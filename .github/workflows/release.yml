@@ -1,0 +1,61 @@
+name: release
+
+# npm is what the installer pulls from, so a release is an npm publish first
+# and a GitHub release second. An npm version can never be republished, which
+# is why the tests gate the publish rather than following it.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    # Windows, because that is where plif's isolation actually applies: job
+    # objects, DPAPI, the OEM console decoder. Testing elsewhere would prove
+    # the build works on a platform nobody is installing it on.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: Check the tag matches the version
+        shell: pwsh
+        run: |
+          $tag = ($env:GITHUB_REF -replace '^refs/tags/v', '')
+          $version = (Get-Content packages/cli/package.json | ConvertFrom-Json).version
+          if ($tag -ne $version) {
+            throw "tag v$tag does not match packages/cli/package.json version $version"
+          }
+
+      # Dependency order: sandbox, then core which needs it, then the CLI.
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish --workspace @plif/sandbox --access public --provenance
+          npm publish --workspace @plif/core --access public --provenance
+          npm publish --workspace @plif/cli --access public --provenance
+
+      - name: Publish the GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME `
+            --title "plif $env:GITHUB_REF_NAME" `
+            --generate-notes `
+            --verify-tag

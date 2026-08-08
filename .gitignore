@@ -1,0 +1,25 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Copied into each package at pack time by scripts/prepack.mjs. The originals
+# live at the repository root.
+packages/*/LICENSE
+packages/*/NOTICE
+packages/*/README.md
+*.tgz
+
+# The local store: containers, layers, sessions, audit log.
+.plif/
+
+# Credentials, in any of the shapes people reach for.
+.env
+.env.*
+*.pem
+*.key
+
+# Agent session transcripts and scratch dumps. These carry conversations,
+# absolute paths and email addresses, and one of them reached the first commit
+# of this repository before anyone noticed.
+History.txt
+*-this-session-is-being-continued-*.txt

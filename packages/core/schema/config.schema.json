@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plif.dev/config.json",
+  "title": "Plif configuration",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string", "format": "uri-reference" },
+    "model": { "type": "string" },
+    "small_model": { "type": "string" },
+    "provider": { "type": "object", "additionalProperties": { "$ref": "#/$defs/provider" } },
+    "providers": { "type": "object", "additionalProperties": { "$ref": "#/$defs/provider" } },
+    "mcp": { "type": ["object", "array"] },
+    "mcpServers": { "type": ["object", "array"] },
+    "permissionMode": { "enum": ["ask", "auto-approve", "deny"] },
+    "profiles": { "type": "object" }
+  },
+  "$defs": {
+    "provider": {
+      "type": "object",
+      "properties": {
+        "npm": { "type": "string" },
+        "name": { "type": "string" },
+        "options": { "type": "object" },
+        "models": { "type": "object", "additionalProperties": { "type": "object" } }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

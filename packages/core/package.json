@@ -1,0 +1,33 @@
+{
+  "name": "@plif/core",
+  "version": "0.1.0",
+  "description": "plif's runtime: container engine, path jail, policy, audit log, agent loop.",
+  "license": "Apache-2.0",
+  "author": "Anthophicous",
+  "homepage": "https://github.com/AnThophicous/plif",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnThophicous/plif.git",
+    "directory": "packages/core"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": ["dist", "LICENSE", "NOTICE"],
+  "scripts": {
+    "prepack": "node ../../scripts/prepack.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@plif/sandbox": "0.1.0",
+    "openai": "^4.104.0",
+    "vscode-jsonrpc": "^9.0.1",
+    "vscode-languageserver-protocol": "^3.18.2"
+  }
+}

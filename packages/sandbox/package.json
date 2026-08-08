@@ -1,0 +1,29 @@
+{
+  "name": "@plif/sandbox",
+  "version": "0.1.0",
+  "description": "plif's OS isolation boundary: the only way it creates a process.",
+  "license": "Apache-2.0",
+  "author": "Anthophicous",
+  "homepage": "https://github.com/AnThophicous/plif",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnThophicous/plif.git",
+    "directory": "packages/sandbox"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": ["dist", "LICENSE", "NOTICE"],
+  "scripts": {
+    "prepack": "node ../../scripts/prepack.mjs"
+  },
+  "dependencies": {
+    "koffi": "^2.10.0"
+  }
+}

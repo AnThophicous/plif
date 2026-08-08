@@ -1,0 +1,38 @@
+plif
+Copyright 2026 Anthophicous
+
+This product includes software developed by Anthophicous
+(https://github.com/AnThophicous/plif).
+
+Licensed under the Apache License, Version 2.0. You may not use this file
+except in compliance with the License. A copy is distributed with this work in
+the file LICENSE, and is available at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+------------------------------------------------------------------------------
+ATTRIBUTION
+------------------------------------------------------------------------------
+
+Section 4 of the License requires that this NOTICE file be carried into any
+derivative work you distribute, in the source you give out, in the
+documentation you ship, or in a display the work itself produces. Removing it
+is not a licensed use of this software.
+
+If you redistribute plif, modified or not, keep this file intact and keep the
+attribution above readable by the people who receive your copy.
+
+------------------------------------------------------------------------------
+NAME AND BRANDING
+------------------------------------------------------------------------------
+
+Section 6 of the License grants no rights to trade names, trademarks, service
+marks, or product names of the licensor. "plif" is the name of this project and
+of its author's work on it.
+
+You are free to fork this software and to sell what you build with it. You are
+not free to call your fork "plif", to present it as the official plif, or to
+use the author's name to promote it. Give your fork its own name and say
+plainly what it is derived from.
+
+See TRADEMARK.md for the full policy on the name.
