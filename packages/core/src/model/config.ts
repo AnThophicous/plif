@@ -148,16 +148,27 @@ export interface StoredConfig {
   readonly provider?: unknown;
   readonly models?: unknown;
   readonly context?: unknown;
+  /** A provider-qualified model explicitly chosen for future vision requests. */
+  readonly visionModel?: string;
   readonly [key: string]: unknown;
 }
 
 export interface CustomProviderModel {
   readonly name?: string;
   readonly contextWindow?: number;
+  /** Explicit capability declaration; an endpoint model id is not evidence. */
+  readonly modalities?: readonly ModelCapability[];
+  /** Price is displayed before a vision subagent is allowed to start. */
+  readonly cost?: ModelCost;
   readonly [key: string]: unknown;
 }
 
+export type ModelCapability = 'text' | 'image';
+export type ModelCost = 'free' | 'paid' | 'unknown';
+
 export interface CustomProvider {
+  /** Plif custom providers all use the OpenAI-compatible adapter. */
+  readonly sdk?: 'openai';
   readonly npm?: string;
   readonly name?: string;
   readonly options?: {
@@ -166,6 +177,39 @@ export interface CustomProvider {
     readonly [key: string]: unknown;
   };
   readonly models?: Readonly<Record<string, CustomProviderModel>>;
+}
+
+export interface VisionCandidate {
+  readonly provider: string;
+  readonly model: string;
+  readonly label: string;
+  readonly baseURL: string;
+  readonly cost: ModelCost;
+  readonly recommended: boolean;
+}
+
+/**
+ * Models an endpoint happens to list are deliberately absent here. A model is
+ * safe to offer for image inspection only when its configuration declares it.
+ */
+export function visionCandidates(config: StoredConfig): readonly VisionCandidate[] {
+  const providers = {
+    ...asCustomProviders(config.providers),
+    ...asCustomProviders(config.provider),
+  };
+  return Object.entries(providers).flatMap(([provider, entry]) =>
+    Object.entries(entry.models ?? {}).flatMap(([model, metadata]) => {
+      if (!metadata.modalities?.includes('image')) return [];
+      return [{
+        provider,
+        model,
+        label: metadata.name ?? model,
+        baseURL: entry.options?.baseURL ?? '',
+        cost: metadata.cost ?? 'unknown',
+        recommended: metadata.cost === 'free',
+      }];
+    }),
+  );
 }
 
 export interface ResolveOptions {

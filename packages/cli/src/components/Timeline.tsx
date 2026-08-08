@@ -225,11 +225,11 @@ function ThinkingRow({
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={color(thinking ? 'accent' : 'info')}>{thinking ? pulse : glyph.step} </Text>
+        <Text color={color(thinking ? 'accent' : 'ghost')}>{thinking ? pulse : glyph.step} </Text>
         {thinking ? (
           <Text color={color('accent')}>Thinking</Text>
         ) : (
-          <Text color={color('info')}>Thought for {formatDuration(entry.durationMs ?? 0)}</Text>
+          <Text color={color('faint')}>{formatDuration(entry.durationMs ?? 0)}</Text>
         )}
         <Text color={color('ghost')}>
           {thinking

@@ -72,6 +72,8 @@ export const palette = {
   brand: '#505081',
   /** Brand hue lifted to 6.2:1. This is what carries agent activity and focus. */
   accent: '#8b8bd4',
+  /** A brighter blue-violet used only by the travelling active-work highlight. */
+  accentBright: '#b9c8ff',
   /** Between the two, at 3.9:1. Secondary emphasis and de-emphasised accents. */
   accentDim: '#6a6aa8',
 

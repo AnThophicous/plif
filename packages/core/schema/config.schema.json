@@ -1,11 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://plif.dev/config.json",
+  "$id": "https://raw.githubusercontent.com/AnThophicous/plif/main/packages/core/schema/config.schema.json",
   "title": "Plif configuration",
   "type": "object",
   "properties": {
     "$schema": { "type": "string", "format": "uri-reference" },
     "model": { "type": "string" },
+    "visionModel": { "type": "string" },
     "small_model": { "type": "string" },
     "provider": { "type": "object", "additionalProperties": { "$ref": "#/$defs/provider" } },
     "providers": { "type": "object", "additionalProperties": { "$ref": "#/$defs/provider" } },
@@ -18,10 +19,25 @@
     "provider": {
       "type": "object",
       "properties": {
+        "sdk": { "const": "openai" },
         "npm": { "type": "string" },
         "name": { "type": "string" },
-        "options": { "type": "object" },
-        "models": { "type": "object", "additionalProperties": { "type": "object" } }
+        "options": {
+          "type": "object",
+          "properties": { "baseURL": { "type": "string", "format": "uri" } },
+          "additionalProperties": true
+        },
+        "models": { "type": "object", "additionalProperties": { "$ref": "#/$defs/model" } }
+      },
+      "additionalProperties": true
+    },
+    "model": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "contextWindow": { "type": "integer", "minimum": 1 },
+        "modalities": { "type": "array", "items": { "enum": ["text", "image"] }, "uniqueItems": true },
+        "cost": { "enum": ["free", "paid", "unknown"] }
       },
       "additionalProperties": true
     }

@@ -206,6 +206,13 @@ export interface PlifEvents {
    * Emitting a second pair produced two rows for one investigation.
    */
   'subagent.progress': { callId: string; toolCalls: number; lastTool: string };
+  /** Live context usage from a child agent's private loop. */
+  'subagent.usage': {
+    taskId: string;
+    promptTokens: number;
+    completionTokens: number;
+    budget: number;
+  };
   'subagent.started': {
     taskId: string;
     /** The parent tool call this belongs to, so its row can be found. */

@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { scheduleBatches } from '../src/harness/loop.js';
+import { MAX_PARALLEL_SAFE_CALLS, scheduleBatches } from '../src/harness/loop.js';
 import { DEFAULT_TOOLS, toolRegistry } from '../src/harness/tools.js';
 import type { Tool } from '../src/harness/tools.js';
 import type { ToolCall } from '../src/model/provider.js';
@@ -32,6 +32,15 @@ describe('batching parallel-safe calls', () => {
       registry,
     );
     assert.deepEqual(names(batches), [['read_file', 'read_file', 'list_dir']]);
+  });
+
+  it('caps a long run of safe calls at three per batch', () => {
+    const batches = scheduleBatches(
+      Array.from({ length: 7 }, () => call('read_file')),
+      registry,
+    );
+    assert.equal(MAX_PARALLEL_SAFE_CALLS, 3);
+    assert.deepEqual(batches.map((batch) => batch.length), [3, 3, 1]);
   });
 
   it('keeps a write between the reads that surround it', () => {

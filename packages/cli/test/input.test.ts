@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { splitPaste, tokenize } from '../src/format.js';
+import { isTerminalPaste, pastedContentToken, sanitizePastedText, splitPaste, tokenize } from '../src/format.js';
 import { matchCommands, findCommand, COMMANDS } from '../src/commands.js';
 import type { CatalogPickerRequest, CommandContext } from '../src/commands.js';
 import { filterPickerGroups, flattenPickerGroups } from '../src/components/Picker.js';
@@ -65,6 +65,14 @@ describe('splitPaste', () => {
 
   it('strips DEL and NUL', () => {
     assert.equal(splitPaste('a\u0000b\u007fc').text, 'abc');
+  });
+
+  it('keeps complete pasted text available for an attachment', () => {
+    assert.equal(sanitizePastedText('one\r\ntwo\u001b[31m'), 'one\ntwo[31m');
+    assert.equal(pastedContentToken(1, 'one\ntwo'), '[Pasted Content #1 - 2 Lines]');
+    assert.equal(pastedContentToken(2), '[Pasted Content #2 - 0 Lines]');
+    assert.equal(isTerminalPaste('colado'), true);
+    assert.equal(isTerminalPaste('🧑‍💻'), false);
   });
 });
 

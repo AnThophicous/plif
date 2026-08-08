@@ -74,6 +74,7 @@ import { Header } from './components/Header.js';
 import { Picker, filterItems, filterPickerGroups, flattenPickerGroups } from './components/Picker.js';
 import { Prompt } from './components/Prompt.js';
 import { Thinking } from './components/Thinking.js';
+import { useSpinnerFrame } from './components/Spinner.js';
 import { TaskIndicator } from './components/TaskIndicator.js';
 import { TaskPanel } from './components/TaskPanel.js';
 import { Timeline, TimelineRow, estimateHeight } from './components/Timeline.js';
@@ -84,19 +85,23 @@ import {
   formatExecOutput,
   formatExecTag,
   describeToolCall,
+  isTerminalPaste,
+  pastedContentToken,
+  sanitizePastedText,
   splitPaste,
   summariseToolInput,
   tokenize,
 } from './format.js';
-import { readClipboardImage } from './clipboard.js';
+import { readClipboardImage, readClipboardText } from './clipboard.js';
 import { expandShortcodes, matchEmoji, openShortcode } from './emoji.js';
 import { stepLeft, stepRight } from './text.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { entry, initialSession, sessionReducer } from './session.js';
-import type { BrowserRow, BrowserState, QueuedMessage, TimelineEntry } from './session.js';
+import type { BrowserRow, BrowserState, PastedAttachment, QueuedMessage, TimelineEntry } from './session.js';
 import { color, formatCount, formatDuration, glyph, layout } from './theme.js';
 import { containerMount, containerWorkdir } from './container-paths.js';
 import { authNotice } from './auth.js';
+import { completedTitle, titleForWorking, writeTerminalTitle } from './terminal-title.js';
 
 export interface AppProps {
   readonly engine: Engine;
@@ -147,6 +152,15 @@ const DOUBLE_INTERRUPT_MS = 1500;
  */
 const LIVE_TAIL = 1;
 
+type PastedDraft =
+  | { readonly kind: 'text'; readonly text: string }
+  | {
+      readonly kind: 'image';
+      readonly path: string;
+      readonly mediaType: string;
+      readonly bytes: number;
+    };
+
 /**
  * An image the developer pasted, waiting to be sent with their message.
  *
@@ -154,13 +168,6 @@ const LIVE_TAIL = 1;
  * directory, and "let me look at that screenshot again" is a thing people ask
  * an hour later.
  */
-interface PastedImage {
-  readonly token: string;
-  readonly path: string;
-  readonly mediaType: string;
-  readonly bytes: number;
-}
-
 /** True once nothing can change this row again. */
 function isSettled(item: { status?: string }): boolean {
   return item.status === undefined || item.status === 'done' || item.status === 'failed';
@@ -202,7 +209,7 @@ export function App({
   /** Which queued message the delete key is aimed at. */
   const [queuedIndex, setQueuedIndex] = useState(0);
   /** Images pasted for the message being typed, cleared when it is sent. */
-  const [pasted, setPasted] = useState<PastedImage[]>([]);
+  const [pasted, setPasted] = useState<PastedAttachment[]>([]);
   /** Live MCP status and loaded skills, for the browser's first two tabs. */
   const [mcpStatuses, setMcpStatuses] = useState<readonly McpServerStatus[]>(initialMcpStatuses);
   const [skillList, setSkillList] = useState<readonly Skill[]>(initialSkills);
@@ -223,6 +230,7 @@ export function App({
   const [now, setNow] = useState(() => Date.now());
   const { exit } = useApp();
   const { columns: width, rows } = useTerminalSize();
+  const titleFrame = useSpinnerFrame(90, state.busy);
 
   // Kept in refs, not state: the keyboard handler needs the current values, and
   // re-creating the handler on every keystroke would drop input under load.
@@ -238,10 +246,8 @@ export function App({
   const compactionSince = useRef<number | null>(null);
   /** The one row all of a turn's retry attempts update, rather than ten rows. */
   const retryRow = useRef<string | null>(null);
-  /** Numbers the paste tokens, so `#1` and `#2` mean two different pictures. */
+  /** Numbers the compact paste tokens for this session. */
   const pasteCount = useRef(0);
-  /** Images attached to queued messages, kept until the queue is drained. */
-  const queuedImages = useRef<PastedImage[]>([]);
   /**
    * The live queue, for the loop's drain callback.
    *
@@ -820,6 +826,9 @@ export function App({
             lines: [],
             thinkingSince: null,
             toolCalls: 0,
+            contextUsed: 0,
+            contextMax: DEFAULT_CONTEXT_TOKENS,
+            completionTokens: 0,
           },
         });
       }),
@@ -838,6 +847,10 @@ export function App({
           },
           ...(thinking ? { thinking } : {}),
         });
+      }),
+
+      engine.bus.on('subagent.usage', (event) => {
+        dispatch({ type: 'subagent.usage', ...event });
       }),
 
       engine.bus.on('subagent.finished', (event) => {
@@ -1067,6 +1080,10 @@ export function App({
     void taskManager.current?.stopAll();
     void lspManager.current?.stop();
   }, []);
+
+  useEffect(() => {
+    writeTerminalTitle(state.busy ? titleForWorking(titleFrame) : completedTitle());
+  }, [state.busy, titleFrame]);
 
   useEffect(() => {
     if (tasks.length === 0) setTasksOpen(false);
@@ -1374,14 +1391,14 @@ export function App({
   };
 
   const submit = useCallback(
-    async (line: string) => {
+    async (line: string, suppliedAttachments?: readonly PastedAttachment[]) => {
       const trimmed = line.trim();
       if (!trimmed) return;
 
       // Claim the pasted images for this message and clear the tray, so a
       // second message does not re-send the first one's screenshot.
-      const carried = pasted;
-      setPasted([]);
+      const carried = suppliedAttachments ?? pasted;
+      if (suppliedAttachments === undefined) setPasted([]);
 
       const privateShell = trimmed.startsWith('!!');
       history.current.push(privateShell ? '!! [private command]' : trimmed);
@@ -1424,7 +1441,7 @@ export function App({
         dispatch({ type: 'busy', busy: false });
       }
     },
-    [push, record],
+    [pasted, push, record],
   );
 
   /**
@@ -1445,7 +1462,9 @@ export function App({
     const leftover = state.queue;
     queueRef.current = [];
     dispatch({ type: 'queue.clear' });
-    void submit(leftover.map((message) => message.text).join('\n\n'));
+    void (async () => {
+      for (const message of leftover) await submit(message.text, message.attachments);
+    })();
   }, [state.busy, state.queue, submit]);
 
   async function runSlash(line: string): Promise<void> {
@@ -1483,22 +1502,26 @@ export function App({
    * attachment rather than the whole turn — an unreadable temp file is worth a
    * warning, not a dead message.
    */
-  async function encodePasted(images: readonly PastedImage[]): Promise<Attachment[]> {
+  async function encodePasted(attachments: readonly PastedAttachment[]): Promise<Attachment[]> {
     const encoded: Attachment[] = [];
-    for (const image of images) {
+    for (const attachment of attachments) {
+      if (attachment.kind === 'text') {
+        encoded.push({ kind: 'text', name: attachment.token, text: attachment.text });
+        continue;
+      }
       try {
-        const data = await fs.readFile(image.path);
+        const data = await fs.readFile(attachment.path);
         encoded.push({
           kind: 'image',
-          mediaType: image.mediaType,
+          mediaType: attachment.mediaType,
           data: data.toString('base64'),
-          name: image.token,
+          name: attachment.token,
         });
       } catch {
         push(
-          entry('notice', `could not read ${image.token}`, {
+          entry('notice', `could not read ${attachment.token}`, {
             tone: 'warn',
-            subtitle: image.path,
+            subtitle: attachment.path,
           }),
         );
       }
@@ -1634,7 +1657,7 @@ export function App({
            * message once. The rows are logged as ordinary input so the
            * transcript reads in the order the model actually received things.
            */
-          drainQueue: () => {
+          drainQueue: async () => {
             const pendingMessages = queueRef.current;
             if (pendingMessages.length === 0) return [];
             queueRef.current = [];
@@ -1643,7 +1666,13 @@ export function App({
               push(entry('input', message.text, { tag: '[queued]' }));
               record({ kind: 'user', at: new Date().toISOString(), text: message.text });
             }
-            return pendingMessages.map((message) => message.text);
+            return await Promise.all(
+              pendingMessages.map(async (message) => ({
+                role: 'user' as const,
+                content: message.text,
+                attachments: await encodePasted(message.attachments),
+              })),
+            );
           },
           activateProfile: async (name) => {
             const stored = await loadStoredConfig(engine.paths);
@@ -1721,7 +1750,7 @@ export function App({
     }
 
     const argv = tokenize(line);
-    const running = entry('step', line, { status: 'active', subtitle: container.name });
+    const running = entry('step', line, { status: 'active' });
     pendingRow.current = running.id;
     push(running);
 
@@ -1790,28 +1819,37 @@ export function App({
    * so the model has something to refer to — "the error in [Image Pasted #1]"
    * is a sentence; a bare picture appended to a message is not.
    */
+  function addPasted(attachment: PastedDraft): void {
+    const token = pastedContentToken(
+      pasteCount.current += 1,
+      attachment.kind === 'text' ? attachment.text : undefined,
+    );
+    setPasted((existing) => [...existing, { ...attachment, token } as PastedAttachment]);
+    const separator = input && !/\s$/.test(input.slice(0, cursor)) ? ' ' : '';
+    const next = input.slice(0, cursor) + separator + token + input.slice(cursor);
+    setInput(next);
+    setCursor(cursor + separator.length + token.length);
+  }
+
   async function pasteImage(): Promise<void> {
     try {
       const image = await readClipboardImage();
-      if (!image) {
+      if (image) {
+        addPasted({ kind: 'image', path: image.path, mediaType: image.mediaType, bytes: image.bytes });
+        return;
+      }
+      const raw = await readClipboardText();
+      const text = raw ? sanitizePastedText(raw) : '';
+      if (!text) {
         push(
           entry('notice', 'nothing to paste', {
             tone: 'muted',
-            subtitle: 'the clipboard has no image on it',
+            subtitle: 'the clipboard has no supported content',
           }),
         );
         return;
       }
-
-      const token = `[Image Pasted #${pasteCount.current += 1}]`;
-      setPasted((existing) => [
-        ...existing,
-        { token, path: image.path, mediaType: image.mediaType, bytes: image.bytes },
-      ]);
-      const separator = input && !input.endsWith(' ') ? ' ' : '';
-      const next = input.slice(0, cursor) + separator + token + input.slice(cursor);
-      setInput(next);
-      setCursor(cursor + separator.length + token.length);
+      addPasted({ kind: 'text', text });
     } catch (error) {
       const { title, detail } = formatError(error);
       push(entry('notice', title, { tone: 'warn', ...(detail ? { detail } : {}) }));
@@ -2002,6 +2040,13 @@ export function App({
       }
     }
 
+    if (key.return && key.shift) {
+      setInput(input.slice(0, cursor) + '\n' + input.slice(cursor));
+      setCursor(cursor + 1);
+      setCompletionIndex(0);
+      return;
+    }
+
     /*
       Working is not a reason to stop listening.
 
@@ -2034,9 +2079,8 @@ export function App({
         if (line || pasted.length > 0) {
           dispatch({
             type: 'queue.push',
-            message: { id: `q${Date.now()}`, text: line, images: pasted.map((image) => image.token) },
+            message: { id: `q${Date.now()}`, text: line, attachments: pasted },
           });
-          queuedImages.current.push(...pasted);
           setPasted([]);
           setInput('');
           setCursor(0);
@@ -2134,37 +2178,26 @@ export function App({
       return;
     }
     if (char && !key.ctrl && !key.meta) {
+      if (isTerminalPaste(char)) {
+        const pastedText = sanitizePastedText(char);
+        if (pastedText) addPasted({ kind: 'text', text: pastedText });
+        return;
+      }
       // A paste arrives as one chunk, not as N keypresses, so this branch must
       // cope with arbitrary text — including embedded newlines and control
       // bytes. Inserting the chunk raw would put a literal CR in the buffer and
       // silently corrupt the command.
-      const { text, submitted } = splitPaste(char);
+      const text = sanitizePastedText(char);
       const raw = input.slice(0, cursor) + text + input.slice(cursor);
       // Resolve any shortcode the keystroke just closed, so `:sob:` becomes the
       // glyph the moment the second colon lands rather than waiting for Enter.
       const next = expandShortcodes(raw);
       const shrank = raw.length - next.length;
 
-      if (submitted) {
-        setInput('');
-        setCursor(0);
-        if (state.busy) {
-          const line = next.trim();
-          if (line) {
-            dispatch({
-              type: 'queue.push',
-              message: { id: `q${Date.now()}`, text: line, images: [] },
-            });
-          }
-        } else {
-          void submit(next);
-        }
-      } else {
-        setInput(next);
-        setEmojiIndex(0);
-        setCursor((value) => Math.max(0, value + text.length - shrank));
-        setCompletionIndex(0);
-      }
+      setInput(next);
+      setEmojiIndex(0);
+      setCursor((value) => Math.max(0, value + text.length - shrank));
+      setCompletionIndex(0);
     }
   });
 
@@ -2689,18 +2722,6 @@ export function App({
       <TaskIndicator tasks={tasks} width={width} />
       {tasksOpen && tasks.length > 0 && <TaskPanel tasks={tasks} width={width} />}
 
-      <Header
-        cwd={cwd}
-        container={state.container}
-        containerState={state.containerState}
-        isolation={report.isolation}
-        degraded={report.degradations.length > 0}
-        model={modelId}
-        contextUsed={state.contextUsed}
-        contextMax={state.contextMax}
-        width={width}
-      />
-
       {state.browser ? (
         /*
           Full-screen, replacing the timeline and the prompt rather than
@@ -2788,19 +2809,6 @@ export function App({
         <EmojiMenu matches={emojiMatches} selected={emojiIndex} width={width - 2} />
       )}
 
-      {showThinking && (
-        <Box paddingX={1} marginTop={1}>
-          <Thinking
-            since={state.busySince ?? Date.now()}
-            tokens={tokens}
-            width={width - 2}
-            {...(state.busyLabel && state.busyLabel !== 'running'
-              ? { label: state.busyLabel }
-              : {})}
-          />
-        </Box>
-      )}
-
       {!state.browser && (
       <Box paddingX={1} marginTop={showCompletions ? 0 : 1}>
         <Prompt
@@ -2808,8 +2816,7 @@ export function App({
           cursor={cursor}
           placeholder={
             // Short enough to survive a narrow terminal without being clipped
-            // mid-word. The container name is already in the header and in the
-            // badge, so repeating it here buys nothing.
+            // mid-word.
             state.container ? 'run a command, or / for commands' : '/new to start a container'
           }
           // Focused while busy too: the field takes input the whole time, and
@@ -2819,8 +2826,32 @@ export function App({
           busy={state.busy}
           busyLabel={state.busyLabel}
           width={width - 2}
+          status={
+            <Box flexDirection="column" width="100%">
+              <Header
+                cwd={cwd}
+                model={modelId}
+                contextUsed={state.contextUsed}
+                contextMax={state.contextMax}
+                delegatedTokens={state.subagents.reduce(
+                  (total, view) => total + view.contextUsed + view.completionTokens,
+                  0,
+                )}
+                width={width - 6}
+              />
+              {showThinking && (
+                <Thinking
+                  since={state.busySince ?? Date.now()}
+                  tokens={tokens}
+                  width={width - 6}
+                  {...(state.busyLabel && state.busyLabel !== 'running'
+                    ? { label: state.busyLabel }
+                    : {})}
+                />
+              )}
+            </Box>
+          }
           {...(state.busySince !== null ? { busySince: state.busySince } : {})}
-          {...(state.container ? { badge: state.container } : {})}
           {...(state.queue.length > 0
             ? {
                 queue: (

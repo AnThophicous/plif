@@ -280,6 +280,15 @@ export function subagentTool(options: SubagentOptions): Tool {
         });
       });
 
+      inner.on('agent.usage', (event) => {
+        parent?.emit('subagent.usage', {
+          taskId,
+          promptTokens: event.promptTokens,
+          completionTokens: event.completionTokens,
+          budget: event.budget,
+        });
+      });
+
       // Sentences, not deltas. The panel shows a line at a time, and forwarding
       // every token would make the parent's render loop run at the child's
       // streaming rate for no visible gain.

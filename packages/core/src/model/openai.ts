@@ -514,10 +514,14 @@ function toWire(message: Message): OpenAI.Chat.ChatCompletionMessageParam {
         role: 'user',
         content: [
           { type: 'text' as const, text: message.content },
-          ...message.attachments.map((attachment) => ({
-            type: 'image_url' as const,
-            image_url: { url: `data:${attachment.mediaType};base64,${attachment.data}` },
-          })),
+          ...message.attachments.map((attachment) =>
+            attachment.kind === 'text'
+              ? { type: 'text' as const, text: attachment.text }
+              : {
+                  type: 'image_url' as const,
+                  image_url: { url: `data:${attachment.mediaType};base64,${attachment.data}` },
+                },
+          ),
         ],
       };
     }

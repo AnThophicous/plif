@@ -122,16 +122,20 @@ export {
   resolveConfig,
   saveStoredConfig,
   validate as validateModelConfig,
+  visionCandidates,
 } from './model/config.js';
 export type {
   CustomProvider,
   CustomProviderModel,
+  ModelCapability,
+  ModelCost,
   Effort,
   ModelConfig,
   ModelRef,
   PresetName,
   ResolveOptions,
   StoredConfig,
+  VisionCandidate,
 } from './model/config.js';
 export {
   MODEL_CATALOG,

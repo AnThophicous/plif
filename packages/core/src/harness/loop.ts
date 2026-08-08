@@ -77,7 +77,7 @@ export interface LoopOptions {
    * Draining rather than reading is deliberate — the loop takes ownership, so a
    * message cannot be delivered twice if a turn makes several tool calls.
    */
-  readonly drainQueue?: () => readonly string[];
+  readonly drainQueue?: () => Promise<readonly (Message | string)[]> | readonly (Message | string)[];
 }
 
 /**
@@ -88,7 +88,7 @@ export interface LoopOptions {
  * summarised. A gauge counting toward 200k while compaction fires at 120k
  * would read two thirds full at the moment it happens.
  */
-export const DEFAULT_CONTEXT_TOKENS = 120_000;
+export const DEFAULT_CONTEXT_TOKENS = 1_000_000;
 
 export type LoopStop =
   /** The model finished and produced an answer. */
@@ -327,12 +327,13 @@ export async function runLoop(
 
     // --- run the tools ---------------------------------------------------
     //
-    // Consecutive parallel-safe calls go out together; anything else runs on
-    // its own. Batching rather than "all at once" is what keeps the semantics
-    // the model expects: it can read six files in one round trip, but a write
-    // followed by a read of the same path still happens in that order, because
-    // the write breaks the batch.
-    for (const batch of scheduleBatches(requested, registry)) {
+    // A long run of independent reads looks busy, but it also turns the
+    // developer's terminal into a wall of simultaneous rows. Work one bounded
+    // batch per model turn; private deferrals keep the tool-call protocol
+    // complete without adding visible failures to the timeline.
+    const [batch = [], ...laterBatches] = scheduleBatches(requested, registry);
+    const deferred = laterBatches.flat();
+    {
       if (options.signal?.aborted) return done('cancelled');
 
       const prepared = batch.map((call) => prepare(call, recentCalls, registry));
@@ -393,15 +394,26 @@ export async function runLoop(
         }
       }
 
+      for (const call of deferred) {
+        messages.push({
+          role: 'tool',
+          toolCallId: call.id,
+          content:
+            'Deferred by Plif: keep tool batches small and inspect the results before ' +
+            'requesting more. Large bursts pollute the developer\'s terminal interface.',
+        });
+      }
+
       // The human said something while this was running. It goes in after the
       // tool results and before the model's next turn, so the very next thing
       // it reads is the correction rather than finding out at the end.
-      const queued = options.drainQueue?.() ?? [];
-      for (const text of queued) {
+      const queued = (await options.drainQueue?.()) ?? [];
+      for (const item of queued) {
+        const queuedMessage = typeof item === 'string' ? { role: 'user' as const, content: item } : item;
         messages.push({
-          role: 'user',
+          ...queuedMessage,
           content:
-            `[sent while you were working, read this before continuing]\n${text}`,
+            `[sent while you were working, read this before continuing]\n${queuedMessage.content}`,
         });
       }
       if (queued.length > 0) {
@@ -450,6 +462,8 @@ const REPEAT_WINDOW = 6;
  * `[read]` — three round trips instead of four, with the write still landing
  * between the reads that surround it.
  */
+export const MAX_PARALLEL_SAFE_CALLS = 3;
+
 export function scheduleBatches(
   calls: readonly ToolCall[],
   registry: Map<string, Tool>,
@@ -458,7 +472,14 @@ export function scheduleBatches(
   for (const call of calls) {
     const safe = registry.get(call.name)?.parallelSafe === true;
     const open = batches[batches.length - 1];
-    if (safe && open && registry.get(open[0]!.name)?.parallelSafe === true) open.push(call);
+    if (
+      safe &&
+      open &&
+      open.length < MAX_PARALLEL_SAFE_CALLS &&
+      registry.get(open[0]!.name)?.parallelSafe === true
+    ) {
+      open.push(call);
+    }
     else batches.push([call]);
   }
   return batches;

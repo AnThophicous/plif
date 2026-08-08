@@ -33,6 +33,43 @@ export interface ClipboardImage {
   readonly bytes: number;
 }
 
+/** Read ordinary clipboard text without treating an empty clipboard as an error. */
+export async function readClipboardText(): Promise<string | null> {
+  if (process.platform === 'win32') {
+    const script = `
+$ErrorActionPreference = 'Stop'
+$text = Get-Clipboard -Raw
+if ($null -eq $text) { exit 0 }
+[Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$text)))
+`;
+    const { stdout } = await run(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      { windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
+    ).catch(() => ({ stdout: '' }));
+    const encoded = stdout.trim();
+    return encoded ? Buffer.from(encoded, 'base64').toString('utf8') : null;
+  }
+
+  if (process.platform === 'darwin') {
+    const { stdout } = await run('pbpaste', [], { maxBuffer: 16 * 1024 * 1024 }).catch(() => ({ stdout: '' }));
+    return stdout || null;
+  }
+
+  for (const [command, args] of [
+    ['wl-paste', ['--no-newline']] as const,
+    ['xclip', ['-selection', 'clipboard', '-o']] as const,
+  ]) {
+    try {
+      const { stdout } = await run(command, [...args], { maxBuffer: 16 * 1024 * 1024 });
+      if (stdout) return stdout;
+    } catch {
+      // Try the next clipboard implementation.
+    }
+  }
+  return null;
+}
+
 /**
  * Ceiling on what will be attached.
  *

@@ -6,15 +6,11 @@ import { color, formatCount, glyph, layout, shortenPath, truncate } from '../the
 
 export interface HeaderProps {
   readonly cwd: string;
-  /** Container the input is currently aimed at. */
-  readonly container: string | null;
-  readonly containerState: string | null;
-  /** Sandbox isolation level, shown as a trust badge. */
-  readonly isolation: string;
-  readonly degraded: boolean;
   readonly model: string | null;
   readonly contextUsed: number;
   readonly contextMax: number;
+  /** Token use in independent child windows, not part of the parent window. */
+  readonly delegatedTokens?: number;
   readonly width: number;
 }
 
@@ -30,29 +26,13 @@ export interface HeaderProps {
  */
 export function Header({
   cwd,
-  container,
-  containerState,
-  isolation,
-  degraded,
   model,
   contextUsed,
   contextMax,
+  delegatedTokens = 0,
   width,
 }: HeaderProps): React.ReactElement {
   const narrow = width < layout.narrowWidth;
-
-  const stateTone =
-    containerState === 'running'
-      ? 'success'
-      : containerState === 'exited'
-        ? 'faint'
-        : containerState === null
-          ? 'ghost'
-          : 'warn';
-
-  // The badge is the loudest element on screen when isolation is weak, and
-  // recedes to a dim label when it is strong. Safety should be boring.
-  const isolationTone = isolation === 'none' ? 'danger' : degraded ? 'warn' : 'muted';
 
   const right = (
     <Box>
@@ -62,19 +42,14 @@ export function Header({
           <Text color={color('ghost')}> {glyph.divider} </Text>
         </>
       )}
-      <Text color={color(isolationTone)}>
-        {isolation === 'none' ? glyph.locked : glyph.container} {isolation}
-      </Text>
-      {!narrow && (
-        <>
-          <Text color={color('ghost')}> {glyph.divider} </Text>
-          <Meter
-            value={contextUsed}
-            max={contextMax}
-            width={8}
-            label={`${formatCount(contextUsed)}/${formatCount(contextMax)}`}
-          />
-        </>
+      <Meter
+        value={contextUsed}
+        max={contextMax}
+        width={narrow ? 4 : 6}
+        label={narrow ? undefined : `Context ${Math.round((contextUsed / Math.max(1, contextMax)) * 100)}%`}
+      />
+      {delegatedTokens > 0 && !narrow && (
+        <Text color={color('ghost')}> {glyph.divider} Agents +{formatCount(delegatedTokens)}</Text>
       )}
     </Box>
   );
@@ -83,22 +58,13 @@ export function Header({
     <Box>
       <Text color={color('accent')}>{glyph.caret} </Text>
       <Text color={color('muted')}>{shortenPath(cwd, Math.max(16, Math.floor(width * 0.4)))}</Text>
-      {container && (
-        <>
-          <Text color={color('ghost')}> {glyph.divider} </Text>
-          <Text color={color(stateTone)}>{glyph.active} </Text>
-          <Text color={color('text')}>{container}</Text>
-        </>
-      )}
     </Box>
   );
 
   return (
     <Box
       width="100%"
-      paddingX={layout.gutter}
       justifyContent="space-between"
-      marginBottom={1}
     >
       {left}
       {right}

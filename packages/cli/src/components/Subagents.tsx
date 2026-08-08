@@ -4,6 +4,7 @@ import { Box, Text } from 'ink';
 import { useSpinnerFrame } from './Spinner.js';
 import type { SubagentLine, SubagentView } from '../session.js';
 import { color, formatDuration, glyph, layout, truncate } from '../theme.js';
+import { Meter } from './Meter.js';
 
 interface SubagentsProps {
   readonly views: readonly SubagentView[];
@@ -62,13 +63,16 @@ export function Subagents({
 
   if (!open) {
     return (
-      <Box paddingX={layout.gutter}>
-        <Text color={color('accentDim')}>{glyph.task} </Text>
-        <Text color={color('muted')}>
-          {views.length} subagent{views.length === 1 ? '' : 's'}
-          {running > 0 ? `, ${running} running` : ''}
-        </Text>
-        <Text color={color('ghost')}> {glyph.divider} Ctrl+S to show</Text>
+      <Box flexDirection="column" paddingX={layout.gutter}>
+        {views.filter((view) => view.status === 'running').map((view) => (
+          <Box key={view.taskId}>
+            <Text color={color('accent')}>{spinner} </Text>
+            <Text color={color('accent')} bold>{view.title.split(/\s+/)[0]}</Text>
+            <Text color={color('muted')}> {truncate(view.title.split(/\s+/).slice(1).join(' '), width - 34)}</Text>
+            <Text color={color('ghost')}> {formatDuration(now - view.startedAt)}</Text>
+          </Box>
+        ))}
+        <Text color={color('ghost')}>Ctrl+S {glyph.divider} {running}/{views.length} agents active</Text>
       </Box>
     );
   }
@@ -79,13 +83,7 @@ export function Subagents({
 
   return (
     <Box paddingX={layout.gutter}>
-      <Box
-        flexDirection="column"
-        borderStyle="round"
-        borderColor={color('brand')}
-        paddingX={layout.boxPadX}
-        width="100%"
-      >
+      <Box flexDirection="column" width="100%">
         <Box justifyContent="space-between">
           <Box>
             {views.map((view, position) => (
@@ -111,6 +109,13 @@ export function Subagents({
             {glyph.divider}{' '}
             {formatDuration((active.endedAt ?? now) - active.startedAt)}
           </Text>
+          <Text color={color('ghost')}> {glyph.divider} </Text>
+          <Meter
+            value={active.contextUsed}
+            max={active.contextMax}
+            width={4}
+            label={`Context ${Math.round((active.contextUsed / Math.max(1, active.contextMax)) * 100)}%`}
+          />
         </Box>
 
         <Box flexDirection="column" marginTop={0}>

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
 
+import { clusterLength } from '../text.js';
 import { color, formatCount, formatDuration, glyph, supportsRichGlyphs, truncate } from '../theme.js';
 
 const VERBS = [
@@ -38,7 +39,9 @@ const TIPS = [
 ];
 
 const VERB_EVERY_MS = 4_000;
-const PULSE_EVERY_MS = 400;
+// Fast enough to read as movement, slow enough that Ink does not repaint a
+// large terminal at display-refresh speed while the agent streams output.
+const PULSE_EVERY_MS = 180;
 const TIP_AFTER_MS = 12_000;
 
 export interface ThinkingProps {
@@ -47,6 +50,26 @@ export interface ThinkingProps {
   readonly label?: string;
   readonly width: number;
   readonly showTips?: boolean;
+}
+
+export interface HighlightPart {
+  readonly text: string;
+  readonly active: boolean;
+}
+
+export function highlightedClusters(value: string, tick: number, bandWidth = 2): readonly HighlightPart[] {
+  const clusters: string[] = [];
+  for (let at = 0; at < value.length;) {
+    const length = clusterLength(value, at) || 1;
+    clusters.push(value.slice(at, at + length));
+    at += length;
+  }
+  if (clusters.length === 0) return [];
+  const start = tick % clusters.length;
+  return clusters.map((text, index) => ({
+    text,
+    active: (index - start + clusters.length) % clusters.length < Math.min(bandWidth, clusters.length),
+  }));
 }
 
 export function Thinking({
@@ -81,7 +104,14 @@ export function Thinking({
     <Box flexDirection="column">
       <Box>
         <Text color={color('accent')}>{pulse} </Text>
-        <Text color={color('accent')}>{verb}…</Text>
+        <Text>
+          {highlightedClusters(verb, tick).map((part, index) => (
+            <Text key={index} color={color(part.active ? 'accentBright' : 'accent')} bold={part.active}>
+              {part.text}
+            </Text>
+          ))}
+          <Text color={color('accent')}>…</Text>
+        </Text>
         <Text color={color('ghost')}> ({parts.join(' · ')})</Text>
       </Box>
       {tip && (

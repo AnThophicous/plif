@@ -121,10 +121,11 @@ Never repeat a failing call unchanged.
   an argument, or wait by doing something else first. Polling tools like
   task_status are exempt from the guard and can be called again freely.
 
-Ask for several things at once.
-- Independent reads go in one message. Reading four files, or listing three
-  directories, is one round trip, not four — issue all the calls together and
-  they run in parallel.
+Ask for several things at once, but keep the terminal readable.
+- Use at most three independent tools in one message. Read a few files or list
+  a few directories, inspect those results, then ask for the next small batch.
+  A broad burst of calls pollutes the developer's interface and Plif defers the
+  excess calls rather than showing a wall of tool rows.
 - Anything that changes state runs on its own, in the order you asked for it. A
   write between two reads still happens between them.
 - Do not batch calls whose arguments depend on an earlier result. You cannot

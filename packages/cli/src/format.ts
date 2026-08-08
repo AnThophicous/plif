@@ -9,6 +9,7 @@
 import { PlifError } from '@plif/core';
 import type { CapabilitySet, ExecResult, ResourceLimits } from '@plif/core';
 
+import { clusterLength } from './text.js';
 import { formatBytes, formatDuration, glyph } from './theme.js';
 
 /**
@@ -145,13 +146,30 @@ export function tokenize(line: string): string[] {
  * submits. Remaining lines are dropped deliberately: the alternative is running
  * several commands the user never had a chance to read.
  */
+export function sanitizePastedText(chunk: string): string {
+  // Keep newlines: they are meaningful to the model and may be intentionally
+  // pasted source. Other C0 bytes are never safe to echo into a terminal.
+  return chunk.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, '');
+}
+
+/** Compact, uniform UI representation of every clipboard payload. */
+export function pastedContentToken(index: number, text?: string): string {
+  const lines = text === undefined ? 0 : text.split('\n').length;
+  return `[Pasted Content #${index} - ${lines} Lines]`;
+}
+
+/** Ink sends normal typing one grapheme at a time and a terminal paste as a chunk. */
+export function isTerminalPaste(chunk: string): boolean {
+  return /[\r\n]/.test(chunk) || clusterLength(chunk, 0) < chunk.length;
+}
+
+/** Legacy line-oriented consumers (pickers and questions) still submit on CR. */
 export function splitPaste(chunk: string): { text: string; submitted: boolean } {
   const newlineAt = chunk.search(/[\r\n]/);
-  const head = newlineAt === -1 ? chunk : chunk.slice(0, newlineAt);
-  // Strip C0 control bytes and DEL: they render as garbage, and an escape
-  // sequence pasted into the buffer could repaint the screen when echoed.
-  const text = head.replace(/[\u0000-\u001f\u007f]/g, '');
-  return { text, submitted: newlineAt !== -1 };
+  return {
+    text: sanitizePastedText(newlineAt === -1 ? chunk : chunk.slice(0, newlineAt)),
+    submitted: newlineAt !== -1,
+  };
 }
 
 /**

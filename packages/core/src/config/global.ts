@@ -50,6 +50,8 @@ export interface GlobalConfig {
    */
   readonly agent?: Readonly<Record<string, AgentConfig>>;
   readonly activeProfile?: string;
+  /** Provider-qualified model chosen explicitly for future image delegation. */
+  readonly visionModel?: string;
   readonly profiles?: Readonly<Record<string, ProfileConfig>>;
   /** MCP servers. OpenCode's key; `mcpServers` is still read. */
   readonly mcp?: unknown;
@@ -78,7 +80,8 @@ export function profilesOf(config: GlobalConfig): Record<string, ProfileConfig> 
   return profiles;
 }
 
-export const CONFIG_SCHEMA_URL = 'https://plif.dev/config.json';
+export const CONFIG_SCHEMA_URL =
+  'https://raw.githubusercontent.com/AnThophicous/plif/main/packages/core/schema/config.schema.json';
 
 /**
  * MCP servers, from whichever key the file uses.

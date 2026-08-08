@@ -22,7 +22,7 @@ export type Role = 'system' | 'user' | 'assistant' | 'tool';
  * where a pasted screenshot lands. The file on disk is for the developer to
  * re-open; this is what actually goes on the wire.
  */
-export interface Attachment {
+export interface ImageAttachment {
   readonly kind: 'image';
   readonly mediaType: string;
   /** Base64, no data-URI prefix. */
@@ -31,16 +31,25 @@ export interface Attachment {
   readonly name: string;
 }
 
+/** Text supplied beside the compact marker shown in the terminal. */
+export interface TextAttachment {
+  readonly kind: 'text';
+  /** The compact marker the developer saw, e.g. `[Pasted Content #1 - 3 Lines]`. */
+  readonly name: string;
+  /** Complete clipboard payload. This is what the model reads. */
+  readonly text: string;
+}
+
+export type Attachment = ImageAttachment | TextAttachment;
+
 export interface Message {
   readonly role: Role;
   readonly content: string;
   /**
-   * Images sent with this message.
+   * Pasted content sent with this message.
    *
-   * Only meaningful on `user` messages. A model without vision will reject the
-   * request, which is the right failure: silently dropping the picture the
-   * developer just pasted would have them wait for an answer about something
-   * the model never saw.
+   * Only meaningful on `user` messages. Text attachments are emitted in full;
+   * images retain their native multimodal payload.
    */
   readonly attachments?: readonly Attachment[];
   /** Set on `tool` messages: which call this is the result of. */

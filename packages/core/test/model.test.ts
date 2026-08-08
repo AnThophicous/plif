@@ -309,6 +309,28 @@ describe('streaming', () => {
     assert.equal(result.usage.completionTokens, 7);
   });
 
+  it('sends complete text and image attachments as ordered content parts', async () => {
+    let received: Record<string, unknown> | undefined;
+    const capture = fakeEndpoint((body, send) => {
+      received = body;
+      send({ id: 'x', object: 'chat.completion.chunk', model: 'fake', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] });
+    });
+    await new Promise<void>((resolve) => capture.listen(0, '127.0.0.1', resolve));
+    const endpoint = `http://127.0.0.1:${(capture.address() as AddressInfo).port}/v1`;
+    const captured = new OpenAIProvider({ model: 'fake', baseURL: endpoint, apiKey: 'test', temperature: 0, maxTokens: undefined, timeoutMs: 10_000 });
+    await collect(captured.stream({ messages: [{ role: 'user', content: 'See [Pasted Content #1 - 2 Lines]', attachments: [
+      { kind: 'text', name: '[Pasted Content #1 - 2 Lines]', text: 'one\ntwo' },
+      { kind: 'image', name: '[Pasted Content #2 - 0 Lines]', mediaType: 'image/png', data: 'AQI=' },
+    ] }] }));
+    await new Promise<void>((resolve) => capture.close(() => resolve()));
+    const message = (received?.['messages'] as Array<Record<string, unknown>>)[0];
+    assert.deepEqual(message?.['content'], [
+      { type: 'text', text: 'See [Pasted Content #1 - 2 Lines]' },
+      { type: 'text', text: 'one\ntwo' },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,AQI=' } },
+    ]);
+  });
+
   it('reassembles a tool call split across fragments', async () => {
     const result = await collect(
       provider().stream({

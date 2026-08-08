@@ -11,8 +11,37 @@ import {
   stripJsonComments,
 } from '../src/config/global.js';
 import type { GlobalConfig } from '../src/config/global.js';
+import { visionCandidates } from '../src/model/config.js';
 
 const parse = (source: string): unknown => JSON.parse(stripJsonComments(source));
+
+describe('declared vision providers', () => {
+  it('offers only models explicitly declared to support images', () => {
+    const candidates = visionCandidates({
+      provider: {
+        custom: {
+          name: 'Custom',
+          sdk: 'openai',
+          options: { baseURL: 'https://models.example.test/v1' },
+          models: {
+            plain: { name: 'Plain', modalities: ['text'] },
+            vision: { name: 'Vision', modalities: ['text', 'image'] },
+          },
+        },
+      },
+    });
+    assert.deepEqual(candidates, [
+      {
+        provider: 'custom',
+        model: 'vision',
+        label: 'Vision',
+        baseURL: 'https://models.example.test/v1',
+        cost: 'unknown',
+        recommended: false,
+      },
+    ]);
+  });
+});
 
 describe('reading a JSONC config', () => {
   it('drops line and block comments', () => {

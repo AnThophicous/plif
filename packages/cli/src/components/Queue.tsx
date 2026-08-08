@@ -50,8 +50,8 @@ export function Queue({ messages, selected, width }: QueueProps): React.ReactEle
               <Text color={color('faint')}>
                 {truncate(message.text, Math.max(12, width - 10))}
               </Text>
-              {message.images.length > 0 && (
-                <Text color={color('ghost')}> +{message.images.length} image</Text>
+              {message.attachments.length > 0 && (
+                <Text color={color('ghost')}> +{message.attachments.length} pasted</Text>
               )}
             </Box>
             <Text color={color(active ? 'faint' : 'ghost')}>[x]</Text>

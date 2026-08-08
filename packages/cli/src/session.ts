@@ -112,9 +112,25 @@ export interface PendingQuestion {
 export interface QueuedMessage {
   readonly id: string;
   readonly text: string;
-  /** Tokens of images pasted with it, e.g. `[Image Pasted #1]`. */
-  readonly images: readonly string[];
+  /** Complete clipboard payloads held until this exact message is delivered. */
+  readonly attachments: readonly PastedAttachment[];
 }
+
+export interface PastedText {
+  readonly kind: 'text';
+  readonly token: string;
+  readonly text: string;
+}
+
+export interface PastedImage {
+  readonly kind: 'image';
+  readonly token: string;
+  readonly path: string;
+  readonly mediaType: string;
+  readonly bytes: number;
+}
+
+export type PastedAttachment = PastedText | PastedImage;
 
 export type BrowserTab = 'mcp' | 'skills' | 'marketplace';
 
@@ -182,6 +198,10 @@ export interface SubagentView {
   /** Set while the child is mid-thought, for its animated line. */
   readonly thinkingSince: number | null;
   readonly toolCalls: number;
+  /** The child's own context window, updated from its private loop. */
+  readonly contextUsed: number;
+  readonly contextMax: number;
+  readonly completionTokens: number;
 }
 
 /** Activity lines kept per subagent. The panel cannot show more. */
@@ -338,6 +358,13 @@ export type SessionAction =
       status: SubagentView['status'];
       at: number;
       summary: string;
+    }
+  | {
+      type: 'subagent.usage';
+      taskId: string;
+      promptTokens: number;
+      completionTokens: number;
+      budget: number;
     }
   | { type: 'subagent.focus'; delta: number }
   | { type: 'subagent.toggle' }
@@ -656,6 +683,21 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
                 endedAt: action.at,
                 summary: action.summary,
                 thinkingSince: null,
+              }
+            : view,
+        ),
+      };
+
+    case 'subagent.usage':
+      return {
+        ...state,
+        subagents: state.subagents.map((view) =>
+          view.taskId === action.taskId
+            ? {
+                ...view,
+                contextUsed: action.promptTokens,
+                contextMax: action.budget || view.contextMax,
+                completionTokens: action.completionTokens,
               }
             : view,
         ),

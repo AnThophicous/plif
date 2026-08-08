@@ -2,23 +2,24 @@ import React from 'react';
 import { Box, Text } from 'ink';
 
 import type { TaskSnapshot } from '@plif/core';
-import { color, glyph, truncate } from '../theme.js';
+import { color, formatDuration, glyph, truncate } from '../theme.js';
 
 export function TaskPanel({ tasks, width }: { tasks: readonly TaskSnapshot[]; width: number }): React.ReactElement {
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={color('brand')} paddingX={1} marginX={1}>
-      <Text color={color('accent')}>background tasks</Text>
-      {tasks.length === 0 ? <Text color={color('muted')}>no tasks</Text> : tasks.map((task) => (
-        <Box key={task.id} flexDirection="column" marginTop={1}>
-          <Text color={color(tone(task.status))}>
-            {statusGlyph(task.status)} {task.id} {task.title} ({task.status})
-          </Text>
-          <Text color={color('muted')}>{truncate(task.argv.join(' '), Math.max(20, width - 6))}</Text>
-          {task.stdout && <Text color={color('faint')}>{truncate(`out: ${lastLine(task.stdout)}`, Math.max(20, width - 6))}</Text>}
-          {task.stderr && <Text color={color('warn')}>{truncate(`err: ${lastLine(task.stderr)}`, Math.max(20, width - 6))}</Text>}
-          {task.error && <Text color={color('danger')}>{truncate(task.error, Math.max(20, width - 6))}</Text>}
-        </Box>
-      ))}
+    <Box flexDirection="column" paddingX={1}>
+      {tasks.length === 0 ? <Text color={color('muted')}>no background tasks</Text> : tasks.map((task) => {
+        const [operation, ...rest] = task.title.split(/\s+/);
+        const summary = rest.join(' ') || task.argv.join(' ');
+        return (
+          <Box key={task.id}>
+            <Text color={color(tone(task.status))}>{statusGlyph(task.status)} </Text>
+            <Text color={color(task.status === 'running' ? 'accent' : 'muted')} bold>{operation}</Text>
+            <Text color={color('muted')}> {truncate(summary, Math.max(12, width - 30))}</Text>
+            <Text color={color('ghost')}> {task.status}</Text>
+            <Text color={color('ghost')}> {formatDuration(Date.now() - (task.startedAt ?? task.createdAt))}</Text>
+          </Box>
+        );
+      })}
       <Text color={color('faint')}>t or Esc to close</Text>
     </Box>
   );
