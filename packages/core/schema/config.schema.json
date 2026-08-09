@@ -7,12 +7,22 @@
     "$schema": { "type": "string", "format": "uri-reference" },
     "model": { "type": "string" },
     "visionModel": { "type": "string" },
+    "theme": { "type": "string" },
     "small_model": { "type": "string" },
     "provider": { "type": "object", "additionalProperties": { "$ref": "#/$defs/provider" } },
     "providers": { "type": "object", "additionalProperties": { "$ref": "#/$defs/provider" } },
     "mcp": { "type": ["object", "array"] },
     "mcpServers": { "type": ["object", "array"] },
+    "autoApprove": { "type": "boolean" },
     "permissionMode": { "enum": ["ask", "auto-approve", "deny"] },
+    "baseURL": { "type": "string", "format": "uri" },
+    "preset": { "type": "string" },
+    "apiKey": { "type": "string" },
+    "temperature": { "type": "number" },
+    "maxTokens": { "type": "integer", "minimum": 1 },
+    "timeoutMs": { "type": "integer", "minimum": 1 },
+    "effort": { "enum": ["low", "medium", "high", "xhigh"] },
+    "agent": { "type": "object", "additionalProperties": { "$ref": "#/$defs/agent" } },
     "profiles": { "type": "object" }
   },
   "$defs": {
@@ -38,6 +48,16 @@
         "contextWindow": { "type": "integer", "minimum": 1 },
         "modalities": { "type": "array", "items": { "enum": ["text", "image"] }, "uniqueItems": true },
         "cost": { "enum": ["free", "paid", "unknown"] }
+      },
+      "additionalProperties": true
+    },
+    "agent": {
+      "type": "object",
+      "properties": {
+        "model": { "type": "string" },
+        "description": { "type": "string" },
+        "maxIterations": { "type": "integer", "minimum": 1 },
+        "disable": { "type": "boolean" }
       },
       "additionalProperties": true
     }

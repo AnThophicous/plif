@@ -48,10 +48,10 @@ describe('highlight', () => {
     }
   });
 
-  it('colours keywords apart from identifiers', () => {
+  it('keeps keywords in the primary text tone instead of adding accent noise', () => {
     const tokens = highlight('const total = sum;', 'ts');
     const keyword = tokens.find((token) => token.text.includes('const'));
-    assert.equal(keyword?.tone, 'accent');
+    assert.equal(keyword?.tone, 'text');
   });
 
   it('treats a whole-line comment as one dim run', () => {

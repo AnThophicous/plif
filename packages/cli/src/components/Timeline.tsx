@@ -154,6 +154,20 @@ export function estimateHeight(entry: TimelineEntry, width: number): number {
   }
 
   if (entry.kind === 'tool') {
+    if (entry.executions?.length) {
+      if (!entry.expand) return 2;
+      return 2 + entry.executions.reduce(
+        (total, execution) => total + 1 + (execution.output?.split(/\r?\n/).filter(Boolean).length ?? 0),
+        0,
+      );
+    }
+    if (entry.planItems?.length) {
+      const shown = entry.expand ? entry.planItems.length : Math.min(entry.planItems.length, 4);
+      return 1 + shown + (shown < entry.planItems.length ? 1 : 0) + 1;
+    }
+    if (entry.edits?.length) {
+      return 1 + entry.edits.reduce((total, edit) => total + 1 + diffHeight(edit.diff, entry.expand ?? false), 0) + 1;
+    }
     // A diff replaces the output block, so it is measured instead of it — not
     // as well as. Counting both would reserve twice the height an edit row
     // actually takes and cost that much scrollback on every edit.
@@ -200,10 +214,8 @@ export function TimelineRow({
  * it happens, states what it cost when it is over, and holds the text until
  * someone asks for it.
  *
- * The finished line is blue rather than the usual grey: a thought that has
- * completed is a real event in the turn, not chrome, and blue is the one colour
- * in the palette that carries information without also meaning "look, a
- * problem".
+ * Finished thinking drops to grey. It remains expandable, but no longer
+ * competes with the answer or tool results for attention.
  */
 function ThinkingRow({
   entry,
@@ -229,13 +241,15 @@ function ThinkingRow({
         {thinking ? (
           <Text color={color('accent')}>Thinking</Text>
         ) : (
-          <Text color={color('faint')}>{formatDuration(entry.durationMs ?? 0)}</Text>
+          <Text color={color('faint')}>
+            {entry.expand ? 'Thinking:' : formatDuration(entry.durationMs ?? 0)}
+          </Text>
         )}
         <Text color={color('ghost')}>
           {thinking
             ? ''
             : entry.expand
-              ? `  ${glyph.divider} Ctrl+R to collapse`
+              ? `  ${formatDuration(entry.durationMs ?? 0)} ${glyph.divider} Ctrl+R to collapse`
               : `  ${glyph.divider} Ctrl+R to expand`}
         </Text>
       </Box>
@@ -341,6 +355,9 @@ function ToolRow({ entry, width }: { entry: TimelineEntry; width: number }): Rea
         width={width}
         expand={entry.expand ?? false}
         {...(entry.diff !== undefined ? { diff: entry.diff } : {})}
+        {...(entry.edits !== undefined ? { edits: entry.edits } : {})}
+        {...(entry.planItems !== undefined ? { planItems: entry.planItems } : {})}
+        {...(entry.executions !== undefined ? { executions: entry.executions } : {})}
         {...(entry.toolTarget !== undefined ? { target: entry.toolTarget } : {})}
         {...(entry.toolSummary !== undefined ? { summary: entry.toolSummary } : {})}
         {...(entry.detail !== undefined ? { output: entry.detail } : {})}

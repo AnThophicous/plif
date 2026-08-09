@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 
 export interface ServerSpec {
@@ -11,9 +13,45 @@ export interface ServerSpec {
   readonly args: readonly string[];
   readonly install: string;
   readonly initializationOptions?: Record<string, unknown>;
+  /** Package-relative executable bundled with Plif as a final fallback. */
+  readonly bundledModule?: string;
 }
 
+const require = createRequire(import.meta.url);
+
 export const SERVERS: readonly ServerSpec[] = [
+  {
+    id: 'json',
+    label: 'JSON / JSONC',
+    languageIds: ['json', 'jsonc'],
+    extensions: ['.json', '.jsonc'],
+    markers: [],
+    bin: 'vscode-json-language-server',
+    args: ['--stdio'],
+    install: 'npm i -g vscode-langservers-extracted',
+    bundledModule: 'vscode-langservers-extracted/bin/vscode-json-language-server',
+    initializationOptions: { provideFormatter: true },
+  },
+  {
+    id: 'bash',
+    label: 'Bash / Shell',
+    languageIds: ['shellscript'],
+    extensions: ['.sh', '.bash', '.zsh'],
+    markers: ['.shellcheckrc'],
+    bin: 'bash-language-server',
+    args: ['start'],
+    install: 'npm i -g bash-language-server',
+  },
+  {
+    id: 'powershell',
+    label: 'PowerShell Editor Services',
+    languageIds: ['powershell'],
+    extensions: ['.ps1', '.psm1', '.psd1'],
+    markers: [],
+    bin: 'pwsh',
+    args: [],
+    install: 'install the VS Code PowerShell extension or set PLIF_POWERSHELL_EDITOR_SERVICES to Start-EditorServices.ps1',
+  },
   {
     id: 'typescript',
     label: 'TypeScript / JavaScript',
@@ -87,6 +125,14 @@ export function languageIdFor(file: string): string | null {
     '.cpp': 'cpp',
     '.hpp': 'cpp',
     '.cxx': 'cpp',
+    '.sh': 'shellscript',
+    '.bash': 'shellscript',
+    '.zsh': 'shellscript',
+    '.ps1': 'powershell',
+    '.psm1': 'powershell',
+    '.psd1': 'powershell',
+    '.json': 'json',
+    '.jsonc': 'jsonc',
   };
   return map[extension] ?? null;
 }
@@ -109,7 +155,7 @@ export interface ResolvedServer {
   readonly spec: ServerSpec;
   readonly command: string;
   readonly args: readonly string[];
-  readonly source: 'project' | 'path';
+  readonly source: 'project' | 'path' | 'bundled';
 }
 
 const WINDOWS_SUFFIXES = ['.cmd', '.exe', '.bat', ''];
@@ -118,6 +164,25 @@ export async function resolveServer(
   spec: ServerSpec,
   workspace: string,
 ): Promise<ResolvedServer | null> {
+  if (spec.id === 'powershell') return await resolvePowerShell(spec);
+
+  // A package-relative script is the only Windows path that does not depend on
+  // spawning an npm-generated `.cmd` shim (Node rejects that with EINVAL when
+  // `shell` is correctly disabled). Invoke the script with this Node process.
+  if (spec.bundledModule) {
+    try {
+      const script = require.resolve(spec.bundledModule);
+      return {
+        spec,
+        command: process.execPath,
+        args: [script, ...spec.args],
+        source: 'bundled',
+      };
+    } catch {
+      // Embedders may deliberately omit the optional package; continue to the
+      // workspace and PATH discovery used by every other language server.
+    }
+  }
   const local = path.join(workspace, 'node_modules', '.bin', spec.bin);
   const suffixes = process.platform === 'win32' ? WINDOWS_SUFFIXES : [''];
 
@@ -130,6 +195,40 @@ export async function resolveServer(
   const onPath = await findOnPath(spec.bin);
   if (onPath) return { spec, command: onPath, args: spec.args, source: 'path' };
 
+  return null;
+}
+
+async function resolvePowerShell(spec: ServerSpec): Promise<ResolvedServer | null> {
+  const executable = await findOnPath('pwsh');
+  if (!executable) return null;
+  const configured = process.env['PLIF_POWERSHELL_EDITOR_SERVICES'];
+  const script = configured && await exists(configured) ? configured : await discoverPowerShellEditorServices();
+  if (!script) return null;
+  const bundled = path.dirname(path.dirname(script));
+  const session = path.join(os.tmpdir(), `plif-pses-${process.pid}.json`);
+  return {
+    spec,
+    command: executable,
+    args: [
+      '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script,
+      '-HostName', 'Plif', '-HostProfileId', 'Plif', '-HostVersion', '0.1.0',
+      '-BundledModulesPath', bundled, '-SessionDetailsPath', session, '-Stdio',
+    ],
+    source: 'path',
+  };
+}
+
+async function discoverPowerShellEditorServices(): Promise<string | null> {
+  const roots = [path.join(os.homedir(), '.vscode', 'extensions'), path.join(os.homedir(), '.vscode-insiders', 'extensions')];
+  for (const root of roots) {
+    let entries;
+    try { entries = await fs.readdir(root, { withFileTypes: true }); } catch { continue; }
+    const extensions = entries.filter((entry) => entry.isDirectory() && entry.name.startsWith('ms-vscode.powershell-')).sort().reverse();
+    for (const extension of extensions) {
+      const script = path.join(root, extension.name, 'modules', 'PowerShellEditorServices', 'Start-EditorServices.ps1');
+      if (await exists(script)) return script;
+    }
+  }
   return null;
 }
 
@@ -161,10 +260,8 @@ export async function detectLanguages(workspace: string): Promise<ServerSpec[]> 
     }
   }
 
-  if (found.size === 0) {
-    for (const spec of SERVERS) {
-      if (await hasExtension(workspace, spec.extensions, 3)) found.set(spec.id, spec);
-    }
+  for (const spec of SERVERS) {
+    if (!found.has(spec.id) && await hasExtension(workspace, spec.extensions, 3)) found.set(spec.id, spec);
   }
 
   return [...found.values()];

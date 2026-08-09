@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="524" viewBox="0 0 860 524" role="img" aria-label="plif 0.1.0 to 0.2.0 changelog">
+  <title>plif 0.1.0 to 0.2.0</title>
+  <defs>
+    <linearGradient id="surface" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#191926"/>
+      <stop offset="1" stop-color="#12121a"/>
+    </linearGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8b8bd4" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#505081" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="859" height="523" rx="14" fill="url(#surface)" stroke="#2a2a38"/>
+  <rect x="0.5" y="0.5" width="859" height="3" rx="1.5" fill="url(#rule)"/>
+
+  <g transform="translate(34, 52)">
+    <text font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="21" font-weight="700" fill="#e8e8f0" letter-spacing="0.5">plif</text>
+    <text x="52" y="0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="15" fill="#55555f">0.1.0</text>
+    <text x="107" y="0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="15" fill="#505081">-&gt;</text>
+    <text x="133" y="0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="15" font-weight="700" fill="#8b8bd4">0.2.0</text>
+    <text x="792" y="0" text-anchor="end" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="13" fill="#55555f">2026-08-09</text>
+  </g>
+
+  <text x="34" y="94" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="13.5" fill="#8b8b95">A container-native coding agent for your terminal. Bring your own model.</text>
+
+  <line x1="34" y1="118" x2="826" y2="118" stroke="#2a2a38"/>
+
+  <g>
+    <text x="34" y="156" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="26" font-weight="600" fill="#e8e8f0">91</text>
+    <text x="34" y="175" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11.5" letter-spacing="0.6" fill="#55555f">FILES</text>
+    <text x="212" y="156" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="26" font-weight="600" fill="#6ec48a">+5 805</text>
+    <text x="212" y="175" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11.5" letter-spacing="0.6" fill="#55555f">ADDED</text>
+    <text x="390" y="156" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="26" font-weight="600" fill="#e8695f">-1 454</text>
+    <text x="390" y="175" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11.5" letter-spacing="0.6" fill="#55555f">REMOVED</text>
+    <text x="568" y="156" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="26" font-weight="600" fill="#e8e8f0">490</text>
+    <text x="568" y="175" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11.5" letter-spacing="0.6" fill="#55555f">TESTS</text></g>
+
+  <line x1="34" y1="185" x2="826" y2="185" stroke="#2a2a38"/>
+
+  
+    <text x="34" y="208" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11.5" font-weight="700" letter-spacing="1.4" fill="#6ec48a">ADDED</text>
+    <line x1="91" y1="204" x2="826" y2="204" stroke="#2a2a38" stroke-width="1"/>
+    
+    <circle cx="40" cy="232" r="2.5" fill="#6ec48a" opacity="0.75"/>
+    <text x="54" y="236" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="14.5" fill="#e8e8f0" opacity="0.92">Modular prompt compiler with per-mode instructions</text>
+    <circle cx="40" cy="255" r="2.5" fill="#6ec48a" opacity="0.75"/>
+    <text x="54" y="259" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="14.5" fill="#e8e8f0" opacity="0.92">Tools: curl, update_plan, get_config, inspect_image</text>
+    <circle cx="40" cy="278" r="2.5" fill="#6ec48a" opacity="0.75"/>
+    <text x="54" y="282" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="14.5" fill="#e8e8f0" opacity="0.92">create_skill, plus three built-in skills</text>
+    <circle cx="40" cy="301" r="2.5" fill="#6ec48a" opacity="0.75"/>
+    <text x="54" y="305" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="14.5" fill="#e8e8f0" opacity="0.92">User themes, discovery panel, shell highlighting</text>
+    <text x="34" y="334" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11.5" font-weight="700" letter-spacing="1.4" fill="#8b8bd4">FIXED</text>
+    <line x1="91" y1="330" x2="826" y2="330" stroke="#2a2a38" stroke-width="1"/>
+    
+    <circle cx="40" cy="358" r="2.5" fill="#8b8bd4" opacity="0.75"/>
+    <text x="54" y="362" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="14.5" fill="#e8e8f0" opacity="0.92">Typing no longer becomes a pasted-content attachment</text>
+    <circle cx="40" cy="381" r="2.5" fill="#8b8bd4" opacity="0.75"/>
+    <text x="54" y="385" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="14.5" fill="#e8e8f0" opacity="0.92">Each turn keeps its own paragraph in the transcript</text>
+    <circle cx="40" cy="404" r="2.5" fill="#8b8bd4" opacity="0.75"/>
+    <text x="54" y="408" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="14.5" fill="#e8e8f0" opacity="0.92">Resizing no longer duplicates the session on Windows</text>
+    <text x="34" y="437" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11.5" font-weight="700" letter-spacing="1.4" fill="#e0a458">SECURITY</text>
+    <line x1="116.8" y1="433" x2="826" y2="433" stroke="#2a2a38" stroke-width="1"/>
+    
+    <circle cx="40" cy="461" r="2.5" fill="#e0a458" opacity="0.75"/>
+    <text x="54" y="465" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="14.5" fill="#e8e8f0" opacity="0.92">get_config redacts MCP headers and env by location</text>
+</svg>

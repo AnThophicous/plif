@@ -16,6 +16,15 @@ import type { Decision, PolicyAction, PolicyVerdict } from '../policy/policy.js'
 import type { SandboxCapabilityReport } from '@plif/sandbox';
 import type { McpAuthEvent } from '../auth/mcp-oauth.js';
 
+export interface QuestionOption {
+  /** Text submitted when this row is selected. */
+  readonly value: string;
+  /** Short, scan-friendly title. */
+  readonly label: string;
+  /** Optional second line explaining the trade-off. */
+  readonly description?: string;
+}
+
 export interface PlifEvents {
   'task.created': {
     taskId: string;
@@ -89,7 +98,7 @@ export interface PlifEvents {
   'question.asked': {
     id: string;
     text: string;
-    options: readonly string[] | undefined;
+    options: readonly QuestionOption[] | undefined;
     context: string | undefined;
     /** A credential. The interface must mask what is typed. */
     secret?: boolean;
@@ -161,11 +170,9 @@ export interface PlifEvents {
     ok?: boolean;
     durationMs?: number;
     /**
-     * Exactly what was handed back to the model, on `end`.
-     *
-     * The interface has no other source for it. Without this the timeline can
-     * say a command ran and how long it took but not what it printed, which is
-     * the one part the developer was watching for.
+     * Terminal-facing output on `end`. This is intentionally separate from
+     * the complete result handed to the model: reads inform the agent without
+     * pasting whole files into the developer's timeline.
      */
     output?: string;
     /**
@@ -232,7 +239,7 @@ export interface PlifEvents {
    */
   'subagent.activity': {
     taskId: string;
-    kind: 'thinking' | 'tool' | 'text';
+    kind: 'thinking' | 'reasoning' | 'tool' | 'text';
     label: string;
     /** Set for `tool` once it has finished. */
     ok?: boolean;

@@ -4,7 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
-import { BUILTIN_SKILLS, SkillRegistry, parseSkill, skillTool, writeSkill } from '../src/harness/skills.js';
+import {
+  BUILTIN_SKILLS,
+  SkillRegistry,
+  createSkillTool,
+  parseSkill,
+  skillTool,
+  writeSkill,
+} from '../src/harness/skills.js';
 import { parseServerConfigs, qualifiedToolName } from '../src/harness/mcp.js';
 import { buildSystemPrompt } from '../src/harness/prompt.js';
 import { detectShell } from '../src/harness/environment.js';
@@ -70,6 +77,95 @@ describe('SkillRegistry', () => {
   after(async () => {
     await fs.rm(root, { recursive: true, force: true });
     await fs.rm(workspace, { recursive: true, force: true });
+  });
+
+  it('ships every builtin with a routable catalogue entry', () => {
+    for (const skill of BUILTIN_SKILLS) {
+      assert.match(skill.name, /^[a-z0-9][a-z0-9-]{0,48}$/, `${skill.name} is not a loadable name`);
+      assert.ok(skill.description.trim().length > 0, `${skill.name} has no description`);
+      assert.equal(skill.description.includes('\n'), false, `${skill.name} description spans lines`);
+      assert.ok(skill.instructions.trim().length > 0, `${skill.name} has no body`);
+      // The default prompt forbids emoji everywhere, and a builtin body is
+      // quoted straight into the model's context.
+      assert.equal(/\p{Extended_Pictographic}/u.test(skill.instructions), false, `${skill.name} has emoji`);
+    }
+    assert.equal(new Set(BUILTIN_SKILLS.map((skill) => skill.name)).size, BUILTIN_SKILLS.length);
+  });
+
+  it('carries the writing, design and authoring builtins', () => {
+    const names = BUILTIN_SKILLS.map((skill) => skill.name);
+    assert.ok(names.includes('anti-ai-slop'));
+    assert.ok(names.includes('dme-eclipse-design'));
+    assert.ok(names.includes('skill-creator'));
+  });
+
+  it('writes a skill and makes it loadable in the same session', async () => {
+    const registry = await SkillRegistry.load({ workspace, root });
+    const tool = createSkillTool(registry);
+
+    const created = await tool.run(
+      {
+        name: 'ship-check',
+        description: 'Run the release checks before tagging',
+        instructions: 'Build, test, then read the diff.',
+        scope: 'project',
+      },
+      context,
+    );
+
+    assert.equal(created.ok, true);
+    // The point of the tool: no restart between writing and loading.
+    assert.equal(registry.get('ship-check')?.instructions, 'Build, test, then read the diff.');
+    assert.match(registry.catalogue(), /ship-check: Run the release checks before tagging/);
+
+    const reloaded = await SkillRegistry.load({ workspace, root });
+    assert.equal(reloaded.get('ship-check')?.scope, 'project');
+  });
+
+  it('refuses a skill that could never be routed or loaded', async () => {
+    const registry = await SkillRegistry.load({ workspace, root });
+    const tool = createSkillTool(registry);
+
+    const nameless = await tool.run(
+      { name: 'Not A Name', description: 'x', instructions: 'y', scope: 'user' },
+      context,
+    );
+    assert.equal(nameless.ok, false);
+
+    const undescribed = await tool.run(
+      { name: 'no-description', description: '  ', instructions: 'y', scope: 'user' },
+      context,
+    );
+    assert.equal(undescribed.ok, false);
+    assert.equal(registry.get('no-description'), null);
+
+    const multiline = await tool.run(
+      { name: 'two-line', description: 'first\nsecond', instructions: 'y', scope: 'user' },
+      context,
+    );
+    assert.equal(multiline.ok, false);
+  });
+
+  it('does not let a user skill written now displace the project skill on disk', async () => {
+    await writeSkill(path.join(workspace, '.plif', 'skills'), {
+      name: 'contested',
+      description: 'project version',
+      instructions: 'project body',
+    });
+    const registry = await SkillRegistry.load({ workspace, root });
+    const result = await createSkillTool(registry).run(
+      {
+        name: 'contested',
+        description: 'user version',
+        instructions: 'user body',
+        scope: 'user',
+      },
+      context,
+    );
+
+    assert.equal(result.ok, true);
+    assert.match(result.output, /still takes precedence/);
+    assert.equal(registry.get('contested')?.instructions, 'project body');
   });
 
   it('finds builtin, user and project skills', async () => {
@@ -338,11 +434,11 @@ describe('system prompt', () => {
   it('states who the agent is, where it is, and what it may not do', () => {
     const prompt = buildSystemPrompt(base);
 
-    assert.match(prompt, /You are plif/);
+    assert.match(prompt, /You are Plif/);
     assert.match(prompt, /calm-cedar/);
     assert.match(prompt, /job isolation/);
-    assert.match(prompt, /the current project is \/workspace/);
-    assert.match(prompt, /You may not:.*host/s);
+    assert.match(prompt, /project working directory inside the container: \/workspace/);
+    assert.match(prompt, /unavailable capabilities:.*host writes/s);
   });
 
   it('names the operating system so the agent never probes for it', () => {
@@ -357,17 +453,25 @@ describe('system prompt', () => {
     // Container paths are for the file tools. run_command launches a real
     // program already inside the working directory, and handing it /workspace
     // gets "No such file or directory" — a wasted turn every time.
-    const prompt = buildSystemPrompt(base);
+    const prompt = buildSystemPrompt({
+      ...base,
+      tools: [
+        ...['read_file', 'write_file', 'edit_file', 'list_dir', 'lsp_diagnostics'].map(
+          (name) => ({ name, description: name, parameters: {} }),
+        ),
+        { name: 'run_command', description: 'run', parameters: {} },
+      ],
+    });
 
-    assert.match(prompt, /the lsp tools take container paths/);
+    assert.match(prompt, /lsp tools take absolute container paths/);
     // The file tools are named individually, so a tool added later without
     // being listed here is caught rather than silently inheriting the wrong
     // path space.
     for (const tool of ['read_file', 'write_file', 'edit_file', 'list_dir']) {
-      assert.match(prompt, new RegExp(`${tool}[^\\n]*container paths`));
+      assert.match(prompt, new RegExp(`${tool}[^\\n]*absolute container paths`));
     }
-    assert.match(prompt, /run_command does not/);
-    assert.match(prompt, /\["ls","-la","src"\]/);
+    assert.match(prompt, /run_command starts inside the project/);
+    assert.match(prompt, /project-relative paths such as src\/index\.ts/);
   });
 
   it('bans emoji up front, where a profile cannot outrank it', () => {
@@ -381,8 +485,8 @@ describe('system prompt', () => {
     });
 
     const identity = prompt.slice(0, prompt.indexOf('Seja caloroso'));
-    assert.match(identity, /never write an emoji/i);
-    assert.match(prompt, /never authorises an emoji/i);
+    assert.match(identity, /never write or emit emoji/i);
+    assert.match(prompt, /profile.*cannot relax/is);
   });
 
   it('contains no emoji itself', () => {
@@ -419,28 +523,29 @@ describe('system prompt', () => {
       ],
     });
 
-    assert.match(prompt, /- read_file: Read a file\./);
-    assert.match(prompt, /From connected MCP servers/);
+    assert.match(prompt, /`read_file`/);
+    assert.doesNotMatch(prompt, /More detail here/);
+    assert.match(prompt, /Connected MCP servers/);
     assert.match(prompt, /mcp__github__search/);
   });
 
   it('describes skills without inlining their instructions', () => {
     const prompt = buildSystemPrompt({ ...base, skills: '- deploy: how this project ships' });
 
-    assert.match(prompt, /Skills available/);
-    assert.match(prompt, /skill\(name\)/);
+    assert.match(prompt, /Available skills/);
+    assert.match(prompt, /skill tool/);
   });
 
   it('warns that MCP tools sit outside the sandbox', () => {
     const prompt = buildSystemPrompt({ ...base, mcpServers: '- github (http): 4 tools' });
 
-    assert.match(prompt, /outside your\ncontainer/);
-    assert.match(prompt, /untrusted input/);
+    assert.match(prompt, /external to the Plif container/);
+    assert.match(prompt, /untrusted data/);
   });
 
   it('tells the agent not to route around a refusal', () => {
     const prompt = buildSystemPrompt({ ...base, sandboxGaps: ['fs writes are not blocked'] });
-    assert.match(prompt, /refusal is the/);
+    assert.match(prompt, /gaps do not grant authority/);
   });
 
   it('omits every optional section when there is nothing to say', () => {

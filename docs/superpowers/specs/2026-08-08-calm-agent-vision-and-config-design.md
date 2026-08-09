@@ -65,15 +65,23 @@ cannot be read and presents a dedicated selection dialog:
 1. A declared vision candidate may be labelled **Recommended Provider**.
 2. All configured vision-capable alternatives are listed below it.
 3. `Cancel` is the safe default.
-4. Choosing any candidate opens a second, non-persistent confirmation containing
+4. Choosing any candidate opens a second confirmation containing
    the exact model, provider, endpoint, and cost classification: free, paid, or
    unknown.
-5. Only explicit confirmation starts a vision subagent. Declining or cancelling
+5. The confirmation offers `Use this model whenever vision is needed?` with a
+   safe default of no. Explicitly choosing yes persists that exact provider/model
+   as the user's vision preference; future image delegations use it without
+   reopening the menu.
+6. If global auto-approve is enabled, a configured or newly selected candidate
+   starts without an additional permission question. If it is disabled and no
+   saved vision preference exists, confirmation is required.
+7. Only explicit confirmation starts a vision subagent. Declining or cancelling
    returns a clear result to the parent and does not call a model.
 
-There is no remembered approval for image escalation, including for a custom
-provider. The source image attachment is transferred only to the confirmed child
-message; its result returns to the parent as the usual concise subagent result.
+The source image attachment is transferred only after selection or a saved
+preference is authorised; its result returns to the parent as the usual concise
+subagent result. A custom provider follows the same preference and approval
+rules.
 
 ## Custom OpenAI-compatible providers
 

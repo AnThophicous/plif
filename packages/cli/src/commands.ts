@@ -35,6 +35,7 @@ import { entry } from './session.js';
 import type { BrowserTab, TimelineEntry } from './session.js';
 import { formatBytes, formatDuration, glyph } from './theme.js';
 import { containerMount, containerWorkdir } from './container-paths.js';
+import type { ThemeDefinition } from './themes.js';
 
 export interface CommandContext {
   readonly engine: Engine;
@@ -66,6 +67,8 @@ export interface CommandContext {
   /** Pull an image off the clipboard and attach it to the line being typed. */
   readonly pasteImage: () => Promise<void>;
   readonly openPicker: (picker: FlatPickerRequest | CatalogPickerRequest) => void;
+  readonly themes: readonly ThemeDefinition[];
+  readonly switchTheme: (id: string) => Promise<void>;
 }
 
 export interface FlatPickerRequest {
@@ -99,6 +102,24 @@ const formatTokens = (value: number): string =>
   value < 1000 ? `${value} tokens` : `${(value / 1000).toFixed(1)}k tokens`;
 
 export const COMMANDS: readonly Command[] = [
+  {
+    name: 'theme',
+    summary: 'Choose a built-in or ~/.plif/*.theme appearance',
+    run: async (_argv, context) => {
+      const stored = await loadGlobalConfig();
+      context.openPicker({
+        title: 'Choose a theme',
+        items: context.themes.map((theme) => ({
+          value: theme.id,
+          label: theme.name,
+          detail: theme.description ?? (theme.source === 'user' ? '~/.plif' : 'built in'),
+          current: (stored.theme ?? 'minimal') === theme.id,
+        })),
+        onPick: (value) => { void context.switchTheme(String(value)); },
+      });
+      return ok();
+    },
+  },
   {
     name: 'compact',
     args: '[hard]',

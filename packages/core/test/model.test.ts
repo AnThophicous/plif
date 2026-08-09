@@ -331,6 +331,33 @@ describe('streaming', () => {
     ]);
   });
 
+  it('sanitizes malformed assistant tool arguments before sending', async () => {
+    let received: Record<string, unknown> | undefined;
+    const capture = fakeEndpoint((body, send) => {
+      received = body;
+      send({ id: 'x', object: 'chat.completion.chunk', model: 'fake', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] });
+    });
+    await new Promise<void>((resolve) => capture.listen(0, '127.0.0.1', resolve));
+    const endpoint = `http://127.0.0.1:${(capture.address() as AddressInfo).port}/v1`;
+    const captured = new OpenAIProvider({ model: 'fake', baseURL: endpoint, apiKey: 'test', temperature: 0, maxTokens: undefined, timeoutMs: 10_000 });
+
+    await collect(captured.stream({
+      messages: [{
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'bad-1', name: 'run_command', arguments: '{"argv":' }],
+      }],
+    }));
+    await new Promise<void>((resolve) => capture.close(() => resolve()));
+
+    const message = (received?.['messages'] as Array<Record<string, unknown>>)[0];
+    const calls = message?.['tool_calls'] as Array<Record<string, unknown>>;
+    const fn = calls[0]?.['function'] as Record<string, unknown>;
+    assert.equal(calls[0]?.['id'], 'bad-1');
+    assert.equal(fn['name'], 'run_command');
+    assert.equal(fn['arguments'], '{}');
+  });
+
   it('reassembles a tool call split across fragments', async () => {
     const result = await collect(
       provider().stream({

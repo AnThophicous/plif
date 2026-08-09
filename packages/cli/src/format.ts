@@ -9,7 +9,6 @@
 import { PlifError } from '@plif/core';
 import type { CapabilitySet, ExecResult, ResourceLimits } from '@plif/core';
 
-import { clusterLength } from './text.js';
 import { formatBytes, formatDuration, glyph } from './theme.js';
 
 /**
@@ -158,9 +157,9 @@ export function pastedContentToken(index: number, text?: string): string {
   return `[Pasted Content #${index} - ${lines} Lines]`;
 }
 
-/** Ink sends normal typing one grapheme at a time and a terminal paste as a chunk. */
+/** Last-resort paste detection for terminals that ignore bracketed paste: only a chunk carrying more than one line of content is a shape the keyboard cannot produce. */
 export function isTerminalPaste(chunk: string): boolean {
-  return /[\r\n]/.test(chunk) || clusterLength(chunk, 0) < chunk.length;
+  return sanitizePastedText(chunk).replace(/\n+$/, '').includes('\n');
 }
 
 /** Legacy line-oriented consumers (pickers and questions) still submit on CR. */
@@ -197,15 +196,29 @@ export interface DescribedTool {
   readonly label: string;
   readonly target?: string;
   readonly summary?: string;
+  readonly planItems?: readonly PlanDisplayItem[];
+}
+
+export interface PlanDisplayItem {
+  readonly step: string;
+  readonly status: 'pending' | 'in_progress' | 'completed';
+}
+
+export type ToolLane = 'timeline' | 'discovery' | 'subagent';
+
+export function toolLane(name: string): ToolLane {
+  if (name === 'read_file' || name === 'list_dir') return 'discovery';
+  if (name === 'subagent') return 'subagent';
+  return 'timeline';
 }
 
 const TOOL_LABELS: Readonly<Record<string, string>> = {
-  run_command: 'Bash',
+  run_command: 'Ran',
   read_file: 'Read',
-  write_file: 'Write',
+  write_file: 'Edited',
   // "Update", not "Edit". The row shows a diff, and a diff is a statement about
   // what the file became — the verb should match what is underneath it.
-  edit_file: 'Update',
+  edit_file: 'Edited',
   list_dir: 'List',
   ask_user: 'Ask',
   remember: 'Remember',
@@ -213,6 +226,8 @@ const TOOL_LABELS: Readonly<Record<string, string>> = {
   subagent: 'Subagent',
   web_search: 'Search',
   web_fetch: 'Fetch',
+  curl: 'Curl',
+  update_plan: 'Plan updated',
 };
 
 /**
@@ -237,8 +252,24 @@ export function describeToolCall(name: string, input: unknown): DescribedTool {
 
   const label = TOOL_LABELS[name] ?? name;
 
+  if (name === 'update_plan' && Array.isArray(record['plan'])) {
+    const planItems = record['plan'].flatMap((value): PlanDisplayItem[] => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+      const item = value as Record<string, unknown>;
+      const step = typeof item['step'] === 'string' ? item['step'].trim() : '';
+      const status = item['status'];
+      if (!step || (status !== 'pending' && status !== 'in_progress' && status !== 'completed')) return [];
+      return [{ step, status }];
+    });
+    return { label, planItems };
+  }
+
   if (name === 'run_command' && Array.isArray(record['argv'])) {
     return { label, target: (record['argv'] as string[]).join(' ') };
+  }
+  if (name === 'curl' && typeof record['url'] === 'string') {
+    const method = typeof record['method'] === 'string' ? record['method'].toUpperCase() : 'GET';
+    return { label, target: `${method} ${record['url']}` };
   }
   // Title before path: a subagent call carries both a title and a long task
   // body, and the title is the one line that says what it is doing.

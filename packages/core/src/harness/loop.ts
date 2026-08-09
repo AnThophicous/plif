@@ -26,14 +26,16 @@
 
 import { PlifError, toPlifError } from '../errors.js';
 import type { EventBus } from '../events/bus.js';
+import { safeToolCallArguments } from '../model/provider.js';
 import type { Message, ModelProvider, ToolCall } from '../model/provider.js';
+import type { Attachment } from '../model/provider.js';
 import type { Container } from '../container/container.js';
 import type { QuestionBroker } from './ask.js';
 import { compact, estimateTokens } from './compaction.js';
 import type { CompactionResult } from './compaction.js';
 import type { MemoryStore } from './memory.js';
 import { DEFAULT_TOOLS, toolRegistry, toolSpecs } from './tools.js';
-import type { Tool } from './tools.js';
+import type { Tool, ToolResult } from './tools.js';
 import type { TaskManager } from '../tasks/manager.js';
 import type { LspManager } from '../lsp/manager.js';
 import type { EditCoordinator } from './edits.js';
@@ -64,6 +66,7 @@ export interface LoopOptions {
   readonly edits?: EditCoordinator;
   readonly agentId?: string;
   readonly activateProfile?: (name: string) => Promise<void>;
+  readonly attachments?: readonly Attachment[];
   /**
    * Anything the human typed since the turn started, taken and cleared.
    *
@@ -80,6 +83,19 @@ export interface LoopOptions {
   readonly drainQueue?: () => Promise<readonly (Message | string)[]> | readonly (Message | string)[];
 }
 
+const VISIBLE_TOOL_OUTPUT = new Set(['run_command', 'write_file', 'edit_file', 'list_dir']);
+
+/** Separate model context from terminal transcript without weakening either one. */
+export function terminalToolOutput(
+  name: string,
+  result: Pick<ToolResult, 'output' | 'display' | 'ok'>,
+): string {
+  const full = result.display ?? result.output;
+  if (VISIBLE_TOOL_OUTPUT.has(name)) return full;
+  if (result.ok) return '';
+  return full.split(/\r?\n/).find((line) => line.trim())?.trim().slice(0, 500) ?? '';
+}
+
 /**
  * Where compaction kicks in, and therefore what the context gauge measures.
  *
@@ -89,6 +105,16 @@ export interface LoopOptions {
  * would read two thirds full at the moment it happens.
  */
 export const DEFAULT_CONTEXT_TOKENS = 1_000_000;
+export const AUTO_COMPACTION_TRIGGER_RATIO = 0.9;
+export const AUTO_COMPACTION_TARGET_RATIO = 0.5;
+
+export function shouldAutoCompact(used: number, contextTokens: number): boolean {
+  return contextTokens > 0 && used >= Math.floor(contextTokens * AUTO_COMPACTION_TRIGGER_RATIO);
+}
+
+export function autoCompactionTarget(contextTokens: number): number {
+  return Math.floor(contextTokens * AUTO_COMPACTION_TARGET_RATIO);
+}
 
 export type LoopStop =
   /** The model finished and produced an answer. */
@@ -198,11 +224,11 @@ export async function runLoop(
     iterations += 1;
     options.bus.emit('agent.turn', { iteration: iterations, maxIterations });
 
-    if (contextTokens > 0 && estimateTokens(messages) > contextTokens) {
+    if (shouldAutoCompact(estimateTokens(messages), contextTokens)) {
       const compacted = await runCompaction(messages, {
         provider: options.provider,
         bus: options.bus,
-        target: Math.floor(contextTokens * 0.7),
+        target: autoCompactionTarget(contextTokens),
         ...(options.signal ? { signal: options.signal } : {}),
       });
       messages.length = 0;
@@ -215,6 +241,21 @@ export async function runLoop(
     const requested: ToolCall[] = [];
     /** When the current thinking block opened, or null when not thinking. */
     let thinkingSince: number | null = null;
+
+    /**
+     * Add this turn's prose to the answer, as its own paragraph.
+     *
+     * The separator is the point. Each turn is a separate utterance with a tool
+     * call between it and the next, so concatenating them bare runs the last
+     * word of one into the first word of the next — and the join is invisible,
+     * so the transcript reads as one mangled sentence rather than two whole
+     * ones. That text is recorded to the session and replayed on resume, so the
+     * damage outlives the turn.
+     */
+    const keepTurnText = (): void => {
+      if (!turnText) return;
+      text = text ? `${text}\n\n${turnText}` : turnText;
+    };
 
     /**
      * Close the thinking block, if one is open.
@@ -286,7 +327,7 @@ export async function runLoop(
           });
           if (event.reason === 'cancelled') {
             endThinking();
-            text += turnText;
+            keepTurnText();
             return done('cancelled');
           }
         }
@@ -297,7 +338,7 @@ export async function runLoop(
       return done('error', toPlifError(error, 'MODEL_ERROR'));
     }
 
-    text += turnText;
+    keepTurnText();
     // Once a model has shown reasoning it is in thinking mode for the rest of
     // the conversation, and every later assistant turn must carry the field —
     // empty string included — or the provider can reject the next request.
@@ -306,7 +347,16 @@ export async function runLoop(
       role: 'assistant',
       content: turnText,
       ...(sawReasoning ? { reasoning: turnReasoning } : {}),
-      ...(requested.length ? { toolCalls: requested } : {}),
+      ...(requested.length
+        ? {
+            // Keep the raw call in `requested` for the local parse error, but
+            // never replay malformed JSON as assistant history.
+            toolCalls: requested.map((call) => ({
+              ...call,
+              arguments: safeToolCallArguments(call.arguments),
+            })),
+          }
+        : {}),
     });
 
     // No tools requested means the model considers itself finished.
@@ -378,7 +428,7 @@ export async function runLoop(
           phase: 'end',
           ok: item.ok,
           durationMs: item.durationMs,
-          output: item.output,
+          output: terminalToolOutput(item.call.name, item),
           ...(item.diff ? { diff: item.diff } : {}),
         });
 
@@ -590,7 +640,7 @@ async function executeCall(input: {
   parseError: string | null;
   registry: Map<string, Tool>;
   options: LoopOptions;
-}): Promise<{ output: string; ok: boolean; diff?: string }> {
+}): Promise<{ output: string; ok: boolean; diff?: string; display?: string }> {
   const { call, parsed, parseError, registry, options } = input;
 
   if (parseError) return { output: `Error: ${parseError}`, ok: false };
@@ -617,6 +667,7 @@ async function executeCall(input: {
       ...(options.edits ? { edits: options.edits } : {}),
       ...(options.agentId ? { agentId: options.agentId } : {}),
       ...(options.activateProfile ? { activateProfile: options.activateProfile } : {}),
+      ...(options.attachments?.length ? { attachments: options.attachments } : {}),
     });
   } catch (error) {
     // A denied action, a bad path, a blown quota — all of these are information

@@ -42,7 +42,7 @@ function Block({
     case 'heading':
       return (
         <Box marginTop={block.level === 1 ? 1 : 0}>
-          <Text color={color('accent')} bold>
+          <Text color={color('text')} bold>
             {block.spans.map((span) => span.text).join('')}
           </Text>
         </Box>
@@ -51,7 +51,7 @@ function Block({
     case 'quote':
       return (
         <Box>
-          <Text color={color('brand')}>{glyph.rail} </Text>
+          <Text color={color('ghost')}>{glyph.rail} </Text>
           <Inline spans={block.spans} dim={dim} />
         </Box>
       );
@@ -101,7 +101,7 @@ function Inline({ spans, dim }: { spans: readonly MdSpan[]; dim: boolean }): Rea
         switch (span.style) {
           case 'bold':
             return (
-              <Text key={index} color={color('accent')} bold>
+              <Text key={index} color={color('text')} bold>
                 {span.text}
               </Text>
             );
@@ -113,13 +113,13 @@ function Inline({ spans, dim }: { spans: readonly MdSpan[]; dim: boolean }): Rea
             );
           case 'code':
             return (
-              <Text key={index} color={color('info')} bold={span.strong ?? false}>
+              <Text key={index} color={color('faint')} bold={span.strong ?? false}>
                 {span.text}
               </Text>
             );
           case 'link':
             return (
-              <Text key={index} color={color('info')} underline bold={span.strong ?? false}>
+              <Text key={index} color={color('muted')} underline bold={span.strong ?? false}>
                 {span.text}
               </Text>
             );

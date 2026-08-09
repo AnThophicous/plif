@@ -150,6 +150,7 @@ export interface StoredConfig {
   readonly context?: unknown;
   /** A provider-qualified model explicitly chosen for future vision requests. */
   readonly visionModel?: string;
+  readonly theme?: string;
   readonly [key: string]: unknown;
 }
 

@@ -14,14 +14,18 @@ import { runLoop } from '../src/harness/loop.js';
 import { QuestionBroker } from '../src/harness/ask.js';
 import type { Message } from '../src/model/provider.js';
 import type { Tool } from '../src/harness/tools.js';
-import type { CompletionEvent, ModelProvider } from '../src/model/provider.js';
+import type { CompletionEvent, CompletionRequest, ModelProvider } from '../src/model/provider.js';
 
 /** A provider that plays a fixed script of turns. */
-function scripted(turns: readonly CompletionEvent[][]): ModelProvider {
+function scripted(
+  turns: readonly CompletionEvent[][],
+  onRequest?: (request: CompletionRequest) => void,
+): ModelProvider {
   let turn = 0;
   return {
     info: { id: 'test', endpoint: 'test://', contextWindow: undefined },
-    async *stream(): AsyncGenerator<CompletionEvent> {
+    async *stream(request): AsyncGenerator<CompletionEvent> {
+      onRequest?.(request);
       const events = turns[turn] ?? [{ kind: 'done', reason: 'stop', usage: { promptTokens: 0, completionTokens: 0 } }];
       turn += 1;
       for (const event of events) yield event;
@@ -82,7 +86,77 @@ const container = {
   capabilities: {},
 } as unknown as Parameters<typeof runLoop>[1]['container'];
 
+describe('the answer collected across turns', () => {
+  it('keeps each turn its own paragraph instead of running them together', async () => {
+    // Observed against DeepSeek V4 Flash on OpenCode Zen, which stops emitting
+    // content the moment the tool-call token appears — so a turn really can end
+    // mid-word. Concatenating bare then glued the fragment onto the next turn's
+    // first word, and the recorded session read as one mangled sentence.
+    const result = await runLoop([{ role: 'user', content: 'go' }], {
+      provider: scripted([
+        [
+          { kind: 'text', delta: 'Vou ler a assinatura exata para ficar fiel ao contrato da' },
+          { kind: 'tool', call: { id: 'c1', name: 'ping', arguments: '{}' } },
+          { kind: 'done', reason: 'tool_calls', usage: { promptTokens: 0, completionTokens: 0 } },
+        ],
+        [
+          { kind: 'text', delta: 'Tenho o contrato completo.' },
+          { kind: 'done', reason: 'stop', usage: { promptTokens: 0, completionTokens: 0 } },
+        ],
+      ]),
+      container,
+      questions: new QuestionBroker(new EventBus(), 50),
+      bus: new EventBus(),
+      tools: [noopTool],
+    });
+
+    assert.equal(
+      result.text,
+      'Vou ler a assinatura exata para ficar fiel ao contrato da\n\nTenho o contrato completo.',
+    );
+    assert.equal(result.text.includes('daTenho'), false);
+  });
+
+  it('does not open with a blank paragraph when the first turn is silent', async () => {
+    const result = await runLoop([{ role: 'user', content: 'go' }], {
+      provider: scripted([toolTurn('c1'), finalTurn]),
+      container,
+      questions: new QuestionBroker(new EventBus(), 50),
+      bus: new EventBus(),
+      tools: [noopTool],
+    });
+
+    assert.equal(result.text, 'done');
+  });
+});
+
 describe('queued messages', () => {
+  it('does not replay malformed tool arguments to the next model turn', async () => {
+    const requests: CompletionRequest[] = [];
+    const result = await runLoop([{ role: 'user', content: 'go' }], {
+      provider: scripted([
+        [
+          { kind: 'tool', call: { id: 'bad-1', name: 'ping', arguments: '{"oops":' } },
+          { kind: 'done', reason: 'tool_calls', usage: { promptTokens: 0, completionTokens: 0 } },
+        ],
+        finalTurn,
+      ], (request) => requests.push(request)),
+      container,
+      questions: new QuestionBroker(new EventBus(), 50),
+      bus: new EventBus(),
+      tools: [noopTool],
+    });
+
+    const assistant = result.messages.find((message) => message.role === 'assistant');
+    assert.equal(assistant?.toolCalls?.[0]?.id, 'bad-1');
+    assert.equal(assistant?.toolCalls?.[0]?.arguments, '{}');
+    assert.match(result.messages.find((message) => message.role === 'tool')?.content ?? '', /not valid JSON/);
+
+    const replayed = requests[1]?.messages.find((message) => message.role === 'assistant');
+    assert.equal(replayed?.toolCalls?.[0]?.arguments, '{}');
+    assert.equal(result.stop, 'complete');
+  });
+
   it('lands after the tool result and before the next turn', async () => {
     // The order is the whole point: the model reads the tool result and the
     // correction in the same pass, while there is still time to act on it.

@@ -58,7 +58,7 @@ export const supportsRichGlyphs = richGlyphs;
  * hue lifted to 6.2:1. The two are unmistakably the same colour family, so the
  * interface still reads as blue; it just does not ask anyone to squint.
  */
-export const palette = {
+const defaultPalette = {
   /** Primary reading colour. Used for content, never for chrome. */
   text: '#e6e6ea',
   /** Secondary: labels, metadata, anything you skim past. */
@@ -83,7 +83,30 @@ export const palette = {
   info: '#6fb3d9',
 } as const;
 
-export type PaletteKey = keyof typeof palette;
+export type PaletteKey = keyof typeof defaultPalette;
+export const palette: Record<PaletteKey, string> = { ...defaultPalette };
+
+export type SyntaxKey = 'command' | 'parameter' | 'string' | 'variable' | 'operator' | 'number' | 'comment' | 'plain';
+export type EmphasisKey = 'normal' | 'important' | 'active' | 'metadata';
+
+export const syntax: Record<SyntaxKey, PaletteKey> = {
+  command: 'text', parameter: 'muted', string: 'faint', variable: 'muted',
+  operator: 'ghost', number: 'muted', comment: 'ghost', plain: 'muted',
+};
+
+export const borders = { panel: 'faint' as PaletteKey, focus: 'muted' as PaletteKey, danger: 'danger' as PaletteKey };
+export const diffStyle = {
+  addBackground: '#12291b',
+  removeBackground: '#33161a',
+  addMarker: 'success' as PaletteKey,
+  removeMarker: 'danger' as PaletteKey,
+};
+export const emphasis: Record<EmphasisKey, { tone: PaletteKey; bold: boolean }> = {
+  normal: { tone: 'muted', bold: false },
+  important: { tone: 'text', bold: true },
+  active: { tone: 'text', bold: true },
+  metadata: { tone: 'ghost', bold: false },
+};
 
 /**
  * Always hand back the hex value.
@@ -99,6 +122,10 @@ export type PaletteKey = keyof typeof palette;
  */
 export function color(key: PaletteKey): string {
   return palette[key];
+}
+
+export function syntaxColor(key: SyntaxKey): string {
+  return color(syntax[key]);
 }
 
 /**
@@ -162,6 +189,7 @@ export const glyph: Record<GlyphKey, string> = Object.fromEntries(
 ) as Record<GlyphKey, string>;
 
 glyph.tool = richGlyphs ? '•' : '*';
+const defaultGlyph = { ...glyph };
 
 /**
  * Layout constants.
@@ -172,7 +200,7 @@ glyph.tool = richGlyphs ? '•' : '*';
  * room inside the prompt — the single biggest contributor to the interface
  * feeling calm instead of cramped.
  */
-export const layout = {
+const defaultLayout = {
   gutter: 1,
   boxPadX: 1,
   /** Width of the status column that `[done]`-style tags right-align into. */
@@ -182,6 +210,43 @@ export const layout = {
   /** Timeline entries kept on screen; older ones scroll out of the render. */
   maxTimelineRows: 200,
 } as const;
+
+export type LayoutKey = keyof typeof defaultLayout;
+export const layout: Record<LayoutKey, number> = { ...defaultLayout };
+
+export interface ThemeOverrides {
+  readonly palette?: Partial<Record<PaletteKey, string>>;
+  readonly syntax?: Partial<Record<SyntaxKey, PaletteKey>>;
+  readonly borders?: Partial<Record<keyof typeof borders, PaletteKey>>;
+  readonly diff?: Partial<typeof diffStyle>;
+  readonly emphasis?: Partial<Record<EmphasisKey, Partial<{ tone: PaletteKey; bold: boolean }>>>;
+  readonly glyphs?: Partial<Record<GlyphKey, string>>;
+  readonly layout?: Partial<Record<LayoutKey, number>>;
+}
+
+export function applyTheme(theme: ThemeOverrides = {}): void {
+  Object.assign(palette, defaultPalette, theme.palette ?? {});
+  Object.assign(syntax, {
+    command: 'text', parameter: 'muted', string: 'faint', variable: 'muted',
+    operator: 'ghost', number: 'muted', comment: 'ghost', plain: 'muted',
+  }, theme.syntax ?? {});
+  Object.assign(borders, { panel: 'faint', focus: 'muted', danger: 'danger' }, theme.borders ?? {});
+  Object.assign(diffStyle, {
+    addBackground: '#12291b', removeBackground: '#33161a',
+    addMarker: 'success', removeMarker: 'danger',
+  }, theme.diff ?? {});
+  const defaults = {
+    normal: { tone: 'muted' as PaletteKey, bold: false },
+    important: { tone: 'text' as PaletteKey, bold: true },
+    active: { tone: 'text' as PaletteKey, bold: true },
+    metadata: { tone: 'ghost' as PaletteKey, bold: false },
+  };
+  for (const key of Object.keys(defaults) as EmphasisKey[]) {
+    emphasis[key] = { ...defaults[key], ...(theme.emphasis?.[key] ?? {}) };
+  }
+  Object.assign(glyph, defaultGlyph, theme.glyphs ?? {});
+  Object.assign(layout, defaultLayout, theme.layout ?? {});
+}
 
 /** Terminal width, clamped to something a layout can reason about. */
 export function terminalWidth(): number {

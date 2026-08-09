@@ -42,6 +42,7 @@ import {
   subagentTool,
   WEB_TOOLS,
   skillTool,
+  createSkillTool,
   summariseMemory,
   validateModelConfig,
   isAutoApproveEnabled,
@@ -54,6 +55,8 @@ import {
   agentsOf,
   mcpServersOf,
   profilesOf,
+  readAgentInstructions,
+  visionTools,
 } from '@plif/core';
 import type { GlobalConfig, Session } from '@plif/core';
 
@@ -63,8 +66,11 @@ import { HELP_TOPICS, USAGE, parseArgv } from './argv.js';
 import type { GlobalFlags, Invocation } from './argv.js';
 import { formatDuration, formatRelative, plain } from './print.js';
 import { containerMount, containerWorkdir } from './container-paths.js';
+import { activateTheme, loadThemes } from './themes.js';
+import { detachImmediateInkResize } from './terminal-resize.js';
+import { disableBracketedPaste, enableBracketedPaste } from './paste.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 function buildEngine(flags: GlobalFlags): Engine {
   return new Engine({
@@ -352,6 +358,12 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
   const engine = buildEngine(invocation.flags);
   const report = await engine.start();
   await configureGlobalApprovals(engine);
+  const themeCatalogue = await loadThemes();
+  for (const problem of themeCatalogue.problems) process.stderr.write(`plif theme: ${problem}\n`);
+  const appearance = await loadGlobalConfig();
+  activateTheme(
+    themeCatalogue.themes.find((theme) => theme.id === appearance.theme) ?? themeCatalogue.themes[0]!,
+  );
   const done = installTeardown(engine);
 
   const provider = await buildProvider(engine, invocation.flags);
@@ -425,6 +437,7 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
   });
 
   const snapshot = await engine.memory.snapshot(invocation.flags.workspace);
+  const agentInstructions = await readAgentInstructions(invocation.flags.workspace);
   const skills = await SkillRegistry.load({
     workspace: invocation.flags.workspace,
     root: engine.paths.root,
@@ -446,7 +459,7 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
     engine.bus,
   );
 
-  const tools = [...DEFAULT_TOOLS, skillTool(skills), ...mcp.tools()];
+  const tools = [...DEFAULT_TOOLS, skillTool(skills), createSkillTool(skills), ...mcp.tools()];
   const tasks = new TaskManager({ container, bus: engine.bus, approvals: engine.approvals });
   const lsp = new LspManager({ root: await container.hostPathFor(container.workdir), bus: engine.bus });
   await lsp.warmup();
@@ -455,18 +468,21 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
   // to the prompt.
   const lspForAgent = lspTools(lsp);
   const edits = new EditCoordinator();
+  const childOptions = {
+    provider,
+    isolation: report.isolation,
+    stored,
+    agents: agentsOf(stored),
+    extraTools: [...lspForAgent, ...WEB_TOOLS],
+    edits,
+    ...(agentInstructions ? { agentInstructions } : {}),
+  };
   const agentTools = [
     ...tools,
     ...lspForAgent,
     ...WEB_TOOLS,
-    subagentTool({
-      provider,
-      isolation: report.isolation,
-      stored,
-      agents: agentsOf(stored),
-      extraTools: [...lspForAgent, ...WEB_TOOLS],
-      edits,
-    }),
+    ...visionTools(childOptions),
+    subagentTool(childOptions),
   ];
 
   try {
@@ -487,6 +503,7 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
             memory: summariseMemory(snapshot),
             notes: snapshot.notes,
             sandboxGaps: engine.sandboxReport.degradations,
+            ...(agentInstructions ? { agentInstructions } : {}),
             ...(activeProfile
               ? { profile: { name: activeProfile.name ?? activeProfileName!, systemPrompt: activeProfile.systemPrompt } }
               : {}),
@@ -628,6 +645,12 @@ async function runInteractive(
   const engine = buildEngine(invocation.flags);
   const report = await engine.start();
   await configureGlobalApprovals(engine);
+  const themeCatalogue = await loadThemes();
+  for (const problem of themeCatalogue.problems) process.stderr.write(`plif theme: ${problem}\n`);
+  const appearance = await loadGlobalConfig();
+  activateTheme(
+    themeCatalogue.themes.find((theme) => theme.id === appearance.theme) ?? themeCatalogue.themes[0]!,
+  );
   const done = installTeardown(engine);
 
   let session: Session | null = null;
@@ -692,7 +715,7 @@ async function runInteractive(
     root: engine.paths.root,
   });
   const mcp = new McpRegistry(engine.bus, { interactive: true });
-  const tools = [...DEFAULT_TOOLS, skillTool(skills)];
+  const tools = [...DEFAULT_TOOLS, skillTool(skills), createSkillTool(skills)];
   // The value comes back through the broker's promise and is written to the
   // encrypted store. It is never put on the bus, so no subscriber — timeline,
   // transcript, audit log — is in a position to leak it.
@@ -708,6 +731,10 @@ async function runInteractive(
 
   const replay = session ? await session.replay() : [];
 
+  const resizeListenersBefore = new Set(
+    process.stdout.listeners('resize') as Array<(...args: unknown[]) => void>,
+  );
+  enableBracketedPaste();
   const instance = render(
     <App
       engine={engine}
@@ -723,15 +750,19 @@ async function runInteractive(
       skillCatalogue={skills.catalogue()}
       mcpCatalogue=""
       skills={skills.list()}
+      skillRegistry={skills}
       mcpStatuses={[]}
       mcpRegistry={mcp}
       credentials={credentials}
+      themeCatalogue={themeCatalogue}
     />,
     // Ink's own Ctrl+C handling would exit before containers are reaped.
     { exitOnCtrlC: false },
   );
+  detachImmediateInkResize(process.stdout, resizeListenersBefore);
 
   await instance.waitUntilExit();
+  disableBracketedPaste();
   await mcp.close();
 
   // Mark the session closed, if one exists. It may have been created lazily by

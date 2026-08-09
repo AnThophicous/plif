@@ -74,6 +74,16 @@ export interface ToolCall {
   readonly arguments: string;
 }
 
+/** Keep malformed model output out of assistant history and provider payloads. */
+export function safeToolCallArguments(raw: string): string {
+  try {
+    JSON.parse(raw || '{}');
+    return raw || '{}';
+  } catch {
+    return '{}';
+  }
+}
+
 /**
  * A tool the model may ask to use.
  *

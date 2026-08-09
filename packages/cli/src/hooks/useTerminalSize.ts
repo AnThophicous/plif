@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useStdout } from 'ink';
 
+const RESIZE_SETTLE_MS = 90;
+
 export interface TerminalSize {
   readonly columns: number;
   readonly rows: number;
@@ -32,19 +34,25 @@ export function useTerminalSize(): TerminalSize {
   useEffect(() => {
     if (!stdout) return;
 
+    let timer: NodeJS.Timeout | undefined;
+
     const onResize = (): void => {
-      setSize((previous) => {
-        const next = read();
-        // Bail if nothing changed: SIGWINCH can fire repeatedly during a drag,
-        // and each accepted update repaints the whole frame.
-        return next.columns === previous.columns && next.rows === previous.rows
-          ? previous
-          : next;
-      });
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = undefined;
+        setSize((previous) => {
+          const next = read();
+          return next.columns === previous.columns && next.rows === previous.rows
+            ? previous
+            : next;
+        });
+      }, RESIZE_SETTLE_MS);
+      timer.unref?.();
     };
 
     stdout.on('resize', onResize);
     return () => {
+      if (timer) clearTimeout(timer);
       stdout.off('resize', onResize);
     };
   }, [stdout]);

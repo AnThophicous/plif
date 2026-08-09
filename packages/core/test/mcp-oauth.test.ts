@@ -8,7 +8,12 @@ import { describe, it } from 'node:test';
 
 import { LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/sdk/types.js';
 
-import { McpOAuthCoordinator, type McpAuthEvent } from '../src/auth/mcp-oauth.js';
+import {
+  McpOAuthCoordinator,
+  oauthBrowserCommand,
+  validateOAuthAuthorizationUrl,
+  type McpAuthEvent,
+} from '../src/auth/mcp-oauth.js';
 import {
   MemoryMcpOAuthStore,
   WindowsDpapiOAuthStore,
@@ -31,6 +36,38 @@ interface ProtectedMcpFixture {
   revokeTokens(): void;
   close(): Promise<void>;
 }
+
+function completeAuthorization(provider: { redirectUrl: URL }, state: string): URL {
+  const url = new URL('https://login.example.test/authorize');
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('client_id', 'plif-test-client');
+  url.searchParams.set('redirect_uri', provider.redirectUrl.toString());
+  url.searchParams.set('state', state);
+  return url;
+}
+
+describe('OAuth browser URL integrity', () => {
+  const complete = new URL(
+    'https://login.example.test/authorize?response_type=code&client_id=plif&' +
+    'redirect_uri=http%3A%2F%2F127.0.0.1%3A3210%2Foauth%2Fcallback&state=abc&' +
+    'code_challenge=xyz&code_challenge_method=S256',
+  );
+
+  it('passes the complete URL as one literal Windows argument', () => {
+    const launch = oauthBrowserCommand(complete, 'win32');
+    assert.equal(launch.command, 'rundll32.exe');
+    assert.equal(launch.args.at(-1), complete.toString());
+    assert.equal(launch.args.at(-1)?.includes('&state=abc&'), true);
+  });
+
+  it('refuses to open an incomplete authorization URL', () => {
+    assert.throws(
+      () => validateOAuthAuthorizationUrl(new URL('https://login.example.test/authorize?response_type=code')),
+      /client_id, redirect_uri, state/,
+    );
+    assert.doesNotThrow(() => validateOAuthAuthorizationUrl(complete));
+  });
+});
 
 async function startProtectedMcp(
   options: { anonymous?: boolean } = {},
@@ -263,7 +300,7 @@ describe('MCP OAuth provider', () => {
     await coordinator.start();
     const provider = coordinator.providerFor('github', new URL('https://mcp.example.test/mcp'));
     const state = provider.state();
-    const authorization = new URL(`https://login.example.test/authorize?state=${state}`);
+    const authorization = completeAuthorization(provider, state);
 
     await provider.redirectToAuthorization(authorization);
     assert.equal(opened[0]?.origin, 'https://login.example.test');
@@ -292,7 +329,7 @@ describe('MCP OAuth provider', () => {
     await coordinator.start();
     const provider = coordinator.providerFor('github', new URL('https://mcp.example.test/mcp'));
     const state = provider.state();
-    const authorization = new URL(`https://login.example.test/authorize?state=${state}`);
+    const authorization = completeAuthorization(provider, state);
 
     await provider.redirectToAuthorization(authorization);
 

@@ -25,7 +25,7 @@ import type { APIError } from 'openai';
 import { PlifError } from '../errors.js';
 import type { ModelConfig } from './config.js';
 import { isLocal } from './config.js';
-import { ReasoningSplitter, reasoningFromDelta } from './reasoning.js';
+import { ReasoningDeltaNormalizer, ReasoningSplitter, reasoningFromDelta } from './reasoning.js';
 import type {
   CompletionEvent,
   CompletionRequest,
@@ -36,7 +36,7 @@ import type {
   ToolCall,
   Usage,
 } from './provider.js';
-import { NO_USAGE } from './provider.js';
+import { NO_USAGE, safeToolCallArguments } from './provider.js';
 
 /** Attempts, including the first. Ten of them span roughly four minutes. */
 const RETRY_ATTEMPTS = 10;
@@ -207,6 +207,7 @@ export class OpenAIProvider implements ModelProvider {
     // the print path, a test — sees the same two kinds of event whichever way
     // the host happens to frame it.
     const splitter = new ReasoningSplitter();
+    const reasoningDeltas = new ReasoningDeltaNormalizer();
     let reason: FinishReason = 'stop';
     let usage: Usage = NO_USAGE;
     let finished = false;
@@ -265,7 +266,10 @@ export class OpenAIProvider implements ModelProvider {
         // Reasoning models put their thinking on a side field, and no two hosts
         // agree on which one. None of them are in the SDK types.
         const thinking = reasoningFromDelta(choice.delta);
-        if (thinking) yield { kind: 'reasoning', delta: thinking };
+        if (thinking) {
+          const delta = reasoningDeltas.push(thinking);
+          if (delta) yield { kind: 'reasoning', delta };
+        }
 
         for (const fragment of choice.delta?.tool_calls ?? []) {
           pending.absorb(fragment);
@@ -498,7 +502,7 @@ function toWire(message: Message): OpenAI.Chat.ChatCompletionMessageParam {
               tool_calls: message.toolCalls.map((call) => ({
                 id: call.id,
                 type: 'function' as const,
-                function: { name: call.name, arguments: call.arguments },
+                function: { name: call.name, arguments: safeToolCallArguments(call.arguments) },
               })),
             }
           : {}),

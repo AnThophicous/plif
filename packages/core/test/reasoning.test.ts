@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { ReasoningSplitter, reasoningFromDelta } from '../src/model/reasoning.js';
+import { ReasoningDeltaNormalizer, ReasoningSplitter, reasoningFromDelta } from '../src/model/reasoning.js';
 
 /** Feed a stream and collect each channel. */
 function run(deltas: readonly string[]): { text: string; reasoning: string } {
@@ -108,5 +108,29 @@ describe('reasoningFromDelta', () => {
     assert.equal(reasoningFromDelta({ content: 'hello' }), undefined);
     assert.equal(reasoningFromDelta({ reasoning: '' }), undefined);
     assert.equal(reasoningFromDelta(undefined), undefined);
+  });
+});
+
+describe('ReasoningDeltaNormalizer', () => {
+  it('turns cumulative snapshots into true deltas', () => {
+    const normalizer = new ReasoningDeltaNormalizer();
+    assert.equal(normalizer.push('Could match'), 'Could match');
+    assert.equal(normalizer.push('Could match "5s"'), ' "5s"');
+    assert.equal(normalizer.push('Could match "5s" in "5s"'), ' in "5s"');
+    assert.equal(normalizer.value, 'Could match "5s" in "5s"');
+  });
+
+  it('leaves ordinary token deltas untouched', () => {
+    const normalizer = new ReasoningDeltaNormalizer();
+    assert.equal(normalizer.push('Could '), 'Could ');
+    assert.equal(normalizer.push('match '), 'match ');
+    assert.equal(normalizer.push('"5s"'), '"5s"');
+    assert.equal(normalizer.value, 'Could match "5s"');
+  });
+
+  it('drops an unchanged repeated snapshot', () => {
+    const normalizer = new ReasoningDeltaNormalizer();
+    assert.equal(normalizer.push('A complete reasoning snapshot'), 'A complete reasoning snapshot');
+    assert.equal(normalizer.push('A complete reasoning snapshot'), '');
   });
 });

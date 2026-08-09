@@ -3,7 +3,7 @@ import { Box, Text } from 'ink';
 
 import { describeStats, diffStats, hunksOf, parseDiff } from '@plif/core';
 import type { DiffLine } from '@plif/core';
-import { color, glyph, truncate } from '../theme.js';
+import { color, diffStyle, glyph, truncate } from '../theme.js';
 import { highlight, languageOf } from '../highlight.js';
 
 interface DiffProps {
@@ -26,9 +26,6 @@ const COLLAPSED_LINES = 14;
  * still carries the syntax colours — the background says which side, the
  * colours say what the code is, and neither has to shout.
  */
-const ADD_BACKGROUND = '#12291b';
-const REMOVE_BACKGROUND = '#33161a';
-
 /** Height in terminal lines, for the caller's layout budget. */
 export function diffHeight(diff: string, expand: boolean): number {
   const lines = parseDiff(diff);
@@ -81,7 +78,7 @@ export function Diff({ diff, width, path, expand = false }: DiffProps): React.Re
         <Box>
           <Text color={color('ghost')}>{'  ' + glyph.rail + ' '}</Text>
           <Text color={color('ghost')} italic>
-            … {hidden} more diff {hidden === 1 ? 'line' : 'lines'} — Ctrl+E to expand
+            … {hidden} more diff {hidden === 1 ? 'line' : 'lines'} — Ctrl+T to expand
           </Text>
         </Box>
       )}
@@ -113,7 +110,7 @@ function DiffRow({
   language: string;
 }): React.ReactElement {
   const background =
-    line.op === 'add' ? ADD_BACKGROUND : line.op === 'remove' ? REMOVE_BACKGROUND : undefined;
+    line.op === 'add' ? diffStyle.addBackground : line.op === 'remove' ? diffStyle.removeBackground : undefined;
   const number = line.op === 'remove' ? line.before : line.after;
   const marker = line.op === 'add' ? '+' : line.op === 'remove' ? '-' : ' ';
   const text = truncate(line.text, width);
@@ -125,7 +122,7 @@ function DiffRow({
         {String(number ?? '').padStart(gutter)}{' '}
       </Text>
       <Text
-        color={color(line.op === 'add' ? 'success' : line.op === 'remove' ? 'danger' : 'ghost')}
+        color={color(line.op === 'add' ? diffStyle.addMarker : line.op === 'remove' ? diffStyle.removeMarker : 'ghost')}
         {...(background ? { backgroundColor: background } : {})}
       >
         {marker}{' '}

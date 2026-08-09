@@ -4,11 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
-import { compact, estimateTokens, pinnedIndices } from '../src/harness/compaction.js';
+import { compact, estimateTokens, pinnedIndices, protocolGroups } from '../src/harness/compaction.js';
 import { MemoryStore, strategyId, summariseMemory } from '../src/harness/memory.js';
 import { assess } from '../src/harness/learning.js';
+import { autoCompactionTarget, shouldAutoCompact } from '../src/harness/loop.js';
 import { StorePaths } from '../src/store/paths.js';
-import type { Message } from '../src/model/provider.js';
+import type { CompletionEvent, Message, ModelProvider } from '../src/model/provider.js';
 
 describe('MemoryStore', () => {
   let root: string;
@@ -136,6 +137,12 @@ describe('compaction', () => {
     assert.equal(result.after, result.before);
   });
 
+  it('automatically compacts a 1M window at 900K toward 500K', () => {
+    assert.equal(shouldAutoCompact(899_999, 1_000_000), false);
+    assert.equal(shouldAutoCompact(900_000, 1_000_000), true);
+    assert.equal(autoCompactionTarget(1_000_000), 500_000);
+  });
+
   it('never drops the system prompt or the original task', async () => {
     const messages = conversation(30);
     const result = await compact(messages, { maxTokens: 500 });
@@ -225,4 +232,65 @@ describe('compaction', () => {
     assert.ok(withReasoning > bare);
     assert.ok(withTools > bare);
   });
+
+  it('never separates a tool request from its result', () => {
+    const messages = conversation(3);
+    const groups = protocolGroups(messages);
+    const toolGroups = groups.filter((group) => group.messages[0]?.role === 'assistant');
+    assert.equal(toolGroups.length, 3);
+    assert.equal(toolGroups.every((group) => group.messages.length === 2), true);
+  });
+
+  it('keeps raw history when a capsule is incomplete', async () => {
+    const messages = conversation(12, 2_000);
+    const provider = summaryProvider('too short');
+    const result = await compact(messages, {
+      maxTokens: 400,
+      keepRecent: 2,
+      chunkTokenBudget: 2_000,
+      provider,
+    });
+    assert.equal(result.summary, null);
+    assert.equal(result.messages.some((message) => message.toolCallId === 'call_0'), true);
+  });
+
+  it('creates multiple detailed chronological continuity capsules', async () => {
+    const messages = conversation(14, 2_000);
+    const capsule = REQUIRED_TEST_CAPSULE + ' '.repeat(350);
+    const result = await compact(messages, {
+      maxTokens: 400,
+      keepRecent: 2,
+      chunkTokenBudget: 2_000,
+      provider: summaryProvider(capsule),
+    });
+    const capsules = result.messages.filter((message) => message.content.startsWith('[continuity capsule'));
+    assert.ok(capsules.length > 1);
+    assert.match(capsules[0]!.content, /1\//);
+    assert.equal(result.messages.at(-1)?.content, messages.at(-1)?.content);
+  });
 });
+
+const REQUIRED_TEST_CAPSULE = [
+  '## Objective and checkpoint\nContinue the approved implementation.',
+  '## Files and changes\nChanged /workspace/file.ts.',
+  '## Commands and verification\nRan npm test successfully.',
+  '## Decisions and preferences\nKeep the terminal minimal.',
+  '## Findings and errors\nNo remaining error in this chunk.',
+  '## Pending work\nProceed to the next checkpoint.',
+].join('\n');
+
+function summaryProvider(text: string): ModelProvider {
+  return {
+    info: { id: 'summary-test', endpoint: 'test', contextWindow: 1_000_000 },
+    async *stream(): AsyncGenerator<CompletionEvent> {
+      yield { kind: 'text', delta: text };
+      yield {
+        kind: 'done',
+        reason: 'stop',
+        usage: { promptTokens: 1, completionTokens: 1 },
+      };
+    },
+    async probe() { return { ok: true, detail: 'ok' }; },
+    async list() { return []; },
+  };
+}

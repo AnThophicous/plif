@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { isTerminalPaste, pastedContentToken, sanitizePastedText, splitPaste, tokenize } from '../src/format.js';
+import { IDLE_PASTE, hasPasteMarker, readPasteChunk } from '../src/paste.js';
 import { matchCommands, findCommand, COMMANDS } from '../src/commands.js';
 import type { CatalogPickerRequest, CommandContext } from '../src/commands.js';
 import { filterPickerGroups, flattenPickerGroups } from '../src/components/Picker.js';
@@ -71,8 +72,84 @@ describe('splitPaste', () => {
     assert.equal(sanitizePastedText('one\r\ntwo\u001b[31m'), 'one\ntwo[31m');
     assert.equal(pastedContentToken(1, 'one\ntwo'), '[Pasted Content #1 - 2 Lines]');
     assert.equal(pastedContentToken(2), '[Pasted Content #2 - 0 Lines]');
-    assert.equal(isTerminalPaste('colado'), true);
+  });
+});
+
+describe('isTerminalPaste', () => {
+  it('never mistakes coalesced typing for a paste', () => {
+    // Ink hands over whatever `stdin.read()` had buffered, so a repeated space
+    // or two keystrokes landing in the same frame arrive as one chunk. Calling
+    // those a paste is what turned typed sentences into attachments.
+    assert.equal(isTerminalPaste(' '), false);
+    assert.equal(isTerminalPaste('  '), false);
+    assert.equal(isTerminalPaste('da '), false);
+    assert.equal(isTerminalPaste('colado'), false);
     assert.equal(isTerminalPaste('🧑‍💻'), false);
+  });
+
+  it('treats a chunk ending in a newline as typing plus Enter, not a paste', () => {
+    assert.equal(isTerminalPaste('npm test\r'), false);
+    assert.equal(isTerminalPaste('npm test\r\n'), false);
+  });
+
+  it('accepts more than one line of content, which a keyboard cannot produce', () => {
+    assert.equal(isTerminalPaste('first\nsecond'), true);
+    assert.equal(isTerminalPaste('first\r\nsecond\r\n'), true);
+  });
+});
+
+describe('bracketed paste', () => {
+  const ESC = String.fromCharCode(27);
+  const OPEN = `${ESC}[200~`;
+  const CLOSE = `${ESC}[201~`;
+  const wrap = (text: string): string => `${OPEN}${text}${CLOSE}`;
+
+  it('reads a whole paste out of one chunk', () => {
+    const read = readPasteChunk(IDLE_PASTE, wrap('one\ntwo'));
+    assert.deepEqual(read.segments, [{ pasted: true, text: 'one\ntwo' }]);
+    assert.deepEqual(read.state, IDLE_PASTE);
+  });
+
+  it('restores the escape byte Ink strips from the head of a chunk', () => {
+    // useInput drops a leading ESC before the handler ever sees it, so the
+    // opening marker arrives as a bare `[200~`.
+    const read = readPasteChunk(IDLE_PASTE, `[200~text${CLOSE}`);
+    assert.deepEqual(read.segments, [{ pasted: true, text: 'text' }]);
+  });
+
+  it('joins a paste split across reads', () => {
+    const first = readPasteChunk(IDLE_PASTE, `${OPEN}alpha`);
+    assert.deepEqual(first.segments, []);
+    assert.equal(first.state.open, true);
+
+    const second = readPasteChunk(first.state, `beta${CLOSE}`);
+    assert.deepEqual(second.segments, [{ pasted: true, text: 'alphabeta' }]);
+    assert.equal(second.state.open, false);
+  });
+
+  it('joins a paste whose closing marker is itself split', () => {
+    const first = readPasteChunk(IDLE_PASTE, `${OPEN}alpha${ESC}[20`);
+    assert.deepEqual(first.segments, []);
+
+    const second = readPasteChunk(first.state, '1~');
+    assert.deepEqual(second.segments, [{ pasted: true, text: 'alpha' }]);
+    assert.equal(second.state.open, false);
+  });
+
+  it('keeps keystrokes on either side of the markers as keystrokes', () => {
+    const read = readPasteChunk(IDLE_PASTE, `a${wrap('x')}b`);
+    assert.deepEqual(read.segments, [
+      { pasted: false, text: 'a' },
+      { pasted: true, text: 'x' },
+      { pasted: false, text: 'b' },
+    ]);
+  });
+
+  it('reports a marker only when one is actually present', () => {
+    assert.equal(hasPasteMarker(' '), false);
+    assert.equal(hasPasteMarker('colado'), false);
+    assert.equal(hasPasteMarker('[200~x'), true);
+    assert.equal(hasPasteMarker(wrap('x')), true);
   });
 });
 

@@ -21,7 +21,7 @@
 import { PlifError } from '../errors.js';
 import type { Container } from '../container/container.js';
 import type { ToolSpec } from '../model/provider.js';
-import type { QuestionBroker } from './ask.js';
+import type { QuestionBroker, QuestionChoice } from './ask.js';
 import type { MemoryStore } from './memory.js';
 import type { TaskManager } from '../tasks/manager.js';
 import type { EventBus } from '../events/bus.js';
@@ -29,9 +29,17 @@ import type { LspManager } from '../lsp/manager.js';
 import { diagnosticsAfterWrite } from '../lsp/tools.js';
 import { describeStats, diffLines, diffStats, formatDiff } from './diff.js';
 import type { EditCoordinator } from './edits.js';
-import { globalConfigPath, loadGlobalConfig, profilesOf, saveGlobalConfig } from '../config/global.js';
+import {
+  globalConfigPath,
+  isAutoApproveEnabled,
+  loadGlobalConfig,
+  profilesOf,
+  saveGlobalConfig,
+} from '../config/global.js';
+import type { GlobalConfig } from '../config/global.js';
 import { parseModelRef, resolveConfig, validate as validateModel } from '../model/config.js';
 import type { StoredConfig } from '../model/config.js';
+import type { Attachment } from '../model/provider.js';
 
 export interface ToolContext {
   readonly container: Container;
@@ -59,6 +67,8 @@ export interface ToolContext {
   readonly edits?: EditCoordinator;
   readonly agentId?: string;
   readonly activateProfile?: (name: string) => Promise<void>;
+  /** Attachments from the user message that caused this tool call. */
+  readonly attachments?: readonly Attachment[];
 }
 
 export interface ToolResult {
@@ -75,6 +85,8 @@ export interface ToolResult {
    * every edit, which is the cost the summary exists to avoid.
    */
   readonly diff?: string;
+  /** Full terminal-facing transcript when the model-facing output is compacted. */
+  readonly display?: string;
 }
 
 export interface Tool {
@@ -410,6 +422,12 @@ export const runCommand: Tool = {
 
     return {
       output: clip(parts.join('\n')),
+      display: [
+        `exit ${result.exitCode}${result.killedBy ? ` (${result.killedBy})` : ''}`,
+        result.stdout.trimEnd(),
+        result.stderr.trimEnd(),
+        result.truncated ? '(output truncated at the container limit)' : '',
+      ].filter(Boolean).join('\n'),
       ok: result.exitCode === 0 && !result.killedBy,
     };
   },
@@ -436,8 +454,22 @@ export const askUser: Tool = {
         question: { type: 'string', description: 'The question, in one sentence' },
         options: {
           type: 'array',
-          items: { type: 'string' },
-          description: 'Suggested answers, if the choice is between a few known ones',
+          items: {
+            oneOf: [
+              { type: 'string' },
+              {
+                type: 'object',
+                properties: {
+                  value: { type: 'string' },
+                  label: { type: 'string' },
+                  description: { type: 'string' },
+                },
+                required: ['value', 'label'],
+                additionalProperties: false,
+              },
+            ],
+          },
+          description: 'Suggested answers. Objects add the second-line description shown in the picker.',
         },
         context: {
           type: 'string',
@@ -451,7 +483,17 @@ export const askUser: Tool = {
   async run(input, context) {
     const question = requireString(input, 'question');
     const options = Array.isArray(input['options'])
-      ? (input['options'] as unknown[]).filter((o): o is string => typeof o === 'string')
+      ? (input['options'] as unknown[]).flatMap<QuestionChoice>((option) => {
+          if (typeof option === 'string') return [option];
+          if (!option || typeof option !== 'object') return [];
+          const item = option as Record<string, unknown>;
+          if (typeof item['value'] !== 'string' || typeof item['label'] !== 'string') return [];
+          return [{
+            value: item['value'],
+            label: item['label'],
+            ...(typeof item['description'] === 'string' ? { description: item['description'] } : {}),
+          }];
+        })
       : undefined;
 
     const answer = await context.questions.ask({
@@ -475,21 +517,6 @@ export const askUser: Tool = {
   },
 };
 
-/**
- * Whether an answer means yes.
- *
- * The question offers `sim`/`não`, but the broker takes free text and a
- * developer typing `y`, `yes` or `ok` plainly means the same thing. Matching
- * only `sim` turned all three into a silent decline — the profile was not
- * saved, the tool reported success at *not* saving it, and nothing on screen
- * explained why. Anything unrecognised is still a no: a save that happens
- * because the answer was ambiguous is the wrong way to be wrong.
- */
-function affirmative(answer: string | null): boolean {
-  if (!answer) return false;
-  return /^(s|sim|y|yes|ok|okay|claro|pode)$/i.test(answer.trim());
-}
-
 export const listProfiles: Tool = {
   spec: { name: 'list_profiles', description: 'List persistent main-agent profiles.', parameters: { type: 'object', properties: {}, additionalProperties: false } },
   async run() {
@@ -500,8 +527,155 @@ export const listProfiles: Tool = {
   },
 };
 
+const SECRET_KEY = /api[-_]?key|token|secret|password|credential/i;
+/**
+ * Containers whose contents are credentials whatever the keys are called.
+ *
+ * Redacting by key name alone leaks the two places a credential actually
+ * lives: an HTTP MCP server keeps its bearer token in `headers.Authorization`,
+ * and a stdio one keeps it in `env` under whatever the vendor named the
+ * variable. Neither matches a name denylist, and this output goes to the model
+ * and therefore to the model's endpoint — so the location has to be the rule.
+ */
+const SECRET_CONTAINER = /^(headers|env)$/i;
+
+export function redactedConfig(config: GlobalConfig): unknown {
+  const hide = (value: unknown, key: string, sealed: boolean): unknown => {
+    if (SECRET_KEY.test(key)) return value ? '[redacted]' : value;
+    if (sealed && (value === null || typeof value !== 'object')) {
+      return value ? '[redacted]' : value;
+    }
+    if (Array.isArray(value)) return value.map((item) => hide(item, '', sealed));
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value).map(([childKey, child]) => [
+          childKey,
+          hide(child, childKey, sealed || SECRET_CONTAINER.test(childKey)),
+        ]),
+      );
+    }
+    return value;
+  };
+  return hide(config, '', false);
+}
+
+export const getConfig: Tool = {
+  parallelSafe: true,
+  repeatable: true,
+  spec: {
+    name: 'get_config',
+    description: 'Read Plif configuration with credentials redacted. Use this before proposing a configuration change.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  async run() {
+    const config = await loadGlobalConfig();
+    return { output: JSON.stringify(redactedConfig(config), null, 2), ok: true };
+  },
+};
+
+export const updateConfig: Tool = {
+  spec: {
+    name: 'update_config',
+    description:
+      'Update Plif configuration. When Auto Approve is off, Plif opens a navigable confirmation panel before writing. ' +
+      'Can change the active model, vision model, Auto Approve, or add an OpenAI-compatible provider/model.',
+    parameters: {
+      type: 'object',
+      properties: {
+        operation: { type: 'string', enum: ['set_model', 'set_vision_model', 'set_theme', 'set_auto_approve', 'upsert_provider'] },
+        value: { type: 'string', description: 'Model ref for model operations, or theme id for set_theme' },
+        enabled: { type: 'boolean', description: 'New value for set_auto_approve' },
+        provider: { type: 'string', description: 'Provider id for upsert_provider' },
+        name: { type: 'string', description: 'Human-readable provider name' },
+        baseURL: { type: 'string', description: 'OpenAI-compatible API base URL' },
+        apiKey: { type: 'string', description: 'Optional provider credential; never shown in transcripts' },
+        model: { type: 'string', description: 'Optional model id to add to the provider' },
+        modelName: { type: 'string', description: 'Optional human-readable model name' },
+        modalities: { type: 'array', items: { type: 'string', enum: ['text', 'image'] } },
+        contextWindow: { type: 'number' },
+        cost: { type: 'string', enum: ['free', 'paid', 'unknown'] },
+      },
+      required: ['operation'],
+      additionalProperties: false,
+    },
+  },
+  async run(input, context) {
+    const operation = requireString(input, 'operation');
+    const current = await loadGlobalConfig();
+    let next: GlobalConfig;
+    let summary: string;
+
+    if (operation === 'set_model' || operation === 'set_vision_model' || operation === 'set_theme') {
+      const value = requireString(input, 'value');
+      const key = operation === 'set_model' ? 'model' : operation === 'set_theme' ? 'theme' : 'visionModel';
+      next = { ...current, [key]: value };
+      summary = `${key}: ${value}`;
+    } else if (operation === 'set_auto_approve') {
+      if (typeof input['enabled'] !== 'boolean') throw new PlifError('INVALID_ARGUMENT', 'enabled must be a boolean');
+      next = {
+        ...current,
+        autoApprove: input['enabled'],
+        permissionMode: input['enabled'] ? 'auto-approve' : 'ask',
+      };
+      summary = `Auto Approve: ${input['enabled'] ? 'on' : 'off'}`;
+    } else if (operation === 'upsert_provider') {
+      const provider = requireString(input, 'provider');
+      const baseURL = requireString(input, 'baseURL');
+      const providerMap = current.provider && typeof current.provider === 'object'
+        ? { ...(current.provider as Record<string, unknown>) }
+        : {};
+      const previous = providerMap[provider] && typeof providerMap[provider] === 'object'
+        ? providerMap[provider] as Record<string, unknown>
+        : {};
+      const previousOptions = previous['options'] && typeof previous['options'] === 'object'
+        ? previous['options'] as Record<string, unknown>
+        : {};
+      const model = typeof input['model'] === 'string' ? input['model'].trim() : '';
+      const previousModels = previous['models'] && typeof previous['models'] === 'object'
+        ? previous['models'] as Record<string, unknown>
+        : {};
+      const modelEntry = model ? {
+        name: typeof input['modelName'] === 'string' ? input['modelName'] : model,
+        modalities: Array.isArray(input['modalities']) ? input['modalities'] : ['text'],
+        ...(typeof input['contextWindow'] === 'number' ? { contextWindow: input['contextWindow'] } : {}),
+        ...(typeof input['cost'] === 'string' ? { cost: input['cost'] } : {}),
+      } : undefined;
+      providerMap[provider] = {
+        ...previous,
+        sdk: 'openai',
+        name: typeof input['name'] === 'string' ? input['name'] : provider,
+        options: {
+          ...previousOptions,
+          baseURL,
+          ...(typeof input['apiKey'] === 'string' ? { apiKey: input['apiKey'] } : {}),
+        },
+        models: model ? { ...previousModels, [model]: modelEntry } : previousModels,
+      };
+      next = { ...current, provider: providerMap };
+      summary = `Provider ${provider} (${baseURL})${model ? ` with model ${model}` : ''}`;
+    } else {
+      throw new PlifError('INVALID_ARGUMENT', `Unsupported configuration operation: ${operation}`);
+    }
+
+    if (!isAutoApproveEnabled(current)) {
+      const answer = await context.questions.ask({
+        text: 'Allow this Plif configuration change?',
+        options: [
+          { value: 'approve', label: 'Apply change', description: 'Write this update to config.jsonc.' },
+          { value: 'cancel', label: 'Cancel', description: 'Leave the current configuration untouched.' },
+        ],
+        context: summary,
+      });
+      if (answer !== 'approve') return { output: 'Configuration was not changed.', ok: false };
+    }
+
+    await saveGlobalConfig(next);
+    return { output: `Configuration updated: ${summary}.`, ok: true };
+  },
+};
+
 export const createProfile: Tool = {
-  spec: { name: 'create_profile', description: 'Propose a persistent main-agent profile. Always ask the user for confirmation before saving it.', parameters: { type: 'object', properties: { name: { type: 'string' }, model: { type: 'string' }, systemPrompt: { type: 'string' } }, required: ['name', 'model', 'systemPrompt'], additionalProperties: false } },
+  spec: { name: 'create_profile', description: 'Create a persistent main-agent profile. Plif confirms through the picker unless Auto Approve is enabled.', parameters: { type: 'object', properties: { name: { type: 'string' }, model: { type: 'string' }, systemPrompt: { type: 'string' } }, required: ['name', 'model', 'systemPrompt'], additionalProperties: false } },
   async run(input, context) {
     const name = requireString(input, 'name');
     const model = requireString(input, 'model');
@@ -529,18 +703,18 @@ export const createProfile: Tool = {
       };
     }
 
-    const answer = await context.questions.ask({ text: `Salvar o perfil de IA "${name}" para uso futuro?`, options: ['sim', 'não'], context: `Modelo: ${model}\nIdentidade: ${systemPrompt}` });
-    if (!affirmative(answer)) {
-      return {
-        output:
-          answer === null
-            ? 'Profile was not saved: nobody answered the confirmation. Do not retry it — ' +
-              'say that the profile is ready and ask the user to confirm when they are back.'
-            : `Profile was not saved: the user answered "${answer}".`,
-        ok: false,
-      };
-    }
     const config = await loadGlobalConfig();
+    if (!isAutoApproveEnabled(config)) {
+      const answer = await context.questions.ask({
+        text: `Save the AI profile "${name}" for future use?`,
+        options: [
+          { value: 'approve', label: 'Save profile', description: 'Persist this model and identity in config.jsonc.' },
+          { value: 'cancel', label: 'Cancel', description: 'Do not change configuration.' },
+        ],
+        context: `Model: ${model}\nIdentity: ${systemPrompt}`,
+      });
+      if (answer !== 'approve') return { output: 'Profile was not saved.', ok: false };
+    }
     const profiles = { ...profilesOf(config), [name]: { name, model, systemPrompt } };
     await saveGlobalConfig({ ...config, profiles });
     return { output: `Profile ${name} saved at ${globalConfigPath()}. It is not active until the user activates it.`, ok: true };
@@ -548,20 +722,21 @@ export const createProfile: Tool = {
 };
 
 export const activateProfile: Tool = {
-  spec: { name: 'activate_profile', description: 'Ask the user before switching the main agent identity to a saved profile.', parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'], additionalProperties: false } },
+  spec: { name: 'activate_profile', description: 'Switch to a saved main-agent identity. Plif confirms unless Auto Approve is enabled.', parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'], additionalProperties: false } },
   async run(input, context) {
     const name = requireString(input, 'name');
     const config = await loadGlobalConfig();
     if (!profilesOf(config)[name]) return { output: `No profile named ${name}.`, ok: false };
-    const answer = await context.questions.ask({ text: `Ativar o perfil de IA "${name}" e reiniciar a conversa?`, options: ['sim', 'não'], context: profilesOf(config)[name]?.systemPrompt });
-    if (!affirmative(answer)) {
-      return {
-        output:
-          answer === null
-            ? 'Profile was not activated: nobody answered. Do not retry — ask again next turn.'
-            : `Profile was not activated: the user answered "${answer}".`,
-        ok: false,
-      };
+    if (!isAutoApproveEnabled(config)) {
+      const answer = await context.questions.ask({
+        text: `Activate the AI profile "${name}" and restart the conversation?`,
+        options: [
+          { value: 'approve', label: 'Activate profile', description: 'Switch identity and begin a fresh conversation.' },
+          { value: 'cancel', label: 'Cancel', description: 'Keep the current profile and conversation.' },
+        ],
+        context: profilesOf(config)[name]?.systemPrompt,
+      });
+      if (answer !== 'approve') return { output: 'Profile was not activated.', ok: false };
     }
     if (context.activateProfile) await context.activateProfile(name);
     else await saveGlobalConfig({ ...config, activeProfile: name });
@@ -599,6 +774,83 @@ export const remember: Tool = {
     const stored = await context.memory.remember({ workspace: context.workspace, kind, text });
     return {
       output: `Recorded as ${kind}${stored.confirmations > 1 ? ` (confirmed ${stored.confirmations}x)` : ''}.`,
+      ok: true,
+    };
+  },
+};
+
+export type PlanStatus = 'pending' | 'in_progress' | 'completed';
+
+export interface PlanCheckpoint {
+  readonly step: string;
+  readonly status: PlanStatus;
+}
+
+/** Keep plans useful as navigation without turning the timeline into a backlog. */
+export const updatePlan: Tool = {
+  spec: {
+    name: 'update_plan',
+    description:
+      'Set a short execution plan for genuinely multi-step work. Use 2-6 concise checkpoints, ' +
+      'update it only at meaningful checkpoint boundaries, and keep at most one checkpoint in progress.',
+    parameters: {
+      type: 'object',
+      properties: {
+        explanation: {
+          type: 'string',
+          description: 'Optional one-sentence reason the plan changed; do not narrate routine progress.',
+        },
+        plan: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 6,
+          items: {
+            type: 'object',
+            properties: {
+              step: { type: 'string', description: 'A short outcome-oriented checkpoint.' },
+              status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
+            },
+            required: ['step', 'status'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['plan'],
+      additionalProperties: false,
+    },
+  },
+  async run(input) {
+    const raw = input['plan'];
+    if (!Array.isArray(raw) || raw.length < 1 || raw.length > 6) {
+      throw new PlifError('INVALID_ARGUMENT', 'update_plan needs between 1 and 6 checkpoints');
+    }
+
+    const checkpoints = raw.map((value, index): PlanCheckpoint => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new PlifError('INVALID_ARGUMENT', `plan checkpoint ${index + 1} must be an object`);
+      }
+      const record = value as Record<string, unknown>;
+      const step = typeof record['step'] === 'string' ? record['step'].trim() : '';
+      const status = record['status'];
+      if (!step) {
+        throw new PlifError('INVALID_ARGUMENT', `plan checkpoint ${index + 1} needs a short step`);
+      }
+      if (status !== 'pending' && status !== 'in_progress' && status !== 'completed') {
+        throw new PlifError('INVALID_ARGUMENT', `plan checkpoint ${index + 1} has an invalid status`);
+      }
+      return { step, status };
+    });
+
+    if (checkpoints.filter((checkpoint) => checkpoint.status === 'in_progress').length > 1) {
+      throw new PlifError('INVALID_ARGUMENT', 'update_plan allows at most one checkpoint in progress');
+    }
+
+    const completed = checkpoints.filter((checkpoint) => checkpoint.status === 'completed').length;
+    const active = checkpoints.find((checkpoint) => checkpoint.status === 'in_progress');
+    return {
+      output:
+        `Plan updated: ${completed}/${checkpoints.length} checkpoints completed.` +
+        (active ? ` Current checkpoint: ${active.step}` : ''),
       ok: true,
     };
   },
@@ -730,6 +982,9 @@ export const DEFAULT_TOOLS: readonly Tool[] = [
   listDir,
   runCommand,
   askUser,
+  getConfig,
+  updateConfig,
+  updatePlan,
   remember,
   startTask,
   listTasks,

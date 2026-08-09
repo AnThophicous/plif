@@ -153,7 +153,7 @@ export class LspClient {
 
       connection.sendNotification('initialized', {});
       this.#ready = true;
-      this.#detail = `${this.#resolved.source === 'project' ? 'project' : 'PATH'}: ${this.#resolved.command}`;
+      this.#detail = `${this.#resolved.source}: ${this.#resolved.command}`;
     } catch (error) {
       await this.stop();
       throw new PlifError('LSP_UNAVAILABLE', `${this.label} language server failed to start`, {

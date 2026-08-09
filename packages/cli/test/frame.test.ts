@@ -16,6 +16,8 @@ import { describe, it } from 'node:test';
 import { entry, initialSession, sessionReducer } from '../src/session.js';
 import type { SessionState, TimelineEntry } from '../src/session.js';
 import { estimateHeight, tail } from '../src/components/Timeline.js';
+import { detachImmediateInkResize, terminalFrameRows } from '../src/terminal-resize.js';
+import { PassThrough } from 'node:stream';
 
 function withEntries(items: readonly TimelineEntry[]): SessionState {
   return items.reduce(
@@ -73,6 +75,129 @@ describe('committing rows to scrollback', () => {
 
     assert.deepEqual(cleared.committed, []);
     assert.equal(cleared.epoch, state.epoch + 1);
+  });
+});
+
+describe('terminal resize guard', () => {
+  it('keeps the dynamic frame below Ink\'s clear-terminal threshold', () => {
+    assert.equal(terminalFrameRows(40), 39);
+    assert.equal(terminalFrameRows(1), 1);
+  });
+
+  it('removes only Ink\'s immediate resized listener', () => {
+    const stream = new PassThrough() as unknown as NodeJS.WriteStream;
+    const existing = (): void => undefined;
+    const ink = function resized(): void { /* Ink listener signature */ };
+    const app = function onResize(): void { /* Plif listener signature */ };
+    stream.on('resize', existing);
+    const before = new Set([existing as (...args: unknown[]) => void]);
+    stream.on('resize', ink);
+    stream.on('resize', app);
+    assert.equal(detachImmediateInkResize(stream, before), 1);
+    assert.deepEqual(stream.listeners('resize'), [existing, app]);
+  });
+});
+
+describe('live controls', () => {
+  it('updates discovery calls outside the timeline and flushes one final row', () => {
+    let state = sessionReducer(initialSession, {
+      type: 'discovery.start', id: 'read-1', kind: 'Read', target: 'src/one.ts',
+    });
+    state = sessionReducer(state, {
+      type: 'discovery.start', id: 'list-1', kind: 'List', target: 'src',
+    });
+    state = sessionReducer(state, {
+      type: 'discovery.finish', id: 'read-1', ok: true, output: '',
+    });
+    state = sessionReducer(state, {
+      type: 'discovery.finish', id: 'list-1', ok: true, output: 'app.ts',
+    });
+
+    assert.equal(state.entries.length, 0);
+    assert.equal(state.discovery.calls.length, 2);
+    assert.equal(state.discovery.calls[1]?.output, 'app.ts');
+
+    state = sessionReducer(state, { type: 'discovery.flush' });
+    assert.equal(state.discovery.calls.length, 0);
+    assert.equal(state.entries.length, 1);
+    assert.equal(state.entries[0]?.title, 'Executed');
+    assert.equal(state.entries[0]?.toolTarget, 'Read 1x · List 1x');
+    assert.equal(state.entries[0]?.executions?.length, 2);
+  });
+
+  it('groups adjacent completed edits into one compact transcript row', () => {
+    const first = entry('tool', 'Edited', {
+      status: 'active',
+      toolTarget: 'src/one.ts',
+    });
+    const second = entry('tool', 'Edited', {
+      status: 'active',
+      toolTarget: 'src/two.ts',
+    });
+    let state = withEntries([first, second]);
+    state = sessionReducer(state, {
+      type: 'update',
+      id: first.id,
+      patch: { status: 'done', diff: '@@ -1 +1 @@\n-old\n+new' },
+    });
+    state = sessionReducer(state, {
+      type: 'update',
+      id: second.id,
+      patch: { status: 'done', diff: '@@ -1 +1 @@\n-before\n+after' },
+    });
+
+    assert.equal(state.entries.length, 1);
+    assert.equal(state.entries[0]?.toolTarget, '2 files');
+    assert.equal(state.entries[0]?.toolSummary, '(+2 -2)');
+    assert.deepEqual(state.entries[0]?.edits?.map((edit) => edit.path), ['src/one.ts', 'src/two.ts']);
+  });
+
+  it('removes a subagent as soon as it finishes', () => {
+    const running = sessionReducer(initialSession, {
+      type: 'subagent.start',
+      view: {
+        taskId: 'child-1',
+        callId: 'call-1',
+        title: 'Inspect backend',
+        model: 'test/model',
+        startedAt: 1,
+        endedAt: null,
+        status: 'running',
+        summary: null,
+        lines: [],
+        thinkingSince: null,
+        toolCalls: 0,
+        contextUsed: 0,
+        contextMax: 1_000_000,
+        completionTokens: 0,
+      },
+    });
+    const finished = sessionReducer(running, {
+      type: 'subagent.finish',
+      taskId: 'child-1',
+      status: 'done',
+      at: 2,
+      summary: 'done',
+    });
+    assert.equal(finished.subagents.length, 0);
+    assert.equal(finished.subagentsOpen, false);
+  });
+
+  it('lets arrow navigation reach the Other answer row', () => {
+    const asked = sessionReducer(initialSession, {
+      type: 'question.push',
+      question: {
+        id: 'q1',
+        text: 'Pick one',
+        options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }],
+        context: undefined,
+        askedAt: 1,
+      },
+    });
+    const second = sessionReducer(asked, { type: 'question.move', delta: 1 });
+    const other = sessionReducer(second, { type: 'question.move', delta: 1 });
+    assert.equal(second.questionChoice, 1);
+    assert.equal(other.questionChoice, -1);
   });
 });
 

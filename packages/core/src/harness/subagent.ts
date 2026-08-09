@@ -3,6 +3,7 @@ import { EventBus } from '../events/bus.js';
 import type { PlifEvents } from '../events/bus.js';
 import { formatModelRef, keyOptional, parseModelRef, resolveConfig, validate } from '../model/config.js';
 import type { StoredConfig } from '../model/config.js';
+import type { CustomProvider } from '../model/config.js';
 import { OpenAIProvider } from '../model/openai.js';
 import type { Message, ModelProvider } from '../model/provider.js';
 import { runLoop } from './loop.js';
@@ -23,30 +24,30 @@ export interface SubagentOptions {
   /** Passed through to the child — the LSP and web tools, in practice. */
   readonly extraTools?: readonly Tool[];
   readonly edits?: EditCoordinator;
+  readonly coordinator?: SubagentCoordinator;
+  readonly agentInstructions?: string;
+}
+
+export class SubagentCoordinator {
+  #running = new Map<string, AbortController>();
+
+  register(taskId: string, controller: AbortController): void {
+    this.#running.set(taskId, controller);
+  }
+
+  finish(taskId: string): void {
+    this.#running.delete(taskId);
+  }
+
+  cancel(taskId: string): boolean {
+    const controller = this.#running.get(taskId);
+    if (!controller) return false;
+    controller.abort();
+    return true;
+  }
 }
 
 const DEFAULT_MAX_ITERATIONS = 12;
-
-const BRIEFING = `You are a subagent. Another agent gave you one question and your
-entire job is to answer it.
-
-Nobody reads your steps. The only thing that survives is your final message, so it
-has to stand alone: say what you found, name the files and line numbers that
-support it, and quote the two or three lines that actually matter. "I looked into
-it and the handling seems fine" is worthless — the agent that asked cannot see
-what you saw.
-
-You cannot ask anyone anything; there is no human attached to this run. When
-something is genuinely ambiguous, pick the reading you can defend, answer under
-it, and say in one line which reading you picked.
-
-You may edit files when the parent asks for implementation. Every edit is transactional.
-If the tool reports EDIT_CONFLICT, stop editing that path and report the conflict clearly;
-the principal agent will inspect and arbitrate all competing proposals.
-
-Keep it under a few hundred words. If the honest answer is that you could not find
-it, say so and say where you looked — that is a real result, and it stops the next
-attempt repeating yours.`;
 
 /**
  * The tools a subagent gets.
@@ -122,7 +123,14 @@ export function subagentTool(options: SubagentOptions): Tool {
 
     const agent = agents[requested];
     const ref = agent?.model ?? requested;
-    const parsed = parseModelRef(ref);
+    const providerMap = (value: unknown): Record<string, CustomProvider> =>
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? value as Record<string, CustomProvider>
+        : {};
+    const parsed = parseModelRef(ref, {
+      ...providerMap(options.stored.providers),
+      ...providerMap(options.stored.provider),
+    });
 
     const config = resolveConfig(options.stored, {
       model: parsed.model,
@@ -197,6 +205,10 @@ export function subagentTool(options: SubagentOptions): Tool {
               '"opencode/longcat-2.0-free". Omit to use your own model. A model that ' +
               'bills needs the developer to approve it; free ones do not.',
           },
+          includeAttachments: {
+            type: 'boolean',
+            description: 'Pass the current pasted attachments to this subagent. Use only when its task requires them.',
+          },
         },
         required: ['title', 'task'],
         additionalProperties: false,
@@ -229,6 +241,10 @@ export function subagentTool(options: SubagentOptions): Tool {
       const callId = context.callId;
       const taskId = `subagent-${callId ?? Date.now()}`;
       const startedAt = Date.now();
+      const childAbort = new AbortController();
+      const abortChild = (): void => childAbort.abort();
+      context.signal?.addEventListener('abort', abortChild, { once: true });
+      options.coordinator?.register(taskId, childAbort);
       parent?.emit('subagent.started', {
         taskId,
         callId,
@@ -271,7 +287,23 @@ export function subagentTool(options: SubagentOptions): Tool {
         }
       });
 
+      let reasoning = '';
+      const flushReasoning = (): void => {
+        const line = reasoning.trim();
+        reasoning = '';
+        if (line) relay({ taskId, kind: 'reasoning', label: line });
+      };
+      inner.on('agent.reasoning', (event) => {
+        reasoning += event.delta;
+        const cut = reasoning.lastIndexOf('\n');
+        if (cut < 0 && reasoning.length < 160) return;
+        const line = (cut >= 0 ? reasoning.slice(0, cut) : reasoning).trim();
+        reasoning = cut >= 0 ? reasoning.slice(cut + 1) : '';
+        if (line) relay({ taskId, kind: 'reasoning', label: line });
+      });
+
       inner.on('agent.thinking', (event) => {
+        if (event.phase === 'end') flushReasoning();
         relay({
           taskId,
           kind: 'thinking',
@@ -305,20 +337,24 @@ export function subagentTool(options: SubagentOptions): Tool {
       const messages: Message[] = [
         {
           role: 'system',
-          content: [
-            BRIEFING,
-            '',
-            buildSystemPrompt({
-              workspace: context.workspace ?? context.container.workdir,
-              containerName: context.container.name,
-              workdir: context.container.workdir,
-              capabilities: context.container.capabilities,
-              isolation: options.isolation,
-              tools: tools.map((tool) => tool.spec),
-            }),
-          ].join('\n'),
+          content: buildSystemPrompt({
+            workspace: context.workspace ?? context.container.workdir,
+            containerName: context.container.name,
+            workdir: context.container.workdir,
+            capabilities: context.container.capabilities,
+            isolation: options.isolation,
+            mode: 'subagent',
+            tools: tools.map((tool) => tool.spec),
+            ...(options.agentInstructions ? { agentInstructions: options.agentInstructions } : {}),
+          }),
         },
-        { role: 'user', content: task },
+        {
+          role: 'user',
+          content: task,
+          ...(input['includeAttachments'] === true && context.attachments?.length
+            ? { attachments: context.attachments }
+            : {}),
+        },
       ];
 
       const result = await runLoop(messages, {
@@ -329,11 +365,23 @@ export function subagentTool(options: SubagentOptions): Tool {
         tools,
         maxIterations:
           resolved.maxIterations ?? options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
-        ...(context.signal ? { signal: context.signal } : {}),
+        signal: childAbort.signal,
         ...(context.workspace ? { workspace: context.workspace } : {}),
         ...(context.lsp ? { lsp: context.lsp } : {}),
         ...(context.edits ? { edits: context.edits } : {}),
         agentId: `subagent:${callId ?? title}:${Date.now()}`,
+      }).catch((error: unknown) => {
+        parent?.emit('subagent.finished', {
+          taskId,
+          status: childAbort.signal.aborted ? 'cancelled' : 'failed',
+          at: Date.now(),
+          durationMs: Date.now() - startedAt,
+          summary: error instanceof Error ? error.message : 'subagent failed',
+        });
+        throw error;
+      }).finally(() => {
+        context.signal?.removeEventListener('abort', abortChild);
+        options.coordinator?.finish(taskId);
       });
 
       const answer = result.text.trim();

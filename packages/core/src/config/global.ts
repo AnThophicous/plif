@@ -52,6 +52,8 @@ export interface GlobalConfig {
   readonly activeProfile?: string;
   /** Provider-qualified model chosen explicitly for future image delegation. */
   readonly visionModel?: string;
+  /** Built-in id or the id of a ~/.plif/*.theme document. */
+  readonly theme?: string;
   readonly profiles?: Readonly<Record<string, ProfileConfig>>;
   /** MCP servers. OpenCode's key; `mcpServers` is still read. */
   readonly mcp?: unknown;

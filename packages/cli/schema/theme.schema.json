@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/AnThophicous/plif/main/packages/cli/schema/theme.schema.json",
+  "title": "Plif terminal theme",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string", "format": "uri-reference" },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "palette": { "$ref": "#/$defs/paletteMap" },
+    "syntax": { "$ref": "#/$defs/syntax" },
+    "diff": { "$ref": "#/$defs/diff" },
+    "borders": { "$ref": "#/$defs/borders" },
+    "emphasis": { "$ref": "#/$defs/emphasis" },
+    "glyphs": { "$ref": "#/$defs/glyphs" },
+    "layout": { "$ref": "#/$defs/layout" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "tone": { "enum": ["text", "muted", "faint", "ghost", "brand", "accent", "accentBright", "accentDim", "success", "warn", "danger", "info"] },
+    "paletteMap": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/tone" },
+      "additionalProperties": { "type": "string" }
+    },
+    "syntax": {
+      "type": "object",
+      "properties": {
+        "command": { "$ref": "#/$defs/tone" }, "parameter": { "$ref": "#/$defs/tone" },
+        "string": { "$ref": "#/$defs/tone" }, "variable": { "$ref": "#/$defs/tone" },
+        "operator": { "$ref": "#/$defs/tone" }, "number": { "$ref": "#/$defs/tone" },
+        "comment": { "$ref": "#/$defs/tone" }, "plain": { "$ref": "#/$defs/tone" }
+      },
+      "additionalProperties": false
+    },
+    "diff": {
+      "type": "object",
+      "properties": {
+        "addBackground": { "type": "string" }, "removeBackground": { "type": "string" },
+        "addMarker": { "$ref": "#/$defs/tone" }, "removeMarker": { "$ref": "#/$defs/tone" }
+      },
+      "additionalProperties": false
+    },
+    "borders": {
+      "type": "object",
+      "properties": { "panel": { "$ref": "#/$defs/tone" }, "focus": { "$ref": "#/$defs/tone" }, "danger": { "$ref": "#/$defs/tone" } },
+      "additionalProperties": false
+    },
+    "emphasisEntry": {
+      "type": "object",
+      "properties": { "tone": { "$ref": "#/$defs/tone" }, "bold": { "type": "boolean" } },
+      "additionalProperties": false
+    },
+    "emphasis": {
+      "type": "object",
+      "properties": {
+        "normal": { "$ref": "#/$defs/emphasisEntry" }, "important": { "$ref": "#/$defs/emphasisEntry" },
+        "active": { "$ref": "#/$defs/emphasisEntry" }, "metadata": { "$ref": "#/$defs/emphasisEntry" }
+      },
+      "additionalProperties": false
+    },
+    "glyphs": { "type": "object", "additionalProperties": { "type": "string" } },
+    "layout": {
+      "type": "object",
+      "properties": {
+        "gutter": { "type": "number", "minimum": 0 }, "boxPadX": { "type": "number", "minimum": 0 },
+        "statusColumn": { "type": "number", "minimum": 0 }, "narrowWidth": { "type": "number", "minimum": 0 },
+        "maxTimelineRows": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

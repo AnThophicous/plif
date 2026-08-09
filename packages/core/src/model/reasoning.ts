@@ -173,3 +173,28 @@ export function reasoningFromDelta(delta: unknown): string | undefined {
 
   return undefined;
 }
+
+/**
+ * OpenAI-compatible hosts disagree on whether reasoning fields are deltas or
+ * the complete snapshot so far. Convert both shapes into actual increments.
+ */
+export class ReasoningDeltaNormalizer {
+  #value = '';
+
+  get value(): string {
+    return this.#value;
+  }
+
+  push(incoming: string): string {
+    if (!incoming) return '';
+    // Four characters is long enough to avoid mistaking ordinary one-token
+    // repetition for a snapshot, while catching cumulative streams early.
+    if (this.#value.length >= 4 && incoming.startsWith(this.#value)) {
+      const delta = incoming.slice(this.#value.length);
+      this.#value = incoming;
+      return delta;
+    }
+    this.#value += incoming;
+    return incoming;
+  }
+}

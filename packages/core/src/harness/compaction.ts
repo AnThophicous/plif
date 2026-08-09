@@ -1,9 +1,14 @@
 import type { Message, ModelProvider } from '../model/provider.js';
 import { collect } from '../model/provider.js';
+import { compactionSystemPrompt } from './prompts/modes/index.js';
 
 export interface CompactionOptions {
   readonly maxTokens: number;
   readonly keepRecent?: number;
+  /** Recent context retained verbatim, independent of message count. */
+  readonly recentTokenBudget?: number;
+  /** Maximum input size of one continuity-capsule request. */
+  readonly chunkTokenBudget?: number;
   readonly provider?: ModelProvider;
   readonly signal?: AbortSignal;
   /**
@@ -27,7 +32,7 @@ export const COMPACTION_STAGES = [
   'dropping superseded reads',
   'trimming tool output',
   'dropping stale reasoning',
-  'summarising older turns',
+  'building continuity capsules',
 ] as const;
 
 export interface CompactionResult {
@@ -43,6 +48,16 @@ const CHARS_PER_TOKEN = 4;
 const IMAGE_TOKENS = 1_000;
 const DEFAULT_KEEP_RECENT = 6;
 const TOOL_OUTPUT_CEILING = 2_000;
+const DEFAULT_RECENT_TOKENS = 200_000;
+const DEFAULT_CHUNK_TOKENS = 100_000;
+const REQUIRED_CAPSULE_SECTIONS = [
+  'Objective and checkpoint',
+  'Files and changes',
+  'Commands and verification',
+  'Decisions and preferences',
+  'Findings and errors',
+  'Pending work',
+] as const;
 
 export function estimateTokens(messages: readonly Message[]): number {
   let chars = 0;
@@ -145,6 +160,85 @@ function dropReasoning(messages: readonly Message[], pinned: ReadonlySet<number>
   });
 }
 
+interface MessageGroup {
+  readonly indices: readonly number[];
+  readonly messages: readonly Message[];
+}
+
+/** Keep an assistant tool request and all of its tool results inseparable. */
+export function protocolGroups(messages: readonly Message[]): MessageGroup[] {
+  const groups: MessageGroup[] = [];
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index]!;
+    const indices = [index];
+    const members = [message];
+    if (message.role === 'assistant' && (message.toolCalls?.length ?? 0) > 0) {
+      const ids = new Set(message.toolCalls!.map((call) => call.id));
+      while (
+        index + 1 < messages.length &&
+        messages[index + 1]!.role === 'tool' &&
+        ids.has(messages[index + 1]!.toolCallId ?? '')
+      ) {
+        index += 1;
+        indices.push(index);
+        members.push(messages[index]!);
+      }
+    }
+    groups.push({ indices, messages: members });
+  }
+  return groups;
+}
+
+function recentIndicesByTokens(messages: readonly Message[], budget: number): Set<number> {
+  const groups = protocolGroups(messages);
+  const selected = new Set<number>();
+  let used = 0;
+  for (let index = groups.length - 1; index >= 0; index -= 1) {
+    const group = groups[index]!;
+    const cost = estimateTokens(group.messages);
+    if (selected.size > 0 && used + cost > budget) break;
+    for (const messageIndex of group.indices) selected.add(messageIndex);
+    used += cost;
+  }
+  return selected;
+}
+
+function chunkGroups(groups: readonly MessageGroup[], budget: number): MessageGroup[][] {
+  const chunks: MessageGroup[][] = [];
+  let current: MessageGroup[] = [];
+  let tokens = 0;
+  for (const group of groups) {
+    const cost = estimateTokens(group.messages);
+    if (current.length > 0 && tokens + cost > budget) {
+      chunks.push(current);
+      current = [];
+      tokens = 0;
+    }
+    current.push(group);
+    tokens += cost;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
+function capsuleIsDetailed(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.length >= 300 && REQUIRED_CAPSULE_SECTIONS.every((section) =>
+    trimmed.toLowerCase().includes(section.toLowerCase()),
+  );
+}
+
+function transcriptOf(messages: readonly Message[]): string {
+  return messages.map((message) => {
+    const calls = (message.toolCalls ?? []).map((call) =>
+      `${call.name}(${call.arguments}) [id=${call.id}]`,
+    );
+    return `${message.role}${message.toolCallId ? ` [result=${message.toolCallId}]` : ''}: ` +
+      `${message.content}${message.reasoning ? `\n  reasoning: ${message.reasoning}` : ''}` +
+      `${calls.length ? `\n  tools: ${calls.join(', ')}` : ''}`;
+  }).join('\n');
+}
+
 async function summariseOlder(
   messages: readonly Message[],
   pinned: ReadonlySet<number>,
@@ -152,54 +246,56 @@ async function summariseOlder(
 ): Promise<{ messages: Message[]; summary: string | null }> {
   if (!options.provider) return { messages: [...messages], summary: null };
 
-  const collapsible = messages
-    .map((message, index) => ({ message, index }))
-    .filter(({ index }) => !pinned.has(index));
-
-  if (collapsible.length < 4) return { messages: [...messages], summary: null };
-
-  const transcript = collapsible
-    .map(({ message }) => {
-      const calls = (message.toolCalls ?? []).map((call) => `${call.name}(${call.arguments})`);
-      return `${message.role}: ${message.content}${calls.length ? `\n  tools: ${calls.join(', ')}` : ''}`;
-    })
-    .join('\n')
-    .slice(0, 24_000);
-
-  const result = await collect(
-    options.provider.stream({
-      messages: [
-        {
-          role: 'system',
-          content:
-            'Summarise this partial transcript of a coding agent session. Keep every decision ' +
-            'made, every file path touched, every command run and its outcome, and anything ' +
-            'discovered about the project. Drop pleasantries and repeated observations. ' +
-            'Write terse notes, not prose. Never invent detail that is not present.',
-        },
-        { role: 'user', content: transcript },
-      ],
-      ...(options.signal ? { signal: options.signal } : {}),
-    }),
+  const collapsible = protocolGroups(messages).filter((group) =>
+    group.indices.every((index) => !pinned.has(index)),
   );
+  if (collapsible.length < 2) return { messages: [...messages], summary: null };
 
-  if (!result.text.trim()) return { messages: [...messages], summary: null };
+  const chunks = chunkGroups(collapsible, options.chunkTokenBudget ?? DEFAULT_CHUNK_TOKENS);
+  const replacements = new Map<number, Message>();
+  const removed = new Set<number>();
+  const summaries: string[] = [];
 
-  const kept: Message[] = [];
-  let inserted = false;
-
-  for (const [index, message] of messages.entries()) {
-    if (pinned.has(index)) {
-      kept.push(message);
-      continue;
+  for (const [chunkIndex, chunk] of chunks.entries()) {
+    const source = chunk.flatMap((group) => group.messages);
+    let text = '';
+    try {
+      const result = await collect(options.provider.stream({
+        messages: [
+          {
+            role: 'system',
+            content: compactionSystemPrompt(REQUIRED_CAPSULE_SECTIONS),
+          },
+          { role: 'user', content: transcriptOf(source) },
+        ],
+        maxTokens: Math.min(20_000, Math.max(2_000, Math.floor(options.maxTokens / 10))),
+        ...(options.signal ? { signal: options.signal } : {}),
+      }));
+      text = result.text.trim();
+    } catch {
+      text = '';
     }
-    if (!inserted) {
-      kept.push({ role: 'user', content: `[earlier turns, summarised]\n${result.text.trim()}` });
-      inserted = true;
-    }
+
+    // Failure is non-destructive: leave this entire protocol-safe chunk raw.
+    if (!capsuleIsDetailed(text)) continue;
+    const indices = chunk.flatMap((group) => group.indices);
+    const first = indices[0]!;
+    replacements.set(first, {
+      role: 'user',
+      content: `[continuity capsule ${chunkIndex + 1}/${chunks.length}]\n${text}`,
+    });
+    for (const index of indices) removed.add(index);
+    summaries.push(text);
   }
 
-  return { messages: kept, summary: result.text.trim() };
+  if (summaries.length === 0) return { messages: [...messages], summary: null };
+  const kept: Message[] = [];
+  for (const [index, message] of messages.entries()) {
+    const replacement = replacements.get(index);
+    if (replacement) kept.push(replacement);
+    if (!removed.has(index)) kept.push(message);
+  }
+  return { messages: kept, summary: summaries.join('\n\n') };
 }
 
 export async function compact(
@@ -219,6 +315,13 @@ export async function compact(
     options.onStage?.(COMPACTION_STAGES[step - 1] as string, step, steps);
 
   const pinned = pinnedIndices(messages, keepRecent);
+  if (options.keepRecent === undefined) {
+    const recentBudget = Math.min(
+      DEFAULT_RECENT_TOKENS,
+      options.recentTokenBudget ?? Math.max(1, Math.floor(options.maxTokens * 0.4)),
+    );
+    for (const index of recentIndicesByTokens(messages, recentBudget)) pinned.add(index);
+  }
   announce(1);
   let working = dropSupersededReads(messages, pinned);
   stages.push('dropped superseded reads');
@@ -238,7 +341,15 @@ export async function compact(
   let summary: string | null = null;
   if (estimateTokens(working) > options.maxTokens) {
     announce(4);
-    const collapsed = await summariseOlder(working, pinnedIndices(working, keepRecent), options);
+    const summaryPinned = pinnedIndices(working, keepRecent);
+    if (options.keepRecent === undefined) {
+      const recentBudget = Math.min(
+        DEFAULT_RECENT_TOKENS,
+        options.recentTokenBudget ?? Math.max(1, Math.floor(options.maxTokens * 0.4)),
+      );
+      for (const index of recentIndicesByTokens(working, recentBudget)) summaryPinned.add(index);
+    }
+    const collapsed = await summariseOlder(working, summaryPinned, options);
     if (collapsed.summary) {
       working = collapsed.messages;
       summary = collapsed.summary;

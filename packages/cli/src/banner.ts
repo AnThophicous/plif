@@ -38,8 +38,8 @@ export interface BannerInput {
   readonly width: number;
 }
 
-const MARK = ['▄▀▀▄ ▄▀▀▄', '▌   ▀   ▐', '▀▄▄▀ ▀▄▄▀'];
-const MARK_ASCII = [' __   __ ', '(  ) (  )', ' --   -- '];
+const MARK = ['▗▛▀▜▄▛▀▜▖', '█▌ ▘█▝ ▐█', '▝▜█▛ ▜█▛▘'];
+const MARK_ASCII = [' __   __ ', '(  ) (  )', ' \\/   \\/ '];
 
 const RULE = supportsRichGlyphs
   ? { top: '╭─', side: '│', bottom: '╰─' }

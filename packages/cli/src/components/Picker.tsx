@@ -199,7 +199,7 @@ export function Picker({
                 <Text color={color(active ? 'accent' : 'ghost')}>
                   {active ? glyph.caret : ' '}{' '}
                 </Text>
-                <Text color={color(active ? 'text' : 'faint')} bold={active}>
+                <Text color={color(active ? 'text' : 'muted')} bold={active}>
                   {truncate(pickerItem.label, Math.max(10, inner - 14))}
                 </Text>
                 {pickerItem.current && <Text color={color('success')}> {glyph.done} in use</Text>}

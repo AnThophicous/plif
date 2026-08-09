@@ -56,7 +56,7 @@ export function Header({
 
   const left = (
     <Box>
-      <Text color={color('accent')}>{glyph.caret} </Text>
+      <Text color={color('muted')}>{glyph.caret} </Text>
       <Text color={color('muted')}>{shortenPath(cwd, Math.max(16, Math.floor(width * 0.4)))}</Text>
     </Box>
   );

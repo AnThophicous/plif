@@ -7,7 +7,7 @@
  * produced this state" instead of "which of eleven setters ran last".
  */
 
-import { DEFAULT_CONTEXT_TOKENS } from '@plif/core';
+import { DEFAULT_CONTEXT_TOKENS, diffStats, parseDiff } from '@plif/core';
 import type { Catalog, Decision, PolicyAction } from '@plif/core';
 import type { ModelSelection } from '@plif/core';
 import { filterItems, filterPickerGroups, flattenPickerGroups } from './components/Picker.js';
@@ -79,7 +79,28 @@ export interface TimelineEntry {
    * and lose everything that makes a diff readable at a glance.
    */
   readonly diff?: string;
+  readonly edits?: readonly { readonly path: string; readonly diff: string }[];
+  readonly planItems?: readonly import('./format.js').PlanDisplayItem[];
+  readonly executions?: readonly {
+    readonly kind?: 'Read' | 'List';
+    readonly target?: string;
+    readonly output?: string;
+    readonly ok?: boolean;
+  }[];
   readonly at: number;
+}
+
+export interface DiscoveryCall {
+  readonly id: string;
+  readonly kind: 'Read' | 'List';
+  readonly target?: string;
+  readonly output?: string;
+  readonly ok?: boolean;
+}
+
+export interface DiscoveryState {
+  readonly calls: readonly DiscoveryCall[];
+  readonly open: boolean;
 }
 
 /**
@@ -93,7 +114,7 @@ export interface TimelineEntry {
 export interface PendingQuestion {
   readonly id: string;
   readonly text: string;
-  readonly options: readonly string[] | undefined;
+  readonly options: readonly import('@plif/core').QuestionOption[] | undefined;
   readonly context: string | undefined;
   readonly askedAt: number;
   /** A credential: masked on screen, never echoed back into the timeline. */
@@ -173,7 +194,7 @@ export interface CompactionState {
 }
 
 export interface SubagentLine {
-  readonly kind: 'thinking' | 'tool' | 'text';
+  readonly kind: 'thinking' | 'reasoning' | 'tool' | 'text';
   readonly label: string;
   readonly ok?: boolean;
   readonly durationMs?: number;
@@ -263,6 +284,7 @@ export interface SessionState {
   /** Index into `subagents` of the tab being shown. */
   readonly subagentFocus: number;
   readonly subagentsOpen: boolean;
+  readonly discovery: DiscoveryState;
   readonly container: string | null;
   readonly containerState: string | null;
   readonly busy: boolean;
@@ -291,7 +313,8 @@ export const initialSession: SessionState = {
   queue: [],
   subagents: [],
   subagentFocus: 0,
-  subagentsOpen: true,
+  subagentsOpen: false,
+  discovery: { calls: [], open: false },
   container: null,
   containerState: null,
   busy: false,
@@ -369,6 +392,11 @@ export type SessionAction =
   | { type: 'subagent.focus'; delta: number }
   | { type: 'subagent.toggle' }
   | { type: 'subagent.reset' }
+  | { type: 'discovery.start'; id: string; kind: DiscoveryCall['kind']; target?: string }
+  | { type: 'discovery.finish'; id: string; ok: boolean; output: string }
+  | { type: 'discovery.toggle' }
+  | { type: 'discovery.reset' }
+  | { type: 'discovery.flush' }
   | { type: 'container'; name: string | null; state: string | null }
   | { type: 'busy'; busy: boolean; label?: string; since?: number }
   | { type: 'context'; used: number; max?: number }
@@ -385,6 +413,34 @@ export type SessionAction =
 
 /** Bound on retained entries; the terminal cannot show more and memory is not free. */
 const MAX_ENTRIES = 500;
+
+function mergeAdjacentEdits(entries: readonly TimelineEntry[]): TimelineEntry[] {
+  const merged: TimelineEntry[] = [];
+  for (const entry of entries) {
+    const previous = merged.at(-1);
+    const mergeable = previous?.kind === 'tool' && previous.title === 'Edited' && previous.status === 'done'
+      && entry.kind === 'tool' && entry.title === 'Edited' && entry.status === 'done';
+    if (!mergeable) { merged.push(entry); continue; }
+
+    const collect = (item: TimelineEntry): { path: string; diff: string }[] => item.edits
+      ? [...item.edits]
+      : item.diff && item.toolTarget ? [{ path: item.toolTarget, diff: item.diff }] : [];
+    const edits = [...collect(previous), ...collect(entry)];
+    if (edits.length < 2) { merged.push(entry); continue; }
+    const totals = edits.reduce((sum, edit) => {
+      const stats = diffStats(parseDiff(edit.diff));
+      return { added: sum.added + stats.added, removed: sum.removed + stats.removed };
+    }, { added: 0, removed: 0 });
+    merged[merged.length - 1] = {
+      ...previous,
+      toolTarget: `${edits.length} files`,
+      toolSummary: `(+${totals.added} -${totals.removed})`,
+      diff: undefined,
+      edits,
+    };
+  }
+  return merged;
+}
 
 export function sessionReducer(state: SessionState, action: SessionAction): SessionState {
   switch (action.type) {
@@ -434,13 +490,12 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       };
     }
 
-    case 'update':
-      return {
-        ...state,
-        entries: state.entries.map((entry) =>
-          entry.id === action.id ? { ...entry, ...action.patch } : entry,
-        ),
-      };
+    case 'update': {
+      const entries = state.entries.map((entry) =>
+        entry.id === action.id ? { ...entry, ...action.patch } : entry,
+      );
+      return { ...state, entries: mergeAdjacentEdits(entries) };
+    }
 
     case 'drop':
       return { ...state, entries: state.entries.filter((item) => item.id !== action.id) };
@@ -470,6 +525,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         epoch: state.epoch + 1,
         subagents: [],
         subagentFocus: 0,
+        discovery: { calls: [], open: false },
       };
 
     case 'approval.push':
@@ -518,10 +574,10 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
 
     case 'question.move': {
       const options = state.question?.options ?? [];
-      if (options.length === 0) return state;
-      const from = state.questionChoice < 0 ? -1 : state.questionChoice;
-      const next = Math.min(options.length - 1, Math.max(0, from + action.delta));
-      return { ...state, questionChoice: next, questionDraft: '' };
+      const other = options.length;
+      const from = state.questionChoice < 0 ? other : state.questionChoice;
+      const next = Math.min(other, Math.max(0, from + action.delta));
+      return { ...state, questionChoice: next === other ? -1 : next, questionDraft: '' };
     }
 
     case 'question.expand':
@@ -673,20 +729,15 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       };
 
     case 'subagent.finish':
-      return {
-        ...state,
-        subagents: state.subagents.map((view) =>
-          view.taskId === action.taskId
-            ? {
-                ...view,
-                status: action.status,
-                endedAt: action.at,
-                summary: action.summary,
-                thinkingSince: null,
-              }
-            : view,
-        ),
-      };
+      {
+        const subagents = state.subagents.filter((view) => view.taskId !== action.taskId);
+        return {
+          ...state,
+          subagents,
+          subagentFocus: Math.max(0, Math.min(state.subagentFocus, subagents.length - 1)),
+          subagentsOpen: subagents.length > 0 && state.subagentsOpen,
+        };
+      }
 
     case 'subagent.usage':
       return {
@@ -707,7 +758,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       if (state.subagents.length === 0) return state;
       const next =
         (state.subagentFocus + action.delta + state.subagents.length) % state.subagents.length;
-      return { ...state, subagentFocus: next, subagentsOpen: true };
+      return { ...state, subagentFocus: next };
     }
 
     case 'subagent.toggle':
@@ -715,6 +766,58 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
 
     case 'subagent.reset':
       return { ...state, subagents: [], subagentFocus: 0 };
+
+    case 'discovery.start':
+      return {
+        ...state,
+        discovery: {
+          ...state.discovery,
+          calls: [...state.discovery.calls, {
+            id: action.id,
+            kind: action.kind,
+            ...(action.target ? { target: action.target } : {}),
+          }].slice(-100),
+        },
+      };
+
+    case 'discovery.finish':
+      return {
+        ...state,
+        discovery: {
+          ...state.discovery,
+          calls: state.discovery.calls.map((call) => call.id === action.id
+            ? { ...call, ok: action.ok, ...(action.output ? { output: action.output } : {}) }
+            : call),
+        },
+      };
+
+    case 'discovery.toggle':
+      return { ...state, discovery: { ...state.discovery, open: !state.discovery.open } };
+
+    case 'discovery.reset':
+      return { ...state, discovery: { calls: [], open: false } };
+
+    case 'discovery.flush': {
+      if (state.discovery.calls.length === 0) return state;
+      const reads = state.discovery.calls.filter((call) => call.kind === 'Read').length;
+      const lists = state.discovery.calls.filter((call) => call.kind === 'List').length;
+      const parts = [reads ? `Read ${reads}x` : '', lists ? `List ${lists}x` : ''].filter(Boolean);
+      const summary = entry('tool', 'Executed', {
+        status: 'done',
+        toolTarget: parts.join(` ${String.fromCharCode(183)} `),
+        executions: state.discovery.calls.map(({ kind, target, output, ok }) => ({
+          kind,
+          ...(target ? { target } : {}),
+          ...(output ? { output } : {}),
+          ...(ok !== undefined ? { ok } : {}),
+        })),
+      });
+      return {
+        ...state,
+        entries: [...state.entries, summary],
+        discovery: { calls: [], open: false },
+      };
+    }
 
     case 'container':
       return { ...state, container: action.name, containerState: action.state };

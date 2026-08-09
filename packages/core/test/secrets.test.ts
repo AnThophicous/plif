@@ -12,8 +12,61 @@ import {
 import { EventBus } from '../src/events/bus.js';
 import { QuestionBroker } from '../src/harness/ask.js';
 import { missingMcpCredentials, parseServerConfigs, resolveServerConfigs } from '../src/harness/mcp.js';
+import { redactedConfig } from '../src/harness/tools.js';
+import type { GlobalConfig } from '../src/config/global.js';
 
 const SECRET = 'sk-live-do-not-print-me';
+
+describe('the configuration the model is allowed to read', () => {
+  // get_config is in DEFAULT_TOOLS, so its output lands in the context and is
+  // sent to whichever endpoint is serving the model. Anything a credential can
+  // hide behind has to be redacted by where it sits, not by what it is called.
+  const config = {
+    model: 'opencode/deepseek-v4-flash-free',
+    provider: {
+      house: {
+        options: {
+          baseURL: 'https://api.example.com/v1',
+          apiKey: SECRET,
+          headers: { 'X-Tenant': SECRET },
+        },
+      },
+    },
+    mcpServers: {
+      remote: {
+        type: 'http',
+        url: 'https://mcp.example.com',
+        headers: { Authorization: `Bearer ${SECRET}`, 'X-Trace': 'on' },
+      },
+      local: {
+        command: 'npx',
+        args: ['-y', 'server'],
+        env: { GH_PAT: SECRET, NODE_ENV: 'production' },
+      },
+    },
+  } as unknown as GlobalConfig;
+
+  it('leaves no credential anywhere in the rendered output', () => {
+    const rendered = JSON.stringify(redactedConfig(config));
+    assert.equal(rendered.includes(SECRET), false, `secret survived redaction: ${rendered}`);
+  });
+
+  it('redacts by location, since a bearer header is not named like a secret', () => {
+    const out = redactedConfig(config) as Record<string, any>;
+    assert.equal(out['mcpServers']['remote']['headers']['Authorization'], '[redacted]');
+    assert.equal(out['mcpServers']['local']['env']['GH_PAT'], '[redacted]');
+    assert.equal(out['provider']['house']['options']['headers']['X-Tenant'], '[redacted]');
+    assert.equal(out['provider']['house']['options']['apiKey'], '[redacted]');
+  });
+
+  it('keeps what the model needs in order to propose a change', () => {
+    const out = redactedConfig(config) as Record<string, any>;
+    assert.equal(out['model'], 'opencode/deepseek-v4-flash-free');
+    assert.equal(out['provider']['house']['options']['baseURL'], 'https://api.example.com/v1');
+    assert.equal(out['mcpServers']['remote']['url'], 'https://mcp.example.com');
+    assert.equal(out['mcpServers']['local']['command'], 'npx');
+  });
+});
 
 describe('the credential store', () => {
   it('round-trips a value without writing it in the clear', async () => {
@@ -130,6 +183,26 @@ describe('finding a credential', () => {
 });
 
 describe('a secret question', () => {
+  it('normalizes picker options while preserving their descriptions', async () => {
+    const bus = new EventBus();
+    let asked: Parameters<Parameters<typeof bus.on<'question.asked'>>[1]>[0] | undefined;
+    bus.on('question.asked', (event) => { asked = event; });
+    const broker = new QuestionBroker(bus);
+    const pending = broker.ask({
+      text: 'choose',
+      options: [
+        'simple',
+        { value: 'rich', label: 'Rich choice', description: 'Explains the trade-off.' },
+      ],
+    });
+    assert.deepEqual(asked?.options, [
+      { value: 'simple', label: 'simple' },
+      { value: 'rich', label: 'Rich choice', description: 'Explains the trade-off.' },
+    ]);
+    broker.abandonAll();
+    await pending;
+  });
+
   it('keeps the value off the bus entirely', async () => {
     const bus = new EventBus();
     const seen: unknown[] = [];

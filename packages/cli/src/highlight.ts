@@ -151,7 +151,7 @@ export function highlight(line: string, language: string): Token[] {
           break;
         } else end += 1;
       }
-      push(rest.slice(0, end), 'success');
+      push(rest.slice(0, end), 'faint');
       index += end;
       continue;
     }
@@ -159,13 +159,13 @@ export function highlight(line: string, language: string): Token[] {
     const word = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(rest)?.[0];
     if (word) {
       const tone: PaletteKey = keywords.has(word)
-        ? 'accent'
+        ? 'text'
         : LITERALS.includes(word)
-          ? 'warn'
+          ? 'muted'
           : // A name immediately followed by `(` is being called, and calls are
             // the landmarks a reader scans a diff for.
             /^\s*\(/.test(rest.slice(word.length))
-            ? 'info'
+            ? 'text'
             : 'text';
       push(word, tone);
       index += word.length;
@@ -174,7 +174,7 @@ export function highlight(line: string, language: string): Token[] {
 
     const number = /^0[xXbBoO][0-9a-fA-F_]+|^\d[\d_]*(\.\d+)?([eE][+-]?\d+)?/.exec(rest)?.[0];
     if (number) {
-      push(number, 'warn');
+      push(number, 'muted');
       index += number.length;
       continue;
     }

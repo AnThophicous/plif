@@ -20,7 +20,7 @@ export function TaskPanel({ tasks, width }: { tasks: readonly TaskSnapshot[]; wi
           </Box>
         );
       })}
-      <Text color={color('faint')}>t or Esc to close</Text>
+      <Text color={color('faint')}>Ctrl+T or Esc to close</Text>
     </Box>
   );
 }

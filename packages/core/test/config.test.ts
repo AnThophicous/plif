@@ -12,6 +12,7 @@ import {
 } from '../src/config/global.js';
 import type { GlobalConfig } from '../src/config/global.js';
 import { visionCandidates } from '../src/model/config.js';
+import { routeVision } from '../src/harness/vision.js';
 
 const parse = (source: string): unknown => JSON.parse(stripJsonComments(source));
 
@@ -40,6 +41,17 @@ describe('declared vision providers', () => {
         recommended: false,
       },
     ]);
+  });
+
+  it('uses a saved vision model only while that exact configured model exists', () => {
+    const provider = {
+      custom: {
+        options: { baseURL: 'https://models.example.test/v1' },
+        models: { vision: { modalities: ['text', 'image'] as const, cost: 'free' as const } },
+      },
+    };
+    assert.equal(routeVision({ provider, visionModel: 'custom/vision' }).kind, 'saved');
+    assert.equal(routeVision({ provider, visionModel: 'custom/removed' }).kind, 'select');
   });
 });
 

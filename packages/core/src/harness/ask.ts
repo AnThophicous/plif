@@ -19,7 +19,9 @@
 
 import { randomUUID } from 'node:crypto';
 
-import type { EventBus } from '../events/bus.js';
+import type { EventBus, QuestionOption } from '../events/bus.js';
+
+export type QuestionChoice = string | QuestionOption;
 
 export interface Question {
   /** The question itself, in the agent's words. */
@@ -29,7 +31,7 @@ export interface Question {
    * shortcut, not a constraint, because an agent that could enumerate every
    * valid answer would not have needed to ask.
    */
-  readonly options?: readonly string[];
+  readonly options?: readonly QuestionChoice[];
   /** Why the agent is stuck. Shown under the question so the human can judge. */
   readonly context?: string;
   /**
@@ -62,6 +64,9 @@ export class QuestionBroker {
   /** Ask, and wait. Resolves to `null` if nobody answers in time. */
   ask(question: Question): Promise<string | null> {
     const id = randomUUID();
+    const options = question.options?.map((option) =>
+      typeof option === 'string' ? { value: option, label: option } : option,
+    );
 
     return new Promise<string | null>((resolve) => {
       const timer = setTimeout(() => {
@@ -76,7 +81,7 @@ export class QuestionBroker {
       this.#bus.emit('question.asked', {
         id,
         text: question.text,
-        options: question.options,
+        options,
         context: question.context,
         ...(question.secret ? { secret: true } : {}),
       });

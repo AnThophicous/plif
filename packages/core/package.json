@@ -1,6 +1,6 @@
 {
   "name": "@plif/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "plif's runtime: container engine, path jail, policy, audit log, agent loop.",
   "license": "Apache-2.0",
   "author": "Anthophicous",
@@ -19,15 +19,21 @@
   "exports": {
     ".": "./dist/index.js"
   },
-  "files": ["dist", "LICENSE", "NOTICE"],
+  "files": [
+    "dist",
+    "src/harness/prompts/default.md",
+    "LICENSE",
+    "NOTICE"
+  ],
   "scripts": {
     "prepack": "node ../../scripts/prepack.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@plif/sandbox": "0.1.0",
+    "@plif/sandbox": "0.2.0",
     "openai": "^4.104.0",
     "vscode-jsonrpc": "^9.0.1",
+    "vscode-langservers-extracted": "^4.10.0",
     "vscode-languageserver-protocol": "^3.18.2"
   }
 }

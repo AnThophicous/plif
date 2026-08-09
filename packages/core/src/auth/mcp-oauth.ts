@@ -41,6 +41,39 @@ export interface McpOAuthCoordinatorOptions {
   readonly timeoutMs?: number;
 }
 
+export interface OAuthBrowserCommand {
+  readonly command: string;
+  readonly args: readonly string[];
+}
+
+export function oauthBrowserCommand(
+  url: URL,
+  platform: NodeJS.Platform = process.platform,
+): OAuthBrowserCommand {
+  if (platform === 'win32') {
+    // Never use `cmd /c start`: cmd treats every `&` in an OAuth query as a
+    // command separator, so the browser receives only the first parameter.
+    return { command: 'rundll32.exe', args: ['url.dll,FileProtocolHandler', url.toString()] };
+  }
+  return platform === 'darwin'
+    ? { command: 'open', args: [url.toString()] }
+    : { command: 'xdg-open', args: [url.toString()] };
+}
+
+export function validateOAuthAuthorizationUrl(url: URL): void {
+  const required = ['response_type', 'client_id', 'redirect_uri', 'state'];
+  const missing = required.filter((name) => !url.searchParams.get(name));
+  if (url.searchParams.has('code_challenge_method') && !url.searchParams.get('code_challenge')) {
+    missing.push('code_challenge');
+  }
+  if (missing.length > 0) {
+    throw new PlifError(
+      'MODEL_AUTH',
+      `OAuth authorization URL is missing required parameters: ${missing.join(', ')}`,
+    );
+  }
+}
+
 interface PendingCallback {
   readonly provider: McpOAuthProvider;
   readonly resolve: (code: string) => void;
@@ -52,11 +85,7 @@ export async function openOAuthBrowser(url: URL): Promise<void> {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new PlifError('INVALID_ARGUMENT', 'OAuth authorization URL must use HTTP or HTTPS');
   }
-  const [command, args] = process.platform === 'win32'
-    ? ['cmd.exe', ['/d', '/s', '/c', 'start', '', url.toString()]]
-    : process.platform === 'darwin'
-      ? ['open', [url.toString()]]
-      : ['xdg-open', [url.toString()]];
+  const { command, args } = oauthBrowserCommand(url);
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, { detached: true, shell: false, stdio: 'ignore', windowsHide: true });
     child.once('error', reject);
@@ -119,6 +148,12 @@ export class McpOAuthCoordinator {
   }
 
   async authorize(provider: McpOAuthProvider, authorizationUrl: URL): Promise<void> {
+    try {
+      validateOAuthAuthorizationUrl(authorizationUrl);
+    } catch (error) {
+      this.#cancel(provider, error instanceof Error ? error.message : 'invalid OAuth authorization URL');
+      throw error;
+    }
     const requestId = provider.requestId;
     const base = {
       requestId,

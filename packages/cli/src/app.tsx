@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { Box, Static, Text, useApp, useInput } from 'ink';
+import type { Key } from 'ink';
 
 import {
   OpenAIProvider,
@@ -16,18 +17,20 @@ import {
   loadStoredConfig,
   mcpServersOf,
   parseServerConfigs,
+  readAgentInstructions,
   resolveConfig,
   resolveServerConfigs,
   runCompaction,
   runLoop,
   subagentTool,
+  SubagentCoordinator,
+  visionTools,
   WEB_TOOLS,
   TaskManager,
   LspManager,
   lspTools,
   EditCoordinator,
   agentsOf,
-  describeStats,
   diffStats,
   parseDiff,
   profilesOf,
@@ -37,6 +40,8 @@ import {
   installMarketplacePlugin,
   sourceUrl,
   globalConfigPath,
+  loadGlobalConfig,
+  saveGlobalConfig,
   summariseMemory,
   validateModelConfig,
 } from '@plif/core';
@@ -55,6 +60,7 @@ import type {
   ModelSelection,
   Session,
   Skill,
+  SkillRegistry,
   Tool,
   TranscriptEvent,
   TaskSnapshot,
@@ -65,6 +71,7 @@ import { Approval, APPROVAL_CHOICES, approvalHeight } from './components/Approva
 import { Browser } from './components/Browser.js';
 import { Compaction, COMPACTION_HEIGHT } from './components/Compaction.js';
 import { Completions, EmojiMenu } from './components/Completions.js';
+import { Discovery, discoveryHeight } from './components/Discovery.js';
 import { Queue, queueHeight } from './components/Queue.js';
 import { Question, questionHeight } from './components/Question.js';
 import { Subagents, subagentsHeight } from './components/Subagents.js';
@@ -75,7 +82,7 @@ import { Picker, filterItems, filterPickerGroups, flattenPickerGroups } from './
 import { Prompt } from './components/Prompt.js';
 import { Thinking } from './components/Thinking.js';
 import { useSpinnerFrame } from './components/Spinner.js';
-import { TaskIndicator } from './components/TaskIndicator.js';
+import { TaskIndicator, visibleTasks } from './components/TaskIndicator.js';
 import { TaskPanel } from './components/TaskPanel.js';
 import { Timeline, TimelineRow, estimateHeight } from './components/Timeline.js';
 import { findCommand, matchCommands } from './commands.js';
@@ -90,18 +97,24 @@ import {
   sanitizePastedText,
   splitPaste,
   summariseToolInput,
+  toolLane,
   tokenize,
 } from './format.js';
 import { readClipboardImage, readClipboardText } from './clipboard.js';
+import { IDLE_PASTE, hasPasteMarker, readPasteChunk } from './paste.js';
+import type { PasteState } from './paste.js';
 import { expandShortcodes, matchEmoji, openShortcode } from './emoji.js';
 import { stepLeft, stepRight } from './text.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { entry, initialSession, sessionReducer } from './session.js';
 import type { BrowserRow, BrowserState, PastedAttachment, QueuedMessage, TimelineEntry } from './session.js';
-import { color, formatCount, formatDuration, glyph, layout } from './theme.js';
+import { borders, color, formatCount, formatDuration, glyph, layout } from './theme.js';
 import { containerMount, containerWorkdir } from './container-paths.js';
 import { authNotice } from './auth.js';
 import { completedTitle, titleForWorking, writeTerminalTitle } from './terminal-title.js';
+import { terminalFrameRows } from './terminal-resize.js';
+import { activateTheme } from './themes.js';
+import type { ThemeCatalogue } from './themes.js';
 
 export interface AppProps {
   readonly engine: Engine;
@@ -124,11 +137,14 @@ export interface AppProps {
   readonly mcpCatalogue: string;
   /** Loaded skills, for the browser. The catalogue string is for the prompt. */
   readonly skills: readonly Skill[];
+  /** Live source of both, so a skill the agent writes mid-session is reachable. */
+  readonly skillRegistry?: SkillRegistry;
   /** MCP servers as connected at startup, for the browser. */
   readonly mcpStatuses: readonly McpServerStatus[];
   readonly mcpRegistry?: McpRegistry;
   /** Finds credentials the MCP configuration asked for, asking when it must. */
   readonly credentials?: CredentialBroker;
+  readonly themeCatalogue: ThemeCatalogue;
 }
 
 /** How often streamed output is flushed into the timeline. */
@@ -150,7 +166,7 @@ const DOUBLE_INTERRUPT_MS = 1500;
  * the newest row live while the reducer's `gate` action can still insert an
  * approval above it.
  */
-const LIVE_TAIL = 1;
+const LIVE_TAIL = 8;
 
 type PastedDraft =
   | { readonly kind: 'text'; readonly text: string }
@@ -196,14 +212,17 @@ export function App({
   // this component outside the typechecked build and omitting one crashed the
   // whole render — an empty list is a worse preview, not a broken one.
   skills: initialSkills = [],
+  skillRegistry,
   mcpStatuses: initialMcpStatuses = [],
   mcpRegistry,
   credentials,
+  themeCatalogue,
 }: AppProps): React.ReactElement {
   const [state, dispatch] = useReducer(sessionReducer, initialSession);
   const [input, setInput] = useState('');
   const [cursor, setCursor] = useState(0);
   const [choice, setChoice] = useState(0);
+  const [, setThemeRevision] = useState(0);
   const [completionIndex, setCompletionIndex] = useState(0);
   const [emojiIndex, setEmojiIndex] = useState(0);
   /** Which queued message the delete key is aimed at. */
@@ -261,6 +280,7 @@ export function App({
   const execAbort = useRef<AbortController | null>(null);
   const taskManager = useRef<TaskManager | null>(null);
   const lspManager = useRef<LspManager | null>(null);
+  const subagents = useRef(new SubagentCoordinator());
   const interruptTimer = useRef<NodeJS.Timeout | null>(null);
   /** Session metadata mutates on every append; the ref holds the latest. */
   const sessionRef = useRef<Session | null>(session);
@@ -711,8 +731,24 @@ export function App({
        */
       engine.bus.on('agent.tool', (event) => {
         const described = describeToolCall(event.name, event.input);
+        const lane = toolLane(event.name);
+        const discoveryKind = event.name === 'read_file' ? 'Read' : event.name === 'list_dir' ? 'List' : null;
+        const hiddenSubagent = lane === 'subagent';
+        const recordFinished = (): void => record({
+          kind: 'tool',
+          at: new Date().toISOString(),
+          tool: event.name,
+          input:
+            event.input && typeof event.input === 'object' && !Array.isArray(event.input)
+              ? (event.input as Record<string, unknown>)
+              : { arguments: event.input },
+          output: event.output ?? '',
+          ok: event.ok !== false,
+          durationMs: event.durationMs ?? 0,
+        });
 
         if (event.phase === 'start') {
+          const delegationIntro = hiddenSubagent ? agentRow.current : null;
           // Prose written before a tool call is a finished thought, not the
           // first half of the answer that comes after it.
           closeAnswer();
@@ -720,10 +756,24 @@ export function App({
           // which is before any tool runs — but a row left spinning would never
           // settle, and therefore never reach scrollback.
           closeThinking();
+          // The child owns its own dock. Keeping both an announcement and a
+          // parent tool row would say the same thing in three places.
+          if (delegationIntro) dispatch({ type: 'drop', id: delegationIntro });
+          if (discoveryKind) {
+            dispatch({
+              type: 'discovery.start',
+              id: event.id,
+              kind: discoveryKind,
+              ...(described.target ? { target: described.target } : {}),
+            });
+            return;
+          }
+          if (hiddenSubagent) return;
           const row = entry('tool', described.label, {
             status: 'active',
             ...(described.target !== undefined ? { toolTarget: described.target } : {}),
             ...(described.summary ? { toolSummary: described.summary } : {}),
+            ...(described.planItems ? { planItems: described.planItems } : {}),
           });
           toolRows.current.set(event.id, row.id);
           // Only a lone call can own the exec stream. `run_command` is never
@@ -732,6 +782,21 @@ export function App({
           // to whichever read happened to start last.
           pendingRow.current = toolRows.current.size === 1 ? row.id : null;
           push(row);
+          return;
+        }
+
+        if (discoveryKind) {
+          dispatch({
+            type: 'discovery.finish',
+            id: event.id,
+            ok: event.ok !== false,
+            output: event.output ?? '',
+          });
+          recordFinished();
+          return;
+        }
+        if (hiddenSubagent) {
+          recordFinished();
           return;
         }
 
@@ -749,14 +814,15 @@ export function App({
           // An edit describes itself with its own diff stats — "Added 9 lines,
           // removed 1 line" — rather than a byte count, because that is the
           // number a reviewer is actually looking for.
-          toolSummary: [
-            event.diff ? describeStats(diffStats(parseDiff(event.diff))) : described.summary,
-            event.durationMs ? `${event.durationMs}ms` : null,
-          ]
-            .filter(Boolean)
-            .join(' · '),
+          toolSummary: event.diff
+            ? (() => {
+                const stats = diffStats(parseDiff(event.diff));
+                return `(+${stats.added} -${stats.removed})`;
+              })()
+            : described.summary,
           ...(event.diff ? { diff: event.diff } : {}),
           ...(event.output?.trim() ? { detail: event.output } : {}),
+          ...(described.planItems ? { planItems: described.planItems } : {}),
         };
 
         if (id) dispatch({ type: 'update', id, patch });
@@ -769,18 +835,7 @@ export function App({
           );
         }
 
-        record({
-          kind: 'tool',
-          at: new Date().toISOString(),
-          tool: event.name,
-          input:
-            event.input && typeof event.input === 'object' && !Array.isArray(event.input)
-              ? (event.input as Record<string, unknown>)
-              : { arguments: event.input },
-          output: event.output ?? '',
-          ok: event.ok !== false,
-          durationMs: event.durationMs ?? 0,
-        });
+        recordFinished();
       }),
 
       /**
@@ -915,11 +970,11 @@ export function App({
           return found < 0 ? [...current, next] : current.map((item, index) => index === found ? next : item);
         });
       }),
-      engine.bus.on('task.created', () => setTasks(taskManager.current?.list() ?? [])),
-      engine.bus.on('task.started', () => setTasks(taskManager.current?.list() ?? [])),
-      engine.bus.on('task.output', () => setTasks(taskManager.current?.list() ?? [])),
-      engine.bus.on('task.finished', () => setTasks(taskManager.current?.list() ?? [])),
-      engine.bus.on('task.blocked', () => setTasks(taskManager.current?.list() ?? [])),
+      engine.bus.on('task.created', () => setTasks(visibleTasks(taskManager.current?.list() ?? []))),
+      engine.bus.on('task.started', () => setTasks(visibleTasks(taskManager.current?.list() ?? []))),
+      engine.bus.on('task.output', () => setTasks(visibleTasks(taskManager.current?.list() ?? []))),
+      engine.bus.on('task.finished', () => setTasks(visibleTasks(taskManager.current?.list() ?? []))),
+      engine.bus.on('task.blocked', () => setTasks(visibleTasks(taskManager.current?.list() ?? []))),
     ];
     return () => offs.forEach((off) => off());
   }, [engine, push, record, closeAnswer, closeThinking, settleRetry]);
@@ -1388,6 +1443,15 @@ export function App({
     loginMcp,
     mcpNames: mcpStatuses.map((server) => server.name),
     openPicker: (picker) => dispatch({ type: 'picker.open', picker }),
+    themes: themeCatalogue.themes,
+    switchTheme: async (id) => {
+      const theme = themeCatalogue.themes.find((entry) => entry.id === id);
+      if (!theme) throw new Error(`unknown theme ${id}`);
+      activateTheme(theme);
+      const stored = await loadGlobalConfig();
+      await saveGlobalConfig({ ...stored, theme: id });
+      setThemeRevision((value) => value + 1);
+    },
   };
 
   const submit = useCallback(
@@ -1406,6 +1470,7 @@ export function App({
       turnStarted.current = Date.now();
       setTurn((value) => value + 1);
       setCompletionIndex(0);
+      dispatch({ type: 'discovery.reset' });
 
       push(entry('input', privateShell ? '!! [private command]' : trimmed));
       if (!privateShell) record({ kind: 'user', at: new Date().toISOString(), text: trimmed });
@@ -1438,6 +1503,7 @@ export function App({
           entry('step', title, { status: 'failed', tone: 'danger', ...(detail ? { detail } : {}) }),
         );
       } finally {
+        dispatch({ type: 'discovery.flush' });
         dispatch({ type: 'busy', busy: false });
       }
     },
@@ -1581,7 +1647,7 @@ export function App({
         bus: engine.bus,
         approvals: engine.approvals,
       });
-      setTasks(taskManager.current.list());
+      setTasks(visibleTasks(taskManager.current.list()));
       lspManager.current = new LspManager({
         root: await container.hostPathFor(container.workdir),
         bus: engine.bus,
@@ -1589,6 +1655,7 @@ export function App({
       await lspManager.current.warmup();
     }
     const snapshot = await engine.memory.snapshot(cwd);
+    const agentInstructions = await readAgentInstructions(cwd);
     const profileConfig = await loadStoredConfig(engine.paths);
     const activeProfileName = typeof profileConfig.activeProfile === 'string' ? profileConfig.activeProfile : undefined;
     const activeProfile = activeProfileName ? profilesOf(profileConfig)[activeProfileName] : undefined;
@@ -1597,19 +1664,24 @@ export function App({
     // trusted to the prompt.
     const lspForAgent = lspManager.current ? lspTools(lspManager.current) : [];
     const edits = new EditCoordinator();
+    const storedConfig = await loadStoredConfig(engine.paths);
+    const childOptions = {
+      provider: providerRef.current,
+      isolation: report.isolation,
+      stored: storedConfig,
+      agents: agentsOf(storedConfig),
+      extraTools: [...lspForAgent, ...WEB_TOOLS],
+      edits,
+      coordinator: subagents.current,
+      ...(agentInstructions ? { agentInstructions } : {}),
+    };
     const agentTools = [
       ...tools,
       ...(mcpRegistry?.tools() ?? []),
       ...lspForAgent,
       ...WEB_TOOLS,
-      subagentTool({
-        provider: providerRef.current,
-        isolation: report.isolation,
-        stored: await loadStoredConfig(engine.paths),
-        agents: agentsOf(await loadStoredConfig(engine.paths)),
-        extraTools: [...lspForAgent, ...WEB_TOOLS],
-        edits,
-      }),
+      ...visionTools(childOptions),
+      subagentTool(childOptions),
     ];
 
     try {
@@ -1624,12 +1696,13 @@ export function App({
               capabilities: container.capabilities,
               isolation: report.isolation,
               tools: agentTools.map((tool) => tool.spec),
-              skills: skillCatalogue,
+              skills: skillRegistry?.catalogue() ?? skillCatalogue,
               mcpServers: mcpRegistry ? mcpRegistry.catalogue() : mcpCatalogue,
               guidance: snapshot.guidance,
               memory: summariseMemory(snapshot),
               notes: snapshot.notes,
               sandboxGaps: report.degradations,
+              ...(agentInstructions ? { agentInstructions } : {}),
               ...(activeProfile ? { profile: { name: activeProfile.name ?? activeProfileName!, systemPrompt: activeProfile.systemPrompt } } : {}),
             }),
           },
@@ -1647,6 +1720,7 @@ export function App({
           workspace: cwd,
           sessionId: sessionRef.current?.id ?? 'interactive',
           contextTokens: DEFAULT_CONTEXT_TOKENS,
+          ...(attachments.length ? { attachments } : {}),
           ...(taskManager.current ? { tasks: taskManager.current } : {}),
           ...(lspManager.current ? { lsp: lspManager.current } : {}),
           edits,
@@ -1733,6 +1807,9 @@ export function App({
       settleRetry('gave up');
       compactionSince.current = null;
       dispatch({ type: 'compaction.end' });
+      // A skill the turn just wrote is already in the registry; this is what
+      // puts it in the browser without waiting for a restart.
+      if (skillRegistry) setSkillList(skillRegistry.list());
     }
   }
 
@@ -1929,7 +2006,46 @@ export function App({
 
   // ---- keyboard ----------------------------------------------------------
 
+  const pasteStream = useRef<PasteState>(IDLE_PASTE);
+
+  function receivePastedText(raw: string): void {
+    const text = sanitizePastedText(raw);
+    if (!text) return;
+    const firstLine = text.split('\n')[0] ?? '';
+
+    if (state.browser) {
+      if (firstLine) dispatch({ type: 'browser.filter', filter: state.browser.filter + firstLine });
+      return;
+    }
+    if (state.approval) return;
+    if (state.question) {
+      if (firstLine) dispatch({ type: 'question.draft', draft: state.questionDraft + firstLine });
+      return;
+    }
+    if (state.picker) {
+      if (firstLine) dispatch({ type: 'picker.filter', filter: state.picker.filter + firstLine });
+      return;
+    }
+    addPasted({ kind: 'text', text });
+  }
+
   useInput((char, key) => {
+    if (state.exiting) return;
+
+    if (!pasteStream.current.open && !hasPasteMarker(char)) {
+      handleKey(char, key);
+      return;
+    }
+
+    const read = readPasteChunk(pasteStream.current, char);
+    pasteStream.current = read.state;
+    for (const segment of read.segments) {
+      if (segment.pasted) receivePastedText(segment.text);
+      else handleKey(segment.text, key);
+    }
+  });
+
+  function handleKey(char: string, key: Key): void {
     if (state.exiting) return;
 
     // The browser is a full-screen view and owns every key while it is up.
@@ -1972,6 +2088,10 @@ export function App({
       dispatch({ type: 'subagent.toggle' });
       return;
     }
+    if (key.ctrl && char === 'x' && state.subagents.length > 0) {
+      const selected = state.subagents[Math.min(state.subagentFocus, state.subagents.length - 1)];
+      if (selected && subagents.current.cancel(selected.taskId)) return;
+    }
     // Tab cycles subagent tabs whenever it is not completing a command. While
     // the agent is working there is nothing to complete, which is exactly when
     // there are subagents to look at.
@@ -1989,7 +2109,9 @@ export function App({
     // the first keystroke, which is worse, because then every message starting
     // with that letter silently loses it and nothing on screen explains why.
     if (key.ctrl && char === 't') {
-      setTasksOpen((open) => !open);
+      if (tasks.length > 0) setTasksOpen((open) => !open);
+      else if (state.discovery.calls.length > 0) dispatch({ type: 'discovery.toggle' });
+      else dispatch({ type: 'toggleLastTool' });
       return;
     }
 
@@ -2075,17 +2197,7 @@ export function App({
         return;
       }
       if (key.return) {
-        const line = expandShortcodes(input).trim();
-        if (line || pasted.length > 0) {
-          dispatch({
-            type: 'queue.push',
-            message: { id: `q${Date.now()}`, text: line, attachments: pasted },
-          });
-          setPasted([]);
-          setInput('');
-          setCursor(0);
-          setQueuedIndex(state.queue.length);
-        }
+        sendLine(expandShortcodes(input));
         return;
       }
       if ((key.upArrow || key.downArrow) && state.queue.length > 0) {
@@ -2113,10 +2225,7 @@ export function App({
             return;
           }
         }
-        const line = expandShortcodes(input);
-        setInput('');
-        setCursor(0);
-        void submit(line);
+        sendLine(expandShortcodes(input));
         return;
       }
 
@@ -2188,6 +2297,11 @@ export function App({
       // bytes. Inserting the chunk raw would put a literal CR in the buffer and
       // silently corrupt the command.
       const text = sanitizePastedText(char);
+      if (text.endsWith('\n')) {
+        const typed = text.replace(/\n+$/, '');
+        sendLine(expandShortcodes(input.slice(0, cursor) + typed + input.slice(cursor)));
+        return;
+      }
       const raw = input.slice(0, cursor) + text + input.slice(cursor);
       // Resolve any shortcode the keystroke just closed, so `:sob:` becomes the
       // glyph the moment the second colon lands rather than waiting for Enter.
@@ -2199,7 +2313,26 @@ export function App({
       setCursor((value) => Math.max(0, value + text.length - shrank));
       setCompletionIndex(0);
     }
-  });
+  }
+
+  function sendLine(line: string): void {
+    if (state.busy) {
+      const queued = line.trim();
+      if (!queued && pasted.length === 0) return;
+      dispatch({
+        type: 'queue.push',
+        message: { id: `q${Date.now()}`, text: queued, attachments: pasted },
+      });
+      setPasted([]);
+      setInput('');
+      setCursor(0);
+      setQueuedIndex(state.queue.length);
+      return;
+    }
+    setInput('');
+    setCursor(0);
+    void submit(line);
+  }
 
   /**
    * Navigating the browser.
@@ -2485,7 +2618,7 @@ export function App({
     }
     if (key.return) {
       const chosen =
-        state.questionChoice >= 0 ? question.options?.[state.questionChoice] : undefined;
+        state.questionChoice >= 0 ? question.options?.[state.questionChoice]?.value : undefined;
       const answer = (chosen ?? state.questionDraft).trim();
       // An empty Enter is a slip, not an answer. Sending it would resolve the
       // question with a blank string, which the agent has to interpret.
@@ -2649,6 +2782,7 @@ export function App({
     !state.compaction &&
     !state.browser;
   const subagentRows = subagentsHeight(state.subagents, state.subagentsOpen);
+  const discoveryRows = discoveryHeight(state.discovery.calls, state.discovery.open);
 
   // How many rows a list-style dialog may use. Shrinks with the window so the
   // dialog itself never becomes the thing that overflows it.
@@ -2659,7 +2793,7 @@ export function App({
   // generous: overestimating costs one row of history, underestimating puts the
   // frame at terminal height and duplicates the whole session.
   const chrome =
-    2 + // header, plus the blank line under it
+    3 + // fixed bordered status bar
     4 + // prompt box and its margin
     1 + // footer
     (tasks.length > 0 ? 1 : 0) +
@@ -2673,6 +2807,7 @@ export function App({
     (state.question ? questionHeight(state.question, compactDialogs, state.questionExpanded) : 0) +
     (state.compaction ? COMPACTION_HEIGHT + 1 : 0) +
     subagentRows +
+    discoveryRows +
     (state.exiting ? 1 : 0) +
     // The comparison is `>=`, so a frame that exactly fills the window still
     // repaints — and `estimateHeight` is an estimate, which means it is
@@ -2719,6 +2854,26 @@ export function App({
         )}
       </Static>
 
+      <Box flexDirection="column" height={terminalFrameRows(rows)} overflowY="hidden">
+
+      {!state.browser && (
+        <Box paddingX={1} width="100%">
+          <Box borderStyle="round" borderColor={color(borders.panel)} paddingX={1} width="100%">
+            <Header
+              cwd={cwd}
+              model={modelId}
+              contextUsed={state.contextUsed}
+              contextMax={state.contextMax}
+              delegatedTokens={state.subagents.reduce(
+                (total, view) => total + view.contextUsed + view.completionTokens,
+                0,
+              )}
+              width={width - 6}
+            />
+          </Box>
+        </Box>
+      )}
+
       <TaskIndicator tasks={tasks} width={width} />
       {tasksOpen && tasks.length > 0 && <TaskPanel tasks={tasks} width={width} />}
 
@@ -2754,19 +2909,6 @@ export function App({
           />
         </Box>
       )}
-
-      {/*
-        Delegated agents, between the timeline and the dialogs.
-        Above the prompt because it is live state rather than history, and below
-        the timeline because the parent's own turn is still the main thread.
-      */}
-      <Subagents
-        views={state.subagents}
-        focus={state.subagentFocus}
-        open={state.subagentsOpen}
-        width={width}
-        now={now}
-      />
 
       {state.approval && (
         <Box paddingX={1}>
@@ -2810,7 +2952,20 @@ export function App({
       )}
 
       {!state.browser && (
-      <Box paddingX={1} marginTop={showCompletions ? 0 : 1}>
+        <>
+          <Discovery calls={state.discovery.calls} open={state.discovery.open} width={width} />
+          <Subagents
+            views={state.subagents}
+            focus={state.subagentFocus}
+            open={state.subagentsOpen}
+            width={width}
+            now={now}
+          />
+        </>
+      )}
+
+      {!state.browser && (
+      <Box paddingX={1} marginTop={showCompletions || state.subagents.length > 0 || state.discovery.calls.length > 0 ? 0 : 1}>
         <Prompt
           value={input}
           cursor={cursor}
@@ -2826,31 +2981,16 @@ export function App({
           busy={state.busy}
           busyLabel={state.busyLabel}
           width={width - 2}
-          status={
-            <Box flexDirection="column" width="100%">
-              <Header
-                cwd={cwd}
-                model={modelId}
-                contextUsed={state.contextUsed}
-                contextMax={state.contextMax}
-                delegatedTokens={state.subagents.reduce(
-                  (total, view) => total + view.contextUsed + view.completionTokens,
-                  0,
-                )}
-                width={width - 6}
-              />
-              {showThinking && (
-                <Thinking
-                  since={state.busySince ?? Date.now()}
-                  tokens={tokens}
-                  width={width - 6}
-                  {...(state.busyLabel && state.busyLabel !== 'running'
-                    ? { label: state.busyLabel }
-                    : {})}
-                />
-              )}
-            </Box>
-          }
+          status={showThinking ? (
+            <Thinking
+              since={state.busySince ?? Date.now()}
+              tokens={tokens}
+              width={width - 6}
+              {...(state.busyLabel && state.busyLabel !== 'running'
+                ? { label: state.busyLabel }
+                : {})}
+            />
+          ) : undefined}
           {...(state.busySince !== null ? { busySince: state.busySince } : {})}
           {...(state.queue.length > 0
             ? {
@@ -2874,6 +3014,7 @@ export function App({
           <Text color={color('muted')}>stopping containers…</Text>
         </Box>
       )}
+      </Box>
     </Box>
   );
 }
