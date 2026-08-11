@@ -2,7 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { Box, Static, Text, useApp, useInput } from 'ink';
+import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import type { Key } from 'ink';
 
 import {
@@ -13,6 +13,7 @@ import {
   conversationFromTranscript,
   DEFAULT_CONTEXT_TOKENS,
   estimateTokens,
+  eventBase,
   isLocal,
   loadStoredConfig,
   mcpServersOf,
@@ -62,8 +63,9 @@ import type {
   Skill,
   SkillRegistry,
   Tool,
-  TranscriptEvent,
+  ConversationEvent,
   TaskSnapshot,
+  Effort,
 } from '@plif/core';
 import type { SandboxCapabilityReport } from '@plif/sandbox';
 
@@ -74,17 +76,18 @@ import { Completions, EmojiMenu } from './components/Completions.js';
 import { Discovery, discoveryHeight } from './components/Discovery.js';
 import { Queue, queueHeight } from './components/Queue.js';
 import { Question, questionHeight } from './components/Question.js';
-import { Subagents, subagentsHeight } from './components/Subagents.js';
 import { Footer } from './components/Footer.js';
 import type { Hint } from './components/Footer.js';
-import { Header } from './components/Header.js';
 import { Picker, filterItems, filterPickerGroups, flattenPickerGroups } from './components/Picker.js';
+import { PlifDock, plifDockHeight } from './components/PlifDock.js';
 import { Prompt } from './components/Prompt.js';
-import { Thinking } from './components/Thinking.js';
 import { useSpinnerFrame } from './components/Spinner.js';
-import { TaskIndicator, visibleTasks } from './components/TaskIndicator.js';
-import { TaskPanel } from './components/TaskPanel.js';
+import { visibleTasks } from './components/TaskIndicator.js';
+import { WorkDock, workDockHeight } from './components/WorkDock.js';
 import { Timeline, TimelineRow, estimateHeight } from './components/Timeline.js';
+import { measureTranscriptCells } from './components/Timeline.js';
+import { TranscriptOverlay } from './components/TranscriptOverlay.js';
+import { SessionHeader } from './components/SessionHeader.js';
 import { findCommand, matchCommands } from './commands.js';
 import type { Command, CommandContext } from './commands.js';
 import {
@@ -106,13 +109,30 @@ import type { PasteState } from './paste.js';
 import { expandShortcodes, matchEmoji, openShortcode } from './emoji.js';
 import { stepLeft, stepRight } from './text.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
+import { useTranscriptController } from './hooks/useTranscriptController.js';
 import { entry, initialSession, sessionReducer } from './session.js';
-import type { BrowserRow, BrowserState, PastedAttachment, QueuedMessage, TimelineEntry } from './session.js';
-import { borders, color, formatCount, formatDuration, glyph, layout } from './theme.js';
+import type { BrowserRow, BrowserState, QueuedMessage, TimelineEntry } from './session.js';
+import { ComposerHistory } from './composer/history.js';
+import { composerReducer, initialComposerState } from './composer/state.js';
+import type { PastedAttachment } from './composer/state.js';
+import { allTranscriptCells } from './transcript/reducer.js';
+import { initialViewport, viewportReducer } from './transcript/scroll.js';
+import { deriveLiveStatus } from './live-status.js';
+import {
+  appendCompletionDelta,
+  classifySubmission,
+  countAgentTurns,
+  discardCompletionEstimate,
+  initialCompletionMeter,
+  reconcileCompletionUsage,
+} from './interaction-metrics.js';
+import type { CompletionMeter } from './interaction-metrics.js';
+import { preToolProseAction } from './pre-tool-prose.js';
+import { color, formatCount, formatDuration, glyph, layout } from './theme.js';
 import { containerMount, containerWorkdir } from './container-paths.js';
 import { authNotice } from './auth.js';
 import { completedTitle, titleForWorking, writeTerminalTitle } from './terminal-title.js';
-import { terminalFrameRows } from './terminal-resize.js';
+import { sessionFrameHeight, terminalFrameRows } from './terminal-resize.js';
 import { activateTheme } from './themes.js';
 import type { ThemeCatalogue } from './themes.js';
 
@@ -123,12 +143,15 @@ export interface AppProps {
   /** The conversation this run belongs to. Null only if sessions are disabled. */
   readonly session: Session | null;
   /** Prior turns to replay on screen, from the last compaction boundary on. */
-  readonly replay: readonly TranscriptEvent[];
-  /** How many conversations exist for this workspace, for the banner. */
-  readonly sessionCount: number;
+  readonly replay: readonly ConversationEvent[];
   readonly version: string;
   /** Null when no model is configured; the agent then refuses politely. */
   readonly provider: ModelProvider | null;
+  readonly effort?: Effort;
+  /** Theme active at startup; Plif may temporarily override it. */
+  readonly initialThemeId?: string;
+  /** User preference to restore after leaving Plif mode. */
+  readonly preferredThemeId?: string;
   /** Why there is no provider, when there is none. Shown verbatim. */
   readonly providerProblem: string | null;
   /** Everything the agent can reach: builtins, the skill loader, MCP tools. */
@@ -167,7 +190,6 @@ const DOUBLE_INTERRUPT_MS = 1500;
  * approval above it.
  */
 const LIVE_TAIL = 8;
-
 type PastedDraft =
   | { readonly kind: 'text'; readonly text: string }
   | {
@@ -201,10 +223,12 @@ export function App({
   cwd,
   session,
   replay,
-  sessionCount,
   version,
   provider,
   providerProblem,
+  effort: initialEffort,
+  initialThemeId,
+  preferredThemeId,
   tools,
   skillCatalogue,
   mcpCatalogue,
@@ -219,23 +243,44 @@ export function App({
   themeCatalogue,
 }: AppProps): React.ReactElement {
   const [state, dispatch] = useReducer(sessionReducer, initialSession);
-  const [input, setInput] = useState('');
-  const [cursor, setCursor] = useState(0);
+  const [composer, composerDispatch] = useReducer(composerReducer, initialComposerState);
+  const input = composer.draft;
+  const cursor = composer.cursor;
+  const pasted = composer.attachments;
+  const completionIndex = composer.completion?.selected ?? 0;
+  const queuedIndex = composer.queuedSelection;
+  const setInput = (next: React.SetStateAction<string>): void => {
+    const text = typeof next === 'function' ? next(composer.draft) : next;
+    composerDispatch({ type: 'draft.set', text });
+  };
+  const setCursor = (next: React.SetStateAction<number>): void => {
+    const value = typeof next === 'function' ? next(composer.cursor) : next;
+    composerDispatch({ type: 'cursor.set', cursor: value });
+  };
+  const setPasted = (next: React.SetStateAction<PastedAttachment[]>): void => {
+    const attachments = typeof next === 'function' ? next([...composer.attachments]) : next;
+    composerDispatch({ type: 'attachments.set', attachments });
+  };
+  const setCompletionIndex = (next: React.SetStateAction<number>): void => {
+    const index = typeof next === 'function' ? next(completionIndex) : next;
+    composerDispatch({ type: 'completion.select', index });
+  };
+  const setQueuedIndex = (next: React.SetStateAction<number>): void => {
+    const index = typeof next === 'function' ? next(queuedIndex) : next;
+    composerDispatch({ type: 'queue.select', index });
+  };
   const [choice, setChoice] = useState(0);
   const [, setThemeRevision] = useState(0);
-  const [completionIndex, setCompletionIndex] = useState(0);
   const [emojiIndex, setEmojiIndex] = useState(0);
-  /** Which queued message the delete key is aimed at. */
-  const [queuedIndex, setQueuedIndex] = useState(0);
-  /** Images pasted for the message being typed, cleared when it is sent. */
-  const [pasted, setPasted] = useState<PastedAttachment[]>([]);
   /** Live MCP status and loaded skills, for the browser's first two tabs. */
   const [mcpStatuses, setMcpStatuses] = useState<readonly McpServerStatus[]>(initialMcpStatuses);
   const [skillList, setSkillList] = useState<readonly Skill[]>(initialSkills);
-  const [turn, setTurn] = useState(0);
+  const [turn, setTurn] = useState(() => countAgentTurns(replay));
+  const [agentTurnStartedAt, setAgentTurnStartedAt] = useState<number | null>(null);
   const [interruptArmed, setInterruptArmed] = useState(false);
   const [modelId, setModelId] = useState<string | null>(provider?.info.id ?? null);
-  const [tokens, setTokens] = useState(0);
+  const [effort, setEffortState] = useState<Effort | undefined>(initialEffort);
+  const [completionMeter, setCompletionMeter] = useState<CompletionMeter>(initialCompletionMeter);
   const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
   const [tasksOpen, setTasksOpen] = useState(false);
   /**
@@ -248,15 +293,20 @@ export function App({
    */
   const [now, setNow] = useState(() => Date.now());
   const { exit } = useApp();
+  const { stdout } = useStdout();
   const { columns: width, rows } = useTerminalSize();
   const titleFrame = useSpinnerFrame(90, state.busy);
+  const transcript = useTranscriptController({ engine, workspace: cwd, session, replay });
+  const [transcriptViewport, dispatchTranscriptViewport] = useReducer(
+    viewportReducer,
+    initialViewport,
+  );
 
   // Kept in refs, not state: the keyboard handler needs the current values, and
   // re-creating the handler on every keystroke would drop input under load.
   const current = useRef<Container | null>(null);
-  const history = useRef<string[]>([]);
-  const historyIndex = useRef<number>(-1);
-  const turnStarted = useRef<number>(Date.now());
+  const history = useRef(new ComposerHistory());
+  const completionMeterRef = useRef<CompletionMeter>(initialCompletionMeter);
   /** approval id -> the timeline row showing it, so answers resolve in place. */
   const approvalRows = useRef<Map<string, string>>(new Map());
   /** question id -> its timeline row, for the same reason. */
@@ -282,12 +332,6 @@ export function App({
   const lspManager = useRef<LspManager | null>(null);
   const subagents = useRef(new SubagentCoordinator());
   const interruptTimer = useRef<NodeJS.Timeout | null>(null);
-  /** Session metadata mutates on every append; the ref holds the latest. */
-  const sessionRef = useRef<Session | null>(session);
-  /** Serialises lazy creation so two fast records cannot make two sessions. */
-  const sessionCreate = useRef<Promise<Session> | null>(
-    session ? Promise.resolve(session) : null,
-  );
 
   // --- live output plumbing ---
   // Chunks arrive far faster than the terminal can usefully repaint, so they
@@ -323,6 +367,9 @@ export function App({
   /** Everything said so far, minus the system prompt, carried across turns. */
   const conversation = useRef<Message[]>([]);
   const providerRef = useRef<ModelProvider | null>(provider);
+  const effortRef = useRef<Effort | undefined>(initialEffort);
+  const activeThemeId = useRef(initialThemeId ?? themeCatalogue.themes[0]?.id ?? 'minimal');
+  const themeBeforePlif = useRef(preferredThemeId ?? themeCatalogue.themes[0]?.id ?? 'minimal');
 
   const push = useCallback(
     (item: ReturnType<typeof entry>) => dispatch({ type: 'append', entry: item }),
@@ -351,6 +398,18 @@ export function App({
     });
   }, []);
 
+  const settlePreToolProse = useCallback((event: {
+    readonly text: string;
+    readonly visibility: 'transient' | 'activity';
+  }) => {
+    const id = agentRow.current;
+    if (!id) return;
+    agentRow.current = null;
+    agentText.current = '';
+    stream.current = { rowId: null, text: '', dirty: false };
+    dispatch(preToolProseAction(id, event.text, event.visibility));
+  }, []);
+
   /**
    * Settle the thinking row, if one is open.
    *
@@ -366,7 +425,7 @@ export function App({
    * saying "retrying in 15s" above an answer that arrived is worse than no row
    * at all — it makes a recovered turn look like a stuck one.
    */
-  const settleRetry = useCallback((outcome: 'recovered' | 'gave up') => {
+  const settleRetry = useCallback((outcome: 'recovered' | 'gave up' | 'cancelled') => {
     const id = retryRow.current;
     if (!id) return;
     retryRow.current = null;
@@ -374,10 +433,15 @@ export function App({
       type: 'update',
       id,
       patch: {
-        title: outcome === 'recovered' ? 'endpoint recovered' : 'endpoint never recovered',
+        title:
+          outcome === 'recovered'
+            ? `${glyph.retry} Endpoint recovered`
+            : outcome === 'cancelled'
+              ? `${glyph.retry} Retry cancelled`
+              : `${glyph.retry} Endpoint unavailable`,
         subtitle: undefined,
-        status: outcome === 'recovered' ? 'done' : 'failed',
-        tone: outcome === 'recovered' ? 'success' : 'danger',
+        status: outcome === 'recovered' ? 'done' : outcome === 'cancelled' ? 'done' : 'failed',
+        tone: outcome === 'recovered' ? 'success' : outcome === 'cancelled' ? 'muted' : 'danger',
       },
     });
   }, []);
@@ -390,7 +454,7 @@ export function App({
       type: 'update',
       id: live.id,
       patch: {
-        title: 'Thought',
+        title: effortRef.current === 'plif' ? 'Plif Thought' : 'Thought',
         status: undefined,
         durationMs: durationMs ?? Date.now() - live.since,
         ...(live.text.trim() ? { detail: live.text.trim() } : {}),
@@ -409,39 +473,6 @@ export function App({
   useEffect(() => {
     if (replay.length === 0) return;
 
-    for (const event of replay) {
-      switch (event.kind) {
-        case 'compaction':
-          push(
-            entry('notice', 'earlier turns summarised', {
-              tone: 'faint',
-              tag: '[replay]',
-              detail: event.summary,
-              expand: true,
-            }),
-          );
-          break;
-        case 'user':
-          push(entry('input', event.text, { tone: 'muted', tag: '[replay]' }));
-          break;
-        case 'assistant':
-          push(entry('step', event.text, { tone: 'muted', status: 'done', tag: '[replay]' }));
-          break;
-        case 'tool':
-          push(
-            entry('step', `${event.tool}`, {
-              tone: 'muted',
-              status: event.ok ? 'done' : 'failed',
-              tag: '[replay]',
-              detail: event.output,
-            }),
-          );
-          break;
-        case 'note':
-          push(entry('notice', event.text, { tone: 'faint', tag: '[replay]' }));
-          break;
-      }
-    }
     conversation.current = conversationFromTranscript(replay);
     const restored = estimateTokens(conversation.current);
     dispatch({ type: 'context', used: restored });
@@ -453,6 +484,11 @@ export function App({
     );
   }, [replay, push, session]);
 
+  useEffect(() => {
+    if (!transcript.persistenceWarning) return;
+    push(entry('notice', transcript.persistenceWarning, { tone: 'warn' }));
+  }, [push, transcript.persistenceWarning]);
+
   /**
    * Record a turn to the session.
    *
@@ -460,29 +496,7 @@ export function App({
    * a command. If the disk is full the conversation still works; it just stops
    * being resumable, and that is the right thing to lose first.
    */
-  const record = useCallback(
-    (event: TranscriptEvent) => {
-      // Created on the first thing worth recording, not on startup. Opening the
-      // interface and closing it without saying anything should leave nothing
-      // behind — an empty session in `plif sessions` is pure noise, and the
-      // list is only useful if every row is a conversation someone had.
-      //
-      // Only the *creation* needs guarding against races here; the Session
-      // handle serialises its own appends.
-      sessionCreate.current ??= engine.sessions.create(cwd);
-
-      void sessionCreate.current.then(
-        (live) => {
-          sessionRef.current = live;
-          return live.append(event);
-        },
-        // Fire-and-forget: a transcript write must never block the interface or
-        // fail a command. Losing resumability is the right thing to lose first.
-        () => undefined,
-      );
-    },
-    [engine, cwd],
-  );
+  // Canonical persistence is owned by useTranscriptController.
 
   // ---- engine → timeline -------------------------------------------------
 
@@ -540,7 +554,7 @@ export function App({
         // The row is the record; the dialog is the detail. Putting the context
         // on both prints the whole proposal twice on one screen, and the copy
         // in the timeline is the one nobody can act on.
-        const row = entry('approval', event.text, {
+        const row = entry('question', event.text, {
           status: 'blocked',
           subtitle: 'waiting on you',
         });
@@ -592,7 +606,7 @@ export function App({
         if (event.phase === 'start') {
           // Prose written before a thought is a finished thought of its own.
           closeAnswer();
-          const row = entry('thinking', 'Thinking', { status: 'active' });
+          const row = entry('thinking', effortRef.current === 'plif' ? 'Plif Thinking' : 'Thinking', { status: 'active' });
           thinkRow.current = { id: row.id, text: '', since: Date.now(), dirty: false };
           push(row);
           return;
@@ -600,25 +614,39 @@ export function App({
         closeThinking(event.durationMs);
       }),
 
+      engine.bus.on('agent.cycle', (event) => {
+        push(
+          entry('separator', 'Worked', {
+            durationMs: event.durationMs,
+            tone: 'faint',
+          }),
+        );
+      }),
+
       engine.bus.on('agent.reasoning', (event) => {
-        setTokens((value) => value + Math.ceil(event.delta.length / 4));
+        settleRetry('recovered');
+        completionMeterRef.current = appendCompletionDelta(completionMeterRef.current, event.delta);
+        setCompletionMeter(completionMeterRef.current);
         const live = thinkRow.current;
         if (!live) return;
         live.text += event.delta;
-        live.dirty = true;
+        live.dirty = false;
+        // Reasoning is rendered from the same delta the provider yielded. Do
+        // not wait for stream completion or a polling interval to expose it.
+        dispatch({ type: 'update', id: live.id, patch: { detail: live.text } });
       }),
 
       /**
        * The endpoint failed; another attempt is queued.
        *
-       * One row, updated in place across all ten attempts rather than ten rows.
+       * One row, updated in place across the retry budget rather than one row per attempt.
        * The countdown is the point: a developer who can see "next attempt in
        * 15s (3/10)" waits, and one who sees an unchanging spinner kills it.
        */
       engine.bus.on('agent.retry', (event) => {
         const seconds = Math.round(event.waitMs / 1000);
         const patch = {
-          title: `endpoint failed — retrying in ${seconds}s`,
+          title: `${glyph.retry} Retry in ${seconds}s`,
           subtitle: `attempt ${event.attempt + 1} of ${event.of}`,
           tone: 'warn' as const,
           status: 'active' as const,
@@ -642,6 +670,8 @@ export function App({
         agentText.current = '';
         thinkRow.current = null;
         stream.current = { rowId: null, text: '', dirty: false };
+        completionMeterRef.current = discardCompletionEstimate(completionMeterRef.current);
+        setCompletionMeter(completionMeterRef.current);
         if (answer) dispatch({ type: 'drop', id: answer });
         if (think) dispatch({ type: 'drop', id: think.id });
       }),
@@ -691,6 +721,11 @@ export function App({
           used: event.promptTokens,
           ...(event.budget > 0 ? { max: event.budget } : {}),
         });
+        completionMeterRef.current = reconcileCompletionUsage(
+          completionMeterRef.current,
+          event.completionTokens,
+        );
+        setCompletionMeter(completionMeterRef.current);
       }),
 
       /**
@@ -709,7 +744,8 @@ export function App({
       engine.bus.on('agent.text', (event) => {
         // The endpoint is answering, so whatever it was retrying worked.
         settleRetry('recovered');
-        setTokens((value) => value + Math.ceil(event.delta.length / 4));
+        completionMeterRef.current = appendCompletionDelta(completionMeterRef.current, event.delta);
+        setCompletionMeter(completionMeterRef.current);
         if (!agentRow.current) {
           const row = entry('answer', '', { status: 'active' });
           agentRow.current = row.id;
@@ -717,8 +753,16 @@ export function App({
           push(row);
         }
         agentText.current += event.delta;
-        stream.current = { rowId: agentRow.current, text: agentText.current, dirty: true };
+        // Paint every semantic SSE delta immediately. Command output keeps its
+        // bounded buffer below, but model prose must visibly stream.
+        dispatch({
+          type: 'update',
+          id: agentRow.current,
+          patch: { detail: agentText.current },
+        });
       }),
+
+      engine.bus.on('agent.pre_tool_prose', settlePreToolProse),
 
       /**
        * One row per tool call, opened when it starts and closed when it ends.
@@ -730,23 +774,11 @@ export function App({
        * showed only a duration — the output existed but had nowhere to go.
        */
       engine.bus.on('agent.tool', (event) => {
+        if (event.phase === 'start') settleRetry('recovered');
         const described = describeToolCall(event.name, event.input);
         const lane = toolLane(event.name);
         const discoveryKind = event.name === 'read_file' ? 'Read' : event.name === 'list_dir' ? 'List' : null;
         const hiddenSubagent = lane === 'subagent';
-        const recordFinished = (): void => record({
-          kind: 'tool',
-          at: new Date().toISOString(),
-          tool: event.name,
-          input:
-            event.input && typeof event.input === 'object' && !Array.isArray(event.input)
-              ? (event.input as Record<string, unknown>)
-              : { arguments: event.input },
-          output: event.output ?? '',
-          ok: event.ok !== false,
-          durationMs: event.durationMs ?? 0,
-        });
-
         if (event.phase === 'start') {
           const delegationIntro = hiddenSubagent ? agentRow.current : null;
           // Prose written before a tool call is a finished thought, not the
@@ -771,6 +803,7 @@ export function App({
           if (hiddenSubagent) return;
           const row = entry('tool', described.label, {
             status: 'active',
+            toolCategory: described.category,
             ...(described.target !== undefined ? { toolTarget: described.target } : {}),
             ...(described.summary ? { toolSummary: described.summary } : {}),
             ...(described.planItems ? { planItems: described.planItems } : {}),
@@ -792,11 +825,9 @@ export function App({
             ok: event.ok !== false,
             output: event.output ?? '',
           });
-          recordFinished();
           return;
         }
         if (hiddenSubagent) {
-          recordFinished();
           return;
         }
 
@@ -830,12 +861,11 @@ export function App({
           push(
             entry('tool', described.label, {
               ...patch,
+              toolCategory: described.category,
               ...(described.target !== undefined ? { toolTarget: described.target } : {}),
             }),
           );
         }
-
-        recordFinished();
       }),
 
       /**
@@ -947,10 +977,21 @@ export function App({
 
       engine.bus.on('log', (event) => {
         if (event.level === 'debug') return;
+        // A log that already says why in prose says it in prose. Only a detail
+        // with no `reason` of its own falls back to a JSON dump, which is what
+        // used to put an entire HTML error page on screen.
+        const fields = (event.detail ?? {}) as Record<string, unknown>;
+        const reason = typeof fields['reason'] === 'string' ? fields['reason'] : null;
+        const hint = typeof fields['hint'] === 'string' ? fields['hint'] : null;
+        const detail = reason
+          ? [reason, hint].filter(Boolean).join('\n')
+          : event.detail
+            ? JSON.stringify(event.detail, null, 2)
+            : null;
         push(
           entry('notice', event.message, {
             tone: event.level === 'error' ? 'danger' : event.level === 'warn' ? 'warn' : 'muted',
-            ...(event.detail ? { detail: JSON.stringify(event.detail, null, 2) } : {}),
+            ...(detail ? { detail } : {}),
           }),
         );
       }),
@@ -970,14 +1011,20 @@ export function App({
           return found < 0 ? [...current, next] : current.map((item, index) => index === found ? next : item);
         });
       }),
-      engine.bus.on('task.created', () => setTasks(visibleTasks(taskManager.current?.list() ?? []))),
-      engine.bus.on('task.started', () => setTasks(visibleTasks(taskManager.current?.list() ?? []))),
+      engine.bus.on('task.created', () => {
+        const next = visibleTasks(taskManager.current?.list() ?? []);
+        setTasks(next);
+      }),
+      engine.bus.on('task.started', () => {
+        const next = visibleTasks(taskManager.current?.list() ?? []);
+        setTasks(next);
+      }),
       engine.bus.on('task.output', () => setTasks(visibleTasks(taskManager.current?.list() ?? []))),
       engine.bus.on('task.finished', () => setTasks(visibleTasks(taskManager.current?.list() ?? []))),
       engine.bus.on('task.blocked', () => setTasks(visibleTasks(taskManager.current?.list() ?? []))),
     ];
     return () => offs.forEach((off) => off());
-  }, [engine, push, record, closeAnswer, closeThinking, settleRetry]);
+  }, [engine, push, closeAnswer, closeThinking, settleRetry, settlePreToolProse]);
 
   /**
    * The MCP configuration with its credentials filled in.
@@ -1119,6 +1166,8 @@ export function App({
    * repaint path this whole layout exists to stay off.
    */
   const counting =
+    agentTurnStartedAt !== null ||
+    tasks.length > 0 ||
     state.question !== null ||
     state.compaction !== null ||
     state.subagents.some((view) => view.status === 'running');
@@ -1143,6 +1192,13 @@ export function App({
   useEffect(() => {
     if (tasks.length === 0) setTasksOpen(false);
   }, [tasks.length]);
+
+  useEffect(() => {
+    if (!stdout.isTTY) return;
+    // Release modes that another TUI may have left enabled, then leave mouse
+    // selection, wheel scrolling and viewport position entirely to the terminal.
+    stdout.write('\u001B[?1000l\u001B[?1002l\u001B[?1003l\u001B[?1006l');
+  }, [stdout]);
 
   // Mirror the queue into a ref so the running turn's drain callback sees the
   // current list rather than the one that existed when it started.
@@ -1261,6 +1317,8 @@ export function App({
    * frame Ink has to repaint on every keystroke.
    */
   useEffect(() => {
+    // Committing prints settled rows to native terminal scrollback. Plif does
+    // not inspect or reposition the terminal viewport while doing so.
     let end = 0;
     for (let index = 0; index < state.entries.length; index += 1) {
       const item = state.entries[index]!;
@@ -1392,10 +1450,26 @@ export function App({
       providerRef.current = new OpenAIProvider(config);
       await saveStoredConfig(engine.paths, next);
       conversation.current = [];
-      push(entry('notice', `model effort is now ${effort ?? 'default'}`, {
-        tone: 'accent',
-        subtitle: 'conversation reset for the new model settings',
-      }));
+      const previous = effortRef.current;
+      if (effort === 'plif' && previous !== 'plif') {
+        themeBeforePlif.current = activeThemeId.current === 'midnight'
+          ? preferredThemeId ?? themeCatalogue.themes[0]?.id ?? 'minimal'
+          : activeThemeId.current;
+        const midnight = themeCatalogue.themes.find((theme) => theme.id === 'midnight');
+        if (midnight) {
+          activateTheme(midnight);
+          activeThemeId.current = midnight.id;
+          setThemeRevision((value) => value + 1);
+        }
+      } else if (effort !== 'plif' && previous === 'plif') {
+        const restored = themeCatalogue.themes.find((theme) => theme.id === themeBeforePlif.current)
+          ?? themeCatalogue.themes[0]!;
+        activateTheme(restored);
+        activeThemeId.current = restored.id;
+        setThemeRevision((value) => value + 1);
+      }
+      effortRef.current = effort;
+      setEffortState(effort);
     },
     switchProfile: async (name) => {
       const stored = await loadStoredConfig(engine.paths);
@@ -1448,6 +1522,8 @@ export function App({
       const theme = themeCatalogue.themes.find((entry) => entry.id === id);
       if (!theme) throw new Error(`unknown theme ${id}`);
       activateTheme(theme);
+      activeThemeId.current = id;
+      if (effortRef.current === 'plif' && id !== 'midnight') themeBeforePlif.current = id;
       const stored = await loadGlobalConfig();
       await saveGlobalConfig({ ...stored, theme: id });
       setThemeRevision((value) => value + 1);
@@ -1465,15 +1541,22 @@ export function App({
       if (suppliedAttachments === undefined) setPasted([]);
 
       const privateShell = trimmed.startsWith('!!');
-      history.current.push(privateShell ? '!! [private command]' : trimmed);
-      historyIndex.current = -1;
-      turnStarted.current = Date.now();
-      setTurn((value) => value + 1);
+      const submissionKind = classifySubmission(trimmed);
+      const agentSubmission = submissionKind === 'agent';
+      history.current.record(privateShell ? '!! [private command]' : trimmed);
+      if (agentSubmission) {
+        setAgentTurnStartedAt(Date.now());
+        setTurn((value) => value + 1);
+        completionMeterRef.current = initialCompletionMeter;
+        setCompletionMeter(initialCompletionMeter);
+      }
       setCompletionIndex(0);
       dispatch({ type: 'discovery.reset' });
 
       push(entry('input', privateShell ? '!! [private command]' : trimmed));
-      if (!privateShell) record({ kind: 'user', at: new Date().toISOString(), text: trimmed });
+      const turnId = !privateShell && !trimmed.startsWith('/') && !trimmed.startsWith('!')
+        ? transcript.appendUserTurn(trimmed)
+        : undefined;
       dispatch({
         type: 'busy',
         busy: true,
@@ -1495,9 +1578,15 @@ export function App({
           const isPrivate = trimmed.startsWith('!!');
           await runExec(trimmed.slice(isPrivate ? 2 : 1).trim(), !isPrivate);
         } else {
-          await runAgent(trimmed, await encodePasted(carried));
+          await runAgent(trimmed, await encodePasted(carried), turnId);
         }
       } catch (error) {
+        if (turnId) {
+          transcript.persist({
+            ...eventBase('turn.failed', turnId),
+            reason: error instanceof Error ? error.message : String(error),
+          });
+        }
         const { title, detail } = formatError(error);
         push(
           entry('step', title, { status: 'failed', tone: 'danger', ...(detail ? { detail } : {}) }),
@@ -1505,9 +1594,10 @@ export function App({
       } finally {
         dispatch({ type: 'discovery.flush' });
         dispatch({ type: 'busy', busy: false });
+        if (agentSubmission) setAgentTurnStartedAt(null);
       }
     },
-    [pasted, push, record],
+    [pasted, push, transcript],
   );
 
   /**
@@ -1595,8 +1685,17 @@ export function App({
     return encoded;
   }
 
-  async function runAgent(text: string, attachments: readonly Attachment[] = []): Promise<void> {
+  async function runAgent(
+    text: string,
+    attachments: readonly Attachment[] = [],
+    turnId?: string,
+  ): Promise<void> {
+    const durableTurnId = turnId ?? transcript.appendUserTurn(text);
     if (!providerRef.current) {
+      transcript.persist({
+        ...eventBase('turn.failed', durableTurnId),
+        reason: providerProblem ?? 'no model provider is configured',
+      });
       push(
         entry('step', 'no model configured', {
           status: 'failed',
@@ -1702,6 +1801,7 @@ export function App({
               memory: summariseMemory(snapshot),
               notes: snapshot.notes,
               sandboxGaps: report.degradations,
+              effort: effortRef.current,
               ...(agentInstructions ? { agentInstructions } : {}),
               ...(activeProfile ? { profile: { name: activeProfile.name ?? activeProfileName!, systemPrompt: activeProfile.systemPrompt } } : {}),
             }),
@@ -1714,11 +1814,12 @@ export function App({
           container,
           questions: engine.questions,
           bus: engine.bus,
+          turnId: durableTurnId,
           signal: abort.signal,
           tools: agentTools,
           memory: engine.memory,
           workspace: cwd,
-          sessionId: sessionRef.current?.id ?? 'interactive',
+          sessionId: transcript.session?.id ?? 'interactive',
           contextTokens: DEFAULT_CONTEXT_TOKENS,
           ...(attachments.length ? { attachments } : {}),
           ...(taskManager.current ? { tasks: taskManager.current } : {}),
@@ -1738,7 +1839,10 @@ export function App({
             dispatch({ type: 'queue.clear' });
             for (const message of pendingMessages) {
               push(entry('input', message.text, { tag: '[queued]' }));
-              record({ kind: 'user', at: new Date().toISOString(), text: message.text });
+              transcript.persist({
+                ...eventBase('user.message', durableTurnId),
+                text: message.text,
+              });
             }
             return await Promise.all(
               pendingMessages.map(async (message) => ({
@@ -1777,14 +1881,12 @@ export function App({
       }
 
       if (result.stop !== 'complete') {
+        if (result.stop === 'cancelled') settleRetry('cancelled');
         push(
           entry('notice', `stopped: ${result.stop}`, {
             tone: result.stop === 'cancelled' ? 'muted' : 'warn',
           }),
         );
-      }
-      if (result.text) {
-        record({ kind: 'assistant', at: new Date().toISOString(), text: result.text });
       }
       if (result.error) {
         const { title, detail } = formatError(result.error);
@@ -1803,7 +1905,7 @@ export function App({
       closeAnswer();
       closeThinking();
       // Still open here means the turn ended without the endpoint ever
-      // answering — the ten attempts ran out, or it was cancelled mid-wait.
+      // answering — the retry budget ran out or the endpoint failed permanently.
       settleRetry('gave up');
       compactionSince.current = null;
       dispatch({ type: 'compaction.end' });
@@ -1840,17 +1942,6 @@ export function App({
         reason: 'typed at the plif prompt',
         signal: abort.signal,
       });
-      if (shareWithAgent) {
-        record({
-          kind: 'tool',
-          at: new Date().toISOString(),
-          tool: 'exec',
-          input: { argv, container: container.name },
-          output: formatExecOutput(result),
-          ok: result.exitCode === 0 && !result.killedBy,
-          durationMs: result.durationMs,
-        });
-      }
       dispatch({
         type: 'update',
         id: running.id,
@@ -2029,6 +2120,33 @@ export function App({
     addPasted({ kind: 'text', text });
   }
 
+  const workDockOpen = tasksOpen || state.subagentsOpen;
+  const transcriptCells = allTranscriptCells(transcript.state);
+  const transcriptBodyHeight = Math.max(1, terminalFrameRows(rows) - 2);
+  const transcriptContentLines = measureTranscriptCells(transcriptCells, width);
+
+  useEffect(() => {
+    if (!transcriptViewport.open) return;
+    dispatchTranscriptViewport({
+      type: 'resize',
+      contentLines: transcriptContentLines,
+      height: transcriptBodyHeight,
+    });
+  }, [
+    transcriptViewport.open,
+    transcriptContentLines,
+    transcriptBodyHeight,
+    width,
+    rows,
+  ]);
+
+  function setWorkDockOpen(open: boolean): void {
+    if (tasks.length > 0) setTasksOpen(open);
+    if (state.subagents.length > 0 && state.subagentsOpen !== open) {
+      dispatch({ type: 'subagent.toggle' });
+    }
+  }
+
   useInput((char, key) => {
     if (state.exiting) return;
 
@@ -2076,6 +2194,35 @@ export function App({
       return;
     }
 
+    if (transcriptViewport.open) {
+      const metrics = {
+        contentLines: transcriptContentLines,
+        height: transcriptBodyHeight,
+      };
+      if ((key.ctrl && char === 't') || key.escape) {
+        dispatchTranscriptViewport({ type: 'close' });
+        return;
+      }
+      if (key.upArrow || key.downArrow) {
+        dispatchTranscriptViewport({ type: 'line', delta: key.upArrow ? -1 : 1, ...metrics });
+        return;
+      }
+      if (key.pageUp || key.pageDown) {
+        dispatchTranscriptViewport({ type: 'page', delta: key.pageUp ? -1 : 1, ...metrics });
+        return;
+      }
+      if (key.ctrl && char === 'a') {
+        dispatchTranscriptViewport({ type: 'home', ...metrics });
+        return;
+      }
+      if (key.ctrl && char === 'e') {
+        dispatchTranscriptViewport({ type: 'end', ...metrics });
+        return;
+      }
+      // Ctrl+C remains global; every other key belongs to the overlay.
+      if (!(key.ctrl && char === 'c')) return;
+    }
+
     if (key.ctrl && char === 'e') {
       dispatch({ type: 'toggleLastTool' });
       return;
@@ -2085,7 +2232,7 @@ export function App({
       return;
     }
     if (key.ctrl && char === 's' && state.subagents.length > 0) {
-      dispatch({ type: 'subagent.toggle' });
+      setWorkDockOpen(!workDockOpen);
       return;
     }
     if (key.ctrl && char === 'x' && state.subagents.length > 0) {
@@ -2100,18 +2247,16 @@ export function App({
       return;
     }
 
-    if (key.escape && tasksOpen) {
-      setTasksOpen(false);
+    if (key.escape && workDockOpen) {
+      setWorkDockOpen(false);
       return;
     }
-    // Ctrl+T, not t. A bare letter cannot be a shortcut in a box you type
-    // prose into: guarding it with `input.length === 0` only narrows the bug to
-    // the first keystroke, which is worse, because then every message starting
-    // with that letter silently loses it and nothing on screen explains why.
     if (key.ctrl && char === 't') {
-      if (tasks.length > 0) setTasksOpen((open) => !open);
-      else if (state.discovery.calls.length > 0) dispatch({ type: 'discovery.toggle' });
-      else dispatch({ type: 'toggleLastTool' });
+      dispatchTranscriptViewport({
+        type: 'open',
+        contentLines: transcriptContentLines,
+        height: transcriptBodyHeight,
+      });
       return;
     }
 
@@ -2245,13 +2390,10 @@ export function App({
           );
           return;
         }
-        const entries = history.current;
-        if (entries.length === 0) return;
-        const next = key.upArrow
-          ? Math.min(entries.length - 1, historyIndex.current + 1)
-          : Math.max(-1, historyIndex.current - 1);
-        historyIndex.current = next;
-        const recalled = next === -1 ? '' : (entries[entries.length - 1 - next] ?? '');
+        if (history.current.size === 0) return;
+        const recalled = key.upArrow
+          ? history.current.previous(input)
+          : history.current.next(input);
         setInput(recalled);
         setCursor(recalled.length);
         return;
@@ -2701,6 +2843,25 @@ export function App({
 
   // ---- render ------------------------------------------------------------
 
+  const liveStatus = deriveLiveStatus({
+    approval: state.approval !== null,
+    question: state.question !== null,
+    agent: state.busy && state.compaction === null,
+    compacting: state.compaction !== null,
+    mcp: null,
+    background: tasks.some((task) => task.status === 'running'),
+    queued: state.queue.length,
+  });
+  const providerLabel = (() => {
+    const endpoint = providerRef.current?.info.endpoint;
+    if (!endpoint) return null;
+    try {
+      return new URL(endpoint).hostname || endpoint;
+    } catch {
+      return endpoint;
+    }
+  })();
+
   const hints: Hint[] = state.browser
     ? [
         { key: 'type', label: 'filter' },
@@ -2744,6 +2905,7 @@ export function App({
           { key: 'Enter', label: 'queue' },
           ...(state.queue.length > 0 ? [{ key: 'Ctrl+X', label: 'drop queued' }] : []),
           ...(state.subagents.length > 1 ? [{ key: 'Tab', label: 'subagent' }] : []),
+          { key: 'Ctrl+T', label: 'transcript' },
           { key: 'Esc', label: input ? 'clear' : 'cancel' },
         ]
       : showCompletions
@@ -2755,7 +2917,8 @@ export function App({
           ]
         : [
             { key: 'Enter', label: 'run' },
-            ...(tasks.length ? [{ key: 'Ctrl+T', label: 'tasks' }] : []),
+            { key: 'Ctrl+T', label: 'transcript' },
+            ...(tasks.length || state.subagents.length ? [{ key: 'Ctrl+S', label: 'work' }] : []),
             { key: '/', label: 'commands' },
             { key: '↑↓', label: 'history' },
             { key: 'Ctrl+C', label: 'quit' },
@@ -2763,8 +2926,12 @@ export function App({
 
   const status = interruptArmed
     ? 'press Ctrl+C again to quit'
-    : turn > 0
-      ? `turn ${turn} ${glyph.divider} ${formatDuration(Date.now() - turnStarted.current)}`
+    : agentTurnStartedAt !== null
+      ? `turn ${turn} ${glyph.divider} ${formatDuration(now - agentTurnStartedAt)}${
+          completionMeter.tokens > 0
+            ? ` ${glyph.divider} ${completionMeter.estimated ? '~' : ''}${formatCount(completionMeter.tokens)} tokens`
+            : ''
+        }`
       : undefined;
 
   // A dialog is the only thing on screen worth attention, and the prompt line
@@ -2774,14 +2941,7 @@ export function App({
   // Compaction takes it over too: both are "the agent is busy", but only one of
   // them can say what it is busy *with* and how far along it is, so the vaguer
   // one steps aside rather than the two stacking.
-  const showThinking =
-    state.busy &&
-    !state.approval &&
-    !state.picker &&
-    !state.question &&
-    !state.compaction &&
-    !state.browser;
-  const subagentRows = subagentsHeight(state.subagents, state.subagentsOpen);
+  const workRows = workDockHeight(tasks, state.subagents, workDockOpen);
   const discoveryRows = discoveryHeight(state.discovery.calls, state.discovery.open);
 
   // How many rows a list-style dialog may use. Shrinks with the window so the
@@ -2793,12 +2953,10 @@ export function App({
   // generous: overestimating costs one row of history, underestimating puts the
   // frame at terminal height and duplicates the whole session.
   const chrome =
-    3 + // fixed bordered status bar
     4 + // prompt box and its margin
+    plifDockHeight(effort) +
     1 + // footer
-    (tasks.length > 0 ? 1 : 0) +
-    (tasksOpen && tasks.length > 0 ? tasks.length + 2 : 0) +
-    (showThinking ? 4 : 0) +
+    workRows +
     (showCompletions ? Math.min(completions.length, 8) + 2 : 0) +
     (showEmoji ? Math.min(emojiMatches.length, 7) + 1 : 0) +
     queueHeight(state.queue) +
@@ -2806,7 +2964,6 @@ export function App({
     (state.approval ? approvalHeight(compactDialogs) : 0) +
     (state.question ? questionHeight(state.question, compactDialogs, state.questionExpanded) : 0) +
     (state.compaction ? COMPACTION_HEIGHT + 1 : 0) +
-    subagentRows +
     discoveryRows +
     (state.exiting ? 1 : 0) +
     // The comparison is `>=`, so a frame that exactly fills the window still
@@ -2838,7 +2995,19 @@ export function App({
       the intermediate frame fits and the erase is exact.
     */
     <Box flexDirection="column">
-
+      <Static items={[{ id: 'session-header' }]}>
+        {(item) => (
+          <SessionHeader
+            key={item.id}
+            version={version}
+            cwd={cwd}
+            model={modelId}
+            provider={providerLabel}
+            sandboxGaps={report.degradations}
+            width={width}
+          />
+        )}
+      </Static>
       {/*
         Scrollback. Ink prints each item once, above the frame, and never again
         — which is both why history survives here and why the array behind it
@@ -2854,28 +3023,32 @@ export function App({
         )}
       </Static>
 
-      <Box flexDirection="column" height={terminalFrameRows(rows)} overflowY="hidden">
+      {transcriptViewport.open ? (
+        <TranscriptOverlay
+          cells={transcript.state.finalized}
+          active={transcript.state.active}
+          viewport={transcriptViewport}
+          width={width}
+          height={terminalFrameRows(rows)}
+        />
+      ) : (
+      <Box
+        flexDirection="column"
+        {...(state.browser
+          ? { height: sessionFrameHeight(rows, 'browser'), overflowY: 'hidden' as const }
+          : {})}
+      >
 
       {!state.browser && (
-        <Box paddingX={1} width="100%">
-          <Box borderStyle="round" borderColor={color(borders.panel)} paddingX={1} width="100%">
-            <Header
-              cwd={cwd}
-              model={modelId}
-              contextUsed={state.contextUsed}
-              contextMax={state.contextMax}
-              delegatedTokens={state.subagents.reduce(
-                (total, view) => total + view.contextUsed + view.completionTokens,
-                0,
-              )}
-              width={width - 6}
-            />
-          </Box>
-        </Box>
+        <WorkDock
+          tasks={tasks}
+          subagents={state.subagents}
+          subagentFocus={state.subagentFocus}
+          expanded={workDockOpen}
+          width={width}
+          now={now}
+        />
       )}
-
-      <TaskIndicator tasks={tasks} width={width} />
-      {tasksOpen && tasks.length > 0 && <TaskPanel tasks={tasks} width={width} />}
 
       {state.browser ? (
         /*
@@ -2892,7 +3065,13 @@ export function App({
           rows={rows}
         />
       ) : (
-        <Timeline entries={state.entries} width={width} maxLines={timelineBudget} />
+        <Box flexDirection="column">
+          <Timeline
+            entries={state.entries}
+            width={width}
+            maxLines={timelineBudget}
+          />
+        </Box>
       )}
 
       {state.picker && (
@@ -2954,18 +3133,11 @@ export function App({
       {!state.browser && (
         <>
           <Discovery calls={state.discovery.calls} open={state.discovery.open} width={width} />
-          <Subagents
-            views={state.subagents}
-            focus={state.subagentFocus}
-            open={state.subagentsOpen}
-            width={width}
-            now={now}
-          />
         </>
       )}
 
       {!state.browser && (
-      <Box paddingX={1} marginTop={showCompletions || state.subagents.length > 0 || state.discovery.calls.length > 0 ? 0 : 1}>
+      <Box flexDirection="column" paddingX={1} marginTop={showCompletions || state.discovery.calls.length > 0 ? 0 : 1}>
         <Prompt
           value={input}
           cursor={cursor}
@@ -2980,17 +3152,23 @@ export function App({
           focused={!state.approval && !state.question && !state.picker}
           busy={state.busy}
           busyLabel={state.busyLabel}
+          plif={effort === 'plif'}
+          working={state.busy}
           width={width - 2}
-          status={showThinking ? (
-            <Thinking
-              since={state.busySince ?? Date.now()}
-              tokens={tokens}
-              width={width - 6}
-              {...(state.busyLabel && state.busyLabel !== 'running'
-                ? { label: state.busyLabel }
-                : {})}
-            />
-          ) : undefined}
+          {...(effort === 'plif'
+            ? {
+                dock: (
+                  <PlifDock
+                    cwd={cwd}
+                    effort={effort}
+                    contextUsed={state.contextUsed}
+                    contextMax={state.contextMax}
+                    working={liveStatus.kind !== 'idle'}
+                    width={width - 2}
+                  />
+                ),
+              }
+            : {})}
           {...(state.busySince !== null ? { busySince: state.busySince } : {})}
           {...(state.queue.length > 0
             ? {
@@ -3015,6 +3193,7 @@ export function App({
         </Box>
       )}
       </Box>
+      )}
     </Box>
   );
 }

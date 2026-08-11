@@ -52,8 +52,8 @@ export type Invocation =
   | { readonly kind: 'interactive'; readonly flags: GlobalFlags; readonly resume: string | null }
   /** `plif prompt "..."` — one turn, print the answer, exit. */
   | { readonly kind: 'prompt'; readonly flags: GlobalFlags; readonly text: string }
-  /** `plif continue` — reopen the most recent session for this folder. */
-  | { readonly kind: 'continue'; readonly flags: GlobalFlags }
+  /** `plif continue [id]` — reopen a specific session, or the most recent one. */
+  | { readonly kind: 'continue'; readonly flags: GlobalFlags; readonly id: string | null }
   /** `plif resume <id>` — reopen a specific session. */
   | { readonly kind: 'resume'; readonly flags: GlobalFlags; readonly id: string }
   /** `plif sessions` — list this folder's conversations. */
@@ -213,7 +213,7 @@ export function parseArgv(argv: readonly string[], cwd: string): Invocation {
     }
 
     case 'continue':
-      return { kind: 'continue', flags: flagSet };
+      return { kind: 'continue', flags: flagSet, id: rest[0] ?? null };
 
     case 'resume': {
       const id = rest[0];
@@ -266,7 +266,7 @@ plif — container-native AI agent core
 
   plif                          Open an interactive session in this folder
   plif prompt "<text>"          Ask one question, print the answer, exit
-  plif continue                 Reopen this folder's most recent session
+  plif continue [id]            Reopen a specific session, or the latest one
   plif resume <id>              Reopen a specific session
   plif sessions [--all]         List conversations recorded for this folder
   plif sandbox                  Report what the sandbox actually enforces
@@ -294,7 +294,8 @@ Flags
 
 Sessions are scoped to the folder you were in when you started talking. Run
 plif in ~/Projetos/Callback, have a conversation, come back tomorrow, and
-\`plif continue\` puts you back in it. A different project has its own history.
+\`plif continue\` puts you back in it. Pass an id or id prefix to reopen a
+specific session instead. A different project has its own history.
 `;
 
 export const HELP_TOPICS: Readonly<Record<string, string>> = {
@@ -307,7 +308,7 @@ history you get is the history of *this* project.
 
   plif sessions          List this folder's sessions, newest first
   plif sessions --all    List every folder that has sessions
-  plif continue          Reopen the most recent one here
+  plif continue [id]     Reopen a specific one, or the latest one here
   plif resume <id>       Reopen a specific one (id prefixes work)
 
 The store itself is global (~/.plif) so that image layers deduplicate across

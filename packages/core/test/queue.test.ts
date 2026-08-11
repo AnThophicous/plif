@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { EventBus } from '../src/events/bus.js';
+import type { PlifEvents } from '../src/events/bus.js';
 import { runLoop } from '../src/harness/loop.js';
 import { QuestionBroker } from '../src/harness/ask.js';
 import type { Message } from '../src/model/provider.js';
@@ -87,11 +88,10 @@ const container = {
 } as unknown as Parameters<typeof runLoop>[1]['container'];
 
 describe('the answer collected across turns', () => {
-  it('keeps each turn its own paragraph instead of running them together', async () => {
-    // Observed against DeepSeek V4 Flash on OpenCode Zen, which stops emitting
-    // content the moment the tool-call token appears — so a turn really can end
-    // mid-word. Concatenating bare then glued the fragment onto the next turn's
-    // first word, and the recorded session read as one mangled sentence.
+  it('keeps clipped pre-tool prose in protocol history but hides it from the visible answer', async () => {
+    const bus = new EventBus();
+    const prose: PlifEvents['agent.pre_tool_prose'][] = [];
+    bus.on('agent.pre_tool_prose', (event) => prose.push(event));
     const result = await runLoop([{ role: 'user', content: 'go' }], {
       provider: scripted([
         [
@@ -105,16 +105,55 @@ describe('the answer collected across turns', () => {
         ],
       ]),
       container,
-      questions: new QuestionBroker(new EventBus(), 50),
-      bus: new EventBus(),
+      questions: new QuestionBroker(bus, 50),
+      bus,
       tools: [noopTool],
     });
 
+    assert.equal(result.text, 'Tenho o contrato completo.');
     assert.equal(
-      result.text,
-      'Vou ler a assinatura exata para ficar fiel ao contrato da\n\nTenho o contrato completo.',
+      result.messages.find((message) => message.role === 'assistant')?.content,
+      'Vou ler a assinatura exata para ficar fiel ao contrato da',
     );
-    assert.equal(result.text.includes('daTenho'), false);
+    assert.deepEqual(prose, [{
+      iteration: 1,
+      text: 'Vou ler a assinatura exata para ficar fiel ao contrato da',
+      visibility: 'transient',
+    }]);
+  });
+
+  it('keeps complete pre-tool prose as activity without returning it as the answer', async () => {
+    const bus = new EventBus();
+    const prose: PlifEvents['agent.pre_tool_prose'][] = [];
+    bus.on('agent.pre_tool_prose', (event) => prose.push(event));
+    const result = await runLoop([{ role: 'user', content: 'go' }], {
+      provider: scripted([
+        [
+          { kind: 'text', delta: 'Vou confirmar a configuração primeiro.' },
+          { kind: 'tool', call: { id: 'c1', name: 'ping', arguments: '{}' } },
+          { kind: 'done', reason: 'tool_calls', usage: { promptTokens: 0, completionTokens: 0 } },
+        ],
+        [
+          { kind: 'text', delta: 'A configuração está correta.' },
+          { kind: 'done', reason: 'stop', usage: { promptTokens: 0, completionTokens: 0 } },
+        ],
+      ]),
+      container,
+      questions: new QuestionBroker(bus, 50),
+      bus,
+      tools: [noopTool],
+    });
+
+    assert.equal(result.text, 'A configuração está correta.');
+    assert.equal(
+      result.messages.find((message) => message.role === 'assistant')?.content,
+      'Vou confirmar a configuração primeiro.',
+    );
+    assert.deepEqual(prose, [{
+      iteration: 1,
+      text: 'Vou confirmar a configuração primeiro.',
+      visibility: 'activity',
+    }]);
   });
 
   it('does not open with a blank paragraph when the first turn is silent', async () => {

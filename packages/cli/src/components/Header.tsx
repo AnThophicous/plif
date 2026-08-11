@@ -7,6 +7,7 @@ import { color, formatCount, glyph, layout, shortenPath, truncate } from '../the
 export interface HeaderProps {
   readonly cwd: string;
   readonly model: string | null;
+  readonly effort?: string;
   readonly contextUsed: number;
   readonly contextMax: number;
   /** Token use in independent child windows, not part of the parent window. */
@@ -27,6 +28,7 @@ export interface HeaderProps {
 export function Header({
   cwd,
   model,
+  effort,
   contextUsed,
   contextMax,
   delegatedTokens = 0,
@@ -39,6 +41,12 @@ export function Header({
       {model && !narrow && (
         <>
           <Text color={color('faint')}>{truncate(model, 28)}</Text>
+          <Text color={color('ghost')}> {glyph.divider} </Text>
+        </>
+      )}
+      {effort === 'plif' && !narrow && (
+        <>
+          <Text color={color('accentBright')} bold>Plif</Text>
           <Text color={color('ghost')}> {glyph.divider} </Text>
         </>
       )}

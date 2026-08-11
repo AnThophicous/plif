@@ -71,6 +71,21 @@ function project(state: TranscriptState, event: ConversationEvent): TranscriptSt
 
     case 'assistant.message':
       if (!event.text.trim()) return state;
+      if (
+        state.active?.kind === 'assistant' &&
+        state.active.turnId === event.turnId &&
+        state.active.id === `stream:${event.turnId}`
+      ) {
+        return {
+          ...state,
+          active: {
+            ...cellBase(event),
+            kind: 'assistant',
+            text: event.text,
+            phase: event.phase,
+          },
+        };
+      }
       return beginCell(state, {
         ...cellBase(event),
         kind: 'assistant',
@@ -258,6 +273,34 @@ export function transcriptReducer(
   action: TranscriptAction,
 ): TranscriptState {
   if (action.type === 'reset') return initialTranscriptState;
+  if (action.type === 'assistant.reset') {
+    return state.active?.kind === 'assistant' &&
+      state.active.id === `stream:${action.turnId}`
+      ? { ...state, active: null }
+      : state;
+  }
+  if (action.type === 'assistant.delta') {
+    if (!action.delta) return state;
+    if (
+      state.active?.kind === 'assistant' &&
+      state.active.turnId === action.turnId &&
+      state.active.id === `stream:${action.turnId}`
+    ) {
+      return {
+        ...state,
+        active: { ...state.active, text: state.active.text + action.delta },
+      };
+    }
+    return beginCell(state, {
+      id: `stream:${action.turnId}`,
+      turnId: action.turnId,
+      at: action.at,
+      kind: 'assistant',
+      finalized: false,
+      text: action.delta,
+      phase: 'final',
+    });
+  }
   if (state.seenEventIds.has(action.event.eventId)) return state;
 
   const seenEventIds = new Set(state.seenEventIds);

@@ -118,8 +118,25 @@ export interface PlifEvents {
     iteration: number;
     maxIterations: number;
   };
+  /** A model/tool cycle finished and the loop is about to ask the model again. */
+  'agent.cycle': {
+    iteration: number;
+    durationMs: number;
+    toolCalls: number;
+  };
   'agent.text': {
     delta: string;
+  };
+  /**
+   * Prose emitted before a model asks for tools.
+   *
+   * It remains in the assistant message sent back to the provider, but the UI
+   * decides whether it is transient clipped prose or a compact activity line.
+   */
+  'agent.pre_tool_prose': {
+    iteration: number;
+    text: string;
+    visibility: 'transient' | 'activity';
   };
   /** Thinking from a reasoning model, as it is written. */
   'agent.reasoning': {

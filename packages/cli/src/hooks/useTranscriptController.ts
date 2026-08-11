@@ -105,6 +105,22 @@ export function useTranscriptController({
   }), [engine, persist]);
 
   useEffect(() => {
+    const textOff = engine.bus.on('agent.text', ({ delta }) => {
+      const turnId = currentTurnId.current;
+      if (!turnId) return;
+      dispatch({ type: 'assistant.delta', turnId, at: new Date().toISOString(), delta });
+    });
+    const resetOff = engine.bus.on('agent.reset', () => {
+      const turnId = currentTurnId.current;
+      if (turnId) dispatch({ type: 'assistant.reset', turnId });
+    });
+    return () => {
+      textOff();
+      resetOff();
+    };
+  }, [engine]);
+
+  useEffect(() => {
     const turnFor = (requestId: string): string => currentTurnId.current ?? `dialog:${requestId}`;
     return engine.bus.on('approval.request', (request) => {
       persist({

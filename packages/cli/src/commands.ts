@@ -14,6 +14,8 @@ import path from 'node:path';
 import {
   MODEL_CATALOG,
   MODEL_CATALOG_DEFAULT,
+  rankFacts,
+  strategyStatus,
 } from '@plif/core';
 import type { Container, Effort, Engine, ModelProvider, ModelSelection } from '@plif/core';
 import {
@@ -33,7 +35,7 @@ import type { PickerGroup, PickerItem } from './components/Picker.js';
 
 import { entry } from './session.js';
 import type { BrowserTab, TimelineEntry } from './session.js';
-import { formatBytes, formatDuration, glyph } from './theme.js';
+import { formatBytes, formatDuration, glyph, shortenPath } from './theme.js';
 import { containerMount, containerWorkdir } from './container-paths.js';
 import type { ThemeDefinition } from './themes.js';
 
@@ -195,6 +197,82 @@ export const COMMANDS: readonly Command[] = [
       }
 
       return ok(await context.loginMcp(server));
+    },
+  },
+  {
+    name: 'memory',
+    args: '[forget]',
+    summary: 'What Plif remembers about this workspace, and how to drop it',
+    /**
+     * Memory the developer cannot read is memory they cannot trust.
+     *
+     * The store is already consulted on every turn and already survives
+     * restarts; what it lacked was a way to see what it had decided. A wrong
+     * fact that keeps steering the agent is invisible until you can list it,
+     * and then it is one command to clear.
+     */
+    run: async (argv, context) => {
+      const workspace = context.cwd;
+      const verb = argv.map((word) => word.trim().toLowerCase()).filter(Boolean)[0];
+
+      if (verb === 'forget') {
+        await context.engine.memory.forget(workspace);
+        return ok(
+          entry('notice', 'memory for this workspace is gone', {
+            tone: 'accent',
+            subtitle: 'facts, failures, strategies and notes',
+          }),
+        );
+      }
+
+      if (verb) {
+        return ok(
+          entry('notice', `/memory does not know "${verb}"`, {
+            tone: 'warn',
+            subtitle: '/memory to read it · /memory forget to drop it',
+          }),
+        );
+      }
+
+      const snapshot = await context.engine.memory.snapshot(workspace);
+      const lines: string[] = [];
+      const section = (title: string, rows: readonly string[]): void => {
+        if (rows.length === 0) return;
+        lines.push(lines.length ? `\n${title}` : title, ...rows);
+      };
+
+      section(
+        'Facts',
+        rankFacts(snapshot.facts, 20).map(
+          (fact) =>
+            `  ${fact.text}${fact.confirmations > 1 ? `  (seen ${fact.confirmations}x)` : ''}`,
+        ),
+      );
+      section('Known not to work', rankFacts(snapshot.failures, 20).map((fact) => `  ${fact.text}`));
+      section(
+        'Strategies',
+        snapshot.strategies.slice(-10).map((strategy) => `  ${strategy.approach} — ${strategyStatus(strategy)}`),
+      );
+      const notes = snapshot.notes.trim();
+      if (notes) section('Notes', notes.split('\n').map((line) => `  ${line}`));
+
+      if (lines.length === 0) {
+        return ok(
+          entry('notice', 'nothing remembered about this workspace yet', {
+            tone: 'muted',
+            subtitle: 'it fills in as the agent works here',
+          }),
+        );
+      }
+
+      return ok(
+        entry('notice', `memory for ${shortenPath(workspace, 48)}`, {
+          tone: 'accent',
+          subtitle: `${snapshot.facts.length} facts · ${snapshot.failures.length} failures · ${snapshot.strategies.length} strategies`,
+          detail: lines.join('\n'),
+          expand: true,
+        }),
+      );
     },
   },
   {
@@ -506,15 +584,15 @@ export const COMMANDS: readonly Command[] = [
 
   {
     name: 'effort',
-    args: '[low|medium|high|xhigh|default]',
+    args: '[low|medium|high|xhigh|plif|default]',
     summary: 'Show or change model reasoning effort',
     run: async (argv, context) => {
       const stored = await loadGlobalConfig();
       const current = stored.effort ?? 'default';
       const value = argv[0];
-      if (!value) return ok(entry('notice', `effort: ${current}`, { tone: 'accent' }));
-      if (!['low', 'medium', 'high', 'xhigh', 'default'].includes(value)) {
-        throw new PlifError('INVALID_ARGUMENT', 'usage: /effort [low|medium|high|xhigh|default]');
+      if (!value) return ok(entry('notice', `effort: ${current === 'plif' ? 'Plif' : current}`, { tone: 'accent' }));
+      if (!['low', 'medium', 'high', 'xhigh', 'plif', 'default'].includes(value)) {
+        throw new PlifError('INVALID_ARGUMENT', 'usage: /effort [low|medium|high|xhigh|plif|default]');
       }
       await context.setEffort(value === 'default' ? undefined : value as Effort);
       return ok(entry('notice', `effort: ${value}`, {

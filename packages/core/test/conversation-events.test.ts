@@ -53,6 +53,8 @@ describe('durable harness conversation events', () => {
   it('emits semantic boundaries in protocol order with one turn id', async () => {
     const bus = new EventBus();
     const events = capture(bus);
+    const completionUsage: number[] = [];
+    bus.on('agent.usage', (usage) => completionUsage.push(usage.completionTokens));
 
     const result = await runLoop([{ role: 'user', content: 'leia a.ts' }], {
       provider: scripted([
@@ -86,6 +88,7 @@ describe('durable harness conversation events', () => {
     assert.equal(started?.kind === 'tool.started' ? started.call.id : null, 'call-1');
     const completed = events.find((event) => event.kind === 'tool.completed');
     assert.equal(completed?.kind === 'tool.completed' ? completed.output : null, 'conteúdo');
+    assert.deepEqual(completionUsage, [2, 6]);
   });
 
   it('ends a cancelled stream with exactly one interruption event', async () => {

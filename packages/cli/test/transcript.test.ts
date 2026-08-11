@@ -70,6 +70,28 @@ describe('canonical transcript projection', () => {
     assert.deepEqual(allTranscriptCells(state).map((cell) => cell.kind), ['user', 'assistant']);
   });
 
+  it('projects SSE deltas into one ephemeral active answer and replaces it durably', () => {
+    let state = transcriptReducer(initialTranscriptState, {
+      type: 'event', event: user('u', 't', 'explique'),
+    });
+    state = transcriptReducer(state, {
+      type: 'assistant.delta', turnId: 't', at, delta: 'res',
+    });
+    state = transcriptReducer(state, {
+      type: 'assistant.delta', turnId: 't', at, delta: 'posta',
+    });
+
+    assert.equal(state.active?.kind, 'assistant');
+    assert.equal(state.active?.kind === 'assistant' ? state.active.text : '', 'resposta');
+    assert.equal(allTranscriptCells(state).filter((cell) => cell.kind === 'assistant').length, 1);
+
+    state = transcriptReducer(state, {
+      type: 'event', event: assistant('a', 't', 'resposta', 'final'),
+    });
+    assert.equal(allTranscriptCells(state).filter((cell) => cell.kind === 'assistant').length, 1);
+    assert.equal(state.active?.id, 'a');
+  });
+
   it('coalesces routine tools within one turn', () => {
     let state = initialTranscriptState;
     state = transcriptReducer(state, {

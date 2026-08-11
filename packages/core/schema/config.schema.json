@@ -21,7 +21,7 @@
     "temperature": { "type": "number" },
     "maxTokens": { "type": "integer", "minimum": 1 },
     "timeoutMs": { "type": "integer", "minimum": 1 },
-    "effort": { "enum": ["low", "medium", "high", "xhigh"] },
+    "effort": { "enum": ["low", "medium", "high", "xhigh", "plif"] },
     "agent": { "type": "object", "additionalProperties": { "$ref": "#/$defs/agent" } },
     "profiles": { "type": "object" }
   },

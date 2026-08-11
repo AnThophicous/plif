@@ -113,12 +113,55 @@ export const DEFAULT_CONTEXT_TOKENS = 1_000_000;
 export const AUTO_COMPACTION_TRIGGER_RATIO = 0.9;
 export const AUTO_COMPACTION_TARGET_RATIO = 0.5;
 
+/** Below this, a loop pass was too quick to be a moment worth marking. */
+export const CYCLE_SEPARATOR_MIN_MS = 10_000;
+
 export function shouldAutoCompact(used: number, contextTokens: number): boolean {
   return contextTokens > 0 && used >= Math.floor(contextTokens * AUTO_COMPACTION_TRIGGER_RATIO);
 }
 
 export function autoCompactionTarget(contextTokens: number): number {
   return Math.floor(contextTokens * AUTO_COMPACTION_TARGET_RATIO);
+}
+
+const DANGLING_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'but', 'by', 'for', 'from', 'in', 'into', 'is', 'of',
+  'on', 'or', 'so', 'than', 'that', 'the', 'then', 'this', 'to', 'was', 'were', 'will', 'with',
+  'à', 'ao', 'aos', 'antes', 'até', 'com', 'como', 'da', 'das', 'de', 'depois', 'do',
+  'dos', 'e', 'em', 'entre', 'está', 'estão', 'é', 'já', 'mais', 'mas', 'muito', 'na', 'nas',
+  'no', 'nos', 'o', 'os', 'ou', 'para', 'pela', 'pelo', 'por', 'que', 'quando', 'se', 'sem',
+  'sobre', 'são', 'também', 'um', 'uma', 'umas', 'uns', 'às',
+]);
+
+const SENTENCE_END = /[.!?:;,)\]}"'`>»…]$/;
+const LAST_WORD = /([\p{L}\p{N}'’-]+)$/u;
+const SENTENCE_SPLIT = /[.!?:;\n]/g;
+const SHEARED_SENTENCE = 40;
+
+export function endsMidSentence(text: string): boolean {
+  const trimmed = text.replace(/\s+$/, '');
+  if (trimmed.length < 8 || SENTENCE_END.test(trimmed)) return false;
+
+  const last = LAST_WORD.exec(trimmed)?.[1];
+  if (last !== undefined && DANGLING_WORDS.has(last.toLowerCase())) return true;
+
+  let start = 0;
+  for (const match of trimmed.matchAll(SENTENCE_SPLIT)) start = match.index + 1;
+  return trimmed.length - start >= SHEARED_SENTENCE;
+}
+
+/**
+ * Prose that arrives before a tool request is operational, not a conclusion.
+ * A clipped fragment is hidden from the developer-facing answer while the raw
+ * assistant message remains in protocol history for the tool follow-up.
+ */
+export function classifyPreToolProse(
+  text: string,
+  requestedTools: number,
+): 'transient' | 'activity' | null {
+  const normalized = text.trim();
+  if (!normalized || requestedTools === 0) return null;
+  return endsMidSentence(normalized) ? 'transient' : 'activity';
 }
 
 export type LoopStop =
@@ -242,6 +285,8 @@ export async function runLoop(
       messages.push(...compacted.messages);
     }
 
+    const turnStartedAt = Date.now();
+
     // --- ask the model ---------------------------------------------------
     let turnText = '';
     let turnReasoning = '';
@@ -328,7 +373,10 @@ export async function runLoop(
           const reported = event.usage.promptTokens > 0;
           options.bus.emit('agent.usage', {
             promptTokens: reported ? event.usage.promptTokens : estimateTokens(messages),
-            completionTokens: event.usage.completionTokens,
+            // Cumulative for this user turn. A tool-using turn may make
+            // several provider requests, and the TUI must not reset its meter
+            // at every tool boundary.
+            completionTokens,
             budget: contextTokens,
             estimated: !reported,
           });
@@ -345,7 +393,16 @@ export async function runLoop(
       return done('error', toPlifError(error, 'MODEL_ERROR'));
     }
 
-    keepTurnText();
+    const preToolProse = classifyPreToolProse(turnText, requested.length);
+    if (preToolProse) {
+      options.bus.emit('agent.pre_tool_prose', {
+        iteration: iterations,
+        text: turnText,
+        visibility: preToolProse,
+      });
+    }
+
+    if (preToolProse === null) keepTurnText();
     // Once a model has shown reasoning it is in thinking mode for the rest of
     // the conversation, and every later assistant turn must carry the field —
     // empty string included — or the provider can reject the next request.
@@ -510,6 +567,25 @@ export async function runLoop(
             'minimal command or repository search instead of repeating the same call.',
         });
         consecutiveFailures = 0;
+      }
+
+      // The next model pass is a distinct visual cycle. Emit this only after
+      // tool results are recorded, so the CLI can place a separator exactly in
+      // the gap between execution and the next reasoning block.
+      //
+      // Not every pass earns one. A rule across the terminal is punctuation,
+      // and punctuation after every sentence fragment is noise — a discovery
+      // burst is six passes in four seconds, and six rules through it say
+      // nothing except that the loop iterated. What a separator is actually
+      // for is marking a wait the developer sat through, so it is emitted for
+      // a cycle that cost real time and skipped for one that did not.
+      const cycleMs = Date.now() - turnStartedAt;
+      if (cycleMs >= CYCLE_SEPARATOR_MIN_MS) {
+        options.bus.emit('agent.cycle', {
+          iteration: iterations,
+          durationMs: cycleMs,
+          toolCalls: settled.length,
+        });
       }
     }
   }

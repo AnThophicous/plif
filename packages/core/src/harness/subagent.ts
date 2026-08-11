@@ -8,7 +8,16 @@ import { OpenAIProvider } from '../model/openai.js';
 import type { Message, ModelProvider } from '../model/provider.js';
 import { runLoop } from './loop.js';
 import { buildSystemPrompt } from './prompt.js';
-import { editFile, listDir, readFile, runCommand, writeFile } from './tools.js';
+import {
+  applyPatch,
+  editFile,
+  globFiles,
+  grepFiles,
+  listDir,
+  readFile,
+  runCommand,
+  writeFile,
+} from './tools.js';
 import type { EditCoordinator } from './edits.js';
 import type { Tool } from './tools.js';
 
@@ -52,13 +61,10 @@ const DEFAULT_MAX_ITERATIONS = 12;
 /**
  * The tools a subagent gets.
  *
- * Read, list, run, plus whatever the parent passes through. Deliberately
- * missing:
+ * File discovery, edits and command execution, plus whatever the parent passes
+ * through. The shared edit coordinator prevents silent concurrent clobbering.
+ * Deliberately missing:
  *
- * - `write_file`, because an investigation that edits the tree is a surprise
- *   nobody asked for. `run_command` can still write — that is the same
- *   `filesystemWriteBlock: false` gap the sandbox report has always declared,
- *   not a new hole opened here.
  * - `ask_user`, because there is nothing to ask. The broker would hang or the
  *   non-interactive responder would deny, and either wastes the whole run.
  * - `subagent`, because recursion is unbounded fan-out with no human in the
@@ -67,7 +73,7 @@ const DEFAULT_MAX_ITERATIONS = 12;
  *   started it has no owner.
  */
 export function subagentTools(extra: readonly Tool[] = []): Tool[] {
-  return [readFile, writeFile, editFile, listDir, runCommand, ...extra];
+  return [readFile, writeFile, editFile, applyPatch, listDir, globFiles, grepFiles, runCommand, ...extra];
 }
 
 /**
@@ -344,6 +350,7 @@ export function subagentTool(options: SubagentOptions): Tool {
             capabilities: context.container.capabilities,
             isolation: options.isolation,
             mode: 'subagent',
+            effort: options.stored.effort,
             tools: tools.map((tool) => tool.spec),
             ...(options.agentInstructions ? { agentInstructions: options.agentInstructions } : {}),
           }),

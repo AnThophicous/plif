@@ -8,8 +8,15 @@ export const skillsModule = definePromptModule({
 
 ${context.skills!.trim()}
 
-Skills are specialized procedures, not decoration. When the user names one or a
-task clearly matches its catalogue description, load it through the available
-skill tool. This catalogue is routing metadata, not the skill body; the default
-skill policy governs activation, precedence, resources, and user updates.`,
+Treat this catalogue as an active routing table. For every request, silently scan
+names, package labels, and descriptions for a clear match. The user does not need
+to mention a skill or know that it exists. Load the smallest sufficient matching
+set through the skill tool before covered work begins. A package groups related
+skills but does not require loading every child.
+
+This catalogue is routing metadata, not the skill body. If no entry clearly
+matches, proceed normally without announcing the scan. If a selected skill cannot
+load or does not fit after inspection, discard it and continue with the default
+workflow. The default skill policy governs precedence, resources, and user
+updates.`,
 });

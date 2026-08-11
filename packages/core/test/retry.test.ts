@@ -13,6 +13,7 @@
 
 import assert from 'node:assert/strict';
 import { afterEach, describe, it, mock } from 'node:test';
+import { APIConnectionError, APIConnectionTimeoutError, APIError } from 'openai';
 
 import { OpenAIProvider } from '../src/model/openai.js';
 import { collect } from '../src/model/provider.js';
@@ -34,6 +35,15 @@ function apiError(status: number, message: string): Error & { status: number } {
   return error;
 }
 
+function retryAfterError(seconds: number): Error & { status: number; headers: Record<string, string> } {
+  const error = apiError(429, 'slow down') as Error & {
+    status: number;
+    headers: Record<string, string>;
+  };
+  error.headers = { 'retry-after': String(seconds) };
+  return error;
+}
+
 function chunk(content: string): unknown {
   return { choices: [{ delta: { content }, finish_reason: null }] };
 }
@@ -48,6 +58,7 @@ type Attempt = Error | readonly unknown[];
 
 class ScriptedProvider extends OpenAIProvider {
   attempts = 0;
+  waits: number[] = [];
   #script: readonly Attempt[];
 
   constructor(script: readonly Attempt[]) {
@@ -72,25 +83,72 @@ class ScriptedProvider extends OpenAIProvider {
       },
     });
   }
+
+  protected override waitBeforeRetry(ms: number, signal?: AbortSignal): Promise<void> {
+    this.waits.push(ms);
+    return signal?.aborted ? Promise.reject(new Error('aborted')) : Promise.resolve();
+  }
 }
 
-/**
- * Record the backoff instead of sleeping it.
- *
- * Only the long waits are intercepted; anything short belongs to something
- * else and is passed through untouched.
- */
-function captureWaits(): number[] {
-  const waits: number[] = [];
-  const real = globalThis.setTimeout;
-  mock.method(globalThis, 'setTimeout', ((handler: () => void, ms?: number, ...rest: unknown[]) => {
-    if (typeof ms === 'number' && ms >= 1_000) {
-      waits.push(ms);
-      return real(handler, 0);
+class StallThenSuccessProvider extends OpenAIProvider {
+  attempts = 0;
+
+  constructor() {
+    super({ ...CONFIG } as ConstructorParameters<typeof OpenAIProvider>[0]);
+  }
+
+  protected override createStream(): Promise<AsyncIterable<never>> {
+    this.attempts += 1;
+    if (this.attempts === 1) {
+      return Promise.resolve({
+        [Symbol.asyncIterator]() {
+          return { next: () => new Promise<IteratorResult<never>>(() => undefined) };
+        },
+      });
     }
-    return real(handler, ms, ...(rest as []));
-  }) as typeof setTimeout);
-  return waits;
+    return Promise.resolve({
+      async *[Symbol.asyncIterator]() {
+        yield chunk('alive') as never;
+        yield FINISH as never;
+      },
+    });
+  }
+
+  protected override waitBeforeRetry(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  protected override streamIdleTimeoutMs(): number {
+    return 5;
+  }
+}
+
+class PlifCapabilityProvider extends OpenAIProvider {
+  efforts: string[] = [];
+
+  constructor() {
+    super({ ...CONFIG, effort: 'plif' } as ConstructorParameters<typeof OpenAIProvider>[0]);
+  }
+
+  protected override createStream(
+    body: Parameters<OpenAIProvider['createStream']>[0],
+  ): Promise<AsyncIterable<never>> {
+    const effort = String((body as { reasoning_effort?: unknown }).reasoning_effort ?? '');
+    this.efforts.push(effort);
+    if (effort !== 'medium') {
+      return Promise.reject(apiError(400, 'reasoning_effort must be one of: medium, low'));
+    }
+    return Promise.resolve({
+      async *[Symbol.asyncIterator]() {
+        yield chunk('negotiated') as never;
+        yield FINISH as never;
+      },
+    });
+  }
+}
+
+function stableJitter(): void {
+  mock.method(Math, 'random', () => 0.5);
 }
 
 async function events(stream: AsyncGenerator<CompletionEvent>): Promise<CompletionEvent[]> {
@@ -104,8 +162,17 @@ const ask = { messages: [{ role: 'user' as const, content: 'x' }] };
 afterEach(() => mock.restoreAll());
 
 describe('retry schedule', () => {
-  it('waits 5s, then 10s, then 15s', async () => {
-    const waits = captureWaits();
+  it('negotiates Plif down to the highest effort an endpoint accepts', async () => {
+    const provider = new PlifCapabilityProvider();
+
+    const result = await collect(provider.stream(ask));
+
+    assert.equal(result.text, 'negotiated');
+    assert.deepEqual(provider.efforts, ['max', 'xhigh', 'high', 'medium']);
+  });
+
+  it('uses capped exponential backoff', async () => {
+    stableJitter();
     const provider = new ScriptedProvider([
       apiError(500, 'Internal server error'),
       apiError(500, 'Internal server error'),
@@ -115,40 +182,49 @@ describe('retry schedule', () => {
 
     const result = await collect(provider.stream(ask));
     assert.equal(result.text, 'finally');
-    assert.deepEqual(waits, [5_000, 10_000, 15_000]);
+    assert.deepEqual(provider.waits, [1_000, 2_000, 4_000]);
   });
 
   it('announces the attempt before the wait, so the silence is explained', async () => {
-    captureWaits();
+    stableJitter();
     const provider = new ScriptedProvider([apiError(503, 'upstream is down'), [chunk('ok'), FINISH]]);
 
     const all = await events(provider.stream(ask));
     const retry = all.find((event) => event.kind === 'retry');
     assert.ok(retry?.kind === 'retry');
     assert.equal(retry.attempt, 1);
-    assert.equal(retry.of, 10);
-    assert.equal(retry.waitMs, 5_000);
+    assert.equal(retry.of, 6);
+    assert.equal(retry.waitMs, 1_000);
   });
 
-  it('gives up after ten attempts and says so', async () => {
-    captureWaits();
+  it('honors Retry-After instead of inventing a shorter delay', async () => {
+    stableJitter();
+    const provider = new ScriptedProvider([retryAfterError(7), [chunk('ok'), FINISH]]);
+
+    const result = await collect(provider.stream(ask));
+    assert.equal(result.text, 'ok');
+    assert.deepEqual(provider.waits, [7_000]);
+  });
+
+  it('gives up after the visible retry budget and says so', async () => {
+    stableJitter();
     const provider = new ScriptedProvider(
       Array.from({ length: 14 }, () => apiError(500, 'Internal server error')),
     );
 
     await assert.rejects(collect(provider.stream(ask)), (error: unknown) => {
       assert.ok(PlifError.is(error));
-      assert.match(error.message, /gave up after 10 attempts/);
+      assert.match(error.message, /gave up after 6 attempts/);
       return true;
     });
-    assert.equal(provider.attempts, 10);
+    assert.equal(provider.attempts, 6);
   });
 
   it('discards a half-delivered turn before redoing it', async () => {
     // The nasty one: the endpoint dies *after* streaming part of the answer.
     // Without a reset the retry's text is appended to the abandoned attempt,
     // and the model is handed both halves back as its own previous turn.
-    captureWaits();
+    stableJitter();
     const provider = new ScriptedProvider([
       [chunk('The answer is '), apiError(500, 'died mid-stream')],
       [chunk('The answer is 42.'), FINISH],
@@ -169,7 +245,7 @@ describe('retry schedule', () => {
   });
 
   it('retries a clean EOF that never included finish_reason', async () => {
-    captureWaits();
+    stableJitter();
     const provider = new ScriptedProvider([
       [chunk('The answer was cut off')],
       [chunk('The complete answer.'), FINISH],
@@ -180,8 +256,42 @@ describe('retry schedule', () => {
     assert.equal(provider.attempts, 2);
   });
 
+  it('recognises the SDK connection classes even though their name is Error', async () => {
+    stableJitter();
+    const provider = new ScriptedProvider([
+      new APIConnectionTimeoutError(),
+      new APIConnectionError({ cause: Object.assign(new Error('reset'), { code: 'ECONNRESET' }) }),
+      [chunk('recovered'), FINISH],
+    ]);
+
+    const result = await collect(provider.stream(ask));
+    assert.equal(result.text, 'recovered');
+    assert.equal(provider.attempts, 3);
+  });
+
+  it('retries an SDK stream error without an HTTP status', async () => {
+    stableJitter();
+    const provider = new ScriptedProvider([
+      new APIError(undefined, { code: 'upstream_error' }, 'SSE error', undefined),
+      [chunk('ok'), FINISH],
+    ]);
+
+    const result = await collect(provider.stream(ask));
+    assert.equal(result.text, 'ok');
+    assert.equal(provider.attempts, 2);
+  });
+
+  it('retries a stream that stays open but stops producing chunks', async () => {
+    stableJitter();
+    const provider = new StallThenSuccessProvider();
+
+    const result = await collect(provider.stream(ask));
+    assert.equal(result.text, 'alive');
+    assert.equal(provider.attempts, 2);
+  });
+
   it('stops immediately when the developer cancels mid-wait', async () => {
-    captureWaits();
+    stableJitter();
     const controller = new AbortController();
     const provider = new ScriptedProvider([
       apiError(500, 'Internal server error'),
@@ -206,7 +316,7 @@ describe('what is not retried', () => {
   it('does not retry a rejected key', async () => {
     // Ten attempts across four minutes to be told the same thing is worse than
     // being told it now.
-    captureWaits();
+    stableJitter();
     const provider = new ScriptedProvider([apiError(401, 'Unauthorized')]);
 
     await assert.rejects(
@@ -217,7 +327,7 @@ describe('what is not retried', () => {
   });
 
   it('does not retry an unknown model', async () => {
-    captureWaits();
+    stableJitter();
     const provider = new ScriptedProvider([apiError(404, 'no such model')]);
 
     await assert.rejects(

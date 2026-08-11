@@ -34,7 +34,7 @@ export interface ModelConfig {
   readonly effort?: Effort;
 }
 
-export type Effort = 'low' | 'medium' | 'high' | 'xhigh';
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'plif';
 
 /**
  * Endpoints known to speak the OpenAI wire format.

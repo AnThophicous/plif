@@ -3,8 +3,14 @@ import path from 'node:path';
 
 import { PlifError } from '../errors.js';
 import type { Tool, ToolContext, ToolResult } from './tools.js';
+import { DME_SKILLS, DME_SKILL_PACKAGE } from './skill-packages/dme.js';
 
 export type SkillScope = 'project' | 'user' | 'builtin';
+
+export interface SkillPackage {
+  readonly id: string;
+  readonly name: string;
+}
 
 export interface Skill {
   readonly name: string;
@@ -12,6 +18,7 @@ export interface Skill {
   readonly scope: SkillScope;
   readonly file: string;
   readonly instructions: string;
+  readonly package?: SkillPackage;
 }
 
 const SKILL_FILE = 'SKILL.md';
@@ -166,9 +173,34 @@ export class SkillRegistry {
 
   catalogue(): string {
     if (this.#skills.size === 0) return '';
-    return this.list()
-      .map((skill) => `- ${skill.name}: ${skill.description}`)
-      .join('\n');
+    const standalone: Skill[] = [];
+    const packaged = new Map<string, { package: SkillPackage; skills: Skill[] }>();
+
+    for (const skill of this.list()) {
+      if (!skill.package) {
+        standalone.push(skill);
+        continue;
+      }
+      const group = packaged.get(skill.package.id) ?? { package: skill.package, skills: [] };
+      group.skills.push(skill);
+      packaged.set(skill.package.id, group);
+    }
+
+    const sections: string[] = [];
+    if (standalone.length > 0) {
+      sections.push(standalone.map((skill) => `- ${skill.name}: ${skill.description}`).join('\n'));
+    }
+    for (const group of [...packaged.values()].sort((a, b) =>
+      a.package.name.localeCompare(b.package.name),
+    )) {
+      sections.push(
+        [
+          `Package: ${group.package.name} [active]`,
+          ...group.skills.map((skill) => `  - ${skill.name}: ${skill.description}`),
+        ].join('\n'),
+      );
+    }
+    return sections.join('\n\n');
   }
 }
 
@@ -204,7 +236,7 @@ export function skillTool(registry: SkillRegistry): Tool {
       }
 
       return {
-        output: `# Skill: ${skill.name}\n\n${skill.instructions}`,
+        output: `${skill.package ? `# Skill package: ${skill.package.name}\n\n` : ''}# Skill: ${skill.name}\n\n${skill.instructions}`,
         ok: true,
       };
     },
@@ -504,19 +536,27 @@ not fine when each idea appears twice.
    Cut it.`,
   },
   {
-    name: 'dme-eclipse-design',
+    name: 'dme-frontend',
     description:
-      'Design an interface with a committed visual identity, built from the project real design context and verified by looking at it',
+      'Build or redesign production frontend interfaces with a distinctive visual direction, responsive component architecture, accessible states, and visual proof',
     scope: 'builtin',
     file: '<builtin>',
-    instructions: `Use this for any interface you build or redesign: a page, a screen, a component,
-a dashboard, a landing page, an email, a printable document, a slide deck. It
-governs the visual and interaction result, not the build system.
+    package: DME_SKILL_PACKAGE,
+    instructions: `Use this for any interface you build or redesign: a page, screen, component,
+dashboard, landing page, email, printable document, or slide deck. For web work it
+governs both the visual result and the frontend decisions that determine whether
+that result remains coherent, accessible, responsive, and maintainable.
 
 The failure it exists to prevent is the generic result: a layout that could
 belong to any product, assembled from framework defaults, that nobody
 remembers. An interface with no point of view has already failed, however clean
 the code behind it is.
+
+Apply decisions in this order: the user's explicit constraints, the project's
+existing product and design language, an approved reference, then the heuristics
+in this skill. Do not erase a real identity to demonstrate your own taste. Do not
+copy a reference mechanically; identify the principles that create its effect and
+express them through the product's content and constraints.
 
 ## Design context comes before pixels
 
@@ -540,14 +580,50 @@ one line, then design an identity and record it. Never invent a brand mark for a
 real company and never redraw a real logo from memory: set the name in type and
 note the gap.
 
+## Work in this order
+
+Do not jump from the request to JSX or CSS. Complete these stages in sequence and
+use them to form the implementation plan; combine adjacent stages into checkpoints
+rather than turning every stage into plan ceremony:
+
+1. **Reconnaissance.** Identify the framework, routing, rendering model, styling
+   system, package versions, component library, asset pipeline, test commands,
+   and the exact surface being changed. Inspect adjacent screens and render the
+   current interface when possible.
+2. **Product frame.** Establish the user, the job this surface performs, the
+   primary action, content hierarchy, required states, device constraints, and
+   what success looks like. Design around the real task, not around decoration.
+3. **Visual direction.** Choose one intentional aesthetic, one memorable move,
+   and the nearest generic default to avoid. If the request or reference already
+   settles the direction, proceed instead of asking the user to choose it again.
+4. **Foundation.** Define or extend project-native tokens for type, colour,
+   spacing, shape, depth, layout, and motion before styling individual sections.
+5. **Component architecture.** Map page regions, reusable primitives, state
+   ownership, data boundaries, and responsive behavior. Build focused components
+   against the foundation instead of accumulating one monolithic page.
+6. **Assembly and states.** Compose the page, navigation, interactions, and real
+   content. Implement loading, empty, error, validation, disabled, overflow, and
+   long-content behavior wherever the product can reach those states.
+7. **Polish and proof.** Render the result, inspect it at representative sizes,
+   operate it with keyboard and pointer, run project checks, fix what the evidence
+   reveals, and repeat. A first render is a draft, not a handoff.
+
+The existing stack wins. Do not migrate frameworks, replace the styling system,
+add a component library, or introduce a dependency merely because another stack
+would be easier to generate. For a genuinely new project, choose the smallest
+stack that satisfies the requested interaction and maintenance needs, inspect the
+scaffolder's current options, and initialize it non-interactively in the verified
+target.
+
 ## Commit to a direction
 
 Pick one aesthetic direction and execute it precisely. Intentionality is what
 reads as designed; intensity is not. Severe minimalism and loud maximalism both
 work. The timid middle never does.
 
-Before building, write a four-line brief in your reply or at the top of the
-file:
+Before building, resolve this four-line brief as part of the implementation plan.
+Share it when the user is choosing or approving a direction; otherwise use it as
+a working decision and keep it out of source-code comments:
 
 - **Who and what for** - the reader, and the single job this surface does.
 - **Direction** - the aesthetic, named: editorial broadsheet, brutalist utility,
@@ -564,23 +640,26 @@ look every time is the same failure as having no look.
 
 ## The identity kit
 
-An identity is a small set of decisions applied without exception. Write it as
-custom properties on the root before any component and reference the variables
-everywhere; a literal colour or size further down the file is a defect.
+An identity is a small set of decisions applied consistently. Express it through
+the project's native token mechanism; for CSS projects, define custom properties
+at the appropriate theme root and consume them through components. Repeated raw
+values below the token layer are a defect. A deliberate one-off value is allowed
+only when it creates a named visual move that does not pretend to be a reusable
+token.
 
-**Type.** Two families, three only with a reason: one with character for
-display, one quiet and legible for body. Reject the faces that mark generated
-work - Inter, Arial, Helvetica as a first choice, the stock system stack when
-the design deserves better. Take a real face from the repository, or choose one
-for its voice. Set a scale from a ratio (1.2 tight, 1.333 balanced, 1.5 and up
-dramatic), fix line-height per step (tight for display, 1.5 to 1.7 for body),
-and hold measure to 60-75 characters. Tracking tightens as size grows; display
-type left at default tracking is the most common sloppiness in generated work.
+**Type.** Use one or two families, a third only with a concrete role: one may
+carry character in display text while another stays quiet and legible in body
+copy. Start with fonts already licensed and loaded by the project. Do not reach
+for Inter, Roboto, Arial, Helvetica, or a stock system stack by reflex; they are
+valid only when the product already uses them or their voice fits the brief.
+Choose a deliberate scale, set line-height per step, keep prose measure readable,
+and tune tracking as display size grows.
 
 **Colour.** One dominant surface, one ink, one accent that carries the identity,
 plus semantic states. Dominance beats distribution: a palette giving every
 colour equal area looks unresolved. Make the accent rare enough that it means
-something. Both light and dark get authored values, never an inverted filter.
+something. When the product supports both light and dark, author each deliberately
+instead of deriving one with an inversion filter.
 
 **Space.** One scale, geometric or 4/8-based, and nothing off it. Space is the
 strongest signal of care; tight margins read cheap faster than any colour
@@ -602,6 +681,30 @@ two designers.
 - Give the page one entry point. Everything cannot be emphasized.
 - Full-bleed elements, oversized type, and edge-anchored content are the cheapest
   ways out of the card-inside-a-container look.
+
+## Component and style architecture
+
+- Build from tokens to primitives to composed components to page sections. Do not
+  create a local design system beside an existing one or bypass shared primitives
+  with ad-hoc markup.
+- Give each component one clear visual or behavioral responsibility. Extract a
+  unit when it repeats, owns state, isolates an effect, or can be understood and
+  tested independently; do not split markup into meaningless wrapper components.
+- Keep business and data rules outside presentational styling. Make loading and
+  failure states explicit inputs rather than hidden branches scattered through
+  the tree.
+- Prefer semantic elements and native browser behavior. Add ARIA only when native
+  HTML cannot express the interaction. Use accessible names as automation hooks;
+  add test identifiers only when user-visible semantics cannot select the target
+  reliably.
+- Keep selectors local, predictable, and shallow. Avoid specificity escalation,
+  global leakage, arbitrary utility piles, duplicated media queries, and magic
+  numbers that encode the same decision differently across components.
+- Keep the render path deterministic. Do not create layout from random values,
+  current timestamps, unstable array keys, or client-only measurements when CSS
+  or stable data can express it.
+- Follow the default no-comment rule. Clear component boundaries, prop names,
+  state models, and token names must explain the implementation.
 
 ## Surface and depth
 
@@ -631,6 +734,18 @@ design: real content, never lorem ipsum, never placeholder counts that could not
 occur. Empty, loading, error, and long-content states are designs, not
 afterthoughts - a layout that only works on the happy path is unfinished. Apply
 the anti-ai-slop skill to the strings themselves.
+
+Use real project assets before inventing new ones. When custom imagery materially
+improves the surface and an authorized image tool exists, generate imagery sized
+for the actual composition and inspect the result before integrating it. Otherwise
+use deliberate typography, geometry, or a clearly identified asset gap; never ship
+a broken placeholder, random hotlinked image, fabricated company logo, or generic
+stock image that contradicts the product.
+
+Use the project's icon set when it has one. If it has none, choose one coherent
+maintained set only when a dependency is justified, or use text and CSS geometry.
+Do not use emoji as icons, mix icon families, or draw improvised SVG paths that
+imitate a library.
 
 ## Surface notes
 
@@ -666,11 +781,28 @@ A design failing any of these is broken, not unpolished.
   Check the accent against its real background, not against white.
 - Keyboard: every interactive element reachable and operable, focus visible and
   never removed without a replacement, tab order matching visual order.
-- Semantics: real buttons, labelled inputs, one h1 and a descending heading
-  order, alt text describing what the image conveys.
+- Semantics: real buttons, labelled inputs, one page-level h1 and a descending
+  heading order, alt text describing what the image conveys. A reusable component
+  must fit the host page's hierarchy instead of assuming its own page-level h1.
 - Responsive: no horizontal page scroll at 320px; wide tables, code blocks, and
   diagrams scroll inside their own container; touch targets at least 44px.
-- Both colour schemes render deliberately.
+- Forms: persistent labels, useful autocomplete attributes, errors associated
+  with their fields, no validation communicated by colour alone, and focus moved
+  only when doing so helps the user recover.
+- Themes: every colour scheme the product supports renders deliberately. Do not
+  add a second theme solely to satisfy this skill, and never fake one with an
+  inversion filter.
+- Discoverability: public pages need a specific title, useful description,
+  semantic landmarks, one meaningful h1, and crawlable content. Add canonical,
+  social, or structured metadata only when the project has the real URL and data;
+  never fabricate production metadata.
+- Performance: size images explicitly, choose appropriate formats, avoid layout
+  shift, lazy-load below-the-fold media, minimize blocking font and script work,
+  and keep animation off the main layout path. Do not trade interaction latency
+  or legibility for a decorative effect.
+- Compatibility: preserve server rendering and hydration assumptions, input
+  methods, supported browsers, localization expansion, and content-security
+  policy established by the project.
 
 ## Verify what you built
 
@@ -678,15 +810,27 @@ You have not designed anything until you have looked at it.
 
 - Run it. Use the project's dev server or open the file, and judge the real
   rendering rather than your mental model of the code.
-- Look at the result as an image when the runtime allows it. Check hierarchy,
-  alignment, optical spacing, and whether the memorable thing is actually
-  visible.
-- Exercise the states you claimed to design: empty, loading, error, longest
-  plausible content, narrowest viewport, both themes, keyboard only.
-- Fix what you saw, then look again. A first render is a draft.
+- Look at the result as an image when the runtime allows it. Capture the narrowest
+  supported mobile width, an intermediate width, and a representative desktop
+  width using project breakpoints when they exist. Check hierarchy, alignment,
+  optical spacing, cropping, overflow, and whether the memorable thing is visible.
+- Exercise the states you claimed to design: initial, loading, empty, error,
+  validation, disabled, longest plausible content, narrowest viewport, every
+  supported theme, keyboard only, and reduced motion. Inspect the browser console
+  for runtime, hydration, asset, and accessibility failures.
+- Test interaction, not only appearance. Navigate in logical tab order, activate
+  controls without a pointer, resize across breakpoints, and verify that state is
+  not lost or duplicated unexpectedly.
+- Run the focused tests and the project's relevant typecheck, lint, build, and
+  smoke checks after the last edit. A screenshot does not prove behavior, and a
+  passing test does not prove visual quality; both forms of evidence are required
+  when the environment supports them.
+- Fix what you observed, render again, and repeat the affected checks. Stop only
+  when another visual pass produces no material correction.
 
 When nothing in the environment can render it, say plainly that the design is
-unverified and name the check you could not run.
+visually unverified and name the exact check you could not run. Do not substitute
+code inspection for pixels or call the interface production-ready.
 
 ## Banned defaults
 
@@ -705,8 +849,23 @@ does.
 - Gradient text on a headline as the only typographic idea.
 - Icon, heading, one grey sentence, repeated across a grid.
 - A hand-drawn SVG standing in for a real icon: use the project's icons, a real
-  icon set, or plain type.`,
+  icon set, or plain type.
+- Dashboard shorthand that turns every value into an identical rounded card,
+  every label into muted uppercase text, and every action into a floating pill.
+- Decorative animation on every element. Motion needs hierarchy and a reason;
+  constant movement is not polish.
+- Placeholder copy, fake analytics, impossible sample values, broken image boxes,
+  and blank rectangles standing in for content the layout depends on.
+- A component library shipped with its defaults untouched. If the project uses a
+  library, preserve its behavior and accessibility while applying the product's
+  tokens, density, typography, and state language.
+
+Before handoff, ask: is the product identity recognizable without its logo, is
+the primary action obvious, does the page remain coherent in every reachable
+state and supported size, and did you inspect the final pixels after the last
+change? If any answer is no, the interface is not finished.`,
   },
+  ...DME_SKILLS,
   {
     name: 'investigate',
     description: 'Find the cause of a bug or failure before changing anything',

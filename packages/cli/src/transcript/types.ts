@@ -51,4 +51,11 @@ export interface TranscriptState {
 
 export type TranscriptAction =
   | { readonly type: 'event'; readonly event: import('@plif/core').ConversationEvent }
+  | {
+      readonly type: 'assistant.delta';
+      readonly turnId: string;
+      readonly at: string;
+      readonly delta: string;
+    }
+  | { readonly type: 'assistant.reset'; readonly turnId: string }
   | { readonly type: 'reset' };

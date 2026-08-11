@@ -33,7 +33,13 @@ export {
   skillTool,
   writeSkill,
 } from './harness/skills.js';
-export type { Skill, SkillDraft, SkillScope, SkillSources } from './harness/skills.js';
+export type {
+  Skill,
+  SkillDraft,
+  SkillPackage,
+  SkillScope,
+  SkillSources,
+} from './harness/skills.js';
 export {
   McpRegistry,
   expandMcpEnvironment,
@@ -62,7 +68,7 @@ export { runLoop, runCompaction } from './harness/loop.js';
 export type { CompactionRun } from './harness/loop.js';
 export { COMPACTION_STAGES, compact, estimateTokens, pinnedIndices } from './harness/compaction.js';
 export type { CompactionOptions, CompactionResult } from './harness/compaction.js';
-export { MemoryStore, strategyId, strategyStatus, summariseMemory } from './harness/memory.js';
+export { MemoryStore, rankFacts, strategyId, strategyStatus, summariseMemory } from './harness/memory.js';
 export type { Fact, FactKind, MemorySnapshot } from './harness/memory.js';
 export { DEFAULT_CONTEXT_TOKENS } from './harness/loop.js';
 export type { LoopOptions, LoopResult, LoopStop } from './harness/loop.js';
@@ -76,7 +82,10 @@ export {
     getConfig,
     updateConfig,
   updatePlan,
+  applyPatch,
   editFile,
+  globFiles,
+  grepFiles,
   listDir,
   readFile,
   remember,
