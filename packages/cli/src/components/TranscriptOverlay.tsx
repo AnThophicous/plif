@@ -55,7 +55,7 @@ export function TranscriptOverlay({
       </Box>
 
       <Box width="100%" justifyContent="space-between">
-        <Text color={color('ghost')}>↑↓ scroll  PgUp/PgDn page  Home/End</Text>
+        <Text color={color('ghost')}>↑↓ scroll  PgUp/PgDn page  Ctrl+A/E ends</Text>
         <Text color={color('ghost')}>Ctrl+T or Esc close</Text>
       </Box>
     </Box>

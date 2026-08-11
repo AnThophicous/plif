@@ -52,17 +52,20 @@ export type ComposerAction =
   | { readonly type: 'move.right' }
   | { readonly type: 'move.home' }
   | { readonly type: 'move.end' }
+  | { readonly type: 'cursor.set'; readonly cursor: number }
   | { readonly type: 'delete.backward' }
   | { readonly type: 'delete.forward' }
   | { readonly type: 'draft.set'; readonly text: string; readonly cursor?: number }
   | { readonly type: 'reset.draft' }
   | { readonly type: 'attachment.add'; readonly attachment: PastedAttachment }
   | { readonly type: 'attachment.remove'; readonly token: string }
+  | { readonly type: 'attachments.set'; readonly attachments: readonly PastedAttachment[] }
   | { readonly type: 'queue.current'; readonly id: string }
   | { readonly type: 'queue.drop'; readonly id: string }
   | { readonly type: 'queue.select'; readonly index: number }
   | { readonly type: 'completion.set'; readonly items: readonly string[] }
   | { readonly type: 'completion.move'; readonly delta: -1 | 1 }
+  | { readonly type: 'completion.select'; readonly index: number }
   | { readonly type: 'completion.clear' }
   | {
       readonly type: 'history.search';
@@ -112,6 +115,11 @@ export function composerReducer(state: ComposerState, action: ComposerAction): C
       return { ...state, cursor: 0 };
     case 'move.end':
       return { ...state, cursor: state.draft.length };
+    case 'cursor.set':
+      return {
+        ...state,
+        cursor: snap(state.draft, Math.max(0, Math.min(action.cursor, state.draft.length))),
+      };
     case 'delete.backward': {
       const from = stepLeft(state.draft, state.cursor);
       if (from === state.cursor) return state;
@@ -159,6 +167,8 @@ export function composerReducer(state: ComposerState, action: ComposerAction): C
         ...state,
         attachments: state.attachments.filter((item) => item.token !== action.token),
       };
+    case 'attachments.set':
+      return { ...state, attachments: [...action.attachments] };
     case 'queue.current': {
       const submission = submissionFromComposer(state);
       if (!submission) return state;
@@ -199,6 +209,19 @@ export function composerReducer(state: ComposerState, action: ComposerAction): C
         },
       };
     }
+    case 'completion.select':
+      if (!state.completion) {
+        return { ...state, completion: { items: [], selected: Math.max(0, action.index) } };
+      }
+      return {
+        ...state,
+        completion: {
+          ...state.completion,
+          selected: state.completion.items.length > 0
+            ? clampSelection(action.index, state.completion.items.length)
+            : Math.max(0, action.index),
+        },
+      };
     case 'completion.clear':
       return { ...state, completion: null };
     case 'history.search':
