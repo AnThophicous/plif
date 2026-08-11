@@ -68,15 +68,25 @@ export function Timeline({ entries, width, limit, maxLines }: TimelineProps): Re
 export function TranscriptCells({
   cells,
   width,
+  expanded = false,
 }: {
   readonly cells: readonly TranscriptCell[];
   readonly width: number;
+  readonly expanded?: boolean;
 }): React.ReactElement {
   const inner = Math.max(8, width - layout.gutter * 2);
   return (
     <Box flexDirection="column" paddingX={layout.gutter}>
-      {cells.map((cell) => (
-        <TranscriptCellRow key={cell.id} cell={cell} width={inner} />
+      {cells.map((cell, index) => (
+        <Box
+          key={cell.id}
+          marginTop={cellSpacing({
+            previousTurnId: cells[index - 1]?.turnId ?? null,
+            turnId: cell.turnId,
+          })}
+        >
+          <TranscriptCellRow cell={cell} width={inner} expanded={expanded} />
+        </Box>
       ))}
     </Box>
   );
@@ -85,29 +95,37 @@ export function TranscriptCells({
 function TranscriptCellRow({
   cell,
   width,
+  expanded,
 }: {
   readonly cell: TranscriptCell;
   readonly width: number;
+  readonly expanded: boolean;
 }): React.ReactElement {
   if (cell.kind === 'activity') {
-    return <ActivityCellRow cell={cell} />;
+    return <ActivityCellRow cell={cell} expanded={expanded} />;
   }
   return <TimelineRow entry={entryFromTranscriptCell(cell)} width={width} />;
 }
 
 function ActivityCellRow({
   cell,
+  expanded,
 }: {
   readonly cell: Extract<TranscriptCell, { readonly kind: 'activity' }>;
+  readonly expanded: boolean;
 }): React.ReactElement {
   const running = cell.items.some((item) => item.status === 'running');
   const spinner = useSpinnerFrame(80, running);
+  const reads = cell.items.filter((item) => item.name === 'read_file' || item.name === 'list_dir').length;
+  const summary = reads === cell.items.length
+    ? `${running ? 'Reading' : 'Read'} ${reads} ${reads === 1 ? 'location' : 'locations'}`
+    : `${running ? 'Running' : 'Ran'} ${cell.items.length} ${cell.items.length === 1 ? 'tool' : 'tools'}`;
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Text color={color(running ? 'accent' : 'faint')}>
-        {running ? spinner : glyph.done} {running ? 'Working' : 'Worked'}
+        {running ? spinner : glyph.done} {summary}
       </Text>
-      {cell.items.map((item) => (
+      {expanded && cell.items.map((item) => (
         <Box key={item.callId} paddingLeft={2}>
           <Text color={color(item.status === 'running' ? 'muted' : 'ghost')}>
             {item.status === 'running' ? glyph.pending : glyph.step} {item.name}
@@ -117,6 +135,16 @@ function ActivityCellRow({
       ))}
     </Box>
   );
+}
+
+export function cellSpacing({
+  previousTurnId,
+  turnId,
+}: {
+  readonly previousTurnId: string | null;
+  readonly turnId: string;
+}): number {
+  return previousTurnId !== null && previousTurnId !== turnId ? 1 : 0;
 }
 
 function entryFromTranscriptCell(cell: Exclude<TranscriptCell, { readonly kind: 'activity' }>): TimelineEntry {

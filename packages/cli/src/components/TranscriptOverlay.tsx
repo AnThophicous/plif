@@ -48,7 +48,7 @@ export function TranscriptOverlay({
 
       <Box flexDirection="column" height={bodyHeight} overflow="hidden">
         {visible.length > 0 ? (
-          <TranscriptCells cells={visible} width={width} />
+          <TranscriptCells cells={visible} width={width} expanded />
         ) : (
           <Text color={color('ghost')}>No conversation yet.</Text>
         )}
