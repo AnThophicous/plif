@@ -6,6 +6,7 @@ import { Markdown } from './Markdown.js';
 import { ToolCall } from './ToolCall.js';
 import { useSpinnerFrame } from './Spinner.js';
 import type { EntryStatus, TimelineEntry } from '../session.js';
+import type { TranscriptCell } from '../transcript/types.js';
 import { color, formatDuration, glyph, layout, supportsRichGlyphs, truncate } from '../theme.js';
 
 interface TimelineProps {
@@ -61,6 +62,136 @@ export function Timeline({ entries, width, limit, maxLines }: TimelineProps): Re
       ))}
     </Box>
   );
+}
+
+/** Render canonical transcript cells through the same rows used by normal mode. */
+export function TranscriptCells({
+  cells,
+  width,
+}: {
+  readonly cells: readonly TranscriptCell[];
+  readonly width: number;
+}): React.ReactElement {
+  const inner = Math.max(8, width - layout.gutter * 2);
+  return (
+    <Box flexDirection="column" paddingX={layout.gutter}>
+      {cells.map((cell) => (
+        <TranscriptCellRow key={cell.id} cell={cell} width={inner} />
+      ))}
+    </Box>
+  );
+}
+
+function TranscriptCellRow({
+  cell,
+  width,
+}: {
+  readonly cell: TranscriptCell;
+  readonly width: number;
+}): React.ReactElement {
+  if (cell.kind === 'activity') {
+    return <ActivityCellRow cell={cell} />;
+  }
+  return <TimelineRow entry={entryFromTranscriptCell(cell)} width={width} />;
+}
+
+function ActivityCellRow({
+  cell,
+}: {
+  readonly cell: Extract<TranscriptCell, { readonly kind: 'activity' }>;
+}): React.ReactElement {
+  const running = cell.items.some((item) => item.status === 'running');
+  const spinner = useSpinnerFrame(80, running);
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Text color={color(running ? 'accent' : 'faint')}>
+        {running ? spinner : glyph.done} {running ? 'Working' : 'Worked'}
+      </Text>
+      {cell.items.map((item) => (
+        <Box key={item.callId} paddingLeft={2}>
+          <Text color={color(item.status === 'running' ? 'muted' : 'ghost')}>
+            {item.status === 'running' ? glyph.pending : glyph.step} {item.name}
+            {item.durationMs === undefined ? '' : `  ${formatDuration(item.durationMs)}`}
+          </Text>
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
+function entryFromTranscriptCell(cell: Exclude<TranscriptCell, { readonly kind: 'activity' }>): TimelineEntry {
+  const parsedAt = Date.parse(cell.at);
+  const at = Number.isFinite(parsedAt) ? parsedAt : 0;
+  switch (cell.kind) {
+    case 'user':
+      return { id: cell.id, kind: 'input', title: cell.text, at };
+    case 'assistant':
+      return {
+        id: cell.id,
+        kind: 'answer',
+        title: cell.text,
+        status: cell.finalized ? 'done' : 'active',
+        at,
+      };
+    case 'diff':
+      return { id: cell.id, kind: 'tool', title: cell.title, diff: cell.diff, status: 'done', at };
+    case 'error':
+      return {
+        id: cell.id,
+        kind: 'tool',
+        title: cell.title,
+        detail: cell.detail,
+        status: 'failed',
+        at,
+      };
+    case 'approval':
+      return {
+        id: cell.id,
+        kind: 'approval',
+        title: cell.text,
+        ...(cell.resolution ? { subtitle: cell.resolution } : {}),
+        status: cell.resolution ? 'done' : 'blocked',
+        at,
+      };
+    case 'question':
+      return {
+        id: cell.id,
+        kind: 'question',
+        title: cell.text,
+        ...(cell.answer ? { subtitle: cell.answer } : {}),
+        status: cell.answer ? 'done' : 'blocked',
+        at,
+      };
+    case 'notice':
+      return { id: cell.id, kind: 'notice', title: cell.text, tone: cell.tone, at };
+  }
+}
+
+export function measureTranscriptCell(cell: TranscriptCell, width: number): number {
+  const inner = Math.max(8, width - layout.gutter * 2);
+  const wrap = (text: string, columns = inner): number =>
+    text.split('\n').reduce((total, line) => total + wrappedHeight(line, columns), 0);
+  switch (cell.kind) {
+    case 'user':
+      return wrap(cell.text, Math.max(8, inner - 4)) + 4;
+    case 'assistant':
+      return wrap(cell.text, Math.max(8, inner - 3)) + 2;
+    case 'activity':
+      return 2 + cell.items.length;
+    case 'diff':
+      return diffHeight(cell.diff, false) + 2;
+    case 'error':
+      return wrap(cell.detail, Math.max(8, inner - 4)) + 2;
+    case 'approval':
+    case 'question':
+      return wrap(cell.text) + 1;
+    case 'notice':
+      return wrap(cell.text);
+  }
+}
+
+export function measureTranscriptCells(cells: readonly TranscriptCell[], width: number): number {
+  return cells.reduce((total, cell) => total + measureTranscriptCell(cell, width), 0);
 }
 
 /**
