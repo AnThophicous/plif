@@ -17,6 +17,10 @@ import {
   matchGlob,
 } from '../src/policy/policy.js';
 import type { PolicyDocument, PolicyRule } from '../src/policy/policy.js';
+import {
+  analyzeShellInvocation,
+  classifyHardDeniedInvocation,
+} from '../src/execution/shell-safety.js';
 
 function policy(rules: PolicyRule[], fallback: PolicyDocument['fallback'] = 'ask'): PolicyEngine {
   return new PolicyEngine({ fallback, trust: 'trusted', rules, networkAllowlist: [] });
@@ -88,6 +92,86 @@ describe('the unconditional exec denylist', () => {
 
   it('does not catch unrelated commands that merely contain a denied word', () => {
     assert.notEqual(permissive.evaluate(req('netstat', ['netstat', '-a'])).decision, 'deny');
+  });
+
+  const nestedDenials: readonly (readonly string[])[] = [
+    ['powershell.exe', '-NoProfile', '-Command', 'vssadmin delete shadows /all'],
+    ['pwsh.exe', '-NoProfile', '-Command', 'Get-Date; netsh advfirewall set allprofiles state off'],
+    ['bash', '-c', 'printf ok; sudo id'],
+    ['sh', '-c', 'dd if=/dev/zero of=/dev/sda'],
+    ['cmd.exe', '/d', '/s', '/c', 'echo ok & schtasks /create /tn x /tr calc'],
+    ['pwsh.exe', '-Command', "bash -c 'printf ok; sudo id'"],
+  ];
+
+  for (const argv of nestedDenials) {
+    it(`hard-denies commands nested in ${argv[0]}`, () => {
+      const verdict = permissive.evaluate(req(argv[0]!, [...argv]));
+      assert.equal(verdict.decision, 'deny');
+      assert.equal(verdict.rule, null);
+    });
+  }
+
+  it('fails closed on opaque interpreter envelopes before permissive policy rules', () => {
+    const opaque: readonly (readonly string[])[] = [
+      ['pwsh.exe', '-EncodedCommand', 'dmFsaWQ='],
+      ['powershell.exe', '-e', 'dmFsaWQ='],
+      ['pwsh.exe', '-File', 'script.ps1'],
+      ['pwsh.exe', '-ExecutionPolicy', 'Bypass', '-Command', 'Get-Date'],
+      ['pwsh.exe', '-Command', '-'],
+      ['pwsh.exe', '-Command', 'Invoke-Expression $payload'],
+      ['pwsh.exe', '-Command', '& $program'],
+      ['pwsh.exe', '-Command', 'Start-Process $program'],
+      ['bash', '-lc', 'npm test'],
+      ['cmd.exe', '/k', 'echo unsafe'],
+    ];
+
+    for (const argv of opaque) {
+      const analysis = analyzeShellInvocation(argv);
+      assert.equal(analysis.state, 'opaque', argv.join(' '));
+      assert.equal(permissive.evaluate(req(argv[0]!, [...argv])).decision, 'deny');
+    }
+  });
+
+  it('fails closed on malformed interpreter envelopes', () => {
+    const malformed: readonly (readonly string[])[] = [
+      ['pwsh.exe', '-Command'],
+      ['pwsh.exe', '-Command', "Write-Output 'unterminated"],
+      ['bash', '-c'],
+      ['cmd.exe', '/c'],
+    ];
+
+    for (const argv of malformed) {
+      assert.equal(analyzeShellInvocation(argv).state, 'malformed', argv.join(' '));
+      assert.equal(permissive.evaluate(req(argv[0]!, [...argv])).decision, 'deny');
+    }
+  });
+
+  it('does not mistake denied words in strings or comments for commands', () => {
+    const safe: readonly (readonly string[])[] = [
+      ['pwsh.exe', '-Command', "Write-Output 'vssadmin'; # netsh"],
+      ['bash', '-c', "printf '%s\\n' 'sudo'; # dd if=/dev/zero of=/dev/sda"],
+      ['cmd.exe', '/d', '/c', 'echo vssadmin & rem netsh'],
+    ];
+
+    for (const argv of safe) {
+      assert.equal(analyzeShellInvocation(argv).state, 'static-envelope', argv.join(' '));
+      assert.equal(classifyHardDeniedInvocation(argv), null, argv.join(' '));
+      assert.equal(permissive.evaluate(req(argv[0]!, [...argv])).decision, 'allow');
+    }
+  });
+
+  it('keeps safe static envelopes and foreground recursive deletion policy-controlled', () => {
+    const policyControlled: readonly (readonly string[])[] = [
+      ['pwsh.exe', '-NoProfile', '-Command', 'Get-ChildItem | Select-Object -First 5'],
+      ['pwsh.exe', '-Command', 'npm test | Tee-Object test.log'],
+      ['bash', '-c', 'npm test'],
+      ['rm', '-rf', './generated'],
+    ];
+
+    for (const argv of policyControlled) {
+      assert.equal(classifyHardDeniedInvocation(argv), null, argv.join(' '));
+      assert.equal(permissive.evaluate(req(argv[0]!, [...argv])).decision, 'allow');
+    }
   });
 });
 

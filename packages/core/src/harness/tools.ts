@@ -16,6 +16,12 @@
 
 import { PlifError } from '../errors.js';
 import type { Container } from '../container/container.js';
+import type { ExecResult } from '../types.js';
+import {
+  analyzeShellInvocation,
+  classifyHardDeniedInvocation,
+} from '../execution/shell-safety.js';
+import type { ShellDialect, ShellDialectResolution } from '../execution/shell-dialects.js';
 import type { ToolSpec } from '../model/provider.js';
 import type { QuestionBroker, QuestionChoice } from './ask.js';
 import type { MemoryStore } from './memory.js';
@@ -62,6 +68,8 @@ export interface ToolContext {
   readonly lsp?: LspManager;
   readonly edits?: EditCoordinator;
   readonly agentId?: string;
+  /** Stable session dialect; absent means shell_command is unsupported. */
+  readonly shellDialect?: ShellDialect;
   readonly activateProfile?: (name: string) => Promise<void>;
   /** Attachments from the user message that caused this tool call. */
   readonly attachments?: readonly Attachment[];
@@ -676,26 +684,106 @@ export const runCommand: Tool = {
       ...(context.signal ? { signal: context.signal } : {}),
     });
 
-    // Both streams are labelled and the exit code is always stated. A model
-    // shown only stdout cannot tell a warning-and-succeeded from a failure.
-    const parts: string[] = [`exit ${result.exitCode}${result.killedBy ? ` (${result.killedBy})` : ''}`];
-    if (result.stdout.trim()) parts.push(`stdout:\n${compactTerminal(result.stdout)}`);
-    if (result.stderr.trim()) parts.push(`stderr:\n${compactTerminal(result.stderr)}`);
-    if (result.truncated) parts.push('(output truncated at the container limit)');
-    if (parts.length === 1) parts.push('(no output)');
-
-    return {
-      output: clip(parts.join('\n')),
-      display: [
-        `exit ${result.exitCode}${result.killedBy ? ` (${result.killedBy})` : ''}`,
-        result.stdout.trimEnd(),
-        result.stderr.trimEnd(),
-        result.truncated ? '(output truncated at the container limit)' : '',
-      ].filter(Boolean).join('\n'),
-      ok: result.exitCode === 0 && !result.killedBy,
-    };
+    return formatExecToolResult(result);
   },
 };
+
+const MAX_SHELL_SCRIPT_BYTES = 32 * 1024;
+
+export const shellCommand: Tool = {
+  spec: {
+    name: 'shell_command',
+    description:
+      'Run one script through the session\'s supported shell dialect. Use this for ' +
+      'pipelines, redirection, shell-native commands, and multi-step expressions; ' +
+      'prefer run_command for one executable.',
+    parameters: {
+      type: 'object',
+      properties: {
+        script: {
+          type: 'string',
+          description: 'Literal script passed as one argv element to the selected interpreter',
+        },
+        reason: {
+          type: 'string',
+          description: 'Short justification, shown to the human on an approval prompt',
+        },
+      },
+      required: ['script', 'reason'],
+      additionalProperties: false,
+    },
+  },
+  async run(input, context) {
+    const script = requireString(input, 'script');
+    if (script.includes('\0')) {
+      throw new PlifError('INVALID_ARGUMENT', 'shell_command scripts cannot contain NUL bytes');
+    }
+    const size = Buffer.byteLength(script, 'utf8');
+    if (size > MAX_SHELL_SCRIPT_BYTES) {
+      throw new PlifError(
+        'INVALID_ARGUMENT',
+        `shell_command script is ${size} bytes; the limit is ${MAX_SHELL_SCRIPT_BYTES}`,
+        { detail: { size, limit: MAX_SHELL_SCRIPT_BYTES } },
+      );
+    }
+
+    const dialect = context.shellDialect;
+    if (!dialect) {
+      throw new PlifError(
+        'SHELL_UNSUPPORTED',
+        'shell_command is unavailable because this run has no resolved shell dialect',
+        { hint: 'Use run_command with literal argv or a dedicated file tool.' },
+      );
+    }
+
+    const argv = dialect.argv(script);
+    const envelope = analyzeShellInvocation(argv);
+    if (envelope.state !== 'static-envelope' || envelope.script !== script) {
+      throw new PlifError(
+        'POLICY_DENIED',
+        `the ${dialect.displayName} invocation cannot be inspected safely`,
+        { detail: { state: envelope.state, reason: envelope.reason } },
+      );
+    }
+    const dangerous = classifyHardDeniedInvocation(argv);
+    if (dangerous) {
+      throw new PlifError(
+        'POLICY_DENIED',
+        `shell_command rejected "${dangerous.command}": ${dangerous.reason}`,
+        { detail: { command: dangerous.command, reason: dangerous.reason } },
+      );
+    }
+
+    const result = await context.container.exec({
+      argv,
+      reason: typeof input['reason'] === 'string' ? input['reason'] : 'no reason given',
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    return formatExecToolResult(result);
+  },
+};
+
+/** Keep process-result semantics identical across direct and interpreter exec. */
+export function formatExecToolResult(result: ExecResult): ToolResult {
+  // Both streams are labelled and the exit code is always stated. A model
+  // shown only stdout cannot tell a warning-and-succeeded from a failure.
+  const parts: string[] = [`exit ${result.exitCode}${result.killedBy ? ` (${result.killedBy})` : ''}`];
+  if (result.stdout.trim()) parts.push(`stdout:\n${compactTerminal(result.stdout)}`);
+  if (result.stderr.trim()) parts.push(`stderr:\n${compactTerminal(result.stderr)}`);
+  if (result.truncated) parts.push('(output truncated at the container limit)');
+  if (parts.length === 1) parts.push('(no output)');
+
+  return {
+    output: clip(parts.join('\n')),
+    display: [
+      `exit ${result.exitCode}${result.killedBy ? ` (${result.killedBy})` : ''}`,
+      result.stdout.trimEnd(),
+      result.stderr.trimEnd(),
+      result.truncated ? '(output truncated at the container limit)' : '',
+    ].filter(Boolean).join('\n'),
+    ok: result.exitCode === 0 && !result.killedBy,
+  };
+}
 
 function compactTerminal(value: string): string {
   const lines = value.trimEnd().split(/\r?\n/);
@@ -1263,6 +1351,18 @@ export const DEFAULT_TOOLS: readonly Tool[] = [
   createProfile,
   activateProfile,
 ];
+
+/** Build a stable session tool set without making DEFAULT_TOOLS platform-specific. */
+export function toolsForEnvironment(
+  resolution: ShellDialectResolution | null | undefined,
+  extras: readonly Tool[] = [],
+): readonly Tool[] {
+  return [
+    ...DEFAULT_TOOLS,
+    ...(resolution?.dialect ? [shellCommand] : []),
+    ...extras,
+  ];
+}
 
 export function toolRegistry(tools: readonly Tool[] = DEFAULT_TOOLS): Map<string, Tool> {
   return new Map(tools.map((tool) => [tool.spec.name, tool]));

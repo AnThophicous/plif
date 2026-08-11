@@ -9,7 +9,7 @@ describe('terminal tool output policy', () => {
   });
 
   it('shows shell, write, edit and directory-list output', () => {
-    for (const name of ['run_command', 'write_file', 'edit_file', 'list_dir']) {
+    for (const name of ['run_command', 'shell_command', 'write_file', 'edit_file', 'list_dir']) {
       assert.equal(terminalToolOutput(name, { output: 'visible', display: 'full display', ok: true }), 'full display');
     }
   });

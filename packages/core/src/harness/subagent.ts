@@ -16,10 +16,12 @@ import {
   listDir,
   readFile,
   runCommand,
+  shellCommand,
   writeFile,
 } from './tools.js';
 import type { EditCoordinator } from './edits.js';
 import type { Tool } from './tools.js';
+import type { ShellDialect } from '../execution/shell-dialects.js';
 
 export interface SubagentOptions {
   /** The parent's provider, used when no model is named. */
@@ -35,6 +37,8 @@ export interface SubagentOptions {
   readonly edits?: EditCoordinator;
   readonly coordinator?: SubagentCoordinator;
   readonly agentInstructions?: string;
+  /** Inherited from the parent session; subagents never resolve a new dialect. */
+  readonly shellDialect?: ShellDialect;
 }
 
 export class SubagentCoordinator {
@@ -72,8 +76,30 @@ const DEFAULT_MAX_ITERATIONS = 12;
  * - the task tools, because a background job outliving the subagent that
  *   started it has no owner.
  */
-export function subagentTools(extra: readonly Tool[] = []): Tool[] {
-  return [readFile, writeFile, editFile, applyPatch, listDir, globFiles, grepFiles, runCommand, ...extra];
+export function subagentTools(extra?: readonly Tool[]): Tool[];
+export function subagentTools(
+  shellDialect: ShellDialect | null,
+  extra?: readonly Tool[],
+): Tool[];
+export function subagentTools(
+  dialectOrExtra: ShellDialect | readonly Tool[] | null = null,
+  additional: readonly Tool[] = [],
+): Tool[] {
+  const oldSignature = Array.isArray(dialectOrExtra);
+  const shellDialect = oldSignature ? null : dialectOrExtra as ShellDialect | null;
+  const extra = oldSignature ? dialectOrExtra as readonly Tool[] : additional;
+  return [
+    readFile,
+    writeFile,
+    editFile,
+    applyPatch,
+    listDir,
+    globFiles,
+    grepFiles,
+    runCommand,
+    ...(shellDialect ? [shellCommand] : []),
+    ...extra,
+  ];
 }
 
 /**
@@ -88,7 +114,7 @@ function summarise(input: unknown): string {
   const fields = input as Record<string, unknown>;
   const argv = fields['argv'];
   if (Array.isArray(argv)) return argv.join(' ').slice(0, 60);
-  for (const key of ['path', 'query', 'url', 'pattern', 'name', 'title']) {
+  for (const key of ['script', 'path', 'query', 'url', 'pattern', 'name', 'title']) {
     const value = fields[key];
     if (typeof value === 'string' && value) return value.slice(0, 60);
   }
@@ -103,7 +129,7 @@ interface Resolved {
 }
 
 export function subagentTool(options: SubagentOptions): Tool {
-  const tools = subagentTools(options.extraTools ?? []);
+  const tools = subagentTools(options.shellDialect ?? null, options.extraTools ?? []);
   const agents = options.agents ?? {};
   const named = Object.entries(agents);
 
@@ -376,6 +402,7 @@ export function subagentTool(options: SubagentOptions): Tool {
         ...(context.workspace ? { workspace: context.workspace } : {}),
         ...(context.lsp ? { lsp: context.lsp } : {}),
         ...(context.edits ? { edits: context.edits } : {}),
+        ...(options.shellDialect ? { shellDialect: options.shellDialect } : {}),
         agentId: `subagent:${callId ?? title}:${Date.now()}`,
       }).catch((error: unknown) => {
         parent?.emit('subagent.finished', {

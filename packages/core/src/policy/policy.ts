@@ -18,9 +18,8 @@
  * handful of actions a developer actually wants to see.
  */
 
-import path from 'node:path';
-
 import { PlifError } from '../errors.js';
+import { classifyHardDeniedInvocation } from '../execution/shell-safety.js';
 import { isPathInside } from '../fs/vpath.js';
 
 export type PolicyAction =
@@ -100,30 +99,6 @@ export interface PolicyVerdict {
   readonly rule: PolicyRule | null;
   readonly reason: string;
 }
-
-/**
- * Commands that are refused before any rule is consulted.
- *
- * These are not "risky" in the way `rm -rf` is risky — the developer may
- * legitimately want that, and a rule can allow it. These specifically defeat
- * the sandbox itself or the machine's integrity, so allowing them by rule would
- * be incoherent. The list is short on purpose: a long denylist is a bad
- * substitute for a good allowlist, and invites the illusion of completeness.
- */
-const ALWAYS_DENIED_EXEC = [
-  { pattern: /^(bcdedit|bootcfg)$/i, why: 'modifies the boot configuration' },
-  { pattern: /^(vssadmin|wbadmin)$/i, why: 'destroys shadow copies and backups' },
-  { pattern: /^(cipher)$/i, why: 'can wipe free space irrecoverably' },
-  { pattern: /^(diskpart|format)$/i, why: 'operates on raw disks' },
-  { pattern: /^(reg|regedit)$/i, why: 'edits the registry outside the sandbox' },
-  { pattern: /^(netsh)$/i, why: 'reconfigures host networking' },
-  { pattern: /^(sc|net)$/i, why: 'controls Windows services and shares' },
-  { pattern: /^(schtasks|at)$/i, why: 'installs persistence outside the container lifetime' },
-  { pattern: /^(takeown|icacls|cacls)$/i, why: 'rewrites host ACLs, defeating the jail' },
-  { pattern: /^(shutdown|logoff)$/i, why: 'terminates the host session' },
-  { pattern: /^(mkfs|fdisk|dd)$/i, why: 'operates on raw block devices' },
-  { pattern: /^(sudo|runas|su)$/i, why: 'escalates privilege out of the sandbox' },
-];
 
 export const STRICT_POLICY: PolicyDocument = Object.freeze({
   fallback: 'ask',
@@ -258,34 +233,13 @@ export class PolicyEngine {
   }
 
   #checkExecDenylist(request: PolicyRequest): PolicyVerdict | null {
-    const argv0 = request.argv?.[0] ?? request.target;
-    const line = (request.argv ?? [request.target]).join(' ');
-    if (/\\(?:windows\\)?(?:system32|syswow64)(?:\\|$)/i.test(line)) {
-      return {
-        decision: 'deny',
-        rule: null,
-        reason: 'access to Windows administrative directories is never permitted inside a container.',
-      };
-    }
-    if (/\b(?:powershell|pwsh)\b.*\b(?:runas|bypass|set-executionpolicy)\b/i.test(line)) {
-      return {
-        decision: 'deny',
-        rule: null,
-        reason: 'attempts to bypass execution policy or elevate PowerShell are never permitted.',
-      };
-    }
-    // Compare on the bare command name so a full path does not slip past.
-    const command = path.basename(argv0).replace(/\.(exe|com|cmd|bat|ps1)$/i, '');
-    for (const { pattern, why } of ALWAYS_DENIED_EXEC) {
-      if (pattern.test(command)) {
-        return {
-          decision: 'deny',
-          rule: null,
-          reason: `"${command}" is never permitted inside a container: it ${why}.`,
-        };
-      }
-    }
-    return null;
+    const dangerous = classifyHardDeniedInvocation(request.argv ?? [request.target]);
+    if (!dangerous) return null;
+    return {
+      decision: 'deny',
+      rule: null,
+      reason: `"${dangerous.command}" is never permitted inside a container: ${dangerous.reason}.`,
+    };
   }
 
   /** Whether a host is reachable. Subdomains match their allowlisted parent. */

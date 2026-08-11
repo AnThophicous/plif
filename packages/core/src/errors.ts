@@ -37,6 +37,7 @@ export type PlifErrorCode =
   | 'EXEC_FAILED'
   | 'EXEC_TIMEOUT'
   | 'EXEC_KILLED'
+  | 'SHELL_UNSUPPORTED'
   | 'SANDBOX_UNAVAILABLE'
   | 'SANDBOX_DEGRADED'
   // model provider

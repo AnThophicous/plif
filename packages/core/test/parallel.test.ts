@@ -10,7 +10,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { MAX_PARALLEL_SAFE_CALLS, scheduleBatches } from '../src/harness/loop.js';
-import { DEFAULT_TOOLS, toolRegistry } from '../src/harness/tools.js';
+import { PowerShellDialect } from '../src/execution/shell-dialects.js';
+import { DEFAULT_TOOLS, toolRegistry, toolsForEnvironment } from '../src/harness/tools.js';
 import type { Tool } from '../src/harness/tools.js';
 import type { ToolCall } from '../src/model/provider.js';
 
@@ -62,6 +63,19 @@ describe('batching parallel-safe calls', () => {
     // a command can do anything to anything.
     const batches = scheduleBatches([call('run_command'), call('run_command')], registry);
     assert.deepEqual(names(batches), [['run_command'], ['run_command']]);
+  });
+
+  it('never batches shell_command', () => {
+    const shellRegistry = toolRegistry(toolsForEnvironment({
+      dialect: new PowerShellDialect('pwsh.exe'),
+      reason: null,
+    }));
+    const batches = scheduleBatches(
+      [call('shell_command'), call('shell_command')],
+      shellRegistry,
+    );
+    assert.deepEqual(names(batches), [['shell_command'], ['shell_command']]);
+    assert.equal(shellRegistry.get('shell_command')?.parallelSafe, undefined);
   });
 
   it('gives an unknown tool a batch of its own', () => {

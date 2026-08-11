@@ -90,6 +90,9 @@ export {
   readFile,
   remember,
   runCommand,
+  shellCommand,
+  toolsForEnvironment,
+  formatExecToolResult,
   toolRegistry,
   toolSpecs,
   writeFile,
@@ -100,6 +103,28 @@ export {
   activateProfile,
 } from './harness/tools.js';
 export type { PlanCheckpoint, PlanStatus, Tool, ToolContext, ToolResult } from './harness/tools.js';
+
+export {
+  analyzeShellInvocation,
+  classifyBackgroundDangerousInvocation,
+  classifyHardDeniedInvocation,
+} from './execution/shell-safety.js';
+export type {
+  DangerousInvocation,
+  ShellEnvelope,
+  ShellInvocationAnalysis,
+  ShellInvocationState,
+} from './execution/shell-safety.js';
+export {
+  BashDialect,
+  PowerShellDialect,
+  resolveShellDialect,
+} from './execution/shell-dialects.js';
+export type {
+  ShellDialect,
+  ShellDialectEnvironment,
+  ShellDialectResolution,
+} from './execution/shell-dialects.js';
 
 export { TaskManager } from './tasks/manager.js';
 export type {

@@ -36,8 +36,9 @@ import type { QuestionBroker } from './ask.js';
 import { compact, estimateTokens } from './compaction.js';
 import type { CompactionResult } from './compaction.js';
 import type { MemoryStore } from './memory.js';
-import { DEFAULT_TOOLS, toolRegistry, toolSpecs } from './tools.js';
+import { DEFAULT_TOOLS, toolRegistry, toolSpecs, toolsForEnvironment } from './tools.js';
 import type { Tool, ToolResult } from './tools.js';
+import type { ShellDialect } from '../execution/shell-dialects.js';
 import type { TaskManager } from '../tasks/manager.js';
 import type { LspManager } from '../lsp/manager.js';
 import type { EditCoordinator } from './edits.js';
@@ -70,6 +71,8 @@ export interface LoopOptions {
   readonly lsp?: LspManager;
   readonly edits?: EditCoordinator;
   readonly agentId?: string;
+  /** Resolved once for the session and shared by tool registration and calls. */
+  readonly shellDialect?: ShellDialect;
   readonly activateProfile?: (name: string) => Promise<void>;
   readonly attachments?: readonly Attachment[];
   /**
@@ -88,7 +91,13 @@ export interface LoopOptions {
   readonly drainQueue?: () => Promise<readonly (Message | string)[]> | readonly (Message | string)[];
 }
 
-const VISIBLE_TOOL_OUTPUT = new Set(['run_command', 'write_file', 'edit_file', 'list_dir']);
+const VISIBLE_TOOL_OUTPUT = new Set([
+  'run_command',
+  'shell_command',
+  'write_file',
+  'edit_file',
+  'list_dir',
+]);
 
 /** Separate model context from terminal transcript without weakening either one. */
 export function terminalToolOutput(
@@ -241,7 +250,11 @@ export async function runLoop(
 ): Promise<LoopResult> {
   const turnId = options.turnId ?? randomUUID();
   const loopStartedAt = Date.now();
-  const tools = options.tools ?? DEFAULT_TOOLS;
+  const tools = options.tools ?? (
+    options.shellDialect
+      ? toolsForEnvironment({ dialect: options.shellDialect, reason: null })
+      : DEFAULT_TOOLS
+  );
   const registry = toolRegistry(tools);
   const specs = toolSpecs(tools);
   // A model/tool mistake is recoverable work, not a reason to kill the task.
@@ -524,8 +537,11 @@ export async function runLoop(
           qualityDirty = true;
           qualityEvidence = false;
         }
-        const validationCommand = item.call.name === 'run_command' &&
-          /(?:test|typecheck|build|check|lint|verify)/i.test(String(item.parsed['argv'] ?? ''));
+        const validationCommand = (
+          item.call.name === 'run_command' || item.call.name === 'shell_command'
+        ) && /(?:test|typecheck|build|check|lint|verify)/i.test(
+          String(item.parsed[item.call.name === 'run_command' ? 'argv' : 'script'] ?? ''),
+        );
         if (item.ok && (item.call.name === 'diagnostics' || validationCommand)) {
           qualityEvidence = true;
         }
@@ -719,7 +735,7 @@ function prepare(
 /**
  * Feed the outcome back into the learning harness.
  *
- * Only `run_command` is recorded. A file read that worked proves nothing about
+ * Only command execution is recorded. A file read that worked proves nothing about
  * how this project is built, but "`npm test` succeeds here" is exactly the kind
  * of claim that should have to earn its confidence across sessions.
  *
@@ -734,20 +750,29 @@ async function recordStrategy(
   ok: boolean,
   durationMs: number,
 ): Promise<void> {
-  if (!options.memory || !options.workspace || call.name !== 'run_command') return;
+  if (
+    !options.memory ||
+    !options.workspace ||
+    (call.name !== 'run_command' && call.name !== 'shell_command')
+  ) return;
 
   const argv = Array.isArray(parsed['argv']) ? (parsed['argv'] as string[]) : [];
-  if (argv.length === 0) return;
+  const script = typeof parsed['script'] === 'string' ? parsed['script'] : '';
+  const goal = call.name === 'run_command'
+    ? argv[0]
+    : options.shellDialect?.executable ?? options.shellDialect?.id ?? 'shell';
+  const approach = call.name === 'run_command' ? argv.join(' ') : script;
+  if (!goal || !approach) return;
 
   await options.memory
     .recordOutcome({
       workspace: options.workspace,
-      goal: argv[0] as string,
-      approach: argv.join(' '),
+      goal,
+      approach,
       ok,
       context: {
         os: process.platform,
-        command: argv[0] as string,
+        command: goal,
         container: options.container.name,
       },
       sessionId: options.sessionId ?? 'unknown',
@@ -788,6 +813,7 @@ async function executeCall(input: {
       ...(options.lsp ? { lsp: options.lsp } : {}),
       ...(options.edits ? { edits: options.edits } : {}),
       ...(options.agentId ? { agentId: options.agentId } : {}),
+      ...(options.shellDialect ? { shellDialect: options.shellDialect } : {}),
       ...(options.activateProfile ? { activateProfile: options.activateProfile } : {}),
       ...(options.attachments?.length ? { attachments: options.attachments } : {}),
     });
