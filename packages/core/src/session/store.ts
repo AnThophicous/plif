@@ -38,6 +38,16 @@ import readline from 'node:readline';
 
 import { PlifError } from '../errors.js';
 import type { StorePaths } from '../store/paths.js';
+import {
+  adaptLegacyTranscriptEvent,
+  decodeConversationEvent,
+  decodeLegacyTranscriptEvent,
+  dedupeConversationEvents,
+} from './events.js';
+import type {
+  ConversationEvent,
+  LegacyTranscriptEvent,
+} from './events.js';
 
 // ---------------------------------------------------------------------------
 // Transcript events
@@ -50,35 +60,8 @@ import type { StorePaths } from '../store/paths.js';
  * line by line, and a schema where a line's meaning depends on an earlier line
  * cannot be resumed from a truncated file.
  */
-export type TranscriptEvent =
-  | { readonly kind: 'user'; readonly at: string; readonly text: string }
-  | { readonly kind: 'assistant'; readonly at: string; readonly text: string }
-  | {
-      readonly kind: 'tool';
-      readonly at: string;
-      readonly tool: string;
-      readonly input: Record<string, unknown>;
-      readonly output: string;
-      readonly ok: boolean;
-      readonly durationMs: number;
-    }
-  | {
-      readonly kind: 'note';
-      readonly at: string;
-      readonly text: string;
-      readonly level: 'info' | 'warn' | 'error';
-    }
-  /**
-   * A compaction boundary. Everything before it has been summarised into
-   * `summary`; a resume replays the summary instead of the raw events, but the
-   * raw events stay on disk so a human can always read what really happened.
-   */
-  | {
-      readonly kind: 'compaction';
-      readonly at: string;
-      readonly summary: string;
-      readonly replacedEvents: number;
-    };
+/** Compatibility input while callers migrate; the store always writes v1. */
+export type TranscriptEvent = ConversationEvent | LegacyTranscriptEvent;
 
 export interface SessionMeta {
   readonly id: string;
@@ -122,6 +105,8 @@ export class Session {
   #store: SessionStore;
   #meta: SessionMeta;
   #queue: Promise<void> = Promise.resolve();
+  #legacyTurnId: string | null = null;
+  #legacyEvent = 0;
 
   constructor(store: SessionStore, meta: SessionMeta) {
     this.#store = store;
@@ -143,9 +128,25 @@ export class Session {
   /** Append one event. Safe to call concurrently. */
   append(event: TranscriptEvent): Promise<void> {
     this.#queue = this.#queue.then(async () => {
-      this.#meta = await this.#store.appendTo(this.#meta, event);
+      this.#meta = await this.#store.appendTo(this.#meta, this.#canonical(event));
     });
     return this.#queue;
+  }
+
+  #canonical(event: TranscriptEvent): ConversationEvent {
+    const canonical = decodeConversationEvent(event);
+    if (canonical) return canonical;
+    const legacy = decodeLegacyTranscriptEvent(event);
+    if (!legacy) {
+      throw new PlifError('INVALID_ARGUMENT', 'session event is malformed');
+    }
+    if (legacy.kind === 'user' || !this.#legacyTurnId) this.#legacyTurnId = randomUUID();
+    const adapted = adaptLegacyTranscriptEvent(legacy, {
+      turnId: this.#legacyTurnId,
+      nextEventId: () => `${this.#meta.id}:legacy-live:${++this.#legacyEvent}`,
+    });
+    if (!adapted) throw new PlifError('INVALID_ARGUMENT', 'session event could not be adapted');
+    return adapted;
   }
 
   /** Flush pending appends, then mark the conversation finished. */
@@ -154,11 +155,11 @@ export class Session {
     this.#meta = await this.#store.closeMeta(this.#meta);
   }
 
-  read(): AsyncGenerator<TranscriptEvent> {
+  read(): AsyncGenerator<ConversationEvent> {
     return this.#store.read(this.#meta);
   }
 
-  replay(): Promise<TranscriptEvent[]> {
+  replay(): Promise<ConversationEvent[]> {
     return this.#store.replay(this.#meta);
   }
 }
@@ -212,7 +213,7 @@ export class SessionStore {
    * Internal: go through `Session.append` instead, which owns the returned
    * metadata so it cannot be dropped on the floor.
    */
-  async appendTo(meta: SessionMeta, event: TranscriptEvent): Promise<SessionMeta> {
+  async appendTo(meta: SessionMeta, event: ConversationEvent): Promise<SessionMeta> {
     await fs.mkdir(this.#dir(meta.workspace), { recursive: true });
     await fs.appendFile(
       this.#transcriptFile(meta.workspace, meta.id),
@@ -223,10 +224,10 @@ export class SessionStore {
     const next: SessionMeta = {
       ...meta,
       updatedAt: new Date().toISOString(),
-      turns: event.kind === 'user' ? meta.turns + 1 : meta.turns,
+      turns: event.kind === 'user.message' ? meta.turns + 1 : meta.turns,
       // The first thing the developer said is the best label available, and it
       // is more useful than any title a model would invent for it.
-      title: meta.title || (event.kind === 'user' ? summarise(event.text) : ''),
+      title: meta.title || (event.kind === 'user.message' ? summarise(event.text) : ''),
     };
     await this.#writeMeta(next);
     return next;
@@ -293,7 +294,7 @@ export class SessionStore {
    * transcript still resumes, and refusing to open a session because its last
    * line was truncated by a crash would defeat the purpose.
    */
-  async *read(meta: SessionMeta): AsyncGenerator<TranscriptEvent> {
+  async *read(meta: SessionMeta): AsyncGenerator<ConversationEvent> {
     const file = this.#transcriptFile(meta.workspace, meta.id);
     try {
       await fs.access(file);
@@ -303,14 +304,75 @@ export class SessionStore {
 
     const stream = createReadStream(file, 'utf8');
     const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    let pending: { line: string; number: number } | null = null;
+    let lineNumber = 0;
+    let legacyTurn = '';
+    let legacyTurns = 0;
+
+    const decodeLine = (
+      line: string,
+      number: number,
+      final: boolean,
+    ): ConversationEvent | null => {
+      let value: unknown;
+      try {
+        value = JSON.parse(line);
+      } catch {
+        return final
+          ? null
+          : {
+              version: 1,
+              eventId: `${meta.id}:malformed:${number}`,
+              turnId: legacyTurn || `${meta.id}:recovery`,
+              at: meta.updatedAt,
+              kind: 'notice.recorded',
+              level: 'warn',
+              text: `Skipped malformed transcript line ${number}.`,
+            };
+      }
+
+      const canonical = decodeConversationEvent(value);
+      if (canonical) {
+        legacyTurn = canonical.turnId;
+        return canonical;
+      }
+
+      const legacy = decodeLegacyTranscriptEvent(value);
+      if (!legacy) {
+        return final
+          ? null
+          : {
+              version: 1,
+              eventId: `${meta.id}:malformed:${number}`,
+              turnId: legacyTurn || `${meta.id}:recovery`,
+              at: meta.updatedAt,
+              kind: 'notice.recorded',
+              level: 'warn',
+              text: `Skipped malformed transcript line ${number}.`,
+            };
+      }
+      if (legacy.kind === 'user' || !legacyTurn) {
+        legacyTurns += 1;
+        legacyTurn = `${meta.id}:legacy:${legacyTurns}`;
+      }
+      return adaptLegacyTranscriptEvent(legacy, {
+        turnId: legacyTurn,
+        nextEventId: () => `${meta.id}:legacy-line:${number}`,
+      });
+    };
     try {
       for await (const line of lines) {
         if (!line.trim()) continue;
-        try {
-          yield JSON.parse(line) as TranscriptEvent;
-        } catch {
-          // truncated or corrupt line
+        lineNumber += 1;
+        if (pending) {
+          const event = decodeLine(pending.line, pending.number, false);
+          if (event) yield event;
         }
+        pending = { line, number: lineNumber };
+      }
+      if (pending) {
+        const event = decodeLine(pending.line, pending.number, true);
+        if (event) yield event;
       }
     } finally {
       lines.close();
@@ -326,12 +388,13 @@ export class SessionStore {
    * events before the boundary remain on disk and readable — compaction shrinks
    * what the model is given, never what the human can audit.
    */
-  async replay(meta: SessionMeta): Promise<TranscriptEvent[]> {
-    const all: TranscriptEvent[] = [];
+  async replay(meta: SessionMeta): Promise<ConversationEvent[]> {
+    const all: ConversationEvent[] = [];
     for await (const event of this.read(meta)) all.push(event);
 
-    const lastCompaction = all.map((event) => event.kind).lastIndexOf('compaction');
-    return lastCompaction === -1 ? all : all.slice(lastCompaction);
+    const unique = dedupeConversationEvents(all);
+    const lastCompaction = unique.map((event) => event.kind).lastIndexOf('compaction.completed');
+    return lastCompaction === -1 ? unique : unique.slice(lastCompaction);
   }
 
   async remove(meta: SessionMeta): Promise<void> {

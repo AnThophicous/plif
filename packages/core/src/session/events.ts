@@ -278,6 +278,51 @@ function stringifyLegacyInput(input: Record<string, unknown>): string {
   }
 }
 
+/** Validate an unversioned transcript record before adapting it. */
+export function decodeLegacyTranscriptEvent(value: unknown): LegacyTranscriptEvent | null {
+  if (!isRecord(value) || !isString(value['kind']) || !isString(value['at'])) return null;
+  switch (value['kind']) {
+    case 'user':
+      return isString(value['text'])
+        ? { kind: 'user', at: value['at'], text: value['text'] }
+        : null;
+    case 'assistant':
+      return isString(value['text'])
+        ? { kind: 'assistant', at: value['at'], text: value['text'] }
+        : null;
+    case 'tool':
+      return isString(value['tool']) && isRecord(value['input']) && isString(value['output']) &&
+        typeof value['ok'] === 'boolean' && isFiniteNumber(value['durationMs'])
+        ? {
+            kind: 'tool',
+            at: value['at'],
+            tool: value['tool'],
+            input: value['input'],
+            output: value['output'],
+            ok: value['ok'],
+            durationMs: value['durationMs'],
+          }
+        : null;
+    case 'note': {
+      const level = value['level'];
+      return isString(value['text']) && (level === 'info' || level === 'warn' || level === 'error')
+        ? { kind: 'note', at: value['at'], text: value['text'], level }
+        : null;
+    }
+    case 'compaction':
+      return isString(value['summary']) && isFiniteNumber(value['replacedEvents'])
+        ? {
+            kind: 'compaction',
+            at: value['at'],
+            summary: value['summary'],
+            replacedEvents: value['replacedEvents'],
+          }
+        : null;
+    default:
+      return null;
+  }
+}
+
 /** Convert one already-validated legacy transcript line without inventing protocol data. */
 export function adaptLegacyTranscriptEvent(
   event: LegacyTranscriptEvent,

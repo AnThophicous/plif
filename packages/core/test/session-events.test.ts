@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   adaptLegacyTranscriptEvent,
   decodeConversationEvent,
+  decodeLegacyTranscriptEvent,
   dedupeConversationEvents,
   recoverInterruptedTurns,
 } from '../src/session/events.js';
@@ -51,6 +52,14 @@ describe('canonical conversation events', () => {
     assert.equal(user?.kind, 'user.message');
     assert.equal(assistant?.kind, 'assistant.message');
     assert.equal(assistant?.kind === 'assistant.message' ? assistant.phase : null, 'final');
+  });
+
+  it('validates legacy records before adapting them', () => {
+    assert.deepEqual(decodeLegacyTranscriptEvent({ kind: 'user', at, text: 'oi' }), {
+      kind: 'user', at, text: 'oi',
+    });
+    assert.equal(decodeLegacyTranscriptEvent({ kind: 'tool', at, tool: 'read_file' }), null);
+    assert.equal(decodeLegacyTranscriptEvent({ kind: 'future', at }), null);
   });
 
   it('adapts legacy tools as labeled historical context', () => {
