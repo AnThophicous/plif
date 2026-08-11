@@ -164,6 +164,20 @@ export type { ModelCatalogModel, ModelCatalogProvider, ModelSelection } from './
 
 export { Session, SessionStore, workspaceKey } from './session/store.js';
 export type { SessionMeta, TranscriptEvent } from './session/store.js';
+export {
+  adaptLegacyTranscriptEvent,
+  decodeConversationEvent,
+  decodeLegacyTranscriptEvent,
+  dedupeConversationEvents,
+  eventBase,
+  recoverInterruptedTurns,
+} from './session/events.js';
+export type {
+  ConversationEvent,
+  ConversationEventV1,
+  LegacyAdaptContext,
+  LegacyTranscriptEvent,
+} from './session/events.js';
 export { declaredServers, manifestBaseUrls } from './marketplace/catalog.js';
 export { checkForUpdate, isNewer } from './update/check.js';
 export type { UpdateStatus, UpdateCheckOptions } from './update/check.js';

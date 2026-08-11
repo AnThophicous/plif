@@ -15,6 +15,7 @@ import type { ContainerState, ExecResult, ResourceUsage } from '../types.js';
 import type { Decision, PolicyAction, PolicyVerdict } from '../policy/policy.js';
 import type { SandboxCapabilityReport } from '@plif/sandbox';
 import type { McpAuthEvent } from '../auth/mcp-oauth.js';
+import type { ConversationEvent } from '../session/events.js';
 
 export interface QuestionOption {
   /** Text submitted when this row is selected. */
@@ -26,6 +27,8 @@ export interface QuestionOption {
 }
 
 export interface PlifEvents {
+  /** Stable semantic boundaries used by persistence and transcript projection. */
+  'conversation.event': ConversationEvent;
   'task.created': {
     taskId: string;
     title: string;

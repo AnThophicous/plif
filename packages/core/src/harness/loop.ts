@@ -24,6 +24,8 @@
  * within one.
  */
 
+import { randomUUID } from 'node:crypto';
+
 import { PlifError, toPlifError } from '../errors.js';
 import type { EventBus } from '../events/bus.js';
 import { safeToolCallArguments } from '../model/provider.js';
@@ -39,12 +41,15 @@ import type { Tool, ToolResult } from './tools.js';
 import type { TaskManager } from '../tasks/manager.js';
 import type { LspManager } from '../lsp/manager.js';
 import type { EditCoordinator } from './edits.js';
+import { eventBase } from '../session/events.js';
 
 export interface LoopOptions {
   readonly provider: ModelProvider;
   readonly container: Container;
   readonly questions: QuestionBroker;
   readonly bus: EventBus;
+  /** Stable identity shared by every durable event emitted during this run. */
+  readonly turnId?: string;
   readonly tools?: readonly Tool[];
   /**
    * Hard ceiling on passes through the loop.
@@ -191,6 +196,8 @@ export async function runLoop(
   history: readonly Message[],
   options: LoopOptions,
 ): Promise<LoopResult> {
+  const turnId = options.turnId ?? randomUUID();
+  const loopStartedAt = Date.now();
   const tools = options.tools ?? DEFAULT_TOOLS;
   const registry = toolRegistry(tools);
   const specs = toolSpecs(tools);
@@ -343,6 +350,10 @@ export async function runLoop(
     // the conversation, and every later assistant turn must carry the field —
     // empty string included — or the provider can reject the next request.
     if (turnReasoning) sawReasoning = true;
+    const protocolToolCalls = requested.map((call) => ({
+      ...call,
+      arguments: safeToolCallArguments(call.arguments),
+    }));
     messages.push({
       role: 'assistant',
       content: turnText,
@@ -351,12 +362,16 @@ export async function runLoop(
         ? {
             // Keep the raw call in `requested` for the local parse error, but
             // never replay malformed JSON as assistant history.
-            toolCalls: requested.map((call) => ({
-              ...call,
-              arguments: safeToolCallArguments(call.arguments),
-            })),
+            toolCalls: protocolToolCalls,
           }
         : {}),
+    });
+    options.bus.emit('conversation.event', {
+      ...eventBase('assistant.message', turnId),
+      phase: requested.length > 0 ? 'commentary' : 'final',
+      text: turnText,
+      ...(sawReasoning ? { reasoning: turnReasoning } : {}),
+      ...(protocolToolCalls.length > 0 ? { toolCalls: protocolToolCalls } : {}),
     });
 
     // No tools requested means the model considers itself finished.
@@ -400,6 +415,13 @@ export async function runLoop(
 
       const settled = await Promise.all(
         prepared.map(async (item) => {
+          options.bus.emit('conversation.event', {
+            ...eventBase('tool.started', turnId),
+            call: {
+              ...item.call,
+              arguments: safeToolCallArguments(item.call.arguments),
+            },
+          });
           const started = Date.now();
           const result =
             item.refusal !== null
@@ -429,6 +451,14 @@ export async function runLoop(
           ok: item.ok,
           durationMs: item.durationMs,
           output: terminalToolOutput(item.call.name, item),
+          ...(item.diff ? { diff: item.diff } : {}),
+        });
+        options.bus.emit('conversation.event', {
+          ...eventBase('tool.completed', turnId),
+          callId: item.call.id,
+          output: item.output,
+          ok: item.ok,
+          durationMs: item.durationMs,
           ...(item.diff ? { diff: item.diff } : {}),
         });
 
@@ -487,6 +517,22 @@ export async function runLoop(
   return done('max_iterations');
 
   function done(stop: LoopStop, error?: PlifError): LoopResult {
+    if (stop === 'complete') {
+      options.bus.emit('conversation.event', {
+        ...eventBase('turn.completed', turnId),
+        durationMs: Date.now() - loopStartedAt,
+      });
+    } else if (stop === 'cancelled') {
+      options.bus.emit('conversation.event', {
+        ...eventBase('turn.interrupted', turnId),
+        reason: 'cancelled',
+      });
+    } else {
+      options.bus.emit('conversation.event', {
+        ...eventBase('turn.failed', turnId),
+        reason: error?.message ?? stop.replaceAll('_', ' '),
+      });
+    }
     return {
       stop,
       text,
