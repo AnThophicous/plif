@@ -32,7 +32,7 @@ describe('user themes', () => {
     await fs.writeFile(path.join(directory, 'night.theme'), '{ // comment\n "name": "Night", "palette": { "text": "#eeeeee" }, }');
     await fs.writeFile(path.join(directory, 'broken.theme'), '{ "unknown": true }');
     const catalogue = await loadThemes(home);
-    assert.deepEqual(catalogue.themes.map((theme) => theme.id), ['minimal', 'night']);
+    assert.deepEqual(catalogue.themes.map((theme) => theme.id), ['minimal', 'midnight', 'night']);
     assert.equal(catalogue.problems.length, 1);
   });
 });

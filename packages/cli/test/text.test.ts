@@ -112,3 +112,24 @@ describe('displayWidth', () => {
     assert.equal(displayWidth('hello world'), 11);
   });
 });
+
+describe('width of characters a terminal draws as emoji', () => {
+  it('counts a default-emoji character as the two cells it occupies', () => {
+    // Missed by the hand-written astral ranges: these all live in the BMP, and
+    // counting them as one cell is a column of misalignment per occurrence.
+    for (const glyph of ['⌛', '✅', '⭐', '⛔', '❌']) {
+      assert.equal(displayWidth(glyph), 2, `${glyph} should measure two cells`);
+    }
+  });
+
+  it('leaves the box-drawing and geometric marks the interface is built from', () => {
+    for (const glyph of ['●', '•', '▌', '◆', '▸', '✦', '✓', '✗', '│', '└', '█', '░']) {
+      assert.equal(displayWidth(glyph), 1, `${glyph} should measure one cell`);
+    }
+  });
+
+  it('still honours an explicit variation selector', () => {
+    assert.equal(displayWidth('⚠'), 1);
+    assert.equal(displayWidth('⚠️'), 2);
+  });
+});

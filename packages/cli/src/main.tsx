@@ -14,6 +14,7 @@
  */
 
 import process from 'node:process';
+import { randomUUID } from 'node:crypto';
 
 import { render } from 'ink';
 import React from 'react';
@@ -38,6 +39,7 @@ import {
   SkillRegistry,
   parseServerConfigs,
   DEFAULT_CONTEXT_TOKENS,
+  eventBase,
   runLoop,
   subagentTool,
   WEB_TOOLS,
@@ -61,10 +63,10 @@ import {
 import type { GlobalConfig, Session } from '@plif/core';
 
 import { App } from './app.js';
-import { renderBanner } from './banner.js';
 import { HELP_TOPICS, USAGE, parseArgv } from './argv.js';
 import type { GlobalFlags, Invocation } from './argv.js';
 import { formatDuration, formatRelative, plain } from './print.js';
+import { workedSeparator } from './theme.js';
 import { containerMount, containerWorkdir } from './container-paths.js';
 import { activateTheme, loadThemes } from './themes.js';
 import { detachImmediateInkResize } from './terminal-resize.js';
@@ -361,14 +363,35 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
   const themeCatalogue = await loadThemes();
   for (const problem of themeCatalogue.problems) process.stderr.write(`plif theme: ${problem}\n`);
   const appearance = await loadGlobalConfig();
+  const initialTheme = appearance.effort === 'plif'
+    ? themeCatalogue.themes.find((theme) => theme.id === 'midnight') ?? themeCatalogue.themes[0]!
+    : themeCatalogue.themes.find((theme) => theme.id === appearance.theme) ?? themeCatalogue.themes[0]!;
   activateTheme(
-    themeCatalogue.themes.find((theme) => theme.id === appearance.theme) ?? themeCatalogue.themes[0]!,
+    initialTheme,
   );
   const done = installTeardown(engine);
 
   const provider = await buildProvider(engine, invocation.flags);
+  const promptConfig = resolveConfig(await loadStoredConfig(engine.paths), {
+    ...(invocation.flags.model ? { model: invocation.flags.model } : {}),
+    ...(invocation.flags.baseURL ? { baseURL: invocation.flags.baseURL } : {}),
+    ...(invocation.flags.preset ? { preset: invocation.flags.preset } : {}),
+    ...(invocation.flags.apiKey ? { apiKey: invocation.flags.apiKey } : {}),
+  });
   const session = await engine.sessions.create(invocation.flags.workspace);
-  await session.append({ kind: 'user', at: new Date().toISOString(), text: invocation.text });
+  const userEvent = {
+    ...eventBase('user.message', randomUUID()),
+    text: invocation.text,
+  };
+  const turnId = userEvent.turnId;
+  await session.append(userEvent);
+  await session.append({
+    ...eventBase('turn.started', turnId),
+    userEventId: userEvent.eventId,
+  });
+  const stopPersisting = engine.bus.on('conversation.event', (event) => {
+    void session.append(event);
+  });
 
   // Ctrl+C during a long run should stop the stream and the tools, not orphan
   // them. One signal is threaded through the model call and every exec.
@@ -395,7 +418,8 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
     if (event.phase !== 'end') return;
     process.stderr.write(`  ${event.ok ? '·' : '!'} ${event.name} (${event.durationMs}ms)\n`);
   });
-  engine.bus.on('agent.text', (event) => process.stdout.write(event.delta));
+  // stdout is committed only after the provider finishes a valid attempt.
+  // A pipe cannot erase partial bytes when a failed stream is reset.
 
   // Thinking goes to stderr, never to stdout. `plif prompt` is meant to be
   // piped, and a reasoning model's interior monologue in the middle of the
@@ -404,6 +428,10 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
   engine.bus.on('agent.thinking', (event) => {
     if (event.phase !== 'end') return;
     process.stderr.write(`  ${'✦'} thought for ${Math.round((event.durationMs ?? 0) / 100) / 10}s\n`);
+  });
+
+  engine.bus.on('agent.cycle', (event) => {
+    process.stderr.write(`  ${workedSeparator(event.durationMs, Math.max(20, (process.stderr.columns ?? 80) - 2))}\n`);
   });
 
   engine.bus.on('agent.compacting', (event) => {
@@ -503,6 +531,7 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
             memory: summariseMemory(snapshot),
             notes: snapshot.notes,
             sandboxGaps: engine.sandboxReport.degradations,
+            effort: promptConfig.effort,
             ...(agentInstructions ? { agentInstructions } : {}),
             ...(activeProfile
               ? { profile: { name: activeProfile.name ?? activeProfileName!, systemPrompt: activeProfile.systemPrompt } }
@@ -516,6 +545,7 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
         container,
         questions: engine.questions,
         bus: engine.bus,
+        turnId,
         signal: abort.signal,
         memory: engine.memory,
         workspace: invocation.flags.workspace,
@@ -528,6 +558,7 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
       },
     );
 
+    if (result.text) process.stdout.write(result.text);
     process.stdout.write('\n');
     if (result.stop !== 'complete') {
       process.stderr.write(`\n(stopped: ${result.stop})\n`);
@@ -541,14 +572,8 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
       );
     }
 
-    if (result.text) {
-      await session.append({
-        kind: 'assistant',
-        at: new Date().toISOString(),
-        text: result.text,
-      });
-    }
   } finally {
+    stopPersisting();
     await tasks.stopAll();
     await lsp.stop();
     await mcp.close();
@@ -648,16 +673,28 @@ async function runInteractive(
   const themeCatalogue = await loadThemes();
   for (const problem of themeCatalogue.problems) process.stderr.write(`plif theme: ${problem}\n`);
   const appearance = await loadGlobalConfig();
-  activateTheme(
-    themeCatalogue.themes.find((theme) => theme.id === appearance.theme) ?? themeCatalogue.themes[0]!,
-  );
+  const initialTheme = appearance.effort === 'plif'
+    ? themeCatalogue.themes.find((theme) => theme.id === 'midnight') ?? themeCatalogue.themes[0]!
+    : themeCatalogue.themes.find((theme) => theme.id === appearance.theme) ?? themeCatalogue.themes[0]!;
+  activateTheme(initialTheme);
   const done = installTeardown(engine);
 
   let session: Session | null = null;
 
   if (invocation.kind === 'continue') {
-    session = await engine.sessions.latest(invocation.flags.workspace);
+    session = invocation.id
+      ? await engine.sessions.resolve(invocation.flags.workspace, invocation.id)
+      : await engine.sessions.latest(invocation.flags.workspace);
     if (!session) {
+      if (invocation.id) {
+        process.stderr.write(
+          `plif: no session "${invocation.id}" in ${plain(invocation.flags.workspace)}.\n` +
+            '      Run `plif sessions` to see what is here.\n',
+        );
+        process.exitCode = 1;
+        await done();
+        return;
+      }
       process.stderr.write(
         `plif: no session to continue in ${plain(invocation.flags.workspace)}.\n` +
           '      Run `plif` to start one.\n',
@@ -681,24 +718,6 @@ async function runInteractive(
   // A fresh interactive run deliberately starts with no session. The App
   // creates one on the first message, so quitting without saying anything
   // leaves no empty row in `plif sessions`.
-
-  // Printed before Ink mounts, so it is ordinary scrollback that Ink never
-  // manages — and therefore cannot repaint when the frame outgrows the window.
-  const sessionCount = (await engine.sessions.list(invocation.flags.workspace)).length;
-
-  process.stdout.write(
-    [
-      '',
-      renderBanner({
-        report,
-        workspace: invocation.flags.workspace,
-        sessions: sessionCount,
-        version: VERSION,
-        width: process.stdout.columns ?? 80,
-      }),
-      '',
-    ].join('\n'),
-  );
 
   let provider: OpenAIProvider | null = null;
   let providerProblem: string | null = null;
@@ -742,10 +761,12 @@ async function runInteractive(
       cwd={invocation.flags.workspace}
       session={session}
       replay={replay}
-      sessionCount={sessionCount}
       version={VERSION}
       provider={provider}
       providerProblem={providerProblem}
+      effort={appearance.effort}
+      initialThemeId={initialTheme.id}
+      preferredThemeId={appearance.theme ?? themeCatalogue.themes[0]?.id}
       tools={tools}
       skillCatalogue={skills.catalogue()}
       mcpCatalogue=""

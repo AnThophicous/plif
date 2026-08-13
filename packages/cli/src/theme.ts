@@ -176,6 +176,22 @@ const glyphPairs = {
   tokens: ['↓', 'v'],
   /** A tool call that ran. Filled, because it is a thing that happened. */
   tool: ['⏺', 'o'],
+  /**
+   * Marks the gutter of something the agent said, as opposed to did.
+   *
+   * A text circle, deliberately not U+23FA. That one carries `Emoji=Yes`, and
+   * on Windows the text font has no glyph for it, so fallback draws it from the
+   * emoji font — coloured, and two cells wide where the layout budgeted one.
+   */
+  speak: ['●', '*'],
+  shell: ['$', '$'],
+  read: ['R', 'R'],
+  list: ['L', 'L'],
+  edit: ['±', '+/-'],
+  network: ['⌕', '/'],
+  agent: ['∷', '::'],
+  retry: ['↻', '~'],
+  question: ['?', '?'],
   /** Added line in a diff. */
   plus: ['+', '+'],
   /** Removed line in a diff. */
@@ -300,6 +316,25 @@ export function formatDuration(ms: number): string {
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);
   return `${minutes}m${seconds.toString().padStart(2, '0')}s`;
+}
+
+/** Human-friendly duration used by the cycle separators in the timeline. */
+export function formatWorkedDuration(ms: number): string {
+  const safeMs = Math.max(0, Math.round(ms));
+  if (safeMs < 1000) return `${safeMs}ms`;
+  const tenths = Math.round(safeMs / 100);
+  if (tenths < 600) return `${(tenths / 10).toFixed(1)}s`;
+  const totalSeconds = Math.round(tenths / 10);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
+}
+
+/** Width-aware rule that separates one model/tool cycle from the next. */
+export function workedSeparator(durationMs: number, width: number): string {
+  const line = supportsRichGlyphs ? '─' : '-';
+  const label = `Worked for ${formatWorkedDuration(durationMs)}`;
+  return `${line} ${label} ${line.repeat(Math.max(1, width - label.length - 3))}`;
 }
 
 export function formatCount(value: number): string {

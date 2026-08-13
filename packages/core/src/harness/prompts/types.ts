@@ -2,6 +2,7 @@ import type { ToolSpec } from '../../model/provider.js';
 import type { CapabilitySet } from '../../types.js';
 import type { ShellReport } from '../environment.js';
 import type { Guidance } from '../learning.js';
+import type { Effort } from '../../model/config.js';
 
 export type PromptMode = 'primary' | 'subagent' | 'explore' | 'review' | 'compaction';
 
@@ -12,6 +13,8 @@ export interface PromptContext {
   readonly capabilities: CapabilitySet;
   readonly isolation: string;
   readonly mode?: PromptMode;
+  /** Reasoning level selected for this provider; Plif enables its boost layer. */
+  readonly effort?: Effort;
   readonly tools?: readonly ToolSpec[];
   readonly skills?: string;
   readonly mcpServers?: string;

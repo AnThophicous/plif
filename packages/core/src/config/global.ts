@@ -64,7 +64,7 @@ export interface GlobalConfig {
   readonly temperature?: number;
   readonly maxTokens?: number;
   readonly timeoutMs?: number;
-  readonly effort?: 'low' | 'medium' | 'high' | 'xhigh';
+  readonly effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'plif';
   readonly providers?: unknown;
   /** OpenCode-style custom provider map. `providers` remains accepted. */
   readonly provider?: unknown;

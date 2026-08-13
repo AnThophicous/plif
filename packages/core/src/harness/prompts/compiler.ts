@@ -7,6 +7,7 @@ import {
 } from './context.js';
 import { environmentModule } from './environment.js';
 import { mcpModule } from './mcp.js';
+import { plifModule } from './plif.js';
 import { MODE_MODULES } from './modes/index.js';
 import { skillsModule } from './skills.js';
 import { toolsModule } from './tools.js';
@@ -23,6 +24,7 @@ const defaultModule = definePromptModule({
 
 export const DEFAULT_PROMPT_MODULES: readonly PromptModule[] = [
   defaultModule,
+  plifModule,
   ...MODE_MODULES,
   environmentModule,
   toolsModule,

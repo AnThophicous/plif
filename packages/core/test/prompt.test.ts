@@ -40,6 +40,16 @@ describe('modular system prompt', () => {
     assert.match(implicit, /Primary operating mode/);
   });
 
+  it('adds the Plif boost only when the Plif effort is selected', () => {
+    const normal = buildSystemPrompt(base);
+    const plif = buildSystemPrompt({ ...base, effort: 'plif' });
+
+    assert.doesNotMatch(normal, /## Plif effort mode/);
+    assert.match(plif, /## Plif effort mode/);
+    assert.match(plif, /implementation plan before the first mutation/);
+    assert.match(plif, /PowerShell on Windows/);
+  });
+
   it('contains no emoji itself', () => {
     const found = [...buildSystemPrompt(base)].filter((character) =>
       /\p{Extended_Pictographic}/u.test(character),
@@ -103,6 +113,19 @@ describe('modular system prompt', () => {
     assert.match(prompt, /external effect/i);
   });
 
+  it('discovers useful MCP capabilities without requiring the user to name MCP', () => {
+    const prompt = buildSystemPrompt({
+      ...base,
+      tools: [{ name: 'mcp__github__search', description: 'Search.', parameters: {} }],
+      mcpServers: '- github (http): 1 tool',
+    });
+
+    assert.match(prompt, /user does not need to mention MCP/i);
+    assert.match(prompt, /silently check/i);
+    assert.match(prompt, /skip an irrelevant or unhealthy capability/i);
+    assert.match(prompt, /continue through the normal local or dedicated-tool workflow/i);
+  });
+
   it('keeps skill instructions lazy', () => {
     const prompt = buildSystemPrompt({
       ...base,
@@ -113,6 +136,19 @@ describe('modular system prompt', () => {
     assert.match(prompt, /Available skills/);
     assert.match(prompt, /skill/);
     assert.doesNotMatch(prompt, /Run the deployment pipeline now/);
+  });
+
+  it('routes skills proactively while keeping unmatched scans quiet', () => {
+    const prompt = buildSystemPrompt({
+      ...base,
+      tools: [{ name: 'skill', description: 'Load a skill.', parameters: {} }],
+      skills: 'Package: DME Skill [active]\n  - dme-frontend: build frontend interfaces',
+    });
+
+    assert.match(prompt, /user does not need\s+to mention a skill/i);
+    assert.match(prompt, /silently scan/i);
+    assert.match(prompt, /does not require loading every child/i);
+    assert.match(prompt, /proceed normally without announcing the scan/i);
   });
 
   it('isolates the subagent contract from primary-agent collaboration', () => {

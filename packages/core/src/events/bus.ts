@@ -15,6 +15,7 @@ import type { ContainerState, ExecResult, ResourceUsage } from '../types.js';
 import type { Decision, PolicyAction, PolicyVerdict } from '../policy/policy.js';
 import type { SandboxCapabilityReport } from '@plif/sandbox';
 import type { McpAuthEvent } from '../auth/mcp-oauth.js';
+import type { ConversationEvent } from '../session/events.js';
 
 export interface QuestionOption {
   /** Text submitted when this row is selected. */
@@ -26,6 +27,8 @@ export interface QuestionOption {
 }
 
 export interface PlifEvents {
+  /** Stable semantic boundaries used by persistence and transcript projection. */
+  'conversation.event': ConversationEvent;
   'task.created': {
     taskId: string;
     title: string;
@@ -115,8 +118,25 @@ export interface PlifEvents {
     iteration: number;
     maxIterations: number;
   };
+  /** A model/tool cycle finished and the loop is about to ask the model again. */
+  'agent.cycle': {
+    iteration: number;
+    durationMs: number;
+    toolCalls: number;
+  };
   'agent.text': {
     delta: string;
+  };
+  /**
+   * Prose emitted before a model asks for tools.
+   *
+   * It remains in the assistant message sent back to the provider, but the UI
+   * decides whether it is transient clipped prose or a compact activity line.
+   */
+  'agent.pre_tool_prose': {
+    iteration: number;
+    text: string;
+    visibility: 'transient' | 'activity';
   };
   /** Thinking from a reasoning model, as it is written. */
   'agent.reasoning': {

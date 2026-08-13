@@ -1,11 +1,9 @@
 /**
  * The OpenAI-compatible provider.
  *
- * A thin translation layer over the official SDK — no retry logic, no prompt
- * templating, no token counting reimplemented. The SDK already handles
- * connection pooling, retries with backoff, and streaming; duplicating any of
- * that would be work spent building a worse version of something that ships in
- * the box.
+ * A translation layer over the official SDK. The SDK owns the wire protocol
+ * and connection pooling; this provider owns the visible retry budget because
+ * streamed output must be reset atomically when an attempt fails.
  *
  * What this file *does* own is the two things the SDK deliberately leaves to
  * the caller:
@@ -19,8 +17,12 @@
  *      api.openai.com — check OPENAI_API_KEY" is.
  */
 
-import OpenAI from 'openai';
-import type { APIError } from 'openai';
+import OpenAI, {
+  APIConnectionError,
+  APIConnectionTimeoutError,
+  APIError,
+  APIUserAbortError,
+} from 'openai';
 
 import { PlifError } from '../errors.js';
 import type { ModelConfig } from './config.js';
@@ -38,10 +40,20 @@ import type {
 } from './provider.js';
 import { NO_USAGE, safeToolCallArguments } from './provider.js';
 
-/** Attempts, including the first. Ten of them span roughly four minutes. */
-const RETRY_ATTEMPTS = 10;
-/** First wait, and the step. 5s, 10s, 15s, … */
-const RETRY_BASE_MS = 5_000;
+/** One owner, one visible budget. The SDK's hidden retries are disabled below. */
+const RETRY_ATTEMPTS = 6;
+const RETRY_BASE_MS = 1_000;
+const RETRY_MAX_WAIT_MS = 30_000;
+const RETRY_MAX_SERVER_WAIT_MS = 60_000;
+const RETRY_DEADLINE_MS = 180_000;
+
+/**
+ * Wire values accepted by current OpenAI reasoning endpoints. The installed
+ * SDK can lag the endpoint contract, so Plif keeps the superset here and
+ * narrows only at the call boundary.
+ */
+const PLIF_EFFORTS = ['max', 'xhigh', 'high', 'medium', 'low'] as const;
+type WireEffort = (typeof PLIF_EFFORTS)[number] | 'low' | 'medium';
 
 /**
  * Failures that another attempt could plausibly clear.
@@ -65,6 +77,13 @@ class StreamInterruptedError extends Error {
   }
 }
 
+class StreamIdleTimeoutError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`stream produced no data for ${timeoutMs}ms`);
+    this.name = 'StreamIdleTimeoutError';
+  }
+}
+
 /** A cancellable wait. Rejects if the signal fires first. */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -84,10 +103,62 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+function retryDelay(attempt: number, retryAfterMs: number | undefined): number {
+  if (retryAfterMs !== undefined) {
+    return Math.max(0, Math.min(retryAfterMs, RETRY_MAX_SERVER_WAIT_MS));
+  }
+  const exponential = Math.min(RETRY_BASE_MS * 2 ** (attempt - 1), RETRY_MAX_WAIT_MS);
+  const jitter = 0.8 + Math.random() * 0.4;
+  return Math.round(exponential * jitter);
+}
+
+async function nextChunk<T>(
+  iterator: AsyncIterator<T>,
+  timeoutMs: number,
+  controller: AbortController,
+  signal?: AbortSignal,
+): Promise<IteratorResult<T>> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new APIUserAbortError());
+      return;
+    }
+
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = (): void => {
+      cleanup();
+      controller.abort();
+      reject(new APIUserAbortError());
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      controller.abort();
+      reject(new StreamIdleTimeoutError(timeoutMs));
+    }, timeoutMs);
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+    void iterator.next().then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
 export class OpenAIProvider implements ModelProvider {
   readonly info: ModelInfo;
   #client: OpenAI;
   #config: ModelConfig;
+  /** Highest Plif candidate accepted by this provider instance. */
+  #plifEffortIndex = 0;
 
   constructor(config: ModelConfig) {
     this.#config = config;
@@ -100,9 +171,9 @@ export class OpenAIProvider implements ModelProvider {
       apiKey: config.apiKey,
       baseURL: config.baseURL,
       timeout: config.timeoutMs,
-      // The SDK retries idempotent failures on its own; two is enough to ride
-      // out a blip without making a wedged endpoint take a minute to report.
-      maxRetries: 2,
+      // Retry belongs to this provider so attempts, waits, cancellation and
+      // partial-output resets share one budget and remain visible to the UI.
+      maxRetries: 0,
     });
     this.info = {
       id: config.model,
@@ -114,17 +185,15 @@ export class OpenAIProvider implements ModelProvider {
   /**
    * Stream, and keep trying when the endpoint is the thing that broke.
    *
-   * The SDK already retries a failed *request*, but not a failed *stream* — and
-   * the failure that actually costs a session is the one that arrives mid-flight
+   * The failure that actually costs a session is the one that arrives mid-flight
    * with a 500. OpenCode Zen fans out across upstreams, so a bad minute on one
    * of them surfaces as `Internal server error: function_call arguments JSON
    * parse error` and kills a turn that was thirty seconds in. That is worth
    * waiting out rather than handing back to the developer.
    *
-   * The backoff is linear, not exponential: 5s, 10s, 15s and so on to ten
-   * attempts, about four minutes in total. Linear because the thing being
-   * waited out is an upstream blip measured in seconds, and an exponential
-   * curve spends its last two attempts asleep for longer than the whole outage.
+   * One capped exponential schedule with jitter covers connection, HTTP and
+   * stream failures. Retry-After wins when the endpoint supplies it, bounded by
+   * the same global deadline so a bad host cannot hold the turn indefinitely.
    *
    * Only failures that could plausibly clear on their own are retried. A
    * rejected key or an unknown model id will be just as rejected in forty-five
@@ -132,6 +201,7 @@ export class OpenAIProvider implements ModelProvider {
    */
   async *stream(request: CompletionRequest): AsyncGenerator<CompletionEvent> {
     let delivered = false;
+    const startedAt = Date.now();
 
     for (let attempt = 1; ; attempt += 1) {
       try {
@@ -141,8 +211,25 @@ export class OpenAIProvider implements ModelProvider {
         }
         return;
       } catch (error) {
+        // Capability negotiation is separate from transport retries. A 400
+        // that rejects only the requested reasoning level should immediately
+        // fall back to the next supported level without burning the retry
+        // budget intended for a failing endpoint.
+        if (this.#advancePlifEffort(error)) {
+          if (delivered) {
+            yield { kind: 'reset' };
+            delivered = false;
+          }
+          // Capability probing is not an endpoint retry. Keep the visible
+          // transport-attempt budget unchanged while moving down the ladder.
+          attempt -= 1;
+          continue;
+        }
         const plif = this.#translate(error);
-        const last = attempt >= RETRY_ATTEMPTS;
+        const retryAfterMs = retryAfterOf(error);
+        const waitMs = retryDelay(attempt, retryAfterMs);
+        const deadlineReached = Date.now() - startedAt + waitMs >= RETRY_DEADLINE_MS;
+        const last = attempt >= RETRY_ATTEMPTS || deadlineReached;
 
         if (last || !RETRYABLE.has(plif.code) || request.signal?.aborted) {
           if (attempt === 1) throw plif;
@@ -155,7 +242,6 @@ export class OpenAIProvider implements ModelProvider {
           });
         }
 
-        const waitMs = RETRY_BASE_MS * attempt;
         // Discard the half-delivered turn before announcing the retry, so
         // nothing is ever showing two attempts at once.
         if (delivered) {
@@ -171,7 +257,7 @@ export class OpenAIProvider implements ModelProvider {
         };
 
         try {
-          await sleep(waitMs, request.signal);
+          await this.waitBeforeRetry(waitMs, request.signal);
         } catch {
           // Cancelled while waiting. Not a failure to report — the developer
           // asked for it to stop.
@@ -200,6 +286,14 @@ export class OpenAIProvider implements ModelProvider {
     >;
   }
 
+  protected waitBeforeRetry(ms: number, signal?: AbortSignal): Promise<void> {
+    return sleep(ms, signal);
+  }
+
+  protected streamIdleTimeoutMs(): number {
+    return Math.max(1_000, Math.min(this.#config.timeoutMs, 30_000));
+  }
+
   async *#attempt(request: CompletionRequest): AsyncGenerator<CompletionEvent> {
     const pending = new ToolCallBuffer();
     // Two channels arrive as one on models that write `<think>` into content.
@@ -211,6 +305,12 @@ export class OpenAIProvider implements ModelProvider {
     let reason: FinishReason = 'stop';
     let usage: Usage = NO_USAGE;
     let finished = false;
+    const attemptAbort = new AbortController();
+    const idleTimeoutMs = this.streamIdleTimeoutMs();
+    let iterator: AsyncIterator<OpenAI.Chat.ChatCompletionChunk> | undefined;
+    const onRequestAbort = (): void => attemptAbort.abort();
+    request.signal?.addEventListener('abort', onRequestAbort, { once: true });
+    if (request.signal?.aborted) attemptAbort.abort();
 
     try {
       const response = await this.createStream(
@@ -227,7 +327,9 @@ export class OpenAIProvider implements ModelProvider {
             ? { max_tokens: request.maxTokens ?? this.#config.maxTokens }
             : {}),
           ...(this.#config.effort
-            ? { reasoning_effort: this.#config.effort === 'xhigh' ? 'high' : this.#config.effort }
+            ? {
+                reasoning_effort: this.#wireEffort() as unknown as OpenAI.Chat.ChatCompletionReasoningEffort,
+              }
             : {}),
           ...(request.tools?.length
             ? {
@@ -242,10 +344,14 @@ export class OpenAIProvider implements ModelProvider {
               }
             : {}),
         },
-        request.signal ? { signal: request.signal } : {},
+        { signal: attemptAbort.signal },
       );
 
-      for await (const chunk of response) {
+      iterator = response[Symbol.asyncIterator]();
+      while (true) {
+        const next = await nextChunk(iterator, idleTimeoutMs, attemptAbort, request.signal);
+        if (next.done) break;
+        const chunk = next.value;
         if (chunk.usage) {
           usage = {
             promptTokens: chunk.usage.prompt_tokens ?? 0,
@@ -268,7 +374,9 @@ export class OpenAIProvider implements ModelProvider {
         const thinking = reasoningFromDelta(choice.delta);
         if (thinking) {
           const delta = reasoningDeltas.push(thinking);
-          if (delta) yield { kind: 'reasoning', delta };
+          if (delta) {
+            yield { kind: 'reasoning', delta };
+          }
         }
 
         for (const fragment of choice.delta?.tool_calls ?? []) {
@@ -295,7 +403,8 @@ export class OpenAIProvider implements ModelProvider {
 
       // Tool calls are emitted only once the stream is complete, because their
       // arguments are not valid JSON until the last fragment has arrived.
-      for (const call of pending.drain()) {
+      const calls = pending.drain();
+      for (const call of calls) {
         yield { kind: 'tool', call };
       }
 
@@ -308,7 +417,36 @@ export class OpenAIProvider implements ModelProvider {
       // Raw, not translated. The retry loop above translates once and needs the
       // code to decide whether another attempt could possibly help.
       throw error;
+    } finally {
+      attemptAbort.abort();
+      request.signal?.removeEventListener('abort', onRequestAbort);
+      if (iterator?.return) {
+        try {
+          void Promise.resolve(iterator.return()).catch(() => undefined);
+        } catch {
+          // The request is already terminal; iterator cleanup cannot change it.
+        }
+      }
     }
+  }
+
+  #wireEffort(): WireEffort {
+    if (this.#config.effort === 'plif') {
+      return PLIF_EFFORTS[this.#plifEffortIndex] ?? 'high';
+    }
+    // Preserve the existing compatibility behavior for explicit xhigh. Plif
+    // is the mode that negotiates beyond the SDK's currently typed values.
+    if (this.#config.effort === 'xhigh') return 'high';
+    return this.#config.effort ?? 'high';
+  }
+
+  #advancePlifEffort(error: unknown): boolean {
+    if (this.#config.effort !== 'plif') return false;
+    const current = PLIF_EFFORTS[this.#plifEffortIndex];
+    if (!current || this.#plifEffortIndex >= PLIF_EFFORTS.length - 1) return false;
+    if (!isUnsupportedReasoningEffort(error, current)) return false;
+    this.#plifEffortIndex += 1;
+    return true;
   }
 
   async probe(): Promise<{ ok: boolean; detail: string }> {
@@ -347,13 +485,23 @@ export class OpenAIProvider implements ModelProvider {
    */
   #translate(error: unknown): PlifError {
     const host = safeHost(this.#config.baseURL);
-    const api = error as Partial<APIError> & { status?: number; code?: string };
+    const api = error as Partial<APIError> & { status?: number; code?: string | null };
 
     if (error instanceof StreamInterruptedError) {
       return new PlifError('MODEL_UNAVAILABLE', `${host} closed the stream early`, {
         cause: error,
         detail: { endpoint: this.#config.baseURL, reason: 'incomplete_stream' },
         hint: 'The response was incomplete. Retrying the request from the beginning.',
+      });
+    }
+
+    if (error instanceof StreamIdleTimeoutError || error instanceof APIConnectionTimeoutError) {
+      const timeoutMs =
+        error instanceof StreamIdleTimeoutError ? error.timeoutMs : this.#config.timeoutMs;
+      return new PlifError('MODEL_TIMEOUT', `${host} stopped responding`, {
+        cause: error,
+        detail: { timeoutMs, endpoint: this.#config.baseURL, phase: 'stream' },
+        hint: 'The request stalled. Retrying it from the beginning.',
       });
     }
 
@@ -386,8 +534,15 @@ export class OpenAIProvider implements ModelProvider {
     if (api?.status === 429) {
       return new PlifError('MODEL_RATE_LIMIT', `${host} is rate limiting this key`, {
         cause: error,
-        detail: { status: 429 },
+        detail: { status: api.status, retryAfterMs: retryAfterOf(error) },
         hint: 'Wait, lower the request rate, or switch to another endpoint.',
+      });
+    }
+    if (api?.status === 408 || api?.status === 409 || api?.status === 425) {
+      return new PlifError('MODEL_UNAVAILABLE', `${host} returned retryable status ${api.status}`, {
+        cause: error,
+        detail: { status: api.status, retryAfterMs: retryAfterOf(error) },
+        hint: 'The endpoint asked for the request to be retried.',
       });
     }
     if (api?.status !== undefined && api.status >= 500) {
@@ -404,13 +559,9 @@ export class OpenAIProvider implements ModelProvider {
     // useless string "Connection error." instead of a hint that says which
     // port to start.
     const code = api?.code ?? errnoOf(error);
-    const isConnection =
-      (error as Error)?.name === 'APIConnectionError' ||
-      code === 'ECONNREFUSED' ||
-      code === 'ENOTFOUND' ||
-      code === 'EAI_AGAIN';
+    const isConnection = error instanceof APIConnectionError || TRANSIENT_ERRNOS.has(code ?? '');
 
-    if (isConnection && (error as Error)?.name !== 'APIConnectionTimeoutError') {
+    if (isConnection && !(error instanceof APIConnectionTimeoutError)) {
       return new PlifError('MODEL_UNAVAILABLE', `could not reach ${host}`, {
         cause: error,
         detail: { code, endpoint: this.#config.baseURL },
@@ -419,11 +570,23 @@ export class OpenAIProvider implements ModelProvider {
           : 'Check the base URL and your network connection.',
       });
     }
-    if (code === 'ETIMEDOUT' || (error as Error)?.name === 'APIConnectionTimeoutError') {
+    if (code === 'ETIMEDOUT') {
       return new PlifError('MODEL_TIMEOUT', `${host} did not respond in time`, {
         cause: error,
         detail: { timeoutMs: this.#config.timeoutMs },
         hint: 'Raise PLIF_TIMEOUT_MS, or pick a faster model.',
+      });
+    }
+
+
+    // Compatible gateways sometimes report an upstream SSE failure as an
+    // APIError without an HTTP status. It is a provider/transport failure, not
+    // a malformed user request, and is safe to retry before any tool executes.
+    if (error instanceof APIError && api.status === undefined) {
+      return new PlifError('MODEL_UNAVAILABLE', `${host} interrupted the response`, {
+        cause: error,
+        detail: { code: api.code, endpoint: this.#config.baseURL, phase: 'stream' },
+        hint: 'The upstream stream failed. Retrying the request from the beginning.',
       });
     }
 
@@ -432,6 +595,36 @@ export class OpenAIProvider implements ModelProvider {
       detail: { endpoint: this.#config.baseURL },
     });
   }
+}
+
+function isUnsupportedReasoningEffort(error: unknown, candidate: string): boolean {
+  const status = statusOf(error);
+  if (status !== 400 && status !== 422) return false;
+  const message = errorChainText(error).toLowerCase();
+  const namesTheEndpoint = message.includes('reasoning_effort') || message.includes('reasoning effort');
+  const mentionsCandidate = message.includes(candidate.toLowerCase());
+  const rejection = /unsupported|not supported|invalid|unknown|unrecognized|unrecognised|must be one/.test(message);
+  return namesTheEndpoint && rejection && (mentionsCandidate || message.includes('must be one'));
+}
+
+function statusOf(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const status = (error as { status?: unknown }).status;
+  if (typeof status === 'number') return status;
+  return statusOf((error as { cause?: unknown }).cause);
+}
+
+function errorChainText(error: unknown, depth = 0): string {
+  if (depth > 4 || error === null || error === undefined) return '';
+  if (typeof error === 'string') return error;
+  if (error instanceof Error) {
+    return `${error.message} ${errorChainText(error.cause, depth + 1)}`;
+  }
+  if (typeof error === 'object') {
+    const value = error as { message?: unknown; cause?: unknown; error?: unknown };
+    return `${typeof value.message === 'string' ? value.message : ''} ${errorChainText(value.cause, depth + 1)} ${errorChainText(value.error, depth + 1)}`;
+  }
+  return String(error);
 }
 
 /**
@@ -560,9 +753,37 @@ function errnoOf(error: unknown, depth = 0): string | undefined {
   return errnoOf((error as { cause?: unknown }).cause, depth + 1);
 }
 
+const TRANSIENT_ERRNOS = new Set([
+  'ECONNABORTED',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'EAI_AGAIN',
+  'ENETDOWN',
+  'ENETUNREACH',
+  'ENOTFOUND',
+  'EPIPE',
+  'ERR_STREAM_PREMATURE_CLOSE',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+
+function retryAfterOf(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const headers = (error as { headers?: Record<string, string> }).headers;
+  const raw = headers?.['retry-after'] ?? headers?.['Retry-After'];
+  if (!raw) return undefined;
+
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1_000);
+
+  const date = Date.parse(raw);
+  if (!Number.isFinite(date)) return undefined;
+  return Math.max(0, date - Date.now());
+}
+
 function isAbort(error: unknown): boolean {
-  const name = (error as Error)?.name;
-  return name === 'AbortError' || name === 'APIUserAbortError';
+  return error instanceof APIUserAbortError || (error as Error)?.name === 'AbortError';
 }
 
 function safeHost(baseURL: string): string {

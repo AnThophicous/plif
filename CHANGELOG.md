@@ -2,6 +2,40 @@
 
 All notable changes to plif. This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-preview.0] — 2026-08-11
+
+Preview release for the new conversation harness, navigable Ink interface, MCP reliability work, and skill packages. 622 tests passing.
+
+### Added
+
+- **Canonical conversation history.** Versioned session events now preserve user messages, assistant commentary/final responses, tool calls and results, approvals, questions, compaction, failures, and interrupted turns without flattening provider roles.
+- **Navigable transcript.** `Ctrl+T` opens the complete transcript; arrows, Page Up/Page Down, Home/End, and Esc provide line, page, boundary, and close navigation while native terminal scrollback remains available.
+- **DME skill package and discovery tools.** Skills can be grouped, inspected, loaded on demand, and routed proactively without flooding the conversation. The DME package ships with focused design capabilities while flat legacy skills remain compatible.
+- **Work dock and Plif focus frame.** Background tasks and subagents share a compact surface, with responsive context/workspace information attached to the existing Ink composer identity.
+- **Durable memory ranking.** Reusable facts are ranked by confirmation, contradiction, recency, and prompt budget instead of being selected only by arrival order.
+
+### Changed
+
+- The normal TUI is content-sized instead of reserving the entire terminal. The compact session header remains visible, while only the transcript and extension browser use full-screen layouts.
+- Model text and reasoning update the timeline directly from SSE deltas; the active answer is also visible in the `Ctrl+T` transcript before it is persisted.
+- Completion tokens are estimated independently of SSE chunk boundaries and reconciled with cumulative provider usage. Slash and shell commands no longer increment agent turns or start the agent timer.
+- Routine tool activity is compacted, while diffs, failures, approvals, and questions retain dedicated rows. Running state, spacing, narrow-terminal collapse order, and Windows resize handling were simplified.
+- Prompt compilation now gives MCP and skills clearer discovery, fallback, and error-isolation instructions.
+
+### Fixed
+
+- Resumed sessions reconstruct protocol-correct assistant tool calls and `tool` results instead of fabricating assistant prose.
+- Truncated or mixed legacy JSONL sessions recover prior valid events and mark unfinished work as interrupted rather than leaving a permanent running row.
+- MCP connection and tool failures remain bounded to the affected server/tool instead of destabilizing the whole harness.
+- OpenAI-compatible streaming handles interrupted/idle SSE responses, visible retry/reset behavior, reasoning-field variants, and reasoning-effort capability fallback more consistently.
+- The opening header is no longer pushed out of view by a terminal-height dynamic frame, and `Plif Thinking` is no longer duplicated inside the input.
+
+### Preview install
+
+```powershell
+npm install -g @plif/cli@preview
+```
+
 ## [0.2.0] — 2026-08-09
 
 <img src="assets/changelog-0.2.0.svg" alt="plif 0.1.0 to 0.2.0" width="860">
@@ -40,5 +74,6 @@ All notable changes to plif. This project follows [Semantic Versioning](https://
 
 First release.
 
+[0.3.0-preview.0]: https://github.com/AnThophicous/plif/compare/v0.2.0...v0.3.0-preview.0
 [0.2.0]: https://github.com/AnThophicous/plif/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/AnThophicous/plif/releases/tag/v0.1.0

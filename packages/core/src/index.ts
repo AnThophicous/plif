@@ -33,7 +33,13 @@ export {
   skillTool,
   writeSkill,
 } from './harness/skills.js';
-export type { Skill, SkillDraft, SkillScope, SkillSources } from './harness/skills.js';
+export type {
+  Skill,
+  SkillDraft,
+  SkillPackage,
+  SkillScope,
+  SkillSources,
+} from './harness/skills.js';
 export {
   McpRegistry,
   expandMcpEnvironment,
@@ -62,7 +68,7 @@ export { runLoop, runCompaction } from './harness/loop.js';
 export type { CompactionRun } from './harness/loop.js';
 export { COMPACTION_STAGES, compact, estimateTokens, pinnedIndices } from './harness/compaction.js';
 export type { CompactionOptions, CompactionResult } from './harness/compaction.js';
-export { MemoryStore, strategyId, strategyStatus, summariseMemory } from './harness/memory.js';
+export { MemoryStore, rankFacts, strategyId, strategyStatus, summariseMemory } from './harness/memory.js';
 export type { Fact, FactKind, MemorySnapshot } from './harness/memory.js';
 export { DEFAULT_CONTEXT_TOKENS } from './harness/loop.js';
 export type { LoopOptions, LoopResult, LoopStop } from './harness/loop.js';
@@ -76,7 +82,10 @@ export {
     getConfig,
     updateConfig,
   updatePlan,
+  applyPatch,
   editFile,
+  globFiles,
+  grepFiles,
   listDir,
   readFile,
   remember,
@@ -164,6 +173,20 @@ export type { ModelCatalogModel, ModelCatalogProvider, ModelSelection } from './
 
 export { Session, SessionStore, workspaceKey } from './session/store.js';
 export type { SessionMeta, TranscriptEvent } from './session/store.js';
+export {
+  adaptLegacyTranscriptEvent,
+  decodeConversationEvent,
+  decodeLegacyTranscriptEvent,
+  dedupeConversationEvents,
+  eventBase,
+  recoverInterruptedTurns,
+} from './session/events.js';
+export type {
+  ConversationEvent,
+  ConversationEventV1,
+  LegacyAdaptContext,
+  LegacyTranscriptEvent,
+} from './session/events.js';
 export { declaredServers, manifestBaseUrls } from './marketplace/catalog.js';
 export { checkForUpdate, isNewer } from './update/check.js';
 export type { UpdateStatus, UpdateCheckOptions } from './update/check.js';

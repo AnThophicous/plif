@@ -95,8 +95,27 @@ describe('SkillRegistry', () => {
   it('carries the writing, design and authoring builtins', () => {
     const names = BUILTIN_SKILLS.map((skill) => skill.name);
     assert.ok(names.includes('anti-ai-slop'));
-    assert.ok(names.includes('dme-eclipse-design'));
+    for (const name of [
+      'dme-frontend',
+      'dme-design-system',
+      'dme-wireframe',
+      'dme-ui-options',
+      'dme-interactive-prototype',
+      'dme-visual-verification',
+    ]) {
+      assert.ok(names.includes(name), `${name} is missing from the DME package`);
+    }
     assert.ok(names.includes('skill-creator'));
+  });
+
+  it('shows the DME package as active and exposes its child skills', async () => {
+    const registry = await SkillRegistry.load({ workspace, root });
+    const catalogue = registry.catalogue();
+
+    assert.match(catalogue, /Package: DME Skill \[active\]/);
+    assert.match(catalogue, /  - dme-frontend:/);
+    assert.match(catalogue, /  - dme-design-system:/);
+    assert.equal(catalogue.includes('The failure it exists to prevent'), false);
   });
 
   it('writes a skill and makes it loadable in the same session', async () => {
@@ -208,6 +227,17 @@ describe('SkillRegistry', () => {
 
     assert.equal(result.ok, true);
     assert.match(result.output, /do the project thing/);
+  });
+
+  it('loads one DME child without loading the entire package', async () => {
+    const registry = await SkillRegistry.load({ workspace, root });
+    const result = await skillTool(registry).run({ name: 'dme-wireframe' }, context);
+
+    assert.equal(result.ok, true);
+    assert.match(result.output, /Skill package: DME Skill/);
+    assert.match(result.output, /Skill: dme-wireframe/);
+    assert.match(result.output, /three to five structurally different options/i);
+    assert.doesNotMatch(result.output, /Skill: dme-interactive-prototype/);
   });
 
   it('lists what exists when asked for a skill that does not', async () => {

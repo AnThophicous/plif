@@ -53,12 +53,97 @@ export interface McpServerStatus {
   readonly detail: string;
 }
 
-const CONNECT_TIMEOUT_MS = 20_000;
+/**
+ * Connect deadlines, split by transport because they are different problems.
+ *
+ * An HTTP server is either reachable or it is not, and twenty seconds is
+ * already generous for a handshake. A stdio server is a process this machine
+ * has to start — and the common form of that is `npx some-mcp@latest`, which on
+ * first use downloads the package before it says a word. Holding both to the
+ * HTTP figure is why a freshly configured stdio server "randomly" fails once
+ * and then works: the download outlived the deadline.
+ */
+const HTTP_CONNECT_TIMEOUT_MS = 20_000;
+const STDIO_CONNECT_TIMEOUT_MS = 90_000;
+/**
+ * A connected server still has to answer `tools/list`.
+ *
+ * Uncovered, this is the one failure that takes plif with it: `start()` awaits
+ * every server, so one that completes its handshake and then never replies
+ * leaves the whole session hanging before the first frame.
+ */
+const LIST_TOOLS_TIMEOUT_MS = 20_000;
 const CALL_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT = 24_000;
+const MAX_REASON = 180;
+const HTML_START = /<!doctype html|<html[\s>]/i;
+const HTML_TITLE = /<title[^>]*>([\s\S]*?)<\/title>/i;
+const HTML_ENTITY = /&(#x[0-9a-f]+|#\d+|[a-z]+);/gi;
+const NAMED_ENTITIES: Readonly<Record<string, string>> = {
+  amp: '&', apos: "'", gt: '>', hellip: '…', laquo: '«', ldquo: '“', lsquo: '‘',
+  lt: '<', mdash: '—', middot: '·', nbsp: ' ', ndash: '–', quot: '"', raquo: '»',
+  rdquo: '”', rsquo: '’',
+};
 
 function isHttp(config: McpServerConfig): config is HttpServerConfig {
   return 'url' in config;
+}
+
+/**
+ * Race a deadline, and clear the timer whichever side wins.
+ *
+ * The timer has to be cleared on success too. A bare `Promise.race` against a
+ * `setTimeout` leaves the timer armed, and with a dozen servers and a retry
+ * each that is a steady drip of wakeups for a session that already connected.
+ */
+async function withDeadline<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${what} did not respond within ${ms}ms`)), ms);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+const DROPPED = /not connected|connection closed|closed|econnreset|epipe|socket hang up|terminated|write after end/i;
+
+/** Whether a failed call is worth one reconnect rather than being reported. */
+export function isDroppedConnection(error: unknown): boolean {
+  return DROPPED.test(error instanceof Error ? error.message : String(error));
+}
+
+function decodeEntities(value: string): string {
+  return value.replace(HTML_ENTITY, (whole, code: string) => {
+    if (!code.startsWith('#')) return NAMED_ENTITIES[code.toLowerCase()] ?? whole;
+    const point = code[1] === 'x' || code[1] === 'X'
+      ? Number.parseInt(code.slice(2), 16)
+      : Number.parseInt(code.slice(1), 10);
+    return Number.isInteger(point) && point > 0 && point <= 0x10ffff
+      ? String.fromCodePoint(point)
+      : whole;
+  });
+}
+
+export function condenseMcpFailure(reason: string): string {
+  const match = HTML_START.exec(reason);
+  if (!match) {
+    const flat = reason.replace(/\s+/g, ' ').trim();
+    return flat.length > MAX_REASON ? `${flat.slice(0, MAX_REASON - 1)}…` : flat;
+  }
+
+  const prefix = reason.slice(0, match.index).replace(/[\s:—-]+$/, '').replace(/\s+/g, ' ').trim();
+  const raw = HTML_TITLE.exec(reason)?.[1];
+  const title = raw === undefined ? undefined : decodeEntities(raw).replace(/\s+/g, ' ').trim();
+  const summary = title
+    ? `answered with an HTML page titled "${title}", so it is not an MCP endpoint`
+    : 'answered with an HTML page, so it is not an MCP endpoint';
+  return prefix ? `${summary} (${prefix})` : summary;
 }
 
 export function qualifiedToolName(server: string, tool: string): string {
@@ -185,15 +270,10 @@ class McpServer {
         });
     this.#httpTransport = transport instanceof StreamableHTTPClientTransport ? transport : undefined;
 
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`did not respond within ${CONNECT_TIMEOUT_MS}ms`)),
-        CONNECT_TIMEOUT_MS,
-      ).unref?.(),
-    );
+    const deadline = isHttp(this.#config) ? HTTP_CONNECT_TIMEOUT_MS : STDIO_CONNECT_TIMEOUT_MS;
 
     try {
-      await Promise.race([client.connect(transport), timeout]);
+      await withDeadline(client.connect(transport), deadline, `"${this.name}"`);
     } catch (error) {
       if (
         error instanceof UnauthorizedError &&
@@ -208,11 +288,26 @@ class McpServer {
         await client.close().catch(() => undefined);
         return this.connect(true);
       }
+      // A handshake that lost its race is still running, and for stdio that is
+      // a spawned process holding a pipe for the rest of the session. Closing
+      // the client is what actually reaps it.
+      await client.close().catch(() => undefined);
       throw error;
     }
-    this.#client = client;
 
-    const listed = await client.listTools();
+    let listed: Awaited<ReturnType<Client['listTools']>>;
+    try {
+      listed = await withDeadline(
+        client.listTools(),
+        LIST_TOOLS_TIMEOUT_MS,
+        `"${this.name}" tool list`,
+      );
+    } catch (error) {
+      await client.close().catch(() => undefined);
+      throw error;
+    }
+
+    this.#client = client;
     this.#tools = listed.tools.map((tool) => this.#wrap(tool));
     this.#detail = `${this.#tools.length} tools`;
     this.#emitStatus();
@@ -273,6 +368,24 @@ class McpServer {
         await this.connect(true);
         return this.#callTool(client, toolName, input, context, true);
       }
+
+      // A stdio server that crashed, or an HTTP one whose socket went away,
+      // fails every remaining call in the session — its tools are still in the
+      // registry, pointing at a client that will never answer again. One
+      // reconnect turns that from a dead half of the toolset into a hiccup.
+      // Once only: a server that dies again on the retry is genuinely down, and
+      // looping on it would spend the turn restarting a process instead of
+      // telling the model what happened.
+      if (!retried && isDroppedConnection(error)) {
+        const previous = this.#client;
+        this.#client = null;
+        await previous?.close().catch(() => undefined);
+        this.#detail = 'reconnecting';
+        this.#emitStatus();
+        await this.connect(true);
+        return this.#callTool(client, toolName, input, context, true);
+      }
+
       throw error;
     }
   }
@@ -340,14 +453,16 @@ export class McpRegistry {
             tools: server.tools.map((tool) => tool.spec.name),
           });
         } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error);
+          const reason = condenseMcpFailure(
+            error instanceof Error ? error.message : String(error),
+          );
           server.fail(reason);
           const status = server.status();
           this.#bus?.emit('mcp.status', { ...status, server: status.name });
           this.#bus?.emit('log', {
             level: 'warn',
             message: `MCP server "${server.name}" is unavailable`,
-            detail: { reason },
+            detail: { reason, hint: `/mcp to review it, or remove it from your config` },
           });
         }
       }),

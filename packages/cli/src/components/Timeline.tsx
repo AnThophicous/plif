@@ -6,7 +6,9 @@ import { Markdown } from './Markdown.js';
 import { ToolCall } from './ToolCall.js';
 import { useSpinnerFrame } from './Spinner.js';
 import type { EntryStatus, TimelineEntry } from '../session.js';
-import { color, formatDuration, glyph, layout, supportsRichGlyphs, truncate } from '../theme.js';
+import type { TranscriptCell } from '../transcript/types.js';
+import { highlightedClusters, toneBetween, useHighlightClock } from '../pulse.js';
+import { color, formatDuration, glyph, layout, supportsRichGlyphs, truncate, workedSeparator } from '../theme.js';
 
 interface TimelineProps {
   readonly entries: readonly TimelineEntry[];
@@ -39,7 +41,12 @@ interface TimelineProps {
  * and colour is used sparingly enough that a red or green line genuinely stands
  * out instead of blending into a rainbow.
  */
-export function Timeline({ entries, width, limit, maxLines }: TimelineProps): React.ReactElement {
+export function Timeline({
+  entries,
+  width,
+  limit,
+  maxLines,
+}: TimelineProps): React.ReactElement {
   const inner = width - layout.gutter * 2;
   const byCount = limit ? entries.slice(-limit) : entries.slice(-layout.maxTimelineRows);
   const visible =
@@ -61,6 +68,164 @@ export function Timeline({ entries, width, limit, maxLines }: TimelineProps): Re
       ))}
     </Box>
   );
+}
+
+/** Render canonical transcript cells through the same rows used by normal mode. */
+export function TranscriptCells({
+  cells,
+  width,
+  expanded = false,
+}: {
+  readonly cells: readonly TranscriptCell[];
+  readonly width: number;
+  readonly expanded?: boolean;
+}): React.ReactElement {
+  const inner = Math.max(8, width - layout.gutter * 2);
+  return (
+    <Box flexDirection="column" paddingX={layout.gutter}>
+      {cells.map((cell, index) => (
+        <Box
+          key={cell.id}
+          marginTop={cellSpacing({
+            previousTurnId: cells[index - 1]?.turnId ?? null,
+            turnId: cell.turnId,
+          })}
+        >
+          <TranscriptCellRow cell={cell} width={inner} expanded={expanded} />
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
+function TranscriptCellRow({
+  cell,
+  width,
+  expanded,
+}: {
+  readonly cell: TranscriptCell;
+  readonly width: number;
+  readonly expanded: boolean;
+}): React.ReactElement {
+  if (cell.kind === 'activity') {
+    return <ActivityCellRow cell={cell} expanded={expanded} />;
+  }
+  return <TimelineRow entry={entryFromTranscriptCell(cell)} width={width} />;
+}
+
+function ActivityCellRow({
+  cell,
+  expanded,
+}: {
+  readonly cell: Extract<TranscriptCell, { readonly kind: 'activity' }>;
+  readonly expanded: boolean;
+}): React.ReactElement {
+  const running = cell.items.some((item) => item.status === 'running');
+  const spinner = useSpinnerFrame(80, running);
+  const reads = cell.items.filter((item) => item.name === 'read_file' || item.name === 'list_dir').length;
+  const summary = reads === cell.items.length
+    ? `${running ? 'Reading' : 'Read'} ${reads} ${reads === 1 ? 'location' : 'locations'}`
+    : `${running ? 'Running' : 'Ran'} ${cell.items.length} ${cell.items.length === 1 ? 'tool' : 'tools'}`;
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Text color={color(running ? 'accent' : 'faint')}>
+        {running ? spinner : glyph.done} {summary}
+      </Text>
+      {expanded && cell.items.map((item) => (
+        <Box key={item.callId} paddingLeft={2}>
+          <Text color={color(item.status === 'running' ? 'muted' : 'ghost')}>
+            {item.status === 'running' ? glyph.pending : glyph.step} {item.name}
+            {item.durationMs === undefined ? '' : `  ${formatDuration(item.durationMs)}`}
+          </Text>
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
+export function cellSpacing({
+  previousTurnId,
+  turnId,
+}: {
+  readonly previousTurnId: string | null;
+  readonly turnId: string;
+}): number {
+  return previousTurnId !== null && previousTurnId !== turnId ? 1 : 0;
+}
+
+function entryFromTranscriptCell(cell: Exclude<TranscriptCell, { readonly kind: 'activity' }>): TimelineEntry {
+  const parsedAt = Date.parse(cell.at);
+  const at = Number.isFinite(parsedAt) ? parsedAt : 0;
+  switch (cell.kind) {
+    case 'user':
+      return { id: cell.id, kind: 'input', title: cell.text, at };
+    case 'assistant':
+      return {
+        id: cell.id,
+        kind: 'answer',
+        title: cell.text,
+        status: cell.finalized ? 'done' : 'active',
+        at,
+      };
+    case 'diff':
+      return { id: cell.id, kind: 'tool', title: cell.title, diff: cell.diff, status: 'done', at };
+    case 'error':
+      return {
+        id: cell.id,
+        kind: 'tool',
+        title: cell.title,
+        detail: cell.detail,
+        status: 'failed',
+        at,
+      };
+    case 'approval':
+      return {
+        id: cell.id,
+        kind: 'approval',
+        title: cell.text,
+        ...(cell.resolution ? { subtitle: cell.resolution } : {}),
+        status: cell.resolution ? 'done' : 'blocked',
+        at,
+      };
+    case 'question':
+      return {
+        id: cell.id,
+        kind: 'question',
+        title: cell.text,
+        ...(cell.answer ? { subtitle: cell.answer } : {}),
+        status: cell.answer ? 'done' : 'blocked',
+        at,
+      };
+    case 'notice':
+      return { id: cell.id, kind: 'notice', title: cell.text, tone: cell.tone, at };
+  }
+}
+
+export function measureTranscriptCell(cell: TranscriptCell, width: number): number {
+  const inner = Math.max(8, width - layout.gutter * 2);
+  const wrap = (text: string, columns = inner): number =>
+    text.split('\n').reduce((total, line) => total + wrappedHeight(line, columns), 0);
+  switch (cell.kind) {
+    case 'user':
+      return wrap(cell.text, Math.max(8, inner - 4)) + 4;
+    case 'assistant':
+      return wrap(cell.text, Math.max(8, inner - 3)) + 2;
+    case 'activity':
+      return 2 + cell.items.length;
+    case 'diff':
+      return diffHeight(cell.diff, false) + 2;
+    case 'error':
+      return wrap(cell.detail, Math.max(8, inner - 4)) + 2;
+    case 'approval':
+    case 'question':
+      return wrap(cell.text) + 1;
+    case 'notice':
+      return wrap(cell.text);
+  }
+}
+
+export function measureTranscriptCells(cells: readonly TranscriptCell[], width: number): number {
+  return cells.reduce((total, cell) => total + measureTranscriptCell(cell, width), 0);
 }
 
 /**
@@ -88,7 +253,8 @@ function fitToHeight(
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const item = entries[index]!;
     const height = estimateHeight(item, width);
-    if (used + height > budget && !(first === entries.length && inFlight(item))) break;
+    const keepRunning = first === entries.length && inFlight(item);
+    if (used + height > budget && !keepRunning) break;
     used += height;
     first = index;
   }
@@ -120,6 +286,36 @@ export function tail(text: string, width: number, budget: number): string {
   return lines.slice(first).join('\n');
 }
 
+export const LIVE_THOUGHT_LINES = 3;
+export const ANSWER_GUTTER = 3;
+
+export function thoughtLines(
+  text: string,
+  width: number,
+  budget = LIVE_THOUGHT_LINES,
+): readonly string[] {
+  const columns = Math.max(8, width);
+  const flat = text.replace(/\s+/g, ' ').trim();
+  if (!flat) return [];
+
+  const rows: string[] = [];
+  let row = '';
+  for (const word of flat.split(' ')) {
+    for (let at = 0; at < word.length || at === 0; at += columns) {
+      const piece = word.slice(at, at + columns);
+      if (!row) row = piece;
+      else if (row.length + 1 + piece.length <= columns) row += ` ${piece}`;
+      else {
+        rows.push(row);
+        row = piece;
+      }
+    }
+  }
+  if (row) rows.push(row);
+
+  return rows.slice(-budget);
+}
+
 /**
  * How many terminal lines a row will occupy, rounded generously upward.
  *
@@ -137,8 +333,16 @@ export function estimateHeight(entry: TimelineEntry, width: number): number {
   if (entry.kind === 'answer') {
     // Markdown adds lines the raw text does not have: blank lines between
     // blocks, gutters on code fences, a bullet's hanging indent. Two extra is
-    // the cheap approximation of all of it.
-    return wrap([entry.title, entry.detail].filter(Boolean).join('\n')) + 3;
+    // the cheap approximation of all of it. The answer gutter narrows the text
+    // column, so the same prose wraps onto more rows than the raw width says.
+    const column = Math.max(8, width - ANSWER_GUTTER);
+    return (
+      [entry.title, entry.detail]
+        .filter(Boolean)
+        .join('\n')
+        .split('\n')
+        .reduce((total, line) => total + wrappedHeight(line, column), 0) + 3
+    );
   }
 
   const detailLines = entry.detail
@@ -147,11 +351,17 @@ export function estimateHeight(entry: TimelineEntry, width: number): number {
 
   // Collapsed by default and worth exactly one line when it is. Reasoning is
   // usually the longest thing in the turn and almost never the thing being
-  // read, so it may not claim height until asked for.
+  // read, so it may not claim height until asked for — apart from the few rows
+  // of live tail an open thinking row draws while the thought is forming.
   if (entry.kind === 'thinking') {
+    if (entry.status === 'active') {
+      return 1 + thoughtLines(entry.detail ?? '', width - 4).length;
+    }
     if (!entry.expand) return 1;
     return 1 + wrap(entry.detail ?? '') + 1;
   }
+
+  if (entry.kind === 'separator') return 3;
 
   if (entry.kind === 'tool') {
     if (entry.executions?.length) {
@@ -200,6 +410,7 @@ export function TimelineRow({
   if (entry.kind === 'thinking') {
     return <ThinkingRow entry={entry} width={width} {...(maxLines === undefined ? {} : { maxLines })} />;
   }
+  if (entry.kind === 'separator') return <CycleSeparator entry={entry} width={width} />;
   if (entry.kind === 'tool') return <ToolRow entry={entry} width={width} />;
   return <PlainRow entry={entry} width={width} />;
 }
@@ -207,15 +418,12 @@ export function TimelineRow({
 /**
  * A block of model reasoning.
  *
- * One line, collapsed, and that is the whole design. Thinking is genuinely
- * useful — it is where a wrong turn becomes visible before the answer hides
- * it — but it is also several times longer than the answer, and a timeline that
- * shows it inline is a timeline nobody can read. So it announces itself while
- * it happens, states what it cost when it is over, and holds the text until
- * someone asks for it.
- *
- * Finished thinking drops to grey. It remains expandable, but no longer
- * competes with the answer or tool results for attention.
+ * While it is being written it shows its own tail — a few rows of the thought
+ * as it forms, in the accent family, because reasoning is where a wrong turn
+ * becomes visible before the answer hides it. The moment it settles the block
+ * folds back to one grey line, since it is also several times longer than the
+ * answer and a timeline that keeps it open is a timeline nobody can read. The
+ * text is held, not discarded: Ctrl+R brings it back.
  */
 function ThinkingRow({
   entry,
@@ -227,10 +435,14 @@ function ThinkingRow({
   maxLines?: number;
 }): React.ReactElement {
   const thinking = entry.status === 'active';
+  const label = entry.title || 'Thinking';
+  const plif = label === 'Plif Thinking';
   // The pulse, not the braille spinner. Thinking is a different kind of waiting
   // from a command running, and the two read as different things at a glance.
-  const pulse = usePulse(thinking);
+  const pulse = usePulse(thinking, plif);
+  const clock = useHighlightClock(thinking);
   const body = entry.detail ?? '';
+  const live = thinking ? thoughtLines(body, width - 4) : [];
   const clipped =
     entry.expand && maxLines !== undefined ? tail(body, width - 4, Math.max(3, maxLines - 2)) : body;
 
@@ -239,10 +451,16 @@ function ThinkingRow({
       <Box>
         <Text color={color(thinking ? 'accent' : 'ghost')}>{thinking ? pulse : glyph.step} </Text>
         {thinking ? (
-          <Text color={color('accent')}>Thinking</Text>
+          <Text>
+            {highlightedClusters(label, clock).map((part, index) => (
+              <Text key={index} color={part.color} bold={part.active}>
+                {part.text}
+              </Text>
+            ))}
+          </Text>
         ) : (
           <Text color={color('faint')}>
-            {entry.expand ? 'Thinking:' : formatDuration(entry.durationMs ?? 0)}
+            {entry.expand ? `${label}:` : formatDuration(entry.durationMs ?? 0)}
           </Text>
         )}
         <Text color={color('ghost')}>
@@ -253,6 +471,17 @@ function ThinkingRow({
               : `  ${glyph.divider} Ctrl+R to expand`}
         </Text>
       </Box>
+
+      {live.length > 0 && (
+        <Box flexDirection="column">
+          {live.map((line, index) => (
+            <Box key={index}>
+              <Text color={color('ghost')}>{`  ${glyph.rail} `}</Text>
+              <Text color={toneBetween('brand', 'accent', (index + 1) / live.length)}>{line}</Text>
+            </Box>
+          ))}
+        </Box>
+      )}
 
       {entry.expand && body.trim() && (
         <Box flexDirection="column" marginBottom={1}>
@@ -270,6 +499,14 @@ function ThinkingRow({
   );
 }
 
+function CycleSeparator({ entry, width }: { entry: TimelineEntry; width: number }): React.ReactElement {
+  return (
+    <Box marginTop={1} marginBottom={1}>
+      <Text color={color('faint')}>{workedSeparator(entry.durationMs ?? 0, width)}</Text>
+    </Box>
+  );
+}
+
 /**
  * The four-frame bullet pulse used for thinking.
  *
@@ -277,16 +514,19 @@ function ThinkingRow({
  * "Thinking" reads as urgency, and this is the calmest thing the agent does.
  */
 const PULSE_FRAMES = supportsRichGlyphs ? ['✦', '✧', '✶', '✧'] : ['*', '+', 'x', '+'];
+const PLIF_PULSE_FRAMES = supportsRichGlyphs ? ['◈', '◇', '✦', '◇'] : ['#', '+', '*', '+'];
 
-function usePulse(active: boolean): string {
+function usePulse(active: boolean, plif = false): string {
   const [index, setIndex] = React.useState(0);
   React.useEffect(() => {
     if (!active) return;
-    const timer = setInterval(() => setIndex((value) => (value + 1) % PULSE_FRAMES.length), 320);
+    const frames = plif ? PLIF_PULSE_FRAMES : PULSE_FRAMES;
+    const timer = setInterval(() => setIndex((value) => (value + 1) % frames.length), 240);
     timer.unref?.();
     return () => clearInterval(timer);
-  }, [active]);
-  return PULSE_FRAMES[index % PULSE_FRAMES.length] as string;
+  }, [active, plif]);
+  const frames = plif ? PLIF_PULSE_FRAMES : PULSE_FRAMES;
+  return frames[index % frames.length] as string;
 }
 
 /**
@@ -308,11 +548,14 @@ function UserRow({ entry, width }: { entry: TimelineEntry; width: number }): Rea
 }
 
 /**
- * The agent's answer, loose on the page.
+ * The agent's answer, loose on the page but claimed by a bullet.
  *
- * Deliberately unboxed and unbulleted: it is the substance, and framing it the
- * same way as a tool row would flatten the distinction between what the agent
- * *did* and what it *concluded*.
+ * Still unboxed — the box is the developer's, and giving the agent one too
+ * would make a conversation look like two logs. What it gets instead is a
+ * single marker in the gutter and a hanging indent underneath, so a glance
+ * down the left edge says who is speaking without reading a word. The body
+ * stays plain: this is the substance, and colouring it would put it in
+ * competition with the tool rows it is supposed to conclude.
  */
 function AnswerRow({
   entry,
@@ -339,8 +582,19 @@ function AnswerRow({
     streaming && maxLines !== undefined ? tail(body, width - 2, maxLines) : body;
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      <Markdown source={source} width={width - 2} />
+    <Box marginBottom={1} width="100%">
+      {/*
+        The gap comes from the box, not from spaces after the glyph. A trailing
+        space inside a gutter this narrow is the first thing squeezed out when
+        the glyph turns out wider than budgeted, which is exactly how the mark
+        ended up touching the text.
+      */}
+      <Box width={ANSWER_GUTTER} flexShrink={0}>
+        <Text color={color(streaming ? 'accent' : 'faint')}>{glyph.speak}</Text>
+      </Box>
+      <Box flexDirection="column" flexGrow={1}>
+        <Markdown source={source} width={Math.max(8, width - 2 - ANSWER_GUTTER)} />
+      </Box>
     </Box>
   );
 }
@@ -350,6 +604,7 @@ function ToolRow({ entry, width }: { entry: TimelineEntry; width: number }): Rea
     <Box flexDirection="column" marginBottom={1}>
       <ToolCall
         name={entry.title}
+        {...(entry.toolCategory !== undefined ? { category: entry.toolCategory } : {})}
         ok={entry.status !== 'failed'}
         running={entry.status === 'active'}
         width={width}
@@ -470,6 +725,9 @@ function marker(
   if (entry.kind === 'input') return { bullet: glyph.prompt, bulletTone: 'accent' };
   if (entry.kind === 'approval' && entry.status !== 'done' && entry.status !== 'failed') {
     return { bullet: glyph.waiting, bulletTone: 'warn' };
+  }
+  if (entry.kind === 'question' && entry.status !== 'done' && entry.status !== 'failed') {
+    return { bullet: glyph.question, bulletTone: 'accent' };
   }
 
   const byStatus: Record<EntryStatus, { bullet: string; bulletTone: Parameters<typeof color>[0] }> =
