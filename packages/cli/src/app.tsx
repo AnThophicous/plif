@@ -23,6 +23,7 @@ import {
   resolveServerConfigs,
   runCompaction,
   runLoop,
+  PRESETS,
   subagentTool,
   SubagentCoordinator,
   visionTools,
@@ -1396,9 +1397,30 @@ export function App({
         model: selection.model,
         preset: selection.preset,
       });
-      const check = validateModelConfig(config);
+      let check = validateModelConfig(config);
+      let finalConfig = config;
+      if (!check.ok && !config.apiKey && !isLocal(config.baseURL) && credentials) {
+        const preset = PRESETS[selection.preset];
+        if (preset?.keyEnv) {
+          const key = await credentials.resolve({
+            variable: preset.keyEnv,
+            purpose: preset.note,
+            hint:
+              `Create an API key for ${preset.note} and paste it here. ` +
+              'It is stored encrypted with your Windows account and will not be asked for again.',
+          });
+          if (key) {
+            finalConfig = resolveConfig(stored, {
+              model: selection.model,
+              preset: selection.preset,
+              apiKey: key,
+            });
+            check = validateModelConfig(finalConfig);
+          }
+        }
+      }
       if (!check.ok) {
-        if (!config.apiKey && !isLocal(config.baseURL)) {
+        if (!finalConfig.apiKey && !isLocal(finalConfig.baseURL)) {
           await saveStoredConfig(engine.paths, {
             ...stored,
             preset: selection.preset,
@@ -1425,7 +1447,7 @@ export function App({
         return;
       }
 
-      providerRef.current = new OpenAIProvider(config);
+      providerRef.current = new OpenAIProvider(finalConfig);
       await saveStoredConfig(engine.paths, {
         ...stored,
         preset: selection.preset,

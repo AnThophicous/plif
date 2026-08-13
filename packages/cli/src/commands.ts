@@ -12,12 +12,18 @@
 import path from 'node:path';
 
 import {
+  CredentialBroker,
   MODEL_CATALOG,
   MODEL_CATALOG_DEFAULT,
+  OpenAIProvider,
+  PRESETS,
   rankFacts,
+  resolveConfig,
   strategyStatus,
+  WindowsDpapiSecretStore,
 } from '@plif/core';
 import type { Container, Effort, Engine, ModelProvider, ModelSelection } from '@plif/core';
+import type { ModelCatalogProvider } from '@plif/core';
 import {
   globalConfigPath,
   isAutoApproveEnabled,
@@ -102,6 +108,73 @@ const ok = (...entries: TimelineEntry[]): CommandResult => ({ entries });
 
 const formatTokens = (value: number): string =>
   value < 1000 ? `${value} tokens` : `${(value / 1000).toFixed(1)}k tokens`;
+
+/**
+ * The NVIDIA NIM group of the model picker.
+ *
+ * When a key is available the group is expanded to every model the account can
+ * actually reach — the endpoint advertises far more than a static catalog can
+ * honestly claim — falling back to the curated list when there is no key yet
+ * (the credential prompt belongs to selection, not to browsing) or when the
+ * endpoint does not answer.
+ */
+async function expandNvidiaGroup(
+  catalog: ModelCatalogProvider,
+  staticItems: readonly PickerItem[],
+  currentModel: string | undefined,
+): Promise<PickerGroup> {
+  const key = await new CredentialBroker({
+    store: new WindowsDpapiSecretStore(),
+  }).resolve({
+    variable: PRESETS.nvidia!.keyEnv,
+    purpose: PRESETS.nvidia!.note,
+  });
+  if (key) {
+    try {
+      const provider = new OpenAIProvider(
+        resolveConfig({}, { preset: 'nvidia', apiKey: key }),
+      );
+      const ids = await provider.list();
+      const known = new Map(catalog.models.map((entry) => [entry.id, entry]));
+      const items: PickerItem[] = ids.map((id) => {
+        const hit = known.get(id);
+        return {
+          value: id,
+          label: hit?.label ?? prettyModelLabel(id),
+          detail: hit?.description ?? id,
+          badges: hit?.badges ?? [],
+          current: id === currentModel,
+        };
+      });
+      if (items.length > 0) {
+        return {
+          id: catalog.id,
+          label: catalog.label,
+          detail: `all ${items.length} models available on your NVIDIA account`,
+          items,
+        };
+      }
+    } catch {
+      // Unreachable endpoint or stale key: the curated list is still better
+      // than an empty group.
+    }
+  }
+  return {
+    id: catalog.id,
+    label: catalog.label,
+    detail: catalog.description,
+    items: staticItems,
+  };
+}
+
+/** A readable label for a model id the static catalog does not know. */
+function prettyModelLabel(id: string): string {
+  const tail = id.slice(id.lastIndexOf('/') + 1);
+  return tail
+    .replace(/[-_]+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
 
 export const COMMANDS: readonly Command[] = [
   {
@@ -556,18 +629,26 @@ export const COMMANDS: readonly Command[] = [
       // Opening the catalog is deliberately independent of the global config:
       // a malformed config or missing key must not hide the model chooser.
       const currentModel = context.model?.info.id;
-      const groups: PickerGroup[] = MODEL_CATALOG.map((catalogProvider) => ({
-        id: catalogProvider.id,
-        label: catalogProvider.label,
-        detail: catalogProvider.description,
-        items: catalogProvider.models.map((catalogModel) => ({
+      const groups: PickerGroup[] = [];
+      for (const catalogProvider of MODEL_CATALOG) {
+        const items: PickerItem[] = catalogProvider.models.map((catalogModel) => ({
           value: catalogModel.id,
           label: catalogModel.label,
           detail: catalogModel.description,
           badges: catalogModel.badges,
           current: catalogModel.id === currentModel,
-        })),
-      }));
+        }));
+        groups.push(
+          catalogProvider.id === 'nvidia'
+            ? await expandNvidiaGroup(catalogProvider, items, currentModel)
+            : {
+                id: catalogProvider.id,
+                label: catalogProvider.label,
+                detail: catalogProvider.description,
+                items,
+              },
+        );
+      }
 
       context.openPicker({
         title: 'select a model',

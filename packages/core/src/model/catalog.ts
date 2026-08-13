@@ -94,6 +94,21 @@ export const MODEL_CATALOG: readonly ModelCatalogProvider[] = Object.freeze([
   provider('together', 'Together AI', 'Hosted open models', [
     model('meta-llama/Llama-3.3-70B-Instruct-Turbo', 'Llama 3.3 70B Turbo', 'Hosted open model'),
   ]),
+  provider('nvidia', 'NVIDIA NIM', 'NVIDIA-hosted open models (needs NIM_API_KEY)', [
+    model('meta/llama-3.1-8b-instruct', 'Llama 3.1 8B', 'Compact, fast general model'),
+    model(
+      'nvidia/llama-3.3-nemotron-super-49b-v1',
+      'Nemotron Super 49B',
+      "NVIDIA's current super-model",
+    ),
+    model('deepseek-ai/deepseek-v4-flash-0731', 'DeepSeek V4 Flash', 'Fast coding model'),
+    model(
+      'nvidia/llama-3.1-nemotron-ultra-253b-v1',
+      'Nemotron Ultra 253B',
+      "NVIDIA's flagship reasoning model",
+    ),
+    model('openai/gpt-oss-120b', 'GPT-OSS 120B', 'OpenAI open model'),
+  ]),
 ]);
 
 export function findCatalogModel(

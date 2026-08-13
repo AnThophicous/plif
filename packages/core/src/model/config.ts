@@ -94,6 +94,14 @@ export const PRESETS: Readonly<Record<string, { baseURL: string; keyEnv: string;
       keyEnv: 'TOGETHER_API_KEY',
       note: 'Together AI',
     },
+    // NVIDIA NIM builds on the OpenAI wire format, so the generic adapter
+    // speaks to it unchanged. `NIM_API_KEY` is the variable the NVIDIA docs
+    // use; `PLIF_API_KEY` or `--api-key` also work.
+    nvidia: {
+      baseURL: 'https://integrate.api.nvidia.com/v1',
+      keyEnv: 'NIM_API_KEY',
+      note: 'NVIDIA NIM — hosted open models',
+    },
   });
 
 export type PresetName = keyof typeof PRESETS;

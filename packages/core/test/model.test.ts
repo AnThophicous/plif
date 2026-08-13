@@ -195,6 +195,7 @@ describe('model catalog', () => {
       'groq',
       'deepseek',
       'together',
+      'nvidia',
     ]);
   });
 });
