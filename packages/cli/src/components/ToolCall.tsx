@@ -5,10 +5,11 @@ import { Diff } from './Diff.js';
 import { useSpinnerFrame } from './Spinner.js';
 import { highlightShell } from '../shell-highlight.js';
 import { color, glyph, syntaxColor, truncate } from '../theme.js';
-import type { PlanDisplayItem } from '../format.js';
+import type { PlanDisplayItem, ToolCategory } from '../format.js';
 
 export interface ToolCallProps {
   readonly name: string;
+  readonly category?: ToolCategory;
   readonly target?: string;
   readonly summary?: string;
   readonly output?: string;
@@ -25,10 +26,25 @@ export interface ToolCallProps {
 
 const COLLAPSED_OUTPUT_LINES = 5;
 
-export function ToolCall({ name, target, summary, output, diff, edits, planItems, executions, expand = false, ok, running, width, maxOutputLines }: ToolCallProps): React.ReactElement {
+const CATEGORY: Record<ToolCategory, { label: string; marker: keyof typeof glyph; tone: Parameters<typeof color>[0] }> = {
+  shell: { label: 'Shell', marker: 'shell', tone: 'accent' },
+  read: { label: 'Read', marker: 'read', tone: 'info' },
+  list: { label: 'List', marker: 'list', tone: 'info' },
+  search: { label: 'Search', marker: 'network', tone: 'info' },
+  edit: { label: 'Edit', marker: 'edit', tone: 'success' },
+  network: { label: 'Network', marker: 'network', tone: 'info' },
+  agent: { label: 'Agent', marker: 'agent', tone: 'accent' },
+  plan: { label: 'Plan', marker: 'step', tone: 'accentDim' },
+  question: { label: 'Question', marker: 'question', tone: 'warn' },
+  memory: { label: 'Memory', marker: 'step', tone: 'accentDim' },
+  external: { label: 'External', marker: 'network', tone: 'warn' },
+  tool: { label: 'Tool', marker: 'tool', tone: 'muted' },
+};
+
+export function ToolCall({ name, category = 'tool', target, summary, output, diff, edits, planItems, executions, expand = false, ok, running, width, maxOutputLines }: ToolCallProps): React.ReactElement {
   const spinner = useSpinnerFrame(80, running);
-  const bullet = running ? spinner : glyph.tool;
-  const targetLines = target ? wrapLine(target, Math.max(18, width - name.length - 4)) : [];
+  const identity = CATEGORY[category];
+  const targetLines = target ? wrapLine(target, Math.max(18, width - identity.label.length - name.length - 7)) : [];
   const outputLines = cleanOutput(output ?? '');
   const limit = maxOutputLines ?? COLLAPSED_OUTPUT_LINES;
   const shown = expand || outputLines.length <= limit ? outputLines : [...outputLines.slice(0, 2), ...outputLines.slice(-2)];
@@ -38,13 +54,15 @@ export function ToolCall({ name, target, summary, output, diff, edits, planItems
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={color(running ? 'muted' : ok ? 'ghost' : 'warn')}>{bullet} </Text>
-        <Text color={color(ok ? quiet ? 'muted' : 'text' : 'warn')} bold={!quiet}>{name}</Text>
-        {targetLines[0] ? <><Text> </Text><Command value={targetLines[0]} shell={name === 'Ran'} /></> : null}
+        <Text color={color(identity.tone)}>{glyph[identity.marker]} </Text>
+        <Text color={color(identity.tone)} bold={!quiet}>{identity.label}</Text>
+        <Text color={color('ghost')}> · {name}</Text>
+        {targetLines[0] ? <><Text> </Text><Command value={targetLines[0]} shell={category === 'shell'} /></> : null}
         {summary ? <Text color={color('ghost')}> {summary}</Text> : null}
+        <Text color={color(running ? 'accent' : ok ? 'success' : 'danger')}> {running ? spinner : ok ? glyph.done : glyph.failed}</Text>
       </Box>
       {targetLines.slice(1).map((line, index) => (
-        <Box key={`target-${index}`}><Text color={color('ghost')}>  {glyph.rail} </Text><Command value={line} shell={name === 'Ran'} /></Box>
+        <Box key={`target-${index}`}><Text color={color('ghost')}>  {glyph.rail} </Text><Command value={line} shell={category === 'shell'} /></Box>
       ))}
       {executions?.length ? (
         <ExecutionGroup executions={executions} expand={expand} width={width} />

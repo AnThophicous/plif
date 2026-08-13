@@ -34,7 +34,7 @@ export interface ModelConfig {
   readonly effort?: Effort;
 }
 
-export type Effort = 'low' | 'medium' | 'high' | 'xhigh';
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'plif';
 
 /**
  * Endpoints known to speak the OpenAI wire format.
@@ -93,6 +93,14 @@ export const PRESETS: Readonly<Record<string, { baseURL: string; keyEnv: string;
       baseURL: 'https://api.together.xyz/v1',
       keyEnv: 'TOGETHER_API_KEY',
       note: 'Together AI',
+    },
+    // NVIDIA NIM builds on the OpenAI wire format, so the generic adapter
+    // speaks to it unchanged. `NIM_API_KEY` is the variable the NVIDIA docs
+    // use; `PLIF_API_KEY` or `--api-key` also work.
+    nvidia: {
+      baseURL: 'https://integrate.api.nvidia.com/v1',
+      keyEnv: 'NIM_API_KEY',
+      note: 'NVIDIA NIM — hosted open models',
     },
   });
 

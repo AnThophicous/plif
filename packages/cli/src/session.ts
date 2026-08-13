@@ -12,6 +12,8 @@ import type { Catalog, Decision, PolicyAction } from '@plif/core';
 import type { ModelSelection } from '@plif/core';
 import { filterItems, filterPickerGroups, flattenPickerGroups } from './components/Picker.js';
 import type { PickerGroup, PickerItem } from './components/Picker.js';
+import type { PastedAttachment } from './composer/state.js';
+export type { PastedAttachment, PastedImage, PastedText } from './composer/state.js';
 
 export type EntryKind =
   /** Something the developer typed. */
@@ -24,12 +26,16 @@ export type EntryKind =
   | 'notice'
   /** A resolved approval, kept in the log as a record. */
   | 'approval'
+  /** A question asked by the agent, distinct from a permission gate. */
+  | 'question'
   /** The agent's prose answer, rendered as markdown. */
   | 'answer'
   /** A block of model reasoning: one collapsed line, expandable. */
   | 'thinking'
   /** One tool invocation, with its own header/summary/output shape. */
-  | 'tool';
+  | 'tool'
+  /** A visual boundary between one model/tool cycle and the next. */
+  | 'separator';
 
 export type EntryStatus = 'pending' | 'active' | 'done' | 'failed' | 'blocked';
 
@@ -66,6 +72,8 @@ export interface TimelineEntry {
   readonly tag?: string;
   /** What the tool acted on, shown in parentheses after its name. */
   readonly toolTarget?: string;
+  /** Stable operational identity; status and colour never replace it. */
+  readonly toolCategory?: import('./format.js').ToolCategory;
   /** One line under the tool header: line counts, exit code, bytes written. */
   readonly toolSummary?: string;
   /** On a `thinking` row: how long the block took, once it has finished. */
@@ -136,22 +144,6 @@ export interface QueuedMessage {
   /** Complete clipboard payloads held until this exact message is delivered. */
   readonly attachments: readonly PastedAttachment[];
 }
-
-export interface PastedText {
-  readonly kind: 'text';
-  readonly token: string;
-  readonly text: string;
-}
-
-export interface PastedImage {
-  readonly kind: 'image';
-  readonly token: string;
-  readonly path: string;
-  readonly mediaType: string;
-  readonly bytes: number;
-}
-
-export type PastedAttachment = PastedText | PastedImage;
 
 export type BrowserTab = 'mcp' | 'skills' | 'marketplace';
 
@@ -343,6 +335,7 @@ export type SessionAction =
   | { type: 'drop'; id: string }
   | { type: 'toggleLastTool' }
   | { type: 'toggleLastThinking' }
+  | { type: 'toggleThinking'; id: string }
   /** Move the settled prefix of `entries` into `committed`. */
   | { type: 'commit'; upTo: number; ids?: readonly string[] }
   | { type: 'clear' }
@@ -459,13 +452,30 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         ),
       };
     }
-
-    case 'append': {
-      const entries = [...state.entries, action.entry];
+    case 'toggleThinking': {
+      const exists = state.entries.some((item) => item.id === action.id && item.kind === 'thinking');
+      if (!exists) return state;
       return {
         ...state,
-        entries: entries.length > MAX_ENTRIES ? entries.slice(-MAX_ENTRIES) : entries,
+        entries: state.entries.map((item) =>
+          item.id === action.id ? { ...item, expand: !item.expand } : item,
+        ),
       };
+    }
+
+    case 'append': {
+      // A separator punctuates something. Two in a row punctuate each other,
+      // and one with nothing above it in the live frame punctuates a blank —
+      // both are the shapes that made a busy turn look like ruled paper. The
+      // guard lives here rather than at the emit site because only the reducer
+      // can see what the newest row actually is.
+      if (action.entry.kind === 'separator') {
+        const previous = state.entries.at(-1);
+        if (!previous || previous.kind === 'separator') return state;
+      }
+      const entries = [...state.entries, action.entry];
+      const trimmed = entries.length > MAX_ENTRIES ? entries.slice(-MAX_ENTRIES) : entries;
+      return { ...state, entries: trimmed };
     }
 
     /**
@@ -765,7 +775,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       return { ...state, subagentsOpen: !state.subagentsOpen };
 
     case 'subagent.reset':
-      return { ...state, subagents: [], subagentFocus: 0 };
+      return { ...state, subagents: [], subagentFocus: 0, subagentsOpen: false };
 
     case 'discovery.start':
       return {
