@@ -124,12 +124,22 @@ export function displayWidth(value: string): number {
     // `⚠` is one cell; `⚠️` — the same sign plus U+FE0F — is two, and the
     // difference is invisible in the source.
     const forcedEmoji = cluster.includes('️');
-    width += isWide(base) || forcedEmoji ? 2 : 1;
+    width += isWide(base) || forcedEmoji || EMOJI_PRESENTATION.test(cluster) ? 2 : 1;
     at += length;
   }
 
   return width;
 }
+
+/**
+ * Characters a terminal draws two cells wide because they are emoji by default.
+ *
+ * Asked of Unicode rather than listed by hand. The hand-written ranges below
+ * cover the astral emoji planes and miss every emoji-presentation codepoint in
+ * the BMP — `⌛`, `✅`, `⭐` and a few dozen more — each of which is counted as
+ * one cell and drawn as two, which is a column of misalignment per occurrence.
+ */
+const EMOJI_PRESENTATION = /^\p{Emoji_Presentation}/u;
 
 function isWide(code: number): boolean {
   return (

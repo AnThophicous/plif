@@ -16,7 +16,11 @@ import { describe, it } from 'node:test';
 import { entry, initialSession, sessionReducer } from '../src/session.js';
 import type { SessionState, TimelineEntry } from '../src/session.js';
 import { estimateHeight, tail } from '../src/components/Timeline.js';
-import { detachImmediateInkResize, terminalFrameRows } from '../src/terminal-resize.js';
+import {
+  detachImmediateInkResize,
+  resizeAppliesImmediately,
+  terminalFrameRows,
+} from '../src/terminal-resize.js';
 import { PassThrough } from 'node:stream';
 
 function withEntries(items: readonly TimelineEntry[]): SessionState {
@@ -152,7 +156,7 @@ describe('live controls', () => {
     assert.deepEqual(state.entries[0]?.edits?.map((edit) => edit.path), ['src/one.ts', 'src/two.ts']);
   });
 
-  it('removes a subagent as soon as it finishes', () => {
+  it('keeps subagent details collapsed and removes the subagent when it finishes', () => {
     const running = sessionReducer(initialSession, {
       type: 'subagent.start',
       view: {
@@ -179,6 +183,7 @@ describe('live controls', () => {
       at: 2,
       summary: 'done',
     });
+    assert.equal(running.subagentsOpen, false);
     assert.equal(finished.subagents.length, 0);
     assert.equal(finished.subagentsOpen, false);
   });
@@ -263,5 +268,32 @@ describe('estimating row height', () => {
       detail: Array.from({ length: 30 }, (_, index) => `out ${index}`).join('\n'),
     });
     assert.ok(estimateHeight(failed, 80) > estimateHeight(ok, 80));
+  });
+});
+
+describe('when a new terminal size may wait for the resize to settle', () => {
+  const size = (columns: number, rows: number) => ({ columns, rows });
+
+  it('applies a shorter window at once', () => {
+    // The frame is capped from the size in state. One repaint against a stale
+    // taller figure is all it takes to reach terminal height and reprint the
+    // session, and the thinking highlight repaints continuously.
+    assert.equal(resizeAppliesImmediately(size(120, 24), size(120, 40)), true);
+  });
+
+  it('applies a narrower window at once', () => {
+    assert.equal(resizeAppliesImmediately(size(60, 40), size(120, 40)), true);
+  });
+
+  it('lets a larger window wait', () => {
+    assert.equal(resizeAppliesImmediately(size(160, 50), size(120, 40)), false);
+  });
+
+  it('lets an unchanged size wait', () => {
+    assert.equal(resizeAppliesImmediately(size(120, 40), size(120, 40)), false);
+  });
+
+  it('applies a drag that shrinks one axis while growing the other', () => {
+    assert.equal(resizeAppliesImmediately(size(200, 20), size(120, 40)), true);
   });
 });

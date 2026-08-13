@@ -194,10 +194,25 @@ export function summariseToolInput(input: unknown): string | undefined {
 
 export interface DescribedTool {
   readonly label: string;
+  readonly category: ToolCategory;
   readonly target?: string;
   readonly summary?: string;
   readonly planItems?: readonly PlanDisplayItem[];
 }
+
+export type ToolCategory =
+  | 'shell'
+  | 'read'
+  | 'list'
+  | 'search'
+  | 'edit'
+  | 'network'
+  | 'agent'
+  | 'plan'
+  | 'question'
+  | 'memory'
+  | 'external'
+  | 'tool';
 
 export interface PlanDisplayItem {
   readonly step: string;
@@ -228,7 +243,25 @@ const TOOL_LABELS: Readonly<Record<string, string>> = {
   web_fetch: 'Fetch',
   curl: 'Curl',
   update_plan: 'Plan updated',
+  glob: 'Glob',
+  grep: 'Grep',
+  apply_patch: 'Patched',
 };
+
+export function toolCategory(name: string): ToolCategory {
+  if (name.startsWith('mcp__')) return 'external';
+  if (name === 'run_command' || name === 'start_task') return 'shell';
+  if (name === 'read_file') return 'read';
+  if (name === 'list_dir' || name === 'glob') return 'list';
+  if (name === 'grep' || name === 'web_search') return 'search';
+  if (name === 'web_fetch' || name === 'curl') return 'network';
+  if (name === 'write_file' || name === 'edit_file' || name === 'apply_patch' || name === 'resolve_edit_conflict') return 'edit';
+  if (name === 'subagent') return 'agent';
+  if (name === 'update_plan') return 'plan';
+  if (name === 'ask_user') return 'question';
+  if (name === 'remember' || name === 'skill') return 'memory';
+  return 'tool';
+}
 
 /**
  * Turn a raw tool call into the header a developer wants to read.
@@ -245,12 +278,14 @@ export function describeToolCall(name: string, input: unknown): DescribedTool {
     const [, server, tool] = name.split('__');
     return {
       label: `${tool ?? name}`,
+      category: 'external',
       target: server,
       summary: 'via MCP, outside the sandbox',
     };
   }
 
   const label = TOOL_LABELS[name] ?? name;
+  const category = toolCategory(name);
 
   if (name === 'update_plan' && Array.isArray(record['plan'])) {
     const planItems = record['plan'].flatMap((value): PlanDisplayItem[] => {
@@ -261,40 +296,47 @@ export function describeToolCall(name: string, input: unknown): DescribedTool {
       if (!step || (status !== 'pending' && status !== 'in_progress' && status !== 'completed')) return [];
       return [{ step, status }];
     });
-    return { label, planItems };
+    return { label, category, planItems };
   }
 
   if (name === 'run_command' && Array.isArray(record['argv'])) {
-    return { label, target: (record['argv'] as string[]).join(' ') };
+    return { label, category, target: (record['argv'] as string[]).join(' ') };
   }
   if (name === 'curl' && typeof record['url'] === 'string') {
     const method = typeof record['method'] === 'string' ? record['method'].toUpperCase() : 'GET';
-    return { label, target: `${method} ${record['url']}` };
+    return { label, category, target: `${method} ${record['url']}` };
+  }
+  if (name === 'apply_patch' && Array.isArray(record['edits'])) {
+    const count = record['edits'].length;
+    return { label, category, target: `${count} ${count === 1 ? 'file' : 'files'}` };
+  }
+  if ((name === 'glob' || name === 'grep') && typeof record['pattern'] === 'string') {
+    return { label, category, target: record['pattern'] };
   }
   // Title before path: a subagent call carries both a title and a long task
   // body, and the title is the one line that says what it is doing.
   if (typeof record['query'] === 'string') {
-    return { label, target: record['query'] };
+    return { label, category, target: record['query'] };
   }
   if (typeof record['url'] === 'string') {
-    return { label, target: record['url'] };
+    return { label, category, target: record['url'] };
   }
   if (typeof record['title'] === 'string') {
-    return { label, target: record['title'] };
+    return { label, category, target: record['title'] };
   }
   if (typeof record['path'] === 'string') {
-    return { label, target: record['path'] };
+    return { label, category, target: record['path'] };
   }
   if (typeof record['question'] === 'string') {
-    return { label, target: record['question'] };
+    return { label, category, target: record['question'] };
   }
   if (typeof record['name'] === 'string') {
-    return { label, target: record['name'] };
+    return { label, category, target: record['name'] };
   }
   if (typeof record['text'] === 'string') {
-    return { label, target: truncateValue(record['text']) };
+    return { label, category, target: truncateValue(record['text']) };
   }
-  return { label };
+  return { label, category };
 }
 
 export { PlifError };

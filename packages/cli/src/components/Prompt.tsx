@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
+import { FocusFrame } from './FocusFrame.js';
 import { clusterAt, clusterLength, displayWidth, snap } from '../text.js';
 import { color, glyph, layout, truncate } from '../theme.js';
 
@@ -13,9 +14,13 @@ export interface PromptProps {
   readonly busyLabel: string;
   readonly busySince?: number;
   readonly width: number;
+  readonly plif?: boolean;
+  readonly working?: boolean;
   /** Live operational state, kept inside the dynamic prompt frame. */
   readonly status?: React.ReactNode;
   readonly queue?: React.ReactNode;
+  /** Status row sharing the frame's walls, under an inset divider. */
+  readonly dock?: React.ReactNode;
 }
 
 export interface PromptRow {
@@ -79,36 +84,60 @@ export function Prompt({
   placeholder,
   focused,
   busy,
+  plif = false,
+  working = busy,
   width,
   status,
   queue,
+  dock,
 }: PromptProps): React.ReactElement {
   const borderTone = focused ? 'faint' : 'ghost';
   // Border + horizontal padding + prompt prefix. Every continuation line gets
   // the same prefix width, so wrapping is stable from the first row onward.
+  //
+  // Nothing is reserved on the right any more. The infinity mark used to sit
+  // there and also in the dock one row below, which is the same thing said
+  // twice and three columns of typing width spent saying it. The dock keeps
+  // the mark, because that is where the rest of the working state already is.
   const available = Math.max(8, width - 2 - layout.boxPadX * 2 - 2);
   const hint = busy ? 'type to queue a message for the agent' : placeholder;
   const rows = value.length ? layoutPrompt(value, cursor, available) : [];
 
+  const content = (
+    <>
+      {status && <Box marginBottom={1}>{status}</Box>}
+      {value.length === 0 ? (
+        <Box width="100%">
+          <Text color={color(busy ? 'ghost' : 'muted')}>{glyph.prompt} </Text>
+          <Text color={color('ghost')} wrap="truncate">{truncate(hint, available)}</Text>
+        </Box>
+      ) : (
+        rows.map((row, index) => (
+          <Box key={`${row.start}:${row.end}`} width="100%">
+            <Text color={color(busy ? 'ghost' : 'muted')}>{index === 0 ? glyph.prompt : ' '} </Text>
+            <CursorRow row={row} focused={focused} />
+          </Box>
+        ))
+      )}
+      {queue}
+    </>
+  );
+
   return (
     <Box flexDirection="column" width="100%">
-      <Box flexDirection="column" borderStyle="round" borderColor={color(borderTone)} paddingX={layout.boxPadX} width="100%">
-        {status && <Box marginBottom={1}>{status}</Box>}
-        {value.length === 0 ? (
-          <Box>
-            <Text color={color(busy ? 'ghost' : 'muted')}>{glyph.prompt} </Text>
-            <Text color={color('ghost')} wrap="truncate">{truncate(hint, available)}</Text>
-          </Box>
-        ) : (
-          rows.map((row, index) => (
-            <Box key={`${row.start}:${row.end}`}>
-              <Text color={color(busy ? 'ghost' : 'muted')}>{index === 0 ? glyph.prompt : ' '} </Text>
-              <CursorRow row={row} focused={focused} />
-            </Box>
-          ))
-        )}
-        {queue}
-      </Box>
+      {plif ? (
+        <FocusFrame
+          width={width}
+          active={focused || working}
+          {...(dock !== undefined ? { footer: dock } : {})}
+        >
+          {content}
+        </FocusFrame>
+      ) : (
+        <Box flexDirection="column" borderStyle="round" borderColor={color(borderTone)} paddingX={layout.boxPadX} width="100%">
+          {content}
+        </Box>
+      )}
     </Box>
   );
 }

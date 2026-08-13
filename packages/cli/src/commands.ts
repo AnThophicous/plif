@@ -12,10 +12,18 @@
 import path from 'node:path';
 
 import {
+  CredentialBroker,
   MODEL_CATALOG,
   MODEL_CATALOG_DEFAULT,
+  OpenAIProvider,
+  PRESETS,
+  rankFacts,
+  resolveConfig,
+  strategyStatus,
+  WindowsDpapiSecretStore,
 } from '@plif/core';
 import type { Container, Effort, Engine, ModelProvider, ModelSelection } from '@plif/core';
+import type { ModelCatalogProvider } from '@plif/core';
 import {
   globalConfigPath,
   isAutoApproveEnabled,
@@ -33,7 +41,7 @@ import type { PickerGroup, PickerItem } from './components/Picker.js';
 
 import { entry } from './session.js';
 import type { BrowserTab, TimelineEntry } from './session.js';
-import { formatBytes, formatDuration, glyph } from './theme.js';
+import { formatBytes, formatDuration, glyph, shortenPath } from './theme.js';
 import { containerMount, containerWorkdir } from './container-paths.js';
 import type { ThemeDefinition } from './themes.js';
 
@@ -100,6 +108,73 @@ const ok = (...entries: TimelineEntry[]): CommandResult => ({ entries });
 
 const formatTokens = (value: number): string =>
   value < 1000 ? `${value} tokens` : `${(value / 1000).toFixed(1)}k tokens`;
+
+/**
+ * The NVIDIA NIM group of the model picker.
+ *
+ * When a key is available the group is expanded to every model the account can
+ * actually reach — the endpoint advertises far more than a static catalog can
+ * honestly claim — falling back to the curated list when there is no key yet
+ * (the credential prompt belongs to selection, not to browsing) or when the
+ * endpoint does not answer.
+ */
+async function expandNvidiaGroup(
+  catalog: ModelCatalogProvider,
+  staticItems: readonly PickerItem[],
+  currentModel: string | undefined,
+): Promise<PickerGroup> {
+  const key = await new CredentialBroker({
+    store: new WindowsDpapiSecretStore(),
+  }).resolve({
+    variable: PRESETS.nvidia!.keyEnv,
+    purpose: PRESETS.nvidia!.note,
+  });
+  if (key) {
+    try {
+      const provider = new OpenAIProvider(
+        resolveConfig({}, { preset: 'nvidia', apiKey: key }),
+      );
+      const ids = await provider.list();
+      const known = new Map(catalog.models.map((entry) => [entry.id, entry]));
+      const items: PickerItem[] = ids.map((id) => {
+        const hit = known.get(id);
+        return {
+          value: id,
+          label: hit?.label ?? prettyModelLabel(id),
+          detail: hit?.description ?? id,
+          badges: hit?.badges ?? [],
+          current: id === currentModel,
+        };
+      });
+      if (items.length > 0) {
+        return {
+          id: catalog.id,
+          label: catalog.label,
+          detail: `all ${items.length} models available on your NVIDIA account`,
+          items,
+        };
+      }
+    } catch {
+      // Unreachable endpoint or stale key: the curated list is still better
+      // than an empty group.
+    }
+  }
+  return {
+    id: catalog.id,
+    label: catalog.label,
+    detail: catalog.description,
+    items: staticItems,
+  };
+}
+
+/** A readable label for a model id the static catalog does not know. */
+function prettyModelLabel(id: string): string {
+  const tail = id.slice(id.lastIndexOf('/') + 1);
+  return tail
+    .replace(/[-_]+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
 
 export const COMMANDS: readonly Command[] = [
   {
@@ -195,6 +270,82 @@ export const COMMANDS: readonly Command[] = [
       }
 
       return ok(await context.loginMcp(server));
+    },
+  },
+  {
+    name: 'memory',
+    args: '[forget]',
+    summary: 'What Plif remembers about this workspace, and how to drop it',
+    /**
+     * Memory the developer cannot read is memory they cannot trust.
+     *
+     * The store is already consulted on every turn and already survives
+     * restarts; what it lacked was a way to see what it had decided. A wrong
+     * fact that keeps steering the agent is invisible until you can list it,
+     * and then it is one command to clear.
+     */
+    run: async (argv, context) => {
+      const workspace = context.cwd;
+      const verb = argv.map((word) => word.trim().toLowerCase()).filter(Boolean)[0];
+
+      if (verb === 'forget') {
+        await context.engine.memory.forget(workspace);
+        return ok(
+          entry('notice', 'memory for this workspace is gone', {
+            tone: 'accent',
+            subtitle: 'facts, failures, strategies and notes',
+          }),
+        );
+      }
+
+      if (verb) {
+        return ok(
+          entry('notice', `/memory does not know "${verb}"`, {
+            tone: 'warn',
+            subtitle: '/memory to read it · /memory forget to drop it',
+          }),
+        );
+      }
+
+      const snapshot = await context.engine.memory.snapshot(workspace);
+      const lines: string[] = [];
+      const section = (title: string, rows: readonly string[]): void => {
+        if (rows.length === 0) return;
+        lines.push(lines.length ? `\n${title}` : title, ...rows);
+      };
+
+      section(
+        'Facts',
+        rankFacts(snapshot.facts, 20).map(
+          (fact) =>
+            `  ${fact.text}${fact.confirmations > 1 ? `  (seen ${fact.confirmations}x)` : ''}`,
+        ),
+      );
+      section('Known not to work', rankFacts(snapshot.failures, 20).map((fact) => `  ${fact.text}`));
+      section(
+        'Strategies',
+        snapshot.strategies.slice(-10).map((strategy) => `  ${strategy.approach} — ${strategyStatus(strategy)}`),
+      );
+      const notes = snapshot.notes.trim();
+      if (notes) section('Notes', notes.split('\n').map((line) => `  ${line}`));
+
+      if (lines.length === 0) {
+        return ok(
+          entry('notice', 'nothing remembered about this workspace yet', {
+            tone: 'muted',
+            subtitle: 'it fills in as the agent works here',
+          }),
+        );
+      }
+
+      return ok(
+        entry('notice', `memory for ${shortenPath(workspace, 48)}`, {
+          tone: 'accent',
+          subtitle: `${snapshot.facts.length} facts · ${snapshot.failures.length} failures · ${snapshot.strategies.length} strategies`,
+          detail: lines.join('\n'),
+          expand: true,
+        }),
+      );
     },
   },
   {
@@ -478,18 +629,26 @@ export const COMMANDS: readonly Command[] = [
       // Opening the catalog is deliberately independent of the global config:
       // a malformed config or missing key must not hide the model chooser.
       const currentModel = context.model?.info.id;
-      const groups: PickerGroup[] = MODEL_CATALOG.map((catalogProvider) => ({
-        id: catalogProvider.id,
-        label: catalogProvider.label,
-        detail: catalogProvider.description,
-        items: catalogProvider.models.map((catalogModel) => ({
+      const groups: PickerGroup[] = [];
+      for (const catalogProvider of MODEL_CATALOG) {
+        const items: PickerItem[] = catalogProvider.models.map((catalogModel) => ({
           value: catalogModel.id,
           label: catalogModel.label,
           detail: catalogModel.description,
           badges: catalogModel.badges,
           current: catalogModel.id === currentModel,
-        })),
-      }));
+        }));
+        groups.push(
+          catalogProvider.id === 'nvidia'
+            ? await expandNvidiaGroup(catalogProvider, items, currentModel)
+            : {
+                id: catalogProvider.id,
+                label: catalogProvider.label,
+                detail: catalogProvider.description,
+                items,
+              },
+        );
+      }
 
       context.openPicker({
         title: 'select a model',
@@ -506,15 +665,15 @@ export const COMMANDS: readonly Command[] = [
 
   {
     name: 'effort',
-    args: '[low|medium|high|xhigh|default]',
+    args: '[low|medium|high|xhigh|plif|default]',
     summary: 'Show or change model reasoning effort',
     run: async (argv, context) => {
       const stored = await loadGlobalConfig();
       const current = stored.effort ?? 'default';
       const value = argv[0];
-      if (!value) return ok(entry('notice', `effort: ${current}`, { tone: 'accent' }));
-      if (!['low', 'medium', 'high', 'xhigh', 'default'].includes(value)) {
-        throw new PlifError('INVALID_ARGUMENT', 'usage: /effort [low|medium|high|xhigh|default]');
+      if (!value) return ok(entry('notice', `effort: ${current === 'plif' ? 'Plif' : current}`, { tone: 'accent' }));
+      if (!['low', 'medium', 'high', 'xhigh', 'plif', 'default'].includes(value)) {
+        throw new PlifError('INVALID_ARGUMENT', 'usage: /effort [low|medium|high|xhigh|plif|default]');
       }
       await context.setEffort(value === 'default' ? undefined : value as Effort);
       return ok(entry('notice', `effort: ${value}`, {

@@ -35,6 +35,56 @@ export const MINIMAL_THEME: ThemeDefinition = {
   source: 'builtin',
 };
 
+/**
+ * MidNight.
+ *
+ * The blue is spent, not spread. Everything a developer reads — answers, tool
+ * output, paths, metadata — is grey, so the transcript stays as quiet as the
+ * default theme. The blue family survives only in `accent` and its neighbours,
+ * and those are wired to exactly two things: the prompt frame and thinking.
+ * That is what makes the colour mean something. A theme that paints the whole
+ * screen blue has no way left to say "this is where you are" or "this is the
+ * agent working", because everything is already saying it.
+ */
+export const MIDNIGHT_THEME: ThemeDefinition = {
+  id: 'midnight',
+  name: 'MidNight',
+  description: 'Neutral greys, with the blue kept to the prompt and to thinking.',
+  source: 'builtin',
+  palette: {
+    text: '#e9e9ef',
+    muted: '#8d8d98',
+    faint: '#585863',
+    ghost: '#3b3b45',
+    brand: '#4a5fc4',
+    accent: '#8aa4ff',
+    accentBright: '#cbd9ff',
+    accentDim: '#5f74d2',
+    success: '#6ec48a',
+    warn: '#e0a458',
+    danger: '#e8695f',
+    info: '#6fb3d9',
+  },
+  syntax: {
+    command: 'text',
+    parameter: 'muted',
+    string: 'faint',
+    variable: 'muted',
+    operator: 'ghost',
+    number: 'muted',
+    comment: 'ghost',
+    plain: 'muted',
+  },
+  borders: { panel: 'ghost', focus: 'accent', danger: 'danger' },
+  diff: { addBackground: '#12291b', removeBackground: '#33161a', addMarker: 'success', removeMarker: 'danger' },
+  emphasis: {
+    normal: { tone: 'muted' },
+    important: { tone: 'text', bold: true },
+    active: { tone: 'text', bold: true },
+    metadata: { tone: 'ghost' },
+  },
+};
+
 export function themeDirectory(home = os.homedir()): string {
   return path.join(home, '.plif');
 }
@@ -48,7 +98,7 @@ export async function loadThemes(home = os.homedir()): Promise<ThemeCatalogue> {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
 
-  const themes: ThemeDefinition[] = [MINIMAL_THEME];
+  const themes: ThemeDefinition[] = [MINIMAL_THEME, MIDNIGHT_THEME];
   const problems: string[] = [];
   for (const file of files) {
     const absolute = path.join(directory, file);

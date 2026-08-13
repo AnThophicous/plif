@@ -9,13 +9,9 @@
  * story, which is why there is a single seam and this file is on the right side
  * of it.
  *
- * ## Why the set is small
- *
- * Five tools, not twenty. A large tool surface reads well in a README and
- * behaves badly in practice: the model spends its attention choosing between
- * near-duplicates, and every extra tool is another schema it can get subtly
- * wrong. Read, write, list, run, ask covers the work; anything more specific is
- * a shell command.
+ * The surface stays task-shaped: structured discovery and transactional edits
+ * are first-class because forcing them through a shell loses safety metadata,
+ * stable output and the ability to validate the complete operation up front.
  */
 
 import { PlifError } from '../errors.js';
@@ -371,6 +367,274 @@ export const listDir: Tool = {
       .sort()
       .join('\n');
     return { output: clip(listing), ok: true };
+  },
+};
+
+const MAX_DISCOVERY_ENTRIES = 10_000;
+const DEFAULT_SEARCH_RESULTS = 200;
+const MAX_SEARCH_RESULTS = 500;
+
+interface WalkedFile {
+  readonly absolute: string;
+  readonly relative: string;
+}
+
+async function walkFiles(container: Container, root: string): Promise<WalkedFile[]> {
+  const normalizedRoot = normalizeToolPath(root);
+  const pending = [normalizedRoot];
+  const files: WalkedFile[] = [];
+  let visited = 0;
+
+  while (pending.length > 0) {
+    const directory = pending.pop()!;
+    const entries = await container.listDir(directory);
+    for (const entry of entries) {
+      visited += 1;
+      if (visited > MAX_DISCOVERY_ENTRIES) {
+        throw new PlifError('INVALID_ARGUMENT', `discovery exceeded ${MAX_DISCOVERY_ENTRIES} entries`, {
+          hint: 'Use a narrower path or pattern.',
+        });
+      }
+      const absolute = joinToolPath(directory, entry.name);
+      if (entry.kind === 'directory') pending.push(absolute);
+      else files.push({ absolute, relative: relativeToolPath(normalizedRoot, absolute) });
+    }
+  }
+
+  return files;
+}
+
+function normalizeToolPath(value: string): string {
+  const normalized = value.replace(/\\/g, '/').replace(/\/+/g, '/');
+  if (normalized === '/') return normalized;
+  return normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
+}
+
+function joinToolPath(parent: string, child: string): string {
+  return normalizeToolPath(`${parent}/${child}`);
+}
+
+function relativeToolPath(root: string, absolute: string): string {
+  if (root === '/') return absolute.slice(1);
+  return absolute.slice(root.length).replace(/^\//, '');
+}
+
+function resultLimit(input: Record<string, unknown>): number {
+  const value = input['max_results'];
+  if (value === undefined) return DEFAULT_SEARCH_RESULTS;
+  if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > MAX_SEARCH_RESULTS) {
+    throw new PlifError('INVALID_ARGUMENT', `max_results must be between 1 and ${MAX_SEARCH_RESULTS}`);
+  }
+  return value as number;
+}
+
+function globExpression(pattern: string): RegExp {
+  const normalized = pattern.replace(/\\/g, '/');
+  let source = '^';
+  for (let index = 0; index < normalized.length; index += 1) {
+    const character = normalized[index]!;
+    if (character === '*' && normalized[index + 1] === '*') {
+      index += 1;
+      if (normalized[index + 1] === '/') {
+        index += 1;
+        source += '(?:.*/)?';
+      } else {
+        source += '.*';
+      }
+    } else if (character === '*') {
+      source += '[^/]*';
+    } else if (character === '?') {
+      source += '[^/]';
+    } else {
+      source += character.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+    }
+  }
+  return new RegExp(`${source}$`);
+}
+
+export const globFiles: Tool = {
+  parallelSafe: true,
+  spec: {
+    name: 'glob',
+    description: 'Find files recursively by glob pattern without starting a shell process.',
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'Pattern relative to path, e.g. **/*.ts' },
+        path: { type: 'string', description: 'Container-absolute root; defaults to /project' },
+        max_results: { type: 'integer', minimum: 1, maximum: MAX_SEARCH_RESULTS },
+      },
+      required: ['pattern'],
+      additionalProperties: false,
+    },
+  },
+  async run(input, context) {
+    const pattern = requireString(input, 'pattern');
+    const root = typeof input['path'] === 'string' ? input['path'] : '/project';
+    const limit = resultLimit(input);
+    const matcher = globExpression(pattern);
+    const matches = (await walkFiles(context.container, root))
+      .filter((file) => matcher.test(file.relative))
+      .map((file) => file.absolute)
+      .sort()
+      .slice(0, limit);
+    return {
+      output: clip(matches.length > 0 ? matches.join('\n') : `No files matched ${pattern} under ${root}.`),
+      ok: true,
+    };
+  },
+};
+
+export const grepFiles: Tool = {
+  parallelSafe: true,
+  spec: {
+    name: 'grep',
+    description: 'Search text files recursively with a regular expression and return path:line matches.',
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'JavaScript regular expression' },
+        path: { type: 'string', description: 'Container-absolute root; defaults to /project' },
+        include: { type: 'string', description: 'Optional file glob, e.g. **/*.ts' },
+        case_sensitive: { type: 'boolean', description: 'Defaults to true' },
+        max_results: { type: 'integer', minimum: 1, maximum: MAX_SEARCH_RESULTS },
+      },
+      required: ['pattern'],
+      additionalProperties: false,
+    },
+  },
+  async run(input, context) {
+    const pattern = requireString(input, 'pattern');
+    const root = typeof input['path'] === 'string' ? input['path'] : '/project';
+    const limit = resultLimit(input);
+    let matcher: RegExp;
+    try {
+      matcher = new RegExp(pattern, input['case_sensitive'] === false ? 'i' : '');
+    } catch (error) {
+      throw new PlifError('INVALID_ARGUMENT', `invalid regular expression: ${(error as Error).message}`);
+    }
+    const include = typeof input['include'] === 'string' ? globExpression(input['include']) : null;
+    const matches: string[] = [];
+
+    for (const file of await walkFiles(context.container, root)) {
+      if (include && !include.test(file.relative)) continue;
+      const content = await context.container.readFile(file.absolute).catch(() => null);
+      if (content === null || content.includes('\0')) continue;
+      for (const [index, line] of content.split(/\r?\n/).entries()) {
+        if (!matcher.test(line)) continue;
+        matches.push(`${file.absolute}:${index + 1}:${line.slice(0, 500)}`);
+        if (matches.length >= limit) break;
+      }
+      if (matches.length >= limit) break;
+    }
+
+    return {
+      output: clip(matches.length > 0 ? matches.join('\n') : `No matches for ${pattern} under ${root}.`),
+      ok: true,
+    };
+  },
+};
+
+interface PatchEdit {
+  readonly path: string;
+  readonly oldString: string;
+  readonly newString: string;
+  readonly replaceAll: boolean;
+}
+
+export const applyPatch: Tool = {
+  spec: {
+    name: 'apply_patch',
+    description:
+      'Apply one or more exact replacements as one transaction. Every edit is validated before ' +
+      'the first write; if a later write fails, earlier writes are restored.',
+    parameters: {
+      type: 'object',
+      properties: {
+        edits: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: 'Container-absolute file path' },
+              old_string: { type: 'string', description: 'Exact existing text' },
+              new_string: { type: 'string', description: 'Replacement text; empty deletes' },
+              replace_all: { type: 'boolean' },
+            },
+            required: ['path', 'old_string', 'new_string'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['edits'],
+      additionalProperties: false,
+    },
+  },
+  async run(input, context) {
+    if (!Array.isArray(input['edits']) || input['edits'].length === 0) {
+      throw new PlifError('INVALID_ARGUMENT', 'apply_patch needs a non-empty edits array');
+    }
+
+    const edits: PatchEdit[] = input['edits'].map((value, index) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new PlifError('INVALID_ARGUMENT', `edits[${index}] must be an object`);
+      }
+      const record = value as Record<string, unknown>;
+      return {
+        path: requireString(record, 'path'),
+        oldString: requireString(record, 'old_string'),
+        newString: typeof record['new_string'] === 'string' ? record['new_string'] : '',
+        replaceAll: record['replace_all'] === true,
+      };
+    });
+
+    if (new Set(edits.map((edit) => edit.path)).size !== edits.length) {
+      throw new PlifError('INVALID_ARGUMENT', 'apply_patch accepts each path once per transaction');
+    }
+
+    const staged: { edit: PatchEdit; before: string; after: string }[] = [];
+    for (const edit of edits) {
+      if (edit.oldString === edit.newString) {
+        throw new PlifError('INVALID_ARGUMENT', `${edit.path}: old_string and new_string are identical`);
+      }
+      const before = await context.container.readFile(edit.path);
+      const occurrences = countOccurrences(before, edit.oldString);
+      if (occurrences === 0) {
+        throw new PlifError('INVALID_ARGUMENT', `${edit.path}: old_string was not found`);
+      }
+      if (occurrences > 1 && !edit.replaceAll) {
+        throw new PlifError('INVALID_ARGUMENT', `${edit.path}: old_string appears ${occurrences} times`);
+      }
+      const after = edit.replaceAll
+        ? before.split(edit.oldString).join(edit.newString)
+        : before.replace(edit.oldString, edit.newString);
+      staged.push({ edit, before, after });
+    }
+
+    const written: typeof staged = [];
+    try {
+      for (const item of staged) {
+        if (context.edits && context.agentId) {
+          await context.edits.observe(context.agentId, item.edit.path, item.before);
+          await context.edits.commit(context.agentId, item.edit.path, item.after, context.container);
+        } else {
+          await context.container.writeFile(item.edit.path, item.after);
+        }
+        written.push(item);
+      }
+    } catch (error) {
+      for (const item of written.reverse()) {
+        await context.container.writeFile(item.edit.path, item.before).catch(() => undefined);
+      }
+      throw error;
+    }
+
+    const diffs = staged.map((item) => formatDiff(item.edit.path, diffLines(item.before, item.after)));
+    const summary = staged
+      .map((item) => `${item.edit.path} — ${describeStats(diffStats(diffLines(item.before, item.after)))?.toLowerCase() ?? 'updated'}`)
+      .join('\n');
+    return { output: summary, diff: diffs.join('\n'), ok: true };
   },
 };
 
@@ -980,6 +1244,9 @@ export const DEFAULT_TOOLS: readonly Tool[] = [
   writeFile,
   editFile,
   listDir,
+  globFiles,
+  grepFiles,
+  applyPatch,
   runCommand,
   askUser,
   getConfig,

@@ -1,7 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStdout } from 'ink';
-
-const RESIZE_SETTLE_MS = 90;
 
 export interface TerminalSize {
   readonly columns: number;
@@ -20,6 +18,10 @@ export interface TerminalSize {
  * Width is clamped: below ~48 columns no layout here is readable, and above
  * ~160 a full-width prompt box becomes a very long horizontal line that is
  * harder to scan than a bounded one.
+ *
+ * Every resize is applied immediately. A delayed size leaves Ink painting an
+ * old, taller frame into a new, shorter terminal; on Windows that is exactly
+ * the condition that duplicates scrollback instead of erasing it cleanly.
  */
 export function useTerminalSize(): TerminalSize {
   const { stdout } = useStdout();
@@ -30,29 +32,25 @@ export function useTerminalSize(): TerminalSize {
   });
 
   const [size, setSize] = useState<TerminalSize>(read);
+  const applied = useRef<TerminalSize>(size);
 
   useEffect(() => {
     if (!stdout) return;
 
-    let timer: NodeJS.Timeout | undefined;
+    const settle = (): void => {
+      const next = read();
+      applied.current = next;
+      setSize((previous) =>
+        next.columns === previous.columns && next.rows === previous.rows ? previous : next,
+      );
+    };
 
     const onResize = (): void => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        timer = undefined;
-        setSize((previous) => {
-          const next = read();
-          return next.columns === previous.columns && next.rows === previous.rows
-            ? previous
-            : next;
-        });
-      }, RESIZE_SETTLE_MS);
-      timer.unref?.();
+      settle();
     };
 
     stdout.on('resize', onResize);
     return () => {
-      if (timer) clearTimeout(timer);
       stdout.off('resize', onResize);
     };
   }, [stdout]);

@@ -24,6 +24,8 @@
  * within one.
  */
 
+import { randomUUID } from 'node:crypto';
+
 import { PlifError, toPlifError } from '../errors.js';
 import type { EventBus } from '../events/bus.js';
 import { safeToolCallArguments } from '../model/provider.js';
@@ -39,12 +41,15 @@ import type { Tool, ToolResult } from './tools.js';
 import type { TaskManager } from '../tasks/manager.js';
 import type { LspManager } from '../lsp/manager.js';
 import type { EditCoordinator } from './edits.js';
+import { eventBase } from '../session/events.js';
 
 export interface LoopOptions {
   readonly provider: ModelProvider;
   readonly container: Container;
   readonly questions: QuestionBroker;
   readonly bus: EventBus;
+  /** Stable identity shared by every durable event emitted during this run. */
+  readonly turnId?: string;
   readonly tools?: readonly Tool[];
   /**
    * Hard ceiling on passes through the loop.
@@ -108,12 +113,55 @@ export const DEFAULT_CONTEXT_TOKENS = 1_000_000;
 export const AUTO_COMPACTION_TRIGGER_RATIO = 0.9;
 export const AUTO_COMPACTION_TARGET_RATIO = 0.5;
 
+/** Below this, a loop pass was too quick to be a moment worth marking. */
+export const CYCLE_SEPARATOR_MIN_MS = 10_000;
+
 export function shouldAutoCompact(used: number, contextTokens: number): boolean {
   return contextTokens > 0 && used >= Math.floor(contextTokens * AUTO_COMPACTION_TRIGGER_RATIO);
 }
 
 export function autoCompactionTarget(contextTokens: number): number {
   return Math.floor(contextTokens * AUTO_COMPACTION_TARGET_RATIO);
+}
+
+const DANGLING_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'but', 'by', 'for', 'from', 'in', 'into', 'is', 'of',
+  'on', 'or', 'so', 'than', 'that', 'the', 'then', 'this', 'to', 'was', 'were', 'will', 'with',
+  'à', 'ao', 'aos', 'antes', 'até', 'com', 'como', 'da', 'das', 'de', 'depois', 'do',
+  'dos', 'e', 'em', 'entre', 'está', 'estão', 'é', 'já', 'mais', 'mas', 'muito', 'na', 'nas',
+  'no', 'nos', 'o', 'os', 'ou', 'para', 'pela', 'pelo', 'por', 'que', 'quando', 'se', 'sem',
+  'sobre', 'são', 'também', 'um', 'uma', 'umas', 'uns', 'às',
+]);
+
+const SENTENCE_END = /[.!?:;,)\]}"'`>»…]$/;
+const LAST_WORD = /([\p{L}\p{N}'’-]+)$/u;
+const SENTENCE_SPLIT = /[.!?:;\n]/g;
+const SHEARED_SENTENCE = 40;
+
+export function endsMidSentence(text: string): boolean {
+  const trimmed = text.replace(/\s+$/, '');
+  if (trimmed.length < 8 || SENTENCE_END.test(trimmed)) return false;
+
+  const last = LAST_WORD.exec(trimmed)?.[1];
+  if (last !== undefined && DANGLING_WORDS.has(last.toLowerCase())) return true;
+
+  let start = 0;
+  for (const match of trimmed.matchAll(SENTENCE_SPLIT)) start = match.index + 1;
+  return trimmed.length - start >= SHEARED_SENTENCE;
+}
+
+/**
+ * Prose that arrives before a tool request is operational, not a conclusion.
+ * A clipped fragment is hidden from the developer-facing answer while the raw
+ * assistant message remains in protocol history for the tool follow-up.
+ */
+export function classifyPreToolProse(
+  text: string,
+  requestedTools: number,
+): 'transient' | 'activity' | null {
+  const normalized = text.trim();
+  if (!normalized || requestedTools === 0) return null;
+  return endsMidSentence(normalized) ? 'transient' : 'activity';
 }
 
 export type LoopStop =
@@ -191,6 +239,8 @@ export async function runLoop(
   history: readonly Message[],
   options: LoopOptions,
 ): Promise<LoopResult> {
+  const turnId = options.turnId ?? randomUUID();
+  const loopStartedAt = Date.now();
   const tools = options.tools ?? DEFAULT_TOOLS;
   const registry = toolRegistry(tools);
   const specs = toolSpecs(tools);
@@ -234,6 +284,8 @@ export async function runLoop(
       messages.length = 0;
       messages.push(...compacted.messages);
     }
+
+    const turnStartedAt = Date.now();
 
     // --- ask the model ---------------------------------------------------
     let turnText = '';
@@ -321,7 +373,10 @@ export async function runLoop(
           const reported = event.usage.promptTokens > 0;
           options.bus.emit('agent.usage', {
             promptTokens: reported ? event.usage.promptTokens : estimateTokens(messages),
-            completionTokens: event.usage.completionTokens,
+            // Cumulative for this user turn. A tool-using turn may make
+            // several provider requests, and the TUI must not reset its meter
+            // at every tool boundary.
+            completionTokens,
             budget: contextTokens,
             estimated: !reported,
           });
@@ -338,11 +393,24 @@ export async function runLoop(
       return done('error', toPlifError(error, 'MODEL_ERROR'));
     }
 
-    keepTurnText();
+    const preToolProse = classifyPreToolProse(turnText, requested.length);
+    if (preToolProse) {
+      options.bus.emit('agent.pre_tool_prose', {
+        iteration: iterations,
+        text: turnText,
+        visibility: preToolProse,
+      });
+    }
+
+    if (preToolProse === null) keepTurnText();
     // Once a model has shown reasoning it is in thinking mode for the rest of
     // the conversation, and every later assistant turn must carry the field —
     // empty string included — or the provider can reject the next request.
     if (turnReasoning) sawReasoning = true;
+    const protocolToolCalls = requested.map((call) => ({
+      ...call,
+      arguments: safeToolCallArguments(call.arguments),
+    }));
     messages.push({
       role: 'assistant',
       content: turnText,
@@ -351,12 +419,16 @@ export async function runLoop(
         ? {
             // Keep the raw call in `requested` for the local parse error, but
             // never replay malformed JSON as assistant history.
-            toolCalls: requested.map((call) => ({
-              ...call,
-              arguments: safeToolCallArguments(call.arguments),
-            })),
+            toolCalls: protocolToolCalls,
           }
         : {}),
+    });
+    options.bus.emit('conversation.event', {
+      ...eventBase('assistant.message', turnId),
+      phase: requested.length > 0 ? 'commentary' : 'final',
+      text: turnText,
+      ...(sawReasoning ? { reasoning: turnReasoning } : {}),
+      ...(protocolToolCalls.length > 0 ? { toolCalls: protocolToolCalls } : {}),
     });
 
     // No tools requested means the model considers itself finished.
@@ -400,6 +472,13 @@ export async function runLoop(
 
       const settled = await Promise.all(
         prepared.map(async (item) => {
+          options.bus.emit('conversation.event', {
+            ...eventBase('tool.started', turnId),
+            call: {
+              ...item.call,
+              arguments: safeToolCallArguments(item.call.arguments),
+            },
+          });
           const started = Date.now();
           const result =
             item.refusal !== null
@@ -429,6 +508,14 @@ export async function runLoop(
           ok: item.ok,
           durationMs: item.durationMs,
           output: terminalToolOutput(item.call.name, item),
+          ...(item.diff ? { diff: item.diff } : {}),
+        });
+        options.bus.emit('conversation.event', {
+          ...eventBase('tool.completed', turnId),
+          callId: item.call.id,
+          output: item.output,
+          ok: item.ok,
+          durationMs: item.durationMs,
           ...(item.diff ? { diff: item.diff } : {}),
         });
 
@@ -481,12 +568,47 @@ export async function runLoop(
         });
         consecutiveFailures = 0;
       }
+
+      // The next model pass is a distinct visual cycle. Emit this only after
+      // tool results are recorded, so the CLI can place a separator exactly in
+      // the gap between execution and the next reasoning block.
+      //
+      // Not every pass earns one. A rule across the terminal is punctuation,
+      // and punctuation after every sentence fragment is noise — a discovery
+      // burst is six passes in four seconds, and six rules through it say
+      // nothing except that the loop iterated. What a separator is actually
+      // for is marking a wait the developer sat through, so it is emitted for
+      // a cycle that cost real time and skipped for one that did not.
+      const cycleMs = Date.now() - turnStartedAt;
+      if (cycleMs >= CYCLE_SEPARATOR_MIN_MS) {
+        options.bus.emit('agent.cycle', {
+          iteration: iterations,
+          durationMs: cycleMs,
+          toolCalls: settled.length,
+        });
+      }
     }
   }
 
   return done('max_iterations');
 
   function done(stop: LoopStop, error?: PlifError): LoopResult {
+    if (stop === 'complete') {
+      options.bus.emit('conversation.event', {
+        ...eventBase('turn.completed', turnId),
+        durationMs: Date.now() - loopStartedAt,
+      });
+    } else if (stop === 'cancelled') {
+      options.bus.emit('conversation.event', {
+        ...eventBase('turn.interrupted', turnId),
+        reason: 'cancelled',
+      });
+    } else {
+      options.bus.emit('conversation.event', {
+        ...eventBase('turn.failed', turnId),
+        reason: error?.message ?? stop.replaceAll('_', ' '),
+      });
+    }
     return {
       stop,
       text,
