@@ -502,6 +502,31 @@ describe('OAuth-protected HTTP MCP', () => {
     }
   });
 
+  it('connects, disconnects, and tests one server on demand', async () => {
+    const fixture = await startProtectedMcp({ anonymous: true });
+    const registry = await McpRegistry.connect({ anon: { url: fixture.url } });
+
+    try {
+      assert.equal(registry.statuses()[0]?.connected, true);
+
+      const disconnected = await registry.disconnect('anon');
+      assert.equal(disconnected.connected, false);
+      assert.equal(disconnected.detail, 'closed');
+
+      const tested = await registry.testConnection('anon');
+      assert.equal(tested.connected, true);
+      assert.equal(tested.toolCount, 1);
+
+      await registry.disconnect('anon');
+      const connected = await registry.connectServer('anon');
+      assert.equal(connected.connected, true);
+      assert.equal(connected.toolCount, 1);
+    } finally {
+      await registry.close();
+      await fixture.close();
+    }
+  });
+
   it('says which servers exist when asked to log in to one that does not', async () => {
     const fixture = await startProtectedMcp();
     const approvals: Promise<void>[] = [];

@@ -248,6 +248,9 @@ class McpServer {
   }
 
   async connect(retried = false): Promise<void> {
+    if (this.#client) return;
+    this.#detail = 'connecting';
+    this.#emitStatus();
     const client = new Client(
       { name: 'plif', version: '0.1.0' },
       { capabilities: {} },
@@ -312,6 +315,27 @@ class McpServer {
     this.#tools = listed.tools.map((tool) => this.#wrap(tool));
     this.#detail = `${this.#tools.length} tools`;
     this.#emitStatus();
+  }
+
+  async test(): Promise<void> {
+    if (!this.#client) {
+      await this.connect();
+      return;
+    }
+    try {
+      const listed = await withDeadline(
+        this.#client.listTools(),
+        LIST_TOOLS_TIMEOUT_MS,
+        `"${this.name}" tool list`,
+      );
+      this.#tools = listed.tools.map((tool) => this.#wrap(tool));
+      this.#detail = `${this.#tools.length} tools`;
+      this.#emitStatus();
+    } catch (error) {
+      this.fail(condenseMcpFailure(error instanceof Error ? error.message : String(error)));
+      this.#emitStatus();
+      throw error;
+    }
   }
 
   #wrap(tool: { name: string; description?: string; inputSchema?: unknown }): Tool {
@@ -525,6 +549,45 @@ export class McpRegistry {
     return this.#servers.map((server) => server.name);
   }
 
+  async connectServer(server: string): Promise<McpServerStatus> {
+    const target = this.#servers.find((item) => item.name === server);
+    if (!target) throw this.unknownServer(server);
+    try {
+      await target.connect();
+      this.#bus?.emit('mcp.connected', {
+        server: target.name,
+        transport: target.transport,
+        tools: target.tools.map((tool) => tool.spec.name),
+      });
+      return target.status();
+    } catch (error) {
+      target.fail(condenseMcpFailure(error instanceof Error ? error.message : String(error)));
+      this.#bus?.emit('mcp.status', { ...target.status(), server: target.name });
+      throw error;
+    }
+  }
+
+  async disconnect(server: string): Promise<McpServerStatus> {
+    const target = this.#servers.find((item) => item.name === server);
+    if (!target) throw this.unknownServer(server);
+    await target.close();
+    this.#bus?.emit('mcp.status', { ...target.status(), server: target.name });
+    return target.status();
+  }
+
+  async testConnection(server: string): Promise<McpServerStatus> {
+    const target = this.#servers.find((item) => item.name === server);
+    if (!target) throw this.unknownServer(server);
+    try {
+      await target.test();
+      return target.status();
+    } catch (error) {
+      target.fail(condenseMcpFailure(error instanceof Error ? error.message : String(error)));
+      this.#bus?.emit('mcp.status', { ...target.status(), server: target.name });
+      throw error;
+    }
+  }
+
   tools(): Tool[] {
     return this.#servers.flatMap((server) => [...server.tools]);
   }
@@ -549,6 +612,13 @@ export class McpRegistry {
     await Promise.all(this.#servers.map((server) => server.close()));
     await this.#oauth.close();
     this.#servers = [];
+  }
+
+  private unknownServer(server: string): PlifError {
+    return new PlifError('INVALID_ARGUMENT', `no MCP server named "${server}"`, {
+      detail: { known: this.#servers.map((item) => item.name) },
+      hint: 'Open /mcp to choose a configured server.',
+    });
   }
 }
 

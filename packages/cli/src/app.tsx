@@ -78,7 +78,7 @@ import type {
 import type { SandboxCapabilityReport } from '@plif/sandbox';
 
 import { Approval, APPROVAL_CHOICES, approvalHeight } from './components/Approval.js';
-import { Browser } from './components/Browser.js';
+import { Browser, mcpStatusKind, sortMcpStatuses } from './components/Browser.js';
 import { Compaction, COMPACTION_HEIGHT } from './components/Compaction.js';
 import { Completions, EmojiMenu } from './components/Completions.js';
 import { Discovery, discoveryHeight } from './components/Discovery.js';
@@ -1208,6 +1208,77 @@ export function App({
     [mcpRegistry],
   );
 
+  const connectMcp = useCallback(
+    async (server: string): Promise<TimelineEntry> => {
+      if (!mcpRegistry) return entry('notice', 'no MCP registry in this session', { tone: 'warn', status: 'failed' });
+      try {
+        const status = await mcpRegistry.connectServer(server);
+        setMcpStatuses(mcpRegistry.statuses());
+        return entry('notice', `${status.name} connected`, {
+          tone: 'accent',
+          subtitle: `${status.toolCount} tools available · ${status.transport}`,
+        });
+      } catch (error) {
+        setMcpStatuses(mcpRegistry.statuses());
+        const { title, detail } = formatError(error);
+        return entry('notice', `${server} could not connect`, {
+          tone: 'danger',
+          status: 'failed',
+          subtitle: title,
+          ...(detail ? { detail, expand: true } : {}),
+        });
+      }
+    },
+    [mcpRegistry],
+  );
+
+  const disconnectMcp = useCallback(
+    async (server: string): Promise<TimelineEntry> => {
+      if (!mcpRegistry) return entry('notice', 'no MCP registry in this session', { tone: 'warn', status: 'failed' });
+      try {
+        const status = await mcpRegistry.disconnect(server);
+        setMcpStatuses(mcpRegistry.statuses());
+        return entry('notice', `${status.name} disconnected`, {
+          tone: 'accent',
+          subtitle: 'Its tools are hidden until you connect it again.',
+        });
+      } catch (error) {
+        const { title, detail } = formatError(error);
+        return entry('notice', `could not disconnect ${server}`, {
+          tone: 'danger',
+          status: 'failed',
+          subtitle: title,
+          ...(detail ? { detail, expand: true } : {}),
+        });
+      }
+    },
+    [mcpRegistry],
+  );
+
+  const testMcp = useCallback(
+    async (server: string): Promise<TimelineEntry> => {
+      if (!mcpRegistry) return entry('notice', 'no MCP registry in this session', { tone: 'warn', status: 'failed' });
+      try {
+        const status = await mcpRegistry.testConnection(server);
+        setMcpStatuses(mcpRegistry.statuses());
+        return entry('notice', `${status.name} connection is healthy`, {
+          tone: 'accent',
+          subtitle: `${status.toolCount} tools answered the test · ${status.transport}`,
+        });
+      } catch (error) {
+        setMcpStatuses(mcpRegistry.statuses());
+        const { title, detail } = formatError(error);
+        return entry('notice', `${server} connection test failed`, {
+          tone: 'danger',
+          status: 'failed',
+          subtitle: title,
+          ...(detail ? { detail, expand: true } : {}),
+        });
+      }
+    },
+    [mcpRegistry],
+  );
+
   const reconnectMcp = useCallback(
     async (added: readonly string[]): Promise<void> => {
       if (!mcpRegistry) return;
@@ -1339,14 +1410,19 @@ export function App({
       const needle = browser.filter.trim().toLowerCase();
 
       if (browser.tab === 'mcp') {
-        return mcpStatuses
+        return sortMcpStatuses(mcpStatuses)
           .filter((server) => !needle || server.name.toLowerCase().includes(needle))
-          .map((server) => ({
-            id: server.name,
-            title: `${server.name}  ${server.connected ? `${server.toolCount} tools` : 'offline'}`,
-            mark: server.connected ? glyph.done : glyph.failed,
-            tone: server.connected ? ('success' as const) : ('danger' as const),
-          }));
+          .map((server) => {
+            const state = mcpStatusKind(server);
+            return {
+              id: server.name,
+              title: `${state} · ${server.name}${server.connected ? ` · ${server.toolCount} tools` : ''}`,
+              mark: state === 'connected' ? glyph.done : state === 'error' ? glyph.failed : glyph.pending,
+              tone: state === 'connected'
+                ? ('success' as const)
+                : state === 'error' ? ('danger' as const) : ('muted' as const),
+            };
+          });
       }
 
       if (browser.tab === 'skills') {
@@ -2875,13 +2951,18 @@ export function App({
       return;
     }
     // Uppercase only. Lowercase belongs to the filter, and a browser where
-    // typing a server's name starts logging into a different one is a trap.
-    if (char === 'L' && !key.ctrl && !key.meta && browser.tab === 'mcp') {
+    // typing a server's name starts changing its connection is a trap.
+    if (browser.tab === 'mcp' && !key.ctrl && !key.meta && ['C', 'D', 'A', 'T'].includes(char)) {
       const row = browser.rows[browser.selected];
-      if (row) {
-        dispatch({ type: 'browser.close' });
-        void loginMcp(row.id).then(push);
-      }
+      if (!row) return;
+      const action = char === 'C'
+        ? connectMcp
+        : char === 'D'
+          ? disconnectMcp
+          : char === 'A'
+            ? loginMcp
+            : testMcp;
+      void action(row.id).then(push);
       return;
     }
     if (key.backspace || key.delete) {
@@ -3310,13 +3391,20 @@ export function App({
     background: tasks.some((task) => task.status === 'running'),
     queued: state.queue.length,
   });
-  const hints: Hint[] = state.browser
+  const hints: Hint[] = state.browser && !state.question
     ? [
         { key: 'type', label: 'filter' },
         { key: '↑↓', label: 'move' },
         { key: 'Tab', label: 'switch tab' },
         { key: 'Enter', label: 'details' },
-        ...(state.browser.tab === 'mcp' ? [{ key: 'L', label: 'login' }] : []),
+        ...(state.browser.tab === 'mcp'
+          ? [
+              { key: 'C', label: 'connect' },
+              { key: 'D', label: 'disconnect' },
+              { key: 'A', label: 'authenticate' },
+              { key: 'T', label: 'test' },
+            ]
+          : []),
         ...(state.browser.tab === 'marketplace' ? [{ key: 'Ctrl+R', label: 'refresh' }] : []),
         { key: 'Esc', label: 'close' },
       ]
