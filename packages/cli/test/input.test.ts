@@ -18,6 +18,8 @@ import type { CatalogPickerRequest, CommandContext } from '../src/commands.js';
 import {
   ALL_SUFFIX,
   PICKER_GROUP_PAGE,
+  effortLabel,
+  effortPickerItems,
   filterPickerGroups,
   flattenPickerGroups,
   pickerRows,
@@ -354,12 +356,48 @@ describe('model catalog picker', () => {
     // built-in ones and carry a different heading. This machine may have none,
     // so the assertion is on the ordering rule rather than on a count.
     const sections = picker!.groups.map((group) => group.section);
-    const firstBuiltin = sections.indexOf('built into plif');
+    const firstBuiltin = sections.indexOf('built into Codex');
     assert.ok(firstBuiltin >= 0);
     assert.ok(sections.slice(0, firstBuiltin).every((s) => s === 'your providers'));
-    assert.ok(sections.slice(firstBuiltin).every((s) => s === 'built into plif'));
+    assert.ok(sections.slice(firstBuiltin).every((s) => s === 'built into Codex'));
 
     const anthropic = picker!.groups.find((group) => group.id === 'anthropic');
     assert.equal(anthropic?.items[0]?.value, 'claude-opus-5');
+  });
+
+  it('labels the internal adaptive effort as Codex and marks the active effort', () => {
+    assert.equal(effortLabel('plif'), 'Codex');
+    assert.equal(effortLabel(undefined), 'Default');
+    assert.deepEqual(
+      effortPickerItems(['low', 'plif'], 'plif').map((item) => ({
+        value: item.value,
+        label: item.label,
+        current: item.current,
+      })),
+      [
+        { value: 'low', label: 'Low', current: false },
+        { value: 'plif', label: 'Codex', current: true },
+      ],
+    );
+  });
+
+  it('clamps picker navigation instead of wrapping to the opposite edge', () => {
+    const opened = sessionReducer(initialSession, {
+      type: 'picker.open',
+      picker: {
+        title: 'select an effort',
+        items: [
+          { value: 'low', label: 'Low' },
+          { value: 'high', label: 'High' },
+        ],
+        onPick: () => undefined,
+      },
+    });
+    const top = sessionReducer(opened, { type: 'picker.move', delta: -1 });
+    assert.equal(top.picker?.selected, 0);
+    const bottom = sessionReducer(top, { type: 'picker.move', delta: 9 });
+    assert.equal(bottom.picker?.selected, 1);
+    const stillBottom = sessionReducer(bottom, { type: 'picker.move', delta: 1 });
+    assert.equal(stillBottom.picker?.selected, 1);
   });
 });
