@@ -677,7 +677,7 @@ export const COMMANDS: readonly Command[] = [
       const mine = userCatalog(stored);
       const providers = [
         ...mine.map((entryProvider) => ({ entryProvider, section: 'your providers' })),
-        ...MODEL_CATALOG.map((entryProvider) => ({ entryProvider, section: 'built into Codex' })),
+        ...MODEL_CATALOG.map((entryProvider) => ({ entryProvider, section: 'built into PLIF' })),
       ];
       const groups: PickerGroup[] = await mapWithConcurrency(providers, 3, ({ entryProvider, section }) =>
         providerGroup(entryProvider, section, currentModel, stored, context.credentials),

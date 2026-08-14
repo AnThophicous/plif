@@ -356,10 +356,10 @@ describe('model catalog picker', () => {
     // built-in ones and carry a different heading. This machine may have none,
     // so the assertion is on the ordering rule rather than on a count.
     const sections = picker!.groups.map((group) => group.section);
-    const firstBuiltin = sections.indexOf('built into Codex');
+    const firstBuiltin = sections.indexOf('built into PLIF');
     assert.ok(firstBuiltin >= 0);
     assert.ok(sections.slice(0, firstBuiltin).every((s) => s === 'your providers'));
-    assert.ok(sections.slice(firstBuiltin).every((s) => s === 'built into Codex'));
+    assert.ok(sections.slice(firstBuiltin).every((s) => s === 'built into PLIF'));
 
     const anthropic = picker!.groups.find((group) => group.id === 'anthropic');
     assert.equal(anthropic?.items[0]?.value, 'claude-opus-5');
