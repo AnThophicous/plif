@@ -188,6 +188,13 @@ export interface AppProps {
 
 /** How often command output is flushed into the timeline. */
 const STREAM_FLUSH_MS = 90;
+/**
+ * Ink has to repaint the live transcript, prompt frame and dock together.
+ * Thirty paints per second makes Windows terminals queue full-frame writes;
+ * keep the first chunk immediate, then let the terminal breathe between
+ * semantic updates without dropping any accumulated text.
+ */
+const SEMANTIC_STREAM_FRAME_MS = 90;
 /** Window in which a second Ctrl+C means "really quit". */
 const DOUBLE_INTERRUPT_MS = 1500;
 const PLAN_BLOCKED_TOOLS = new Set([
@@ -410,6 +417,7 @@ export function App({
   const paintedEpoch = useRef<number | null>(null);
   const semanticFrames = useRef<StreamFrameScheduler | null>(null);
   semanticFrames.current ??= new StreamFrameScheduler({
+    frameMs: SEMANTIC_STREAM_FRAME_MS,
     onFrame: (frame: StreamFrame) => {
       if (frame.kind === 'reset') {
         semanticStartedAt.current = null;
@@ -3092,6 +3100,36 @@ export function App({
   ): void {
     const picker = state.picker;
     if (!picker) return;
+    const activePicker = picker;
+
+    function finishSelection(selection: string | ModelSelection): void {
+      let result: void | Promise<void>;
+      try {
+        result = activePicker.onPick(selection);
+      } catch (error) {
+        dispatch({ type: 'picker.close' });
+        push(entry('notice', 'selection could not be applied', {
+          tone: 'danger',
+          detail: error instanceof Error ? error.message : String(error),
+        }));
+        return;
+      }
+
+      if (result && typeof result.then === 'function') {
+        void result.then(
+          () => dispatch({ type: 'picker.close' }),
+          (error: unknown) => {
+            dispatch({ type: 'picker.close' });
+            push(entry('notice', 'selection could not be applied', {
+              tone: 'danger',
+              detail: error instanceof Error ? error.message : String(error),
+            }));
+          },
+        );
+        return;
+      }
+      dispatch({ type: 'picker.close' });
+    }
 
     if (key.escape || (key.ctrl && char === 'c')) {
       dispatch({ type: 'picker.close' });
@@ -3146,15 +3184,14 @@ export function App({
         }
         const selection = catalogSelection(chosen.groupId, chosen.item.value);
         if (!selection) return;
-        dispatch({ type: 'picker.close' });
-        picker.onPick(selection);
+        finishSelection(selection);
         return;
       }
 
       const matches = filterItems(picker.items ?? [], picker.filter);
       const chosen = matches[picker.selected];
-      dispatch({ type: 'picker.close' });
-      if (chosen) picker.onPick(chosen.value);
+      if (chosen) finishSelection(chosen.value);
+      else dispatch({ type: 'picker.close' });
       return;
     }
     if (key.ctrl && char === 'u') {

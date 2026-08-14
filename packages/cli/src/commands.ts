@@ -100,7 +100,7 @@ export interface CommandContext {
 export interface FlatPickerRequest {
   readonly title: string;
   readonly items: readonly PickerItem[];
-  readonly onPick: (value: string | ModelSelection) => void;
+  readonly onPick: (value: string | ModelSelection) => void | Promise<void>;
 }
 
 export interface CatalogPickerRequest {
@@ -108,7 +108,7 @@ export interface CatalogPickerRequest {
   readonly groups: readonly PickerGroup[];
   readonly expanded: readonly string[];
   readonly selected: number;
-  readonly onPick: (selection: string | ModelSelection) => void;
+  readonly onPick: (selection: string | ModelSelection) => void | Promise<void>;
 }
 
 export interface CommandResult {
@@ -230,7 +230,7 @@ export const COMMANDS: readonly Command[] = [
           detail: theme.description ?? (theme.source === 'user' ? '~/.plif' : 'built in'),
           current: (stored.theme ?? 'minimal') === theme.id,
         })),
-        onPick: (value) => { void context.switchTheme(String(value)); },
+        onPick: (value) => context.switchTheme(String(value)),
       });
       return ok();
     },
@@ -694,7 +694,7 @@ export const COMMANDS: readonly Command[] = [
         expanded,
         selected: Math.max(0, groups.findIndex((group) => group.id === currentGroup?.id)),
         onPick: (selection) => {
-          if (typeof selection !== 'string') void context.switchModel(selection);
+          if (typeof selection !== 'string') return context.switchModel(selection);
         },
       });
       return ok();
@@ -722,9 +722,9 @@ export const COMMANDS: readonly Command[] = [
             },
             ...effortPickerItems(available, current),
           ],
-          onPick: (picked) => {
-            void context.setEffort(picked === 'default' ? undefined : picked as Effort);
-          },
+          onPick: (picked) => context.setEffort(
+            picked === 'default' ? undefined : picked as Effort,
+          ),
         });
         return ok(entry('notice', 'select reasoning effort', {
           tone: 'accent',
@@ -829,9 +829,9 @@ export const COMMANDS: readonly Command[] = [
           { value: 'file', label: 'Save .txt in project', detail: 'creates a new file in the workspace' },
         ],
         selected: 0,
-        onPick: (value) => {
-          void (value === 'clipboard' ? context.copySession!() : context.saveSession!());
-        },
+        onPick: (value) => value === 'clipboard'
+          ? context.copySession!()
+          : context.saveSession!(),
       });
       return ok(entry('notice', 'export session', {
         tone: 'accent',

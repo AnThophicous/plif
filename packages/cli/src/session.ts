@@ -237,7 +237,7 @@ export interface PickerState {
   readonly expanded?: readonly string[];
   readonly filter: string;
   readonly selected: number;
-  readonly onPick: (value: string | ModelSelection) => void;
+  readonly onPick: (value: string | ModelSelection) => void | Promise<void>;
 }
 
 export interface SessionState {
