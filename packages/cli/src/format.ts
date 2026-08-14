@@ -245,7 +245,7 @@ const TOOL_LABELS: Readonly<Record<string, string>> = {
   update_plan: 'Plan updated',
   glob: 'Glob',
   grep: 'Grep',
-  apply_patch: 'Patched',
+  apply_patch: 'Update',
 };
 
 export function toolCategory(name: string): ToolCategory {
@@ -307,6 +307,11 @@ export function describeToolCall(name: string, input: unknown): DescribedTool {
     return { label, category, target: `${method} ${record['url']}` };
   }
   if (name === 'apply_patch' && Array.isArray(record['edits'])) {
+    const edits = record['edits'].filter(
+      (value): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value),
+    );
+    const paths = edits.flatMap((edit) => typeof edit['path'] === 'string' ? [edit['path']] : []);
+    if (paths.length === 1) return { label, category, target: paths[0] };
     const count = record['edits'].length;
     return { label, category, target: `${count} ${count === 1 ? 'file' : 'files'}` };
   }

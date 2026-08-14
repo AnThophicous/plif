@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStdout } from 'ink';
-
-export interface TerminalSize {
-  readonly columns: number;
-  readonly rows: number;
-}
+import { nextTerminalSize } from '../terminal-resize.js';
+import type { TerminalSize } from '../terminal-resize.js';
 
 /**
  * Terminal dimensions that track window resizes.
@@ -15,45 +12,74 @@ export interface TerminalSize {
  * drawn at the old width — one of those bugs nobody files and everybody
  * notices.
  *
- * Width is clamped: below ~48 columns no layout here is readable, and above
- * ~160 a full-width prompt box becomes a very long horizontal line that is
- * harder to scan than a bounded one.
- *
- * Every resize is applied immediately. A delayed size leaves Ink painting an
- * old, taller frame into a new, shorter terminal; on Windows that is exactly
- * the condition that duplicates scrollback instead of erasing it cleanly.
+ * Report the physical dimensions. Layout components decide how to degrade at
+ * narrow sizes; inventing a 48x10 terminal here makes the tree larger than the
+ * real viewport and is the direct cause of resize/scrollback duplication.
+ * Shrinks apply immediately while growth is coalesced for one short burst.
  */
 export function useTerminalSize(): TerminalSize {
   const { stdout } = useStdout();
 
-  const read = (): TerminalSize => ({
-    columns: Math.max(48, Math.min(stdout?.columns ?? 80, 160)),
-    rows: Math.max(10, stdout?.rows ?? 24),
-  });
+  const read = (): TerminalSize => readTerminalSize(stdout);
 
   const [size, setSize] = useState<TerminalSize>(read);
   const applied = useRef<TerminalSize>(size);
+  const pendingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     if (!stdout) return;
 
-    const settle = (): void => {
-      const next = read();
+    const clearPending = (): void => {
+      if (pendingTimer.current === undefined) return;
+      clearTimeout(pendingTimer.current);
+      pendingTimer.current = undefined;
+    };
+
+    const apply = (next: TerminalSize): void => {
       applied.current = next;
       setSize((previous) =>
         next.columns === previous.columns && next.rows === previous.rows ? previous : next,
       );
     };
 
+    const settle = (): void => {
+      pendingTimer.current = undefined;
+      apply(readTerminalSize(stdout));
+    };
+
     const onResize = (): void => {
-      settle();
+      const measured = readTerminalSize(stdout);
+      const decision = nextTerminalSize(applied.current, measured, Date.now());
+      if (decision.deferredUntil === null) {
+        clearPending();
+        apply(decision.size);
+        return;
+      }
+
+      clearPending();
+      pendingTimer.current = setTimeout(
+        settle,
+        Math.max(1, decision.deferredUntil - Date.now()),
+      );
+      pendingTimer.current.unref?.();
     };
 
     stdout.on('resize', onResize);
     return () => {
+      clearPending();
       stdout.off('resize', onResize);
     };
   }, [stdout]);
 
   return size;
+}
+
+function readTerminalSize(stdout: { readonly columns?: number; readonly rows?: number } | undefined): TerminalSize {
+  const columns = Number.isFinite(stdout?.columns) && (stdout?.columns ?? 0) > 0
+    ? Math.floor(stdout!.columns!)
+    : 80;
+  const rows = Number.isFinite(stdout?.rows) && (stdout?.rows ?? 0) > 0
+    ? Math.floor(stdout!.rows!)
+    : 24;
+  return { columns: Math.max(1, columns), rows: Math.max(1, rows) };
 }

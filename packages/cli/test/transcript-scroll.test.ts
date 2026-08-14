@@ -31,6 +31,15 @@ describe('transcript viewport', () => {
     assert.equal(state.follow, true);
   });
 
+  it('jumps from an older position back to the live bottom', () => {
+    const state = viewportReducer(
+      { open: true, offset: 12, follow: false },
+      { type: 'end', contentLines: 120, height: 30 },
+    );
+
+    assert.deepEqual(state, { open: true, offset: 90, follow: true });
+  });
+
   it('clamps the offset after a resize', () => {
     const state = viewportReducer(
       { open: true, offset: 90, follow: false },

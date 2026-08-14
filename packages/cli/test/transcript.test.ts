@@ -19,8 +19,18 @@ function assistant(
   turnId: string,
   text: string,
   phase: 'commentary' | 'final',
+  reasoning?: string,
 ): ConversationEvent {
-  return { version: 1, eventId, turnId, at, kind: 'assistant.message', text, phase };
+  return {
+    version: 1,
+    eventId,
+    turnId,
+    at,
+    kind: 'assistant.message',
+    text,
+    phase,
+    ...(reasoning !== undefined ? { reasoning } : {}),
+  };
 }
 
 function toolStarted(
@@ -70,26 +80,43 @@ describe('canonical transcript projection', () => {
     assert.deepEqual(allTranscriptCells(state).map((cell) => cell.kind), ['user', 'assistant']);
   });
 
-  it('projects SSE deltas into one ephemeral active answer and replaces it durably', () => {
+  it('projects framed reasoning and answer, then replaces both durably byte-for-byte', () => {
     let state = transcriptReducer(initialTranscriptState, {
       type: 'event', event: user('u', 't', 'explique'),
     });
     state = transcriptReducer(state, {
-      type: 'assistant.delta', turnId: 't', at, delta: 'res',
+      type: 'reasoning.frame', turnId: 't', at, epoch: 0, text: 'checking types',
     });
     state = transcriptReducer(state, {
-      type: 'assistant.delta', turnId: 't', at, delta: 'posta',
+      type: 'assistant.frame', turnId: 't', at, epoch: 0, text: 'resposta',
     });
 
     assert.equal(state.active?.kind, 'assistant');
     assert.equal(state.active?.kind === 'assistant' ? state.active.text : '', 'resposta');
+    assert.equal(
+      allTranscriptCells(state).find((cell) => cell.kind === 'reasoning')?.text,
+      'checking types',
+    );
     assert.equal(allTranscriptCells(state).filter((cell) => cell.kind === 'assistant').length, 1);
 
     state = transcriptReducer(state, {
-      type: 'event', event: assistant('a', 't', 'resposta', 'final'),
+      type: 'event', event: assistant('a', 't', 'resposta', 'final', 'checking types'),
     });
+    assert.equal(allTranscriptCells(state).filter((cell) => cell.kind === 'reasoning').length, 1);
     assert.equal(allTranscriptCells(state).filter((cell) => cell.kind === 'assistant').length, 1);
     assert.equal(state.active?.id, 'a');
+  });
+
+  it('removes both ephemeral lanes when an attempt resets', () => {
+    let state = transcriptReducer(initialTranscriptState, {
+      type: 'reasoning.frame', turnId: 't', at, epoch: 0, text: 'abandoned reasoning',
+    });
+    state = transcriptReducer(state, {
+      type: 'assistant.frame', turnId: 't', at, epoch: 0, text: 'abandoned answer',
+    });
+    state = transcriptReducer(state, { type: 'stream.reset', turnId: 't' });
+
+    assert.deepEqual(allTranscriptCells(state), []);
   });
 
   it('coalesces routine tools within one turn', () => {

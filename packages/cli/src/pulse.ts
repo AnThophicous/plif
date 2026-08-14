@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
-
 import { clusterLength } from './text.js';
 import { palette, type PaletteKey } from './theme.js';
+import { ANIMATION_INTERVAL_MS, useAnimationFrame } from './hooks/useAnimationClock.js';
 
-const CELL_MS = 64;
+const CELL_MS = 180;
 const BELL_CELLS = 3;
 const BREATH_MS = 2_400;
 
@@ -35,16 +34,14 @@ export function toneBetween(from: PaletteKey, to: PaletteKey, ratio: number): st
 }
 
 export function useHighlightClock(active = true, frameMs = 16): number {
-  const [elapsed, setElapsed] = useState(0);
-
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => setElapsed((value) => value + frameMs), frameMs);
-    timer.unref?.();
-    return () => clearInterval(timer);
-  }, [active, frameMs]);
-
-  return elapsed;
+  const frame = useAnimationFrame();
+  if (!active) return 0;
+  // Keep this helper's old elapsed-millisecond contract for the pure colour
+  // functions while sourcing every tick from the single shared 90 ms clock.
+  // The argument remains for source compatibility and phase tuning at the
+  // call sites; it must not create a second timer.
+  void frameMs;
+  return frame * ANIMATION_INTERVAL_MS;
 }
 
 export function highlightedClusters(

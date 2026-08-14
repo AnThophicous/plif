@@ -1,81 +1,86 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
-import { Meter } from './Meter.js';
-import { color, formatCount, glyph, layout, shortenPath, truncate } from '../theme.js';
+import { color, shortenPath, truncate } from '../theme.js';
+
+export const HEADER_INFINITY = '▗▛▀▜▄▛▀▜▖\n█▌ ▘█▝ ▐█\n▝▜█▛ ▜█▛▘';
+export const HEADER_INFINITY_COMPACT = '▗▛▜▖';
 
 export interface HeaderProps {
   readonly cwd: string;
-  readonly model: string | null;
-  readonly effort?: string;
-  readonly contextUsed: number;
-  readonly contextMax: number;
-  /** Token use in independent child windows, not part of the parent window. */
-  readonly delegatedTokens?: number;
   readonly width: number;
+  readonly model: string;
+  readonly effort?: string;
+  readonly version: string;
 }
 
-/**
- * The status line.
- *
- * Modelled on the reference CLIs: location on the left, budget on the right,
- * nothing in between. The one addition is the isolation badge, because in a
- * container-native agent the single most important thing a developer needs at a
- * glance is *how confined is the thing about to run my commands* — and if the
- * answer is "barely", that must be impossible to miss rather than buried in a
- * log line at startup.
- */
 export function Header({
   cwd,
+  width,
   model,
   effort,
-  contextUsed,
-  contextMax,
-  delegatedTokens = 0,
-  width,
+  version,
 }: HeaderProps): React.ReactElement {
-  const narrow = width < layout.narrowWidth;
-
-  const right = (
-    <Box>
-      {model && !narrow && (
-        <>
-          <Text color={color('faint')}>{truncate(model, 28)}</Text>
-          <Text color={color('ghost')}> {glyph.divider} </Text>
-        </>
-      )}
-      {effort === 'plif' && !narrow && (
-        <>
-          <Text color={color('accentBright')} bold>Plif</Text>
-          <Text color={color('ghost')}> {glyph.divider} </Text>
-        </>
-      )}
-      <Meter
-        value={contextUsed}
-        max={contextMax}
-        width={narrow ? 4 : 6}
-        label={narrow ? undefined : `Context ${Math.round((contextUsed / Math.max(1, contextMax)) * 100)}%`}
-      />
-      {delegatedTokens > 0 && !narrow && (
-        <Text color={color('ghost')}> {glyph.divider} Agents +{formatCount(delegatedTokens)}</Text>
-      )}
-    </Box>
+  const narrow = width < 74;
+  const modelLabel = model || 'model not configured';
+  const workspace = truncate(
+    shortenPath(cwd, Math.max(16, width - 20)),
+    Math.max(1, width - 20),
   );
 
-  const left = (
-    <Box>
-      <Text color={color('muted')}>{glyph.caret} </Text>
-      <Text color={color('muted')}>{shortenPath(cwd, Math.max(16, Math.floor(width * 0.4)))}</Text>
-    </Box>
-  );
+  if (narrow) {
+    return (
+      <Box
+        flexDirection="column"
+        width="100%"
+        marginBottom={1}
+        borderStyle="round"
+        borderColor={color('faint')}
+        paddingX={1}
+        paddingY={1}
+      >
+        <Box justifyContent="space-between" width="100%">
+          <Text color={color('text')} bold>{HEADER_INFINITY_COMPACT} PLIF Code</Text>
+          <Text color={color('ghost')}>v{version}</Text>
+        </Box>
+        <Text color={color('muted')} wrap="truncate">workspace: {workspace}</Text>
+        <Text color={color('ghost')} wrap="truncate">
+          {truncate(modelLabel, Math.max(8, width - 10))} · /model
+        </Text>
+      </Box>
+    );
+  }
+
+  const leftWidth = Math.max(22, Math.min(30, Math.floor(width * 0.32)));
+  const rightWidth = Math.max(10, width - leftWidth - 3);
 
   return (
-    <Box
-      width="100%"
-      justifyContent="space-between"
-    >
-      {left}
-      {right}
+    <Box borderStyle="round" borderColor={color('faint')} width="100%" marginBottom={1}>
+      <Box flexDirection="column" width={leftWidth} paddingX={1} paddingY={1}>
+        <Box flexDirection="column">
+          <Text color={color('accentDim')} bold>{HEADER_INFINITY}</Text>
+          <Text color={color('text')} bold>PLIF</Text>
+        </Box>
+        <Box justifyContent="space-between">
+          <Text color={color('ghost')}>v{version}</Text>
+        </Box>
+        <Text color={color('text')} bold>Code workspace</Text>
+        <Text color={color('muted')} wrap="truncate">{workspace}</Text>
+        <Text color={color('ghost')} wrap="truncate">
+          {truncate(modelLabel, Math.max(8, leftWidth - 4))}{effort ? ` · ${effort}` : ''}
+        </Text>
+      </Box>
+      <Text color={color('faint')}>{'│\n'.repeat(7)}│</Text>
+      <Box
+        flexDirection="column"
+        width={rightWidth}
+        paddingX={1}
+        paddingY={1}
+      >
+        <Text color={color('accentDim')} bold>Ready to work</Text>
+        <Text color={color('muted')}>Plan, work, review — then ship with evidence.</Text>
+        <Text color={color('ghost')}>Type / for commands · Ctrl+T transcript · Ctrl+C stop</Text>
+      </Box>
     </Box>
   );
 }

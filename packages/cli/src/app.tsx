@@ -6,7 +6,12 @@ import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import type { Key } from 'ink';
 
 import {
-  OpenAIProvider,
+  adoptProvider,
+  createModelProvider,
+  forgetProviderKey,
+  findCatalogProvider,
+  forgetDiscoveredModels,
+  PRESETS,
   buildSystemPrompt,
   catalogSelection,
   checkForUpdate,
@@ -14,7 +19,6 @@ import {
   DEFAULT_CONTEXT_TOKENS,
   estimateTokens,
   eventBase,
-  isLocal,
   loadStoredConfig,
   mcpServersOf,
   parseServerConfigs,
@@ -45,6 +49,9 @@ import {
   saveGlobalConfig,
   summariseMemory,
   validateModelConfig,
+  PlifError,
+  supportedEfforts,
+  redactedProviderId,
 } from '@plif/core';
 import type {
   Attachment,
@@ -66,6 +73,7 @@ import type {
   ConversationEvent,
   TaskSnapshot,
   Effort,
+  EffortCapabilityCache,
 } from '@plif/core';
 import type { SandboxCapabilityReport } from '@plif/sandbox';
 
@@ -78,17 +86,18 @@ import { Queue, queueHeight } from './components/Queue.js';
 import { Question, questionHeight } from './components/Question.js';
 import { Footer } from './components/Footer.js';
 import type { Hint } from './components/Footer.js';
-import { Picker, filterItems, filterPickerGroups, flattenPickerGroups } from './components/Picker.js';
-import { PlifDock, plifDockHeight } from './components/PlifDock.js';
+import { Header } from './components/Header.js';
+import { Picker, filterItems, filterPickerGroups, flattenPickerGroups, pickerRows as visiblePickerRows } from './components/Picker.js';
 import { Prompt } from './components/Prompt.js';
-import { useSpinnerFrame } from './components/Spinner.js';
+import { PlifDock, plifDockHeight } from './components/PlifDock.js';
+import { terminalSurfaceLayout } from './components/TerminalSurface.js';
+import { Working } from './components/Spinner.js';
 import { visibleTasks } from './components/TaskIndicator.js';
 import { WorkDock, workDockHeight } from './components/WorkDock.js';
 import { Timeline, TimelineRow, estimateHeight } from './components/Timeline.js';
 import { measureTranscriptCells } from './components/Timeline.js';
 import { TranscriptOverlay } from './components/TranscriptOverlay.js';
-import { SessionHeader } from './components/SessionHeader.js';
-import { findCommand, matchCommands } from './commands.js';
+import { commandPrefix, findCommand, matchCommands } from './commands.js';
 import type { Command, CommandContext } from './commands.js';
 import {
   formatError,
@@ -103,12 +112,13 @@ import {
   toolLane,
   tokenize,
 } from './format.js';
-import { readClipboardImage, readClipboardText } from './clipboard.js';
+import { readClipboardImage, readClipboardText, writeClipboardText } from './clipboard.js';
 import { IDLE_PASTE, hasPasteMarker, readPasteChunk } from './paste.js';
 import type { PasteState } from './paste.js';
 import { expandShortcodes, matchEmoji, openShortcode } from './emoji.js';
 import { stepLeft, stepRight } from './text.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
+import { AnimationClockProvider } from './hooks/useAnimationClock.js';
 import { useTranscriptController } from './hooks/useTranscriptController.js';
 import { entry, initialSession, sessionReducer } from './session.js';
 import type { BrowserRow, BrowserState, QueuedMessage, TimelineEntry } from './session.js';
@@ -117,6 +127,8 @@ import { composerReducer, initialComposerState } from './composer/state.js';
 import type { PastedAttachment } from './composer/state.js';
 import { allTranscriptCells } from './transcript/reducer.js';
 import { initialViewport, viewportReducer } from './transcript/scroll.js';
+import { StreamFrameScheduler } from './stream-frame.js';
+import type { StreamFrame } from './stream-frame.js';
 import { deriveLiveStatus } from './live-status.js';
 import {
   appendCompletionDelta,
@@ -128,13 +140,14 @@ import {
 } from './interaction-metrics.js';
 import type { CompletionMeter } from './interaction-metrics.js';
 import { preToolProseAction } from './pre-tool-prose.js';
-import { color, formatCount, formatDuration, glyph, layout } from './theme.js';
+import { applyEffortPalette, color, formatCount, formatDuration, glyph, layout } from './theme.js';
 import { containerMount, containerWorkdir } from './container-paths.js';
 import { authNotice } from './auth.js';
 import { completedTitle, titleForWorking, writeTerminalTitle } from './terminal-title.js';
 import { sessionFrameHeight, terminalFrameRows } from './terminal-resize.js';
 import { activateTheme } from './themes.js';
 import type { ThemeCatalogue } from './themes.js';
+import { formatSessionExport, sessionExportFileName } from './session-export.js';
 
 export interface AppProps {
   readonly engine: Engine;
@@ -147,6 +160,8 @@ export interface AppProps {
   readonly version: string;
   /** Null when no model is configured; the agent then refuses politely. */
   readonly provider: ModelProvider | null;
+  /** Shared across profile switches so effort negotiation survives a turn. */
+  readonly capabilityCache?: EffortCapabilityCache;
   readonly effort?: Effort;
   /** Theme active at startup; Plif may temporarily override it. */
   readonly initialThemeId?: string;
@@ -170,10 +185,31 @@ export interface AppProps {
   readonly themeCatalogue: ThemeCatalogue;
 }
 
-/** How often streamed output is flushed into the timeline. */
+/** How often command output is flushed into the timeline. */
 const STREAM_FLUSH_MS = 90;
 /** Window in which a second Ctrl+C means "really quit". */
 const DOUBLE_INTERRUPT_MS = 1500;
+const PLAN_BLOCKED_TOOLS = new Set([
+  'write_file',
+  'edit_file',
+  'apply_patch',
+  'run_command',
+  'shell_command',
+  'create_profile',
+  'create_skill',
+  'resolve_edit_conflict',
+  'activate_profile',
+  'update_config',
+  'remember',
+  'start_task',
+  'cancel_task',
+]);
+
+type AgentTurnMode = 'normal' | 'plan';
+type GoalState = {
+  condition: string;
+  status: 'active';
+};
 /**
  * Rows kept in the live frame behind the newest one.
  *
@@ -225,6 +261,7 @@ export function App({
   replay,
   version,
   provider,
+  capabilityCache,
   providerProblem,
   effort: initialEffort,
   initialThemeId,
@@ -278,8 +315,10 @@ export function App({
   const [turn, setTurn] = useState(() => countAgentTurns(replay));
   const [agentTurnStartedAt, setAgentTurnStartedAt] = useState<number | null>(null);
   const [interruptArmed, setInterruptArmed] = useState(false);
-  const [modelId, setModelId] = useState<string | null>(provider?.info.id ?? null);
   const [effort, setEffortState] = useState<Effort | undefined>(initialEffort);
+  useEffect(() => {
+    applyEffortPalette(effort);
+  }, [effort]);
   const [completionMeter, setCompletionMeter] = useState<CompletionMeter>(initialCompletionMeter);
   const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
   const [tasksOpen, setTasksOpen] = useState(false);
@@ -295,7 +334,7 @@ export function App({
   const { exit } = useApp();
   const { stdout } = useStdout();
   const { columns: width, rows } = useTerminalSize();
-  const titleFrame = useSpinnerFrame(90, state.busy);
+  const surface = terminalSurfaceLayout(width, rows);
   const transcript = useTranscriptController({ engine, workspace: cwd, session, replay });
   const [transcriptViewport, dispatchTranscriptViewport] = useReducer(
     viewportReducer,
@@ -364,10 +403,76 @@ export function App({
    * other's row.
    */
   const thinkRow = useRef<{ id: string; text: string; since: number; dirty: boolean } | null>(null);
+  const transcriptRef = useRef(transcript);
+  transcriptRef.current = transcript;
+  const semanticStartedAt = useRef<number | null>(null);
+  const paintedEpoch = useRef<number | null>(null);
+  const semanticFrames = useRef<StreamFrameScheduler | null>(null);
+  semanticFrames.current ??= new StreamFrameScheduler({
+    onFrame: (frame: StreamFrame) => {
+      if (frame.kind === 'reset') {
+        semanticStartedAt.current = null;
+        paintedEpoch.current = null;
+        transcriptRef.current.resetStream();
+        return;
+      }
+
+      if (frame.kind === 'data' && frame.lanes.length > 0 && paintedEpoch.current !== frame.epoch) {
+        paintedEpoch.current = frame.epoch;
+        const started = semanticStartedAt.current;
+        if (started !== null) {
+          engine.bus.emit('stream.timing', {
+            phase: 'first-paint',
+            elapsedMs: Date.now() - started,
+            provider: redactedProviderId(provider?.info.endpoint ?? ''),
+            model: provider?.info.id ?? 'unknown-model',
+          });
+        }
+      }
+
+      const patches: { id: string; patch: Partial<TimelineEntry> }[] = [];
+      if (frame.lanes.includes('reasoning')) {
+        const live = thinkRow.current;
+        if (live) {
+          live.text = frame.reasoning;
+          live.dirty = false;
+          patches.push({ id: live.id, patch: { detail: frame.reasoning } });
+        }
+      }
+      if (frame.lanes.includes('answer')) {
+        const id = agentRow.current;
+        if (id) {
+          agentText.current = frame.answer;
+          patches.push({ id, patch: { detail: frame.answer } });
+        }
+      }
+      if (patches.length > 0) dispatch({ type: 'stream.frame', patches });
+
+      let meter = completionMeterRef.current;
+      for (const change of frame.changes) {
+        if (change.lane === 'completion') meter = appendCompletionDelta(meter, change.delta);
+      }
+      if (meter !== completionMeterRef.current) {
+        completionMeterRef.current = meter;
+        setCompletionMeter(meter);
+      }
+      transcriptRef.current.applyStreamFrame(frame);
+      if (frame.kind === 'complete' || frame.kind === 'dispose') {
+        semanticStartedAt.current = null;
+        paintedEpoch.current = null;
+      }
+    },
+  });
   /** Everything said so far, minus the system prompt, carried across turns. */
   const conversation = useRef<Message[]>([]);
   const providerRef = useRef<ModelProvider | null>(provider);
+  const modelKeyPrompted = useRef(false);
+  /** The empty-install picker opens once per session, not once per render. */
+  const modelPickerPrompted = useRef(false);
   const effortRef = useRef<Effort | undefined>(initialEffort);
+  const [planMode, setPlanModeState] = useState(false);
+  const planModeRef = useRef(false);
+  const goalRef = useRef<GoalState | null>(null);
   const activeThemeId = useRef(initialThemeId ?? themeCatalogue.themes[0]?.id ?? 'minimal');
   const themeBeforePlif = useRef(preferredThemeId ?? themeCatalogue.themes[0]?.id ?? 'minimal');
 
@@ -385,6 +490,7 @@ export function App({
    * and so the stream buffer stops pointing at a row nothing will write to.
    */
   const closeAnswer = useCallback(() => {
+    semanticFrames.current?.flushAndComplete();
     const id = agentRow.current;
     if (!id) return;
     const text = agentText.current.trim();
@@ -402,6 +508,7 @@ export function App({
     readonly text: string;
     readonly visibility: 'transient' | 'activity';
   }) => {
+    semanticFrames.current?.flushAndComplete();
     const id = agentRow.current;
     if (!id) return;
     agentRow.current = null;
@@ -447,6 +554,7 @@ export function App({
   }, []);
 
   const closeThinking = useCallback((durationMs?: number) => {
+    semanticFrames.current?.flushAndComplete();
     const live = thinkRow.current;
     if (!live) return;
     thinkRow.current = null;
@@ -583,7 +691,7 @@ export function App({
               status: answered ? 'done' : 'failed',
               tone: answered ? 'success' : 'warn',
               subtitle: event.redacted
-                ? 'stored, encrypted with your Windows account'
+                ? 'received; the credential value is omitted from the transcript'
                 : answered
                   ? 'answered'
                   : 'no answer — the agent picked a default',
@@ -614,26 +722,34 @@ export function App({
         closeThinking(event.durationMs);
       }),
 
-      engine.bus.on('agent.cycle', (event) => {
-        push(
-          entry('separator', 'Worked', {
-            durationMs: event.durationMs,
-            tone: 'faint',
-          }),
-        );
-      }),
+      // Deliberately not reported per cycle. A twenty-step task used to end up
+      // with twenty "Worked for" rules through it, which turned one piece of
+      // work into a stack of receipts. The total is reported once, when there
+      // is genuinely nothing left running — see the run-summary effect below.
+      engine.bus.on('agent.cycle', () => undefined),
 
       engine.bus.on('agent.reasoning', (event) => {
         settleRetry('recovered');
-        completionMeterRef.current = appendCompletionDelta(completionMeterRef.current, event.delta);
-        setCompletionMeter(completionMeterRef.current);
-        const live = thinkRow.current;
-        if (!live) return;
-        live.text += event.delta;
-        live.dirty = false;
-        // Reasoning is rendered from the same delta the provider yielded. Do
-        // not wait for stream completion or a polling interval to expose it.
-        dispatch({ type: 'update', id: live.id, patch: { detail: live.text } });
+        let live = thinkRow.current;
+        if (!live) {
+          // Some compatible providers emit the side-channel before the loop's
+          // bracket event. Open the cell at the semantic boundary so reasoning
+          // is never silently discarded just because event order was eager.
+          closeAnswer();
+          const row = entry(
+            'thinking',
+            effortRef.current === 'plif' ? 'Plif Thinking' : 'Thinking',
+            { status: 'active' },
+          );
+          live = { id: row.id, text: '', since: Date.now(), dirty: false };
+          thinkRow.current = live;
+          push(row);
+        }
+        if (semanticStartedAt.current === null) semanticStartedAt.current = Date.now();
+        semanticFrames.current?.appendBatch([
+          { lane: 'reasoning', delta: event.delta },
+          { lane: 'completion', delta: event.delta },
+        ]);
       }),
 
       /**
@@ -666,6 +782,7 @@ export function App({
         // read as text the model actually produced and stood by.
         const answer = agentRow.current;
         const think = thinkRow.current;
+        semanticFrames.current?.discardAndReset();
         agentRow.current = null;
         agentText.current = '';
         thinkRow.current = null;
@@ -744,22 +861,17 @@ export function App({
       engine.bus.on('agent.text', (event) => {
         // The endpoint is answering, so whatever it was retrying worked.
         settleRetry('recovered');
-        completionMeterRef.current = appendCompletionDelta(completionMeterRef.current, event.delta);
-        setCompletionMeter(completionMeterRef.current);
         if (!agentRow.current) {
           const row = entry('answer', '', { status: 'active' });
           agentRow.current = row.id;
           agentText.current = '';
           push(row);
         }
-        agentText.current += event.delta;
-        // Paint every semantic SSE delta immediately. Command output keeps its
-        // bounded buffer below, but model prose must visibly stream.
-        dispatch({
-          type: 'update',
-          id: agentRow.current,
-          patch: { detail: agentText.current },
-        });
+        if (semanticStartedAt.current === null) semanticStartedAt.current = Date.now();
+        semanticFrames.current?.appendBatch([
+          { lane: 'answer', delta: event.delta },
+          { lane: 'completion', delta: event.delta },
+        ]);
       }),
 
       engine.bus.on('agent.pre_tool_prose', settlePreToolProse),
@@ -1014,10 +1126,12 @@ export function App({
       engine.bus.on('task.created', () => {
         const next = visibleTasks(taskManager.current?.list() ?? []);
         setTasks(next);
+        setTasksOpen(true);
       }),
       engine.bus.on('task.started', () => {
         const next = visibleTasks(taskManager.current?.list() ?? []);
         setTasks(next);
+        setTasksOpen(true);
       }),
       engine.bus.on('task.output', () => setTasks(visibleTasks(taskManager.current?.list() ?? []))),
       engine.bus.on('task.finished', () => setTasks(visibleTasks(taskManager.current?.list() ?? []))),
@@ -1181,13 +1295,14 @@ export function App({
   }, [counting]);
 
   useEffect(() => () => {
+    semanticFrames.current?.flushAndDispose();
     void taskManager.current?.stopAll();
     void lspManager.current?.stop();
   }, []);
 
   useEffect(() => {
-    writeTerminalTitle(state.busy ? titleForWorking(titleFrame) : completedTitle());
-  }, [state.busy, titleFrame]);
+    writeTerminalTitle(state.busy ? titleForWorking('') : completedTitle());
+  }, [state.busy]);
 
   useEffect(() => {
     if (tasks.length === 0) setTasksOpen(false);
@@ -1345,17 +1460,9 @@ export function App({
     }
   }, [state.entries, width, rows]);
 
-  /** Drain accumulated output into the active rows on a fixed cadence. */
+  /** Drain accumulated command output into its active row on a fixed cadence. */
   useEffect(() => {
     const timer = setInterval(() => {
-      // Reasoning first, and unconditionally of the other buffer: both can be
-      // dirty in the same tick when a model thinks between two sentences.
-      const think = thinkRow.current;
-      if (think?.dirty) {
-        think.dirty = false;
-        dispatch({ type: 'update', id: think.id, patch: { detail: think.text } });
-      }
-
       const live = stream.current;
       if (!live.dirty || !live.rowId) return;
       live.dirty = false;
@@ -1365,10 +1472,54 @@ export function App({
     return () => clearInterval(timer);
   }, []);
 
+  const requestModelKey = useCallback(async (modelName: string, hint?: string): Promise<string | null> => {
+    const answer = await engine.questions.ask({
+      text: `API key required for ${modelName}. Paste it below.`,
+      secret: true,
+      context: hint ?? 'This model is marked NeedKey. Esc cancels; the key is stored in your personal Plif configuration.',
+    });
+    const key = answer?.trim();
+    if (key) return key;
+    push(
+      entry('notice', 'model key was not entered', {
+        tone: 'warn',
+        subtitle: 'Use /models to choose the model again and reopen this credential popup.',
+      }),
+    );
+    return null;
+  }, [engine, push]);
+
+  const recoverModelAuth = useCallback(async (error: unknown): Promise<boolean> => {
+    if (!PlifError.is(error) || error.code !== 'MODEL_AUTH') return false;
+    const stored = await loadStoredConfig(engine.paths);
+    const preset = stored.preset ?? '';
+    const model = providerRef.current?.info.id ?? stored.model ?? 'the selected model';
+    const cleared = forgetProviderKey(stored, preset);
+    await saveStoredConfig(engine.paths, cleared);
+    const key = await requestModelKey(model, [
+      `${preset || 'This provider'} rejected the saved API key.`,
+      'The old credential was removed from this provider only.',
+      'Paste a new API key to save it, or press Esc to keep the model unconfigured.',
+    ].join('\n'));
+    if (!key) return true;
+    const next = adoptProvider(cleared, { preset, model }, key);
+    await saveStoredConfig(engine.paths, next);
+    providerRef.current = createModelProvider(resolveConfig(next));
+    push(entry('notice', 'provider credential updated', {
+      tone: 'accent',
+      subtitle: 'Retry the message to use the new key.',
+    }));
+    return true;
+  }, [engine, push, requestModelKey]);
+
   // ---- command execution -------------------------------------------------
 
   const context: CommandContext = {
     engine,
+    supportedEfforts: () => supportedEfforts(
+      providerRef.current?.info.id.toLowerCase().includes('claude') ? 'anthropic' : '',
+      providerRef.current?.info.id ?? '',
+    ),
     current: current.current,
     setCurrent: (container) => {
       current.current = container;
@@ -1386,52 +1537,68 @@ export function App({
     cwd,
     model: providerRef.current,
     modelProblem: providerProblem,
+    credentials,
     switchModel: async (requested: ModelSelection | string) => {
       const stored = await loadStoredConfig(engine.paths);
       const selection: ModelSelection =
         typeof requested === 'string'
-          ? { preset: stored.preset ?? 'opencode', model: requested }
+          // A bare `/model <id>` keeps whatever provider is already configured.
+          // There is no default to fall back on when none is.
+          ? { preset: stored.preset ?? '', model: requested }
           : requested;
-      const config = resolveConfig(stored, {
+      let config = resolveConfig(stored, {
         model: selection.model,
         preset: selection.preset,
       });
-      const check = validateModelConfig(config);
+      let check = validateModelConfig(config);
       if (!check.ok) {
-        if (!config.apiKey && !isLocal(config.baseURL)) {
-          await saveStoredConfig(engine.paths, {
-            ...stored,
-            preset: selection.preset,
-            model: selection.model,
-          });
-          setModelId(selection.model);
+        if (!config.apiKey && config.needKey) {
+          const providerLabel =
+            findCatalogProvider(selection.preset)?.label ?? (selection.preset || 'This provider');
+          const keyEnv = PRESETS[selection.preset as keyof typeof PRESETS]?.keyEnv;
+          const key = await requestModelKey(selection.model, [
+            `${providerLabel} serves this model from ${config.baseURL}.`,
+            keyEnv ? `The same value can live in ${keyEnv} instead, if you prefer.` : '',
+            'Paste its API key to save it in your personal Plif configuration, or press Esc to cancel.',
+          ].filter(Boolean).join('\n'));
+          if (!key) return;
+          const next = adoptProvider(stored, selection, key);
+          config = resolveConfig(next, { model: selection.model, preset: selection.preset });
+          check = validateModelConfig(config);
+          if (!check.ok) {
+            push(entry('notice', `cannot switch to ${selection.model}`, {
+              tone: 'danger',
+              detail: [check.problem, check.hint].filter(Boolean).join('\n'),
+            }));
+            return;
+          }
+          await saveStoredConfig(engine.paths, next);
+          // The key is what discovery was missing. Drop the cached "this
+          // provider lists nothing" answer so the next /model shows the real
+          // catalogue instead of the curated stand-in.
+          forgetDiscoveredModels(selection.preset);
+        } else {
           push(
-            entry('notice', `model selected: ${selection.model}`, {
-              tone: 'warn',
-              detail: [
-                'credential required before the agent can run',
-                check.hint ?? 'Configure the provider API key in the environment or global config.',
-              ].join('\n'),
+            entry('notice', `cannot switch to ${selection.model}`, {
+              tone: 'danger',
+              detail: [check.problem, check.hint].filter(Boolean).join('\n'),
             }),
           );
           return;
         }
-        push(
-          entry('notice', `cannot switch to ${selection.model}`, {
-            tone: 'danger',
-            detail: [check.problem, check.hint].filter(Boolean).join('\n'),
-          }),
-        );
-        return;
       }
 
-      providerRef.current = new OpenAIProvider(config);
-      await saveStoredConfig(engine.paths, {
-        ...stored,
-        preset: selection.preset,
-        model: selection.model,
-      });
-      setModelId(selection.model);
+      providerRef.current = createModelProvider(config);
+      await saveStoredConfig(
+        engine.paths,
+        adoptProvider(
+          stored,
+          selection,
+          // "local" is the SDK's placeholder, not a credential. Writing it to
+          // disk would make a local endpoint look configured.
+          config.apiKey && config.apiKey !== 'local' ? config.apiKey : undefined,
+        ),
+      );
       // A model swap changes what the assistant is; carrying the old exchange
       // into it would attribute the previous model's turns to the new one.
       conversation.current = [];
@@ -1447,10 +1614,15 @@ export function App({
       const next = { ...stored, ...(effort ? { effort } : {}) };
       if (!effort) delete next.effort;
       const config = resolveConfig(next);
-      providerRef.current = new OpenAIProvider(config);
+      if (effort && !supportedEfforts(config.baseURL, config.model).includes(effort)) {
+        throw new PlifError('INVALID_ARGUMENT', `${effort} is not supported by ${config.model}`);
+      }
+      providerRef.current = createModelProvider(config);
       await saveStoredConfig(engine.paths, next);
       conversation.current = [];
       const previous = effortRef.current;
+      const specialEffort = (value: Effort | undefined): boolean =>
+        ['plif', 'max', 'ultra', 'ultracode'].includes(value ?? '');
       if (effort === 'plif' && previous !== 'plif') {
         themeBeforePlif.current = activeThemeId.current === 'midnight'
           ? preferredThemeId ?? themeCatalogue.themes[0]?.id ?? 'minimal'
@@ -1468,8 +1640,32 @@ export function App({
         activeThemeId.current = restored.id;
         setThemeRevision((value) => value + 1);
       }
+      if (!specialEffort(effort) && specialEffort(previous) && previous !== 'plif') {
+        const restored = themeCatalogue.themes.find((theme) => theme.id === activeThemeId.current)
+          ?? themeCatalogue.themes[0]!;
+        activateTheme(restored);
+        setThemeRevision((value) => value + 1);
+      }
+      applyEffortPalette(effort);
       effortRef.current = effort;
       setEffortState(effort);
+    },
+    setPlanMode: async (enabled, description) => {
+      planModeRef.current = enabled;
+      setPlanModeState(enabled);
+      if (enabled && description) {
+        await runAgent(description, [], undefined, 'plan');
+      }
+    },
+    startGoal: async (condition) => {
+      // `/goal` is a session note, not a hidden submission. It must never
+      // spend a model turn or start editing just because the user recorded
+      // their desired outcome.
+      goalRef.current = { condition, status: 'active' };
+    },
+    goalStatus: () => goalRef.current ? { ...goalRef.current } : null,
+    clearGoal: () => {
+      goalRef.current = null;
     },
     switchProfile: async (name) => {
       const stored = await loadStoredConfig(engine.paths);
@@ -1478,9 +1674,8 @@ export function App({
       const config = resolveConfig(stored, profile.model ? { model: profile.model } : {});
       const check = validateModelConfig(config);
       if (!check.ok) throw new Error(check.problem ?? 'profile model is not usable');
-      providerRef.current = new OpenAIProvider(config);
+      providerRef.current = createModelProvider(config);
       await saveStoredConfig(engine.paths, { ...stored, activeProfile: name });
-      setModelId(config.model);
       conversation.current = [];
     },
     /**
@@ -1517,6 +1712,43 @@ export function App({
     loginMcp,
     mcpNames: mcpStatuses.map((server) => server.name),
     openPicker: (picker) => dispatch({ type: 'picker.open', picker }),
+    copySession: async () => {
+      try {
+        const text = formatSessionExport({
+          cells: transcript.state.finalized,
+          active: transcript.state.active,
+          workspace: cwd,
+          ...(goalRef.current ? { goal: goalRef.current.condition } : {}),
+        });
+        await writeClipboardText(text);
+        push(entry('notice', 'session copied to clipboard', {
+          tone: 'success',
+          subtitle: `${text.length.toLocaleString()} characters`,
+        }));
+      } catch (error) {
+        const { title, detail } = formatError(error);
+        push(entry('notice', title, { tone: 'danger', ...(detail ? { detail } : {}) }));
+      }
+    },
+    saveSession: async () => {
+      try {
+        const text = formatSessionExport({
+          cells: transcript.state.finalized,
+          active: transcript.state.active,
+          workspace: cwd,
+          ...(goalRef.current ? { goal: goalRef.current.condition } : {}),
+        });
+        const target = path.join(cwd, sessionExportFileName());
+        await fs.writeFile(target, text, { encoding: 'utf8', flag: 'wx' });
+        push(entry('notice', 'session saved', {
+          tone: 'success',
+          subtitle: target,
+        }));
+      } catch (error) {
+        const { title, detail } = formatError(error);
+        push(entry('notice', title, { tone: 'danger', ...(detail ? { detail } : {}) }));
+      }
+    },
     themes: themeCatalogue.themes,
     switchTheme: async (id) => {
       const theme = themeCatalogue.themes.find((entry) => entry.id === id);
@@ -1578,7 +1810,12 @@ export function App({
           const isPrivate = trimmed.startsWith('!!');
           await runExec(trimmed.slice(isPrivate ? 2 : 1).trim(), !isPrivate);
         } else {
-          await runAgent(trimmed, await encodePasted(carried), turnId);
+          await runAgent(
+            trimmed,
+            await encodePasted(carried),
+            turnId,
+            planModeRef.current ? 'plan' : 'normal',
+          );
         }
       } catch (error) {
         if (turnId) {
@@ -1689,6 +1926,7 @@ export function App({
     text: string,
     attachments: readonly Attachment[] = [],
     turnId?: string,
+    mode: AgentTurnMode = 'normal',
   ): Promise<void> {
     const durableTurnId = turnId ?? transcript.appendUserTurn(text);
     if (!providerRef.current) {
@@ -1709,21 +1947,38 @@ export function App({
       return;
     }
 
-    if (!current.current) {
-      const image = await engine.ensureBaseImage();
-      const container = await engine.run({
-        image: image.reference,
-        mounts: [containerMount(cwd)],
-        workdir: containerWorkdir(cwd),
-        // Network is granted at the ceiling and gated per host by policy, which
-        // falls through to "ask". So it costs a permission prompt the first
-        // time a search runs, and nothing at all when auto-approve is on —
-        // which is exactly the trade: reachable, never silent.
-        capabilities: { hostWrite: true, network: true },
-      });
+    // These reads do not depend on the container and are required to assemble
+    // the first prompt. Start them beside image/container preparation so a
+    // slow memory store or instruction file cannot add its latency to the
+    // model's first request.
+    const existingContainer = current.current;
+    const snapshotPromise = engine.memory.snapshot(cwd);
+    const instructionsPromise = readAgentInstructions(cwd);
+    const configPromise = loadStoredConfig(engine.paths);
+    const containerPromise: Promise<Container> = existingContainer
+      ? Promise.resolve(existingContainer)
+      : (async () => {
+          const image = await engine.ensureBaseImage();
+          return await engine.run({
+            image: image.reference,
+            mounts: [containerMount(cwd)],
+            workdir: containerWorkdir(cwd),
+            // Network is granted at the ceiling and gated per host by policy,
+            // which falls through to "ask". It costs a permission prompt the
+            // first time a search runs, and nothing when auto-approve is on.
+            capabilities: { hostWrite: true, network: true },
+          });
+        })();
+
+    const [container, snapshot, agentInstructions, profileConfig] = await Promise.all([
+      containerPromise,
+      snapshotPromise,
+      instructionsPromise,
+      configPromise,
+    ]);
+    if (!existingContainer) {
       // Deliberately silent. The container's name is already in the header and
-      // on the prompt badge, and the old notice managed to say "read-only" and
-      // "read-write" about the same directory in one line.
+      // on the prompt badge.
       context.setCurrent(container);
     }
 
@@ -1738,7 +1993,6 @@ export function App({
     const abort = new AbortController();
     execAbort.current = abort;
 
-    const container = current.current as Container;
     if (!taskManager.current || taskManager.current.container.id !== container.id) {
       await taskManager.current?.stopAll();
       taskManager.current = new TaskManager({
@@ -1751,11 +2005,11 @@ export function App({
         root: await container.hostPathFor(container.workdir),
         bus: engine.bus,
       });
-      await lspManager.current.warmup();
+      // LSP is useful to later tool calls but is not a prerequisite for the
+      // first model request. Its client manager initializes lazily if a tool
+      // asks for a language server before this warmup completes.
+      void lspManager.current.warmup().catch(() => undefined);
     }
-    const snapshot = await engine.memory.snapshot(cwd);
-    const agentInstructions = await readAgentInstructions(cwd);
-    const profileConfig = await loadStoredConfig(engine.paths);
     const activeProfileName = typeof profileConfig.activeProfile === 'string' ? profileConfig.activeProfile : undefined;
     const activeProfile = activeProfileName ? profilesOf(profileConfig)[activeProfileName] : undefined;
     // The subagent inherits the LSP tools but not the parent's own subagent
@@ -1763,7 +2017,18 @@ export function App({
     // trusted to the prompt.
     const lspForAgent = lspManager.current ? lspTools(lspManager.current) : [];
     const edits = new EditCoordinator();
-    const storedConfig = await loadStoredConfig(engine.paths);
+    const storedConfig = profileConfig;
+    const planOnly = mode === 'plan';
+    const goalInstructions = goalRef.current
+      ? `SESSION GOAL (user-defined, guidance only): ${goalRef.current.condition}\nRead this goal to understand the user's final desired outcome across subsequent turns. Do not start work merely because the goal was recorded; act on the user's current request and use ask_user when scope or approval is unclear.`
+      : "No session goal is set. Do not invent a final objective silently. If the user's end goal is unclear, use ask_user first; when the Galileo skill is available, use it after clarification to help structure the objective.";
+    const turnInstructions = [
+      agentInstructions,
+      planOnly
+        ? 'PLAN MODE: inspect files and run read-only discovery only. Do not write, edit, delete, move, install, commit, or otherwise mutate the workspace. Return a concrete implementation plan and wait for /plan off before making changes.'
+        : undefined,
+      goalInstructions,
+    ].filter(Boolean).join('\n\n');
     const childOptions = {
       provider: providerRef.current,
       isolation: report.isolation,
@@ -1772,16 +2037,19 @@ export function App({
       extraTools: [...lspForAgent, ...WEB_TOOLS],
       edits,
       coordinator: subagents.current,
-      ...(agentInstructions ? { agentInstructions } : {}),
+      ...(turnInstructions ? { agentInstructions: turnInstructions } : {}),
     };
-    const agentTools = [
+    const allAgentTools = [
       ...tools,
-      ...(mcpRegistry?.tools() ?? []),
+      ...(planOnly ? [] : mcpRegistry?.tools() ?? []),
       ...lspForAgent,
       ...WEB_TOOLS,
-      ...visionTools(childOptions),
-      subagentTool(childOptions),
+      ...(planOnly ? [] : visionTools(childOptions)),
+      ...(planOnly ? [] : [subagentTool(childOptions)]),
     ];
+    const agentTools = planOnly
+      ? allAgentTools.filter((tool) => !PLAN_BLOCKED_TOOLS.has(tool.spec.name))
+      : allAgentTools;
 
     try {
       const result = await runLoop(
@@ -1802,7 +2070,8 @@ export function App({
               notes: snapshot.notes,
               sandboxGaps: report.degradations,
               effort: effortRef.current,
-              ...(agentInstructions ? { agentInstructions } : {}),
+              ...(turnInstructions ? { agentInstructions: turnInstructions } : {}),
+              ...(planOnly ? { mode: 'explore' as const } : {}),
               ...(activeProfile ? { profile: { name: activeProfile.name ?? activeProfileName!, systemPrompt: activeProfile.systemPrompt } } : {}),
             }),
           },
@@ -1857,10 +2126,19 @@ export function App({
             const profile = profilesOf(stored)[name];
             if (!profile) throw new Error(`unknown profile ${name}`);
             const config = resolveConfig(stored, profile.model ? { model: profile.model } : {});
-            providerRef.current = new OpenAIProvider(config);
+            providerRef.current = createModelProvider(config, {
+              capabilityCache,
+              bus: engine.bus,
+            });
             await saveStoredConfig(engine.paths, { ...stored, activeProfile: name });
-            setModelId(config.model);
             conversation.current = [];
+          },
+          setGoal: async (condition) => {
+            goalRef.current = { condition, status: 'active' };
+            push(entry('notice', 'goal recorded by agent', {
+              tone: 'accent',
+              subtitle: condition,
+            }));
           },
         },
       );
@@ -1889,14 +2167,20 @@ export function App({
         );
       }
       if (result.error) {
-        const { title, detail } = formatError(result.error);
-        push(entry('step', title, { status: 'failed', tone: 'danger', ...(detail ? { detail } : {}) }));
+        const recovered = await recoverModelAuth(result.error);
+        if (!recovered) {
+          const { title, detail } = formatError(result.error);
+          push(entry('step', title, { status: 'failed', tone: 'danger', ...(detail ? { detail } : {}) }));
+        }
       }
     } catch (error) {
-      const { title, detail } = formatError(error);
-      push(
-        entry('step', title, { status: 'failed', tone: 'danger', ...(detail ? { detail } : {}) }),
-      );
+      const recovered = await recoverModelAuth(error);
+      if (!recovered) {
+        const { title, detail } = formatError(error);
+        push(
+          entry('step', title, { status: 'failed', tone: 'danger', ...(detail ? { detail } : {}) }),
+        );
+      }
     } finally {
       execAbort.current = null;
       // Also on the error and cancel paths: whatever the model managed to say
@@ -2080,13 +2364,15 @@ export function App({
     setEmojiIndex(0);
   }
 
+  const typedCommand = commandPrefix(input);
   const completions: Command[] =
-    input.startsWith('/') && !state.busy && !state.approval
-      ? matchCommands(tokenize(input.slice(1))[0] ?? '')
+    typedCommand !== null && !state.busy && !state.approval
+      ? matchCommands(typedCommand)
       : [];
-  // Only offer the menu while the command word is still being typed. Once there
-  // is a space, the user has moved on to arguments and a menu is just noise.
-  const showCompletions = completions.length > 0 && !input.slice(1).includes(' ');
+  // Keep the selected command visible while its arguments are being typed.
+  // The old space check made the menu vanish exactly when `/model ` or
+  // `/mcp ` became useful, and made the prompt look like it had eaten input.
+  const showCompletions = completions.length > 0;
 
   function applyCompletion(command: Command): void {
     const completed = `/${command.name} `;
@@ -2211,12 +2497,15 @@ export function App({
         dispatchTranscriptViewport({ type: 'page', delta: key.pageUp ? -1 : 1, ...metrics });
         return;
       }
-      if (key.ctrl && char === 'a') {
-        dispatchTranscriptViewport({ type: 'home', ...metrics });
+      // Ink exposes Ctrl+End as the parsed key name `end` with ctrl=true.
+      // Ctrl+E remains the short equivalent for terminals that do not emit a
+      // distinct End sequence.
+      if (key.ctrl && (char === 'end' || char === 'e')) {
+        dispatchTranscriptViewport({ type: 'end', ...metrics });
         return;
       }
-      if (key.ctrl && char === 'e') {
-        dispatchTranscriptViewport({ type: 'end', ...metrics });
+      if (key.ctrl && char === 'a') {
+        dispatchTranscriptViewport({ type: 'home', ...metrics });
         return;
       }
       // Ctrl+C remains global; every other key belongs to the overlay.
@@ -2231,7 +2520,7 @@ export function App({
       dispatch({ type: 'toggleLastThinking' });
       return;
     }
-    if (key.ctrl && char === 's' && state.subagents.length > 0) {
+    if (key.ctrl && char === 's' && (tasks.length > 0 || state.subagents.length > 0)) {
       setWorkDockOpen(!workDockOpen);
       return;
     }
@@ -2678,14 +2967,17 @@ export function App({
     }
     if (key.return) {
       if (picker.groups) {
-        const matches = flattenPickerGroups(
-          filterPickerGroups(picker.groups, picker.filter),
-          picker.expanded ?? [],
-        );
+        const matches = visiblePickerRows(picker.groups, picker.expanded ?? [], picker.filter);
         const chosen = matches[picker.selected];
         if (!chosen) return;
         if (chosen.kind === 'group') {
           dispatch({ type: 'picker.toggle', id: chosen.group.id });
+          return;
+        }
+        // "show N more" is an expansion, not a choice: it reveals the rest of
+        // the provider and leaves the picker open on the same provider.
+        if (chosen.kind === 'more') {
+          dispatch({ type: 'picker.toggle', id: chosen.id });
           return;
         }
         const selection = catalogSelection(chosen.groupId, chosen.item.value);
@@ -2841,6 +3133,72 @@ export function App({
     }
   }
 
+  /** Report one total only after the whole run, including queued work, is quiet. */
+  const runQuiet =
+    agentTurnStartedAt === null &&
+    state.compaction === null &&
+    state.queue.length === 0 &&
+    !tasks.some((task) => task.status === 'running' || task.status === 'awaiting_approval') &&
+    !state.subagents.some((view) => view.status === 'running');
+  const runStartedAt = useRef<number | null>(null);
+  useEffect(() => {
+    if (!runQuiet) {
+      runStartedAt.current ??= Date.now();
+      return;
+    }
+    const started = runStartedAt.current;
+    runStartedAt.current = null;
+    if (started === null) return;
+    const elapsed = Date.now() - started;
+    if (elapsed < 1_500) return;
+    push(entry('separator', 'Worked', { durationMs: elapsed, tone: 'faint' }));
+  }, [agentTurnStartedAt, runQuiet, push]);
+
+  useEffect(() => {
+    if (modelPickerPrompted.current || !providerProblem || !/no model/i.test(providerProblem)) return;
+    modelPickerPrompted.current = true;
+    push(
+      entry('notice', 'no model configured yet', {
+        tone: 'accent',
+        subtitle: 'Plif ships empty. Pick a provider and model to get started.',
+      }),
+    );
+    void findCommand('model')?.run([], context);
+  }, [providerProblem, push]);
+
+  useEffect(() => {
+    if (modelKeyPrompted.current || !providerProblem || !/api key|credential/i.test(providerProblem)) return;
+    modelKeyPrompted.current = true;
+    void (async () => {
+      try {
+        const stored = await loadStoredConfig(engine.paths);
+        const currentConfig = resolveConfig(stored);
+        const key = await requestModelKey(currentConfig.model, [
+          'Plif could not start the configured model because its credential is missing.',
+          'You can also set NeedKey = true in ~/.plif/config.toml and use /models later to reconfigure it.',
+        ].join('\n'));
+        if (!key) return;
+        const next = adoptProvider(
+          stored,
+          { preset: stored.preset ?? '', model: currentConfig.model },
+          key,
+        );
+        const ready = resolveConfig(next);
+        providerRef.current = createModelProvider(ready);
+        await saveStoredConfig(engine.paths, next);
+        push(entry('notice', `credential saved for ${ready.model}`, {
+          tone: 'accent',
+          subtitle: 'The model is ready. The key is redacted from the transcript.',
+        }));
+      } catch (error) {
+        push(entry('notice', 'could not save the model credential', {
+          tone: 'danger',
+          detail: String(error),
+        }));
+      }
+    })();
+  }, [engine, providerProblem, push, requestModelKey]);
+
   // ---- render ------------------------------------------------------------
 
   const liveStatus = deriveLiveStatus({
@@ -2852,16 +3210,6 @@ export function App({
     background: tasks.some((task) => task.status === 'running'),
     queued: state.queue.length,
   });
-  const providerLabel = (() => {
-    const endpoint = providerRef.current?.info.endpoint;
-    if (!endpoint) return null;
-    try {
-      return new URL(endpoint).hostname || endpoint;
-    } catch {
-      return endpoint;
-    }
-  })();
-
   const hints: Hint[] = state.browser
     ? [
         { key: 'type', label: 'filter' },
@@ -2905,6 +3253,7 @@ export function App({
           { key: 'Enter', label: 'queue' },
           ...(state.queue.length > 0 ? [{ key: 'Ctrl+X', label: 'drop queued' }] : []),
           ...(state.subagents.length > 1 ? [{ key: 'Tab', label: 'subagent' }] : []),
+          ...(tasks.length > 0 ? [{ key: 'Ctrl+S', label: 'tasks' }] : []),
           { key: 'Ctrl+T', label: 'transcript' },
           { key: 'Esc', label: input ? 'clear' : 'cancel' },
         ]
@@ -2924,15 +3273,22 @@ export function App({
             { key: 'Ctrl+C', label: 'quit' },
           ];
 
-  const status = interruptArmed
-    ? 'press Ctrl+C again to quit'
-    : agentTurnStartedAt !== null
-      ? `turn ${turn} ${glyph.divider} ${formatDuration(now - agentTurnStartedAt)}${
-          completionMeter.tokens > 0
-            ? ` ${glyph.divider} ${completionMeter.estimated ? '~' : ''}${formatCount(completionMeter.tokens)} tokens`
-            : ''
-        }`
-      : undefined;
+  // While the agent runs, the elapsed time and the token count live on the
+  // working line directly above the prompt, where the eye already is. Repeating
+  // them in the footer was the same three facts twice on one screen.
+  const status = interruptArmed ? 'press Ctrl+C again to quit' : undefined;
+  const working =
+    agentTurnStartedAt !== null ? (
+      <Working
+        seed={turn}
+        since={agentTurnStartedAt}
+        tokens={completionMeter.tokens}
+        estimated={completionMeter.estimated}
+      />
+    ) : undefined;
+  const promptStatus = planMode ? (
+    <Text color={color('accent')}>plan mode · read-only · /plan off to work</Text>
+  ) : working;
 
   // A dialog is the only thing on screen worth attention, and the prompt line
   // already carries the elapsed time and "Esc to cancel". A spinner underneath
@@ -2946,19 +3302,20 @@ export function App({
 
   // How many rows a list-style dialog may use. Shrinks with the window so the
   // dialog itself never becomes the thing that overflows it.
-  const pickerRows = Math.max(3, Math.min(8, rows - 14));
+  const pickerRows = Math.max(3, Math.min(12, rows - 12));
   const compactDialogs = rows < 34;
+  const suggestionRows = Math.max(1, Math.min(6, surface.contentHeight - 8));
 
   // Everything Ink has to repaint, other than the timeline. Deliberately
   // generous: overestimating costs one row of history, underestimating puts the
   // frame at terminal height and duplicates the whole session.
   const chrome =
-    4 + // prompt box and its margin
-    plifDockHeight(effort) +
+    12 + // header, rounded prompt frame, its separation and footer
     1 + // footer
+    plifDockHeight(effort) +
     workRows +
-    (showCompletions ? Math.min(completions.length, 8) + 2 : 0) +
-    (showEmoji ? Math.min(emojiMatches.length, 7) + 1 : 0) +
+    (showCompletions ? suggestionRows + (completions.length > suggestionRows ? 1 : 0) : 0) +
+    (showEmoji ? suggestionRows + (emojiMatches.length > suggestionRows ? 1 : 0) : 0) +
     queueHeight(state.queue) +
     (state.picker ? pickerRows + 8 : 0) +
     (state.approval ? approvalHeight(compactDialogs) : 0) +
@@ -2974,12 +3331,21 @@ export function App({
   // Zero is a legitimate answer. On a short window with a dialog open there is
   // genuinely no room for history, and showing two orphaned rows at the cost of
   // duplicating the session is the wrong trade.
-  const timelineBudget = Math.max(0, rows - chrome);
+  const timelineBudget = Math.max(0, surface.contentHeight - chrome);
+  const animationActive =
+    ['plif', 'max', 'ultra', 'ultracode'].includes(effort ?? '') ||
+    state.busy ||
+    state.compaction !== null ||
+    state.browser?.loading === true ||
+    tasks.some((task) => task.status === 'running' || task.status === 'awaiting_approval') ||
+    state.subagents.some((view) => view.status === 'running') ||
+    state.discovery.calls.some((call) => call.ok === undefined);
 
   return (
     /*
-      No explicit width, and none anywhere down the chrome either — every panel
-      below sizes at 100% of this.
+      The surface owns the physical terminal width and height. Visual children
+      receive its computed content width, so the full-bleed background remains
+      stable while nested rows stay inside the available cells.
 
       The reason is a resize race that produced the ugliest bug in the app. Ink
       re-lays-out the *existing* React tree synchronously when the terminal
@@ -2991,23 +3357,11 @@ export function App({
       conversation on screen — measured at three copies of the same prompt box
       at 144, 127 and 140 columns.
 
-      A percentage resolves against whatever the terminal is at layout time, so
-      the intermediate frame fits and the erase is exact.
+      The surface dimensions are derived from the current terminal size on each
+      render, so the intermediate frame fits and the erase is exact.
     */
+    <AnimationClockProvider active={animationActive}>
     <Box flexDirection="column">
-      <Static items={[{ id: 'session-header' }]}>
-        {(item) => (
-          <SessionHeader
-            key={item.id}
-            version={version}
-            cwd={cwd}
-            model={modelId}
-            provider={providerLabel}
-            sandboxGaps={report.degradations}
-            width={width}
-          />
-        )}
-      </Static>
       {/*
         Scrollback. Ink prints each item once, above the frame, and never again
         — which is both why history survives here and why the array behind it
@@ -3031,169 +3385,175 @@ export function App({
           width={width}
           height={terminalFrameRows(rows)}
         />
-      ) : (
-      <Box
-        flexDirection="column"
-        {...(state.browser
-          ? { height: sessionFrameHeight(rows, 'browser'), overflowY: 'hidden' as const }
-          : {})}
-      >
-
-      {!state.browser && (
-        <WorkDock
-          tasks={tasks}
-          subagents={state.subagents}
-          subagentFocus={state.subagentFocus}
-          expanded={workDockOpen}
-          width={width}
-          now={now}
-        />
-      )}
-
-      {state.browser ? (
+      ) : state.browser ? (
         /*
-          Full-screen, replacing the timeline and the prompt rather than
-          sitting above them. Three thousand plugins do not browse in the eight
-          rows a panel would get, and taking the whole window is also what
-          guarantees the frame cannot exceed it: there is nothing else in it.
+          Full-screen, replacing the normal panel rather than sitting above it.
+          Browser and transcript views keep the physical terminal dimensions so
+          their dense tables are not clipped by the quiet interactive shell.
         */
-        <Browser
-          state={state.browser}
-          servers={mcpStatuses}
-          skills={skillList}
-          width={width}
-          rows={rows}
-        />
-      ) : (
-        <Box flexDirection="column">
-          <Timeline
-            entries={state.entries}
+        <Box
+          flexDirection="column"
+          {...{ height: sessionFrameHeight(rows, 'browser'), overflowY: 'hidden' as const }}
+        >
+          <Browser
+            state={state.browser}
+            servers={mcpStatuses}
+            skills={skillList}
             width={width}
-            maxLines={timelineBudget}
+            rows={rows}
           />
         </Box>
-      )}
+      ) : (
+        <Box
+          flexDirection="column"
+          width={surface.panelWidth}
+          height={surface.panelHeight}
+          paddingX={surface.panelPaddingX}
+          paddingY={surface.panelPaddingY}
+        >
+          <Box flexDirection="column" width={surface.contentWidth} flexGrow={1}>
+            <Header
+              cwd={cwd}
+              width={surface.contentWidth}
+              model={provider?.info.id ?? ''}
+              effort={effort}
+              version={version}
+            />
 
-      {state.picker && (
-        <Box paddingX={1}>
-          <Picker
-            title={state.picker.title}
-            {...(state.picker.groups
-              ? { groups: state.picker.groups, expanded: state.picker.expanded }
-              : { items: filterItems(state.picker.items ?? [], state.picker.filter) })}
-            filter={state.picker.filter}
-            selected={state.picker.selected}
-            width={width - 2}
-            rows={pickerRows}
-          />
+            <WorkDock
+              tasks={tasks}
+              subagents={state.subagents}
+              subagentFocus={state.subagentFocus}
+              expanded={workDockOpen}
+              width={surface.contentWidth}
+              now={now}
+            />
+
+            <Box flexDirection="column">
+              <Timeline
+                entries={state.entries}
+                width={surface.contentWidth}
+                maxLines={timelineBudget}
+              />
+            </Box>
+
+            {state.picker && (
+              <Box paddingX={1}>
+                <Picker
+                  title={state.picker.title}
+                  {...(state.picker.groups
+                    ? { groups: state.picker.groups, expanded: state.picker.expanded }
+                    : { items: filterItems(state.picker.items ?? [], state.picker.filter) })}
+                  filter={state.picker.filter}
+                  selected={state.picker.selected}
+                  width={Math.max(1, surface.contentWidth - 2)}
+                  rows={pickerRows}
+                />
+              </Box>
+            )}
+
+            {state.approval && (
+              <Box paddingX={1}>
+                <Approval
+                  approval={state.approval}
+                  selected={choice}
+                  queued={state.approvalQueue.length}
+                  width={Math.max(1, surface.contentWidth - 2)}
+                  compact={compactDialogs}
+                />
+              </Box>
+            )}
+
+            {state.question && (
+              <Box paddingX={1}>
+                <Question
+                  question={state.question}
+                  selected={state.questionChoice}
+                  draft={state.questionDraft}
+                  queued={state.questionQueue.length}
+                  width={Math.max(1, surface.contentWidth - 2)}
+                  expanded={state.questionExpanded}
+                  compact={compactDialogs}
+                  now={now}
+                />
+              </Box>
+            )}
+
+            {state.compaction && (
+              <Box paddingX={1} marginTop={1}>
+                <Compaction state={state.compaction} width={Math.max(1, surface.contentWidth - 2)} now={now} />
+              </Box>
+            )}
+
+            <Discovery calls={state.discovery.calls} open={state.discovery.open} width={surface.contentWidth} />
+
+            <Box flexGrow={1} />
+
+            {showCompletions && (
+              <Completions matches={completions} selected={completionIndex} maxRows={suggestionRows} width={Math.max(1, surface.contentWidth - 2)} />
+            )}
+
+            {showEmoji && (
+              <EmojiMenu matches={emojiMatches} selected={emojiIndex} maxRows={suggestionRows} width={Math.max(1, surface.contentWidth - 2)} />
+            )}
+
+            <Box flexDirection="column" flexShrink={0}>
+              <Prompt
+                value={input}
+                cursor={cursor}
+                placeholder={
+                  // Short enough to survive a narrow terminal without being clipped
+                  // mid-word.
+                  state.container ? 'run a command, or / for commands' : 'describe a task, or / for commands'
+                }
+                // Focused while busy too: the field takes input the whole time, and
+                // an unfocused-looking box that nonetheless accepts typing is a lie
+                // about where the keystrokes are going.
+                focused={!state.approval && !state.question && !state.picker}
+                busy={state.busy}
+                busyLabel={state.busyLabel}
+                width={surface.contentWidth}
+                {...(promptStatus ? { status: promptStatus } : {})}
+                frameActive={['plif', 'max', 'ultra', 'ultracode'].includes(effort ?? '') || state.busy}
+                {...(['plif', 'max', 'ultra', 'ultracode'].includes(effort ?? '')
+                  ? {
+                      frameFooter: (
+                        <PlifDock
+                          cwd={cwd}
+                          effort={effort}
+                          contextUsed={state.contextUsed}
+                          contextMax={state.contextMax}
+                          working={state.busy}
+                          width={Math.max(18, surface.contentWidth - 4)}
+                        />
+                      ),
+                    }
+                  : {})}
+                {...(state.busySince !== null ? { busySince: state.busySince } : {})}
+                {...(state.queue.length > 0
+                  ? {
+                      queue: (
+                        <Queue
+                          messages={state.queue}
+                          selected={queuedIndex}
+                          width={Math.max(1, surface.contentWidth - 4)}
+                        />
+                      ),
+                    }
+                  : {})}
+              />
+              <Footer hints={hints} width={surface.contentWidth} {...(status ? { status } : {})} />
+            </Box>
+
+            {state.exiting && (
+              <Box paddingX={1}>
+                <Text color={color('muted')}>stopping containers…</Text>
+              </Box>
+            )}
+          </Box>
         </Box>
-      )}
-
-      {state.approval && (
-        <Box paddingX={1}>
-          <Approval
-            approval={state.approval}
-            selected={choice}
-            queued={state.approvalQueue.length}
-            width={width - 2}
-            compact={compactDialogs}
-          />
-        </Box>
-      )}
-
-      {state.question && (
-        <Box paddingX={1}>
-          <Question
-            question={state.question}
-            selected={state.questionChoice}
-            draft={state.questionDraft}
-            queued={state.questionQueue.length}
-            width={width - 2}
-            expanded={state.questionExpanded}
-            compact={compactDialogs}
-            now={now}
-          />
-        </Box>
-      )}
-
-      {state.compaction && (
-        <Box paddingX={1} marginTop={1}>
-          <Compaction state={state.compaction} width={width - 2} now={now} />
-        </Box>
-      )}
-
-      {showCompletions && (
-        <Completions matches={completions} selected={completionIndex} width={width - 2} />
-      )}
-
-      {showEmoji && (
-        <EmojiMenu matches={emojiMatches} selected={emojiIndex} width={width - 2} />
-      )}
-
-      {!state.browser && (
-        <>
-          <Discovery calls={state.discovery.calls} open={state.discovery.open} width={width} />
-        </>
-      )}
-
-      {!state.browser && (
-      <Box flexDirection="column" paddingX={1} marginTop={showCompletions || state.discovery.calls.length > 0 ? 0 : 1}>
-        <Prompt
-          value={input}
-          cursor={cursor}
-          placeholder={
-            // Short enough to survive a narrow terminal without being clipped
-            // mid-word.
-            state.container ? 'run a command, or / for commands' : '/new to start a container'
-          }
-          // Focused while busy too: the field takes input the whole time, and
-          // an unfocused-looking box that nonetheless accepts typing is a lie
-          // about where the keystrokes are going.
-          focused={!state.approval && !state.question && !state.picker}
-          busy={state.busy}
-          busyLabel={state.busyLabel}
-          plif={effort === 'plif'}
-          working={state.busy}
-          width={width - 2}
-          {...(effort === 'plif'
-            ? {
-                dock: (
-                  <PlifDock
-                    cwd={cwd}
-                    effort={effort}
-                    contextUsed={state.contextUsed}
-                    contextMax={state.contextMax}
-                    working={liveStatus.kind !== 'idle'}
-                    width={width - 2}
-                  />
-                ),
-              }
-            : {})}
-          {...(state.busySince !== null ? { busySince: state.busySince } : {})}
-          {...(state.queue.length > 0
-            ? {
-                queue: (
-                  <Queue
-                    messages={state.queue}
-                    selected={queuedIndex}
-                    width={width - 6}
-                  />
-                ),
-              }
-            : {})}
-        />
-      </Box>
-      )}
-
-      <Footer hints={hints} width={width} {...(status ? { status } : {})} />
-
-      {state.exiting && (
-        <Box paddingX={1}>
-          <Text color={color('muted')}>stopping containers…</Text>
-        </Box>
-      )}
-      </Box>
       )}
     </Box>
+    </AnimationClockProvider>
   );
 }

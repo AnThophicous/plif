@@ -18,10 +18,12 @@
     "baseURL": { "type": "string", "format": "uri" },
     "preset": { "type": "string" },
     "apiKey": { "type": "string" },
+    "needKey": { "type": "boolean" },
+    "NeedKey": { "type": "boolean" },
     "temperature": { "type": "number" },
     "maxTokens": { "type": "integer", "minimum": 1 },
     "timeoutMs": { "type": "integer", "minimum": 1 },
-    "effort": { "enum": ["low", "medium", "high", "xhigh", "plif"] },
+    "effort": { "enum": ["low", "medium", "high", "xhigh", "max", "ultra", "ultracode", "plif"] },
     "agent": { "type": "object", "additionalProperties": { "$ref": "#/$defs/agent" } },
     "profiles": { "type": "object" }
   },
@@ -34,7 +36,11 @@
         "name": { "type": "string" },
         "options": {
           "type": "object",
-          "properties": { "baseURL": { "type": "string", "format": "uri" } },
+          "properties": {
+            "baseURL": { "type": "string", "format": "uri" },
+            "needKey": { "type": "boolean" },
+            "NeedKey": { "type": "boolean" }
+          },
           "additionalProperties": true
         },
         "models": { "type": "object", "additionalProperties": { "$ref": "#/$defs/model" } }
@@ -47,7 +53,9 @@
         "name": { "type": "string" },
         "contextWindow": { "type": "integer", "minimum": 1 },
         "modalities": { "type": "array", "items": { "enum": ["text", "image"] }, "uniqueItems": true },
-        "cost": { "enum": ["free", "paid", "unknown"] }
+        "cost": { "enum": ["free", "paid", "unknown"] },
+        "needKey": { "type": "boolean" },
+        "NeedKey": { "type": "boolean" }
       },
       "additionalProperties": true
     },

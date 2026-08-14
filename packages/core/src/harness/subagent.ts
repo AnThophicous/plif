@@ -4,7 +4,7 @@ import type { PlifEvents } from '../events/bus.js';
 import { formatModelRef, keyOptional, parseModelRef, resolveConfig, validate } from '../model/config.js';
 import type { StoredConfig } from '../model/config.js';
 import type { CustomProvider } from '../model/config.js';
-import { OpenAIProvider } from '../model/openai.js';
+import { createModelProvider } from '../model/factory.js';
 import type { Message, ModelProvider } from '../model/provider.js';
 import { runLoop } from './loop.js';
 import { buildSystemPrompt } from './prompt.js';
@@ -17,6 +17,7 @@ import {
   readFile,
   runCommand,
   shellCommand,
+  updatePlan,
   writeFile,
 } from './tools.js';
 import type { EditCoordinator } from './edits.js';
@@ -90,6 +91,7 @@ export function subagentTools(
   const extra = oldSignature ? dialectOrExtra as readonly Tool[] : additional;
   return [
     readFile,
+    updatePlan,
     writeFile,
     editFile,
     applyPatch,
@@ -180,7 +182,7 @@ export function subagentTool(options: SubagentOptions): Tool {
 
     return {
       ref: formatModelRef(parsed.preset, parsed.model),
-      provider: new OpenAIProvider(config),
+      provider: createModelProvider(config),
       free: keyOptional(config.baseURL, config.model),
       maxIterations: agent?.maxIterations,
     };

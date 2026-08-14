@@ -61,8 +61,14 @@ describe('tool visual categories', () => {
       category: 'search',
       target: 'TODO',
     });
+    assert.deepEqual(describeToolCall('apply_patch', { edits: [{ path: 'src/app.tsx' }] }), {
+      label: 'Update',
+      category: 'edit',
+      target: 'src/app.tsx',
+    });
+
     assert.deepEqual(describeToolCall('apply_patch', { edits: [{}, {}] }), {
-      label: 'Patched',
+      label: 'Update',
       category: 'edit',
       target: '2 files',
     });

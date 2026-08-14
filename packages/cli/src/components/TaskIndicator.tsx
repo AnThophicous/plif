@@ -12,11 +12,11 @@ export function TaskIndicator({ tasks, width }: { tasks: readonly TaskSnapshot[]
   if (tasks.length === 0) return null;
   const active = tasks.filter((task) => task.status === 'running' || task.status === 'awaiting_approval').length;
   const failed = tasks.filter((task) => task.status === 'failed' || task.status === 'blocked').length;
-  const label = `${glyph.task} tasks ${active} active` + (failed ? ` ${failed} attention` : '');
+  const label = `${glyph.caret} Tasks ${tasks.length}` + (active ? ` ${active} active` : '') + (failed ? ` ${failed} attention` : '');
   return (
     <Box paddingX={1} width="100%" justifyContent="space-between">
       <Text color={color(failed ? 'warn' : 'muted')} bold>{label}</Text>
-      <Text color={color('faint')}>{truncate('Ctrl+T to expand', Math.max(16, width - label.length - 4))}</Text>
+      <Text color={color('faint')}>{truncate('Ctrl+S', Math.max(8, width - label.length - 4))}</Text>
     </Box>
   );
 }

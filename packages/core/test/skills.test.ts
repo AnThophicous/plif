@@ -106,6 +106,7 @@ describe('SkillRegistry', () => {
       assert.ok(names.includes(name), `${name} is missing from the DME package`);
     }
     assert.ok(names.includes('skill-creator'));
+    assert.ok(names.includes('deep-engineering-audit'));
   });
 
   it('shows the DME package as active and exposes its child skills', async () => {
@@ -116,6 +117,23 @@ describe('SkillRegistry', () => {
     assert.match(catalogue, /  - dme-frontend:/);
     assert.match(catalogue, /  - dme-design-system:/);
     assert.equal(catalogue.includes('The failure it exists to prevent'), false);
+  });
+
+  it('loads the EDS skills from the Markdown-native agenting tree', async () => {
+    const registry = await SkillRegistry.load({ workspace, root });
+
+    for (const name of [
+      'context-ingestion',
+      'create-slide-deck',
+      'deep-engineering-audit',
+      'galileu',
+      'office-render',
+    ]) {
+      const skill = registry.get(name);
+      assert.ok(skill, `${name} is missing from the registry`);
+      assert.equal(path.basename(skill.file), 'SKILL.md');
+      assert.match(skill.file, new RegExp(`agenting[\\\\/]skills[\\\\/]builtin[\\\\/]${name}`));
+    }
   });
 
   it('writes a skill and makes it loadable in the same session', async () => {
@@ -564,6 +582,20 @@ describe('system prompt', () => {
 
     assert.match(prompt, /Available skills/);
     assert.match(prompt, /skill tool/);
+  });
+
+  it('ships the builtin skills from the EDS contribution', () => {
+    const names = BUILTIN_SKILLS.map((skill) => skill.name);
+
+    for (const name of [
+      'context-ingestion',
+      'create-slide-deck',
+      'deep-engineering-audit',
+      'galileu',
+      'office-render',
+    ]) {
+      assert.ok(names.includes(name), `missing builtin skill: ${name}`);
+    }
   });
 
   it('warns that MCP tools sit outside the sandbox', () => {

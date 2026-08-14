@@ -27,7 +27,15 @@ import OpenAI, {
 import { PlifError } from '../errors.js';
 import type { ModelConfig } from './config.js';
 import { isLocal } from './config.js';
-import { ReasoningDeltaNormalizer, ReasoningSplitter, reasoningFromDelta } from './reasoning.js';
+import type { CachedEffort, EffortCapabilityCache } from './capabilities.js';
+import { redactedProviderId, streamTiming } from './stream-timing.js';
+import type { StreamTiming } from './stream-timing.js';
+import type { EventBus } from '../events/bus.js';
+import {
+  ReasoningDeltaNormalizer,
+  ReasoningSplitter,
+  reasoningObservationFromDelta,
+} from './reasoning.js';
 import type {
   CompletionEvent,
   CompletionRequest,
@@ -55,6 +63,15 @@ const RETRY_DEADLINE_MS = 180_000;
 const PLIF_EFFORTS = ['max', 'xhigh', 'high', 'medium', 'low'] as const;
 type WireEffort = (typeof PLIF_EFFORTS)[number] | 'low' | 'medium';
 
+export interface OpenAIProviderOptions {
+  /** Optional persisted effort negotiation cache. */
+  readonly capabilityCache?: EffortCapabilityCache;
+  /** Redacted timing sink, normally `engine.bus.emit('stream.timing', ...)`. */
+  readonly onTiming?: (timing: StreamTiming) => void;
+  /** Convenience sink that keeps callers from writing an unsafe adapter. */
+  readonly bus?: Pick<EventBus, 'emit'>;
+}
+
 /**
  * Failures that another attempt could plausibly clear.
  *
@@ -71,8 +88,11 @@ const RETRYABLE: ReadonlySet<string> = new Set([
 /** A connection can close cleanly at the transport layer while the response
  * itself is still incomplete. Treat that EOF as a retryable stream failure. */
 class StreamInterruptedError extends Error {
-  constructor() {
-    super('stream ended before the endpoint sent a finish reason');
+  constructor(
+    message = 'stream ended before the endpoint sent a finish reason',
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
     this.name = 'StreamInterruptedError';
   }
 }
@@ -153,15 +173,65 @@ async function nextChunk<T>(
   });
 }
 
+/** Apply the same cancellable deadline while the HTTP response is opening. */
+async function waitForStream<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  controller: AbortController,
+  signal?: AbortSignal,
+): Promise<T> {
+  return await new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) {
+      controller.abort();
+      reject(new APIUserAbortError());
+      return;
+    }
+
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = (): void => {
+      cleanup();
+      controller.abort();
+      reject(new APIUserAbortError());
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      controller.abort();
+      reject(new StreamIdleTimeoutError(timeoutMs));
+    }, Math.max(0, timeoutMs));
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+    void operation.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
 export class OpenAIProvider implements ModelProvider {
   readonly info: ModelInfo;
   #client: OpenAI;
   #config: ModelConfig;
+  #capabilityCache: EffortCapabilityCache | undefined;
+  #onTiming: ((timing: StreamTiming) => void) | undefined;
+  #capabilityLoad: Promise<void> | undefined;
   /** Highest Plif candidate accepted by this provider instance. */
   #plifEffortIndex = 0;
 
-  constructor(config: ModelConfig) {
+  constructor(config: ModelConfig, options: OpenAIProviderOptions = {}) {
     this.#config = config;
+    this.#capabilityCache = options.capabilityCache;
+    this.#onTiming = options.onTiming ?? (options.bus
+      ? (timing) => options.bus!.emit('stream.timing', timing)
+      : undefined);
     this.#client = new OpenAI({
       // Empty, not a placeholder. The SDK only rejects `undefined`, and an
       // empty string sends a bare `Authorization: Bearer` — which a host with
@@ -200,6 +270,7 @@ export class OpenAIProvider implements ModelProvider {
    * seconds, and burning four minutes to say so is worse than saying it now.
    */
   async *stream(request: CompletionRequest): AsyncGenerator<CompletionEvent> {
+    await this.#loadCachedEffort();
     let delivered = false;
     const startedAt = Date.now();
 
@@ -290,11 +361,32 @@ export class OpenAIProvider implements ModelProvider {
     return sleep(ms, signal);
   }
 
-  protected streamIdleTimeoutMs(): number {
-    return Math.max(1_000, Math.min(this.#config.timeoutMs, 30_000));
+  protected firstChunkTimeoutMs(): number {
+    return this.#config.timeoutMs;
+  }
+
+  protected interChunkTimeoutMs(): number {
+    return this.#config.timeoutMs;
   }
 
   async *#attempt(request: CompletionRequest): AsyncGenerator<CompletionEvent> {
+    const startedAt = Date.now();
+    let firstChunk = false;
+    let firstDelta = false;
+    const emitTiming = (
+      phase: StreamTiming['phase'],
+      extra: { readonly bytes?: number; readonly deltaKind?: StreamTiming['deltaKind'] } = {},
+    ): void => {
+      if (!this.#onTiming) return;
+      this.#onTiming(streamTiming({
+        phase,
+        elapsedMs: Date.now() - startedAt,
+        provider: redactedProviderId(this.#config.baseURL),
+        model: this.#config.model,
+        ...extra,
+      }));
+    };
+    const acceptedEffort = this.#config.effort === 'plif' ? this.#wireEffort() : undefined;
     const pending = new ToolCallBuffer();
     // Two channels arrive as one on models that write `<think>` into content.
     // Splitting here rather than in the loop means every consumer — the TUI,
@@ -306,15 +398,17 @@ export class OpenAIProvider implements ModelProvider {
     let usage: Usage = NO_USAGE;
     let finished = false;
     const attemptAbort = new AbortController();
-    const idleTimeoutMs = this.streamIdleTimeoutMs();
+    const firstChunkTimeoutMs = this.firstChunkTimeoutMs();
+    const firstChunkDeadline = Date.now() + firstChunkTimeoutMs;
     let iterator: AsyncIterator<OpenAI.Chat.ChatCompletionChunk> | undefined;
     const onRequestAbort = (): void => attemptAbort.abort();
     request.signal?.addEventListener('abort', onRequestAbort, { once: true });
     if (request.signal?.aborted) attemptAbort.abort();
 
     try {
-      const response = await this.createStream(
-        {
+      emitTiming('request');
+      const response = await waitForStream(
+        this.createStream({
           model: this.#config.model,
           messages: request.messages.map(toWire),
           temperature: request.temperature ?? this.#config.temperature,
@@ -343,13 +437,40 @@ export class OpenAIProvider implements ModelProvider {
                 })),
               }
             : {}),
-        },
-        { signal: attemptAbort.signal },
+        }, { signal: attemptAbort.signal }),
+        firstChunkTimeoutMs,
+        attemptAbort,
+        request.signal,
       );
 
       iterator = response[Symbol.asyncIterator]();
+      let firstRead = true;
       while (true) {
-        const next = await nextChunk(iterator, idleTimeoutMs, attemptAbort, request.signal);
+        const timeoutMs = firstRead
+          ? Math.max(0, firstChunkDeadline - Date.now())
+          : this.interChunkTimeoutMs();
+        let next: IteratorResult<OpenAI.Chat.ChatCompletionChunk>;
+        try {
+          next = await nextChunk(iterator, timeoutMs, attemptAbort, request.signal);
+        } catch (error) {
+          if (
+            isAbort(error) ||
+            error instanceof APIError ||
+            error instanceof StreamIdleTimeoutError ||
+            error instanceof StreamInterruptedError
+          ) {
+            throw error;
+          }
+          throw new StreamInterruptedError(
+            'stream parser failed after the response opened',
+            { cause: error },
+          );
+        }
+        firstRead = false;
+        if (!firstChunk) {
+          firstChunk = true;
+          emitTiming('first-chunk');
+        }
         if (next.done) break;
         const chunk = next.value;
         if (chunk.usage) {
@@ -365,16 +486,30 @@ export class OpenAIProvider implements ModelProvider {
         const text = choice.delta?.content;
         if (text) {
           for (const part of splitter.push(text)) {
+            if (!firstDelta) {
+              firstDelta = true;
+              emitTiming('first-delta', {
+                bytes: Buffer.byteLength(part.delta, 'utf8'),
+                deltaKind: part.kind,
+              });
+            }
             yield { kind: part.kind, delta: part.delta };
           }
         }
 
         // Reasoning models put their thinking on a side field, and no two hosts
         // agree on which one. None of them are in the SDK types.
-        const thinking = reasoningFromDelta(choice.delta);
+        const thinking = reasoningObservationFromDelta(choice.delta);
         if (thinking) {
           const delta = reasoningDeltas.push(thinking);
           if (delta) {
+            if (!firstDelta) {
+              firstDelta = true;
+              emitTiming('first-delta', {
+                bytes: Buffer.byteLength(delta, 'utf8'),
+                deltaKind: 'reasoning',
+              });
+            }
             yield { kind: 'reasoning', delta };
           }
         }
@@ -405,9 +540,15 @@ export class OpenAIProvider implements ModelProvider {
       // arguments are not valid JSON until the last fragment has arrived.
       const calls = pending.drain();
       for (const call of calls) {
+        if (!firstDelta) {
+          firstDelta = true;
+          emitTiming('first-delta', { deltaKind: 'tool' });
+        }
         yield { kind: 'tool', call };
       }
 
+      await this.#rememberEffort(acceptedEffort);
+      emitTiming('completion', { deltaKind: 'done' });
       yield { kind: 'done', reason, usage };
     } catch (error) {
       if (isAbort(error)) {
@@ -430,10 +571,43 @@ export class OpenAIProvider implements ModelProvider {
     }
   }
 
+  async #loadCachedEffort(): Promise<void> {
+    if (this.#config.effort !== 'plif' || !this.#capabilityCache) return;
+    if (!this.#capabilityLoad) {
+      this.#capabilityLoad = (async () => {
+        try {
+          const cached = await this.#capabilityCache!.get(this.#config.baseURL, this.#config.model);
+          if (!cached) return;
+          const index = PLIF_EFFORTS.indexOf(cached as (typeof PLIF_EFFORTS)[number]);
+          if (index >= 0) this.#plifEffortIndex = index;
+        } catch {
+          // Negotiation remains the safe fallback when the optional cache is
+          // unreadable or unavailable.
+        }
+      })();
+    }
+    await this.#capabilityLoad;
+  }
+
+  async #rememberEffort(effort: WireEffort | undefined): Promise<void> {
+    if (!effort || this.#config.effort !== 'plif' || !this.#capabilityCache) return;
+    try {
+      await this.#capabilityCache.set(
+        this.#config.baseURL,
+        this.#config.model,
+        effort as CachedEffort,
+      );
+    } catch {
+      // A cache write must never turn a valid model response into a failed turn.
+    }
+  }
+
   #wireEffort(): WireEffort {
     if (this.#config.effort === 'plif') {
       return PLIF_EFFORTS[this.#plifEffortIndex] ?? 'high';
     }
+    if (this.#config.effort === 'ultra' || this.#config.effort === 'max') return 'max';
+    if (this.#config.effort === 'ultracode') return 'xhigh';
     // Preserve the existing compatibility behavior for explicit xhigh. Plif
     // is the mode that negotiates beyond the SDK's currently typed values.
     if (this.#config.effort === 'xhigh') return 'high';
@@ -445,6 +619,9 @@ export class OpenAIProvider implements ModelProvider {
     const current = PLIF_EFFORTS[this.#plifEffortIndex];
     if (!current || this.#plifEffortIndex >= PLIF_EFFORTS.length - 1) return false;
     if (!isUnsupportedReasoningEffort(error, current)) return false;
+    void Promise.resolve(
+      this.#capabilityCache?.invalidate?.(this.#config.baseURL, this.#config.model),
+    ).catch(() => undefined);
     this.#plifEffortIndex += 1;
     return true;
   }

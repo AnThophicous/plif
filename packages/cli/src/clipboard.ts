@@ -17,7 +17,7 @@
  * copying a PNG in a file manager puts there).
  */
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -25,6 +25,43 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
+
+/** Put UTF-8 text in the system clipboard without shell interpolation. */
+export async function writeClipboardText(text: string): Promise<void> {
+  const command = process.platform === 'win32'
+    ? 'powershell.exe'
+    : process.platform === 'darwin'
+      ? 'pbcopy'
+      : 'wl-copy';
+  const args = process.platform === 'win32'
+    ? ['-NoProfile', '-NonInteractive', '-Command', '$input | Set-Clipboard']
+    : [];
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, {
+      windowsHide: true,
+      stdio: ['pipe', 'ignore', 'pipe'],
+    });
+    let error = '';
+    child.stderr.on('data', (chunk: Buffer) => { error += chunk.toString(); });
+    child.once('error', reject);
+    child.once('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(error.trim() || `clipboard command exited with ${code ?? 'unknown status'}`));
+    });
+    child.stdin.end(text, 'utf8');
+  }).catch(async (error) => {
+    if (process.platform !== 'linux') throw error;
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn('xclip', ['-selection', 'clipboard'], { stdio: ['pipe', 'ignore', 'pipe'] });
+      let detail = '';
+      child.stderr.on('data', (chunk: Buffer) => { detail += chunk.toString(); });
+      child.once('error', reject);
+      child.once('close', (code) => code === 0 ? resolve() : reject(new Error(detail.trim() || 'xclip failed')));
+      child.stdin.end(text, 'utf8');
+    });
+  });
+}
 
 export interface ClipboardImage {
   /** Where it was written. Inside the OS temp directory, never the project. */

@@ -10,7 +10,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { ReasoningDeltaNormalizer, ReasoningSplitter, reasoningFromDelta } from '../src/model/reasoning.js';
+import {
+  ReasoningDeltaNormalizer,
+  ReasoningSplitter,
+  reasoningFromDelta,
+  reasoningObservationFromDelta,
+} from '../src/model/reasoning.js';
 
 /** Feed a stream and collect each channel. */
 function run(deltas: readonly string[]): { text: string; reasoning: string } {
@@ -102,6 +107,19 @@ describe('reasoningFromDelta', () => {
     );
   });
 
+  it('preserves source and semantics for provider normalization', () => {
+    assert.deepEqual(reasoningObservationFromDelta({ reasoning_content: 'abc' }), {
+      text: 'abc',
+      source: 'reasoning_content',
+      semantics: 'unknown',
+    });
+    assert.deepEqual(reasoningObservationFromDelta({ reasoning_details: [{ text: 'abc' }] }), {
+      text: 'abc',
+      source: 'reasoning_details',
+      semantics: 'snapshot',
+    });
+  });
+
   it('is undefined when there is no thinking, not empty string', () => {
     // The provider branches on truthiness; an empty string here would emit a
     // reasoning event for every content-only chunk of the stream.
@@ -112,25 +130,43 @@ describe('reasoningFromDelta', () => {
 });
 
 describe('ReasoningDeltaNormalizer', () => {
-  it('turns cumulative snapshots into true deltas', () => {
+  it('turns cumulative snapshots beginning at one character into true deltas', () => {
     const normalizer = new ReasoningDeltaNormalizer();
-    assert.equal(normalizer.push('Could match'), 'Could match');
-    assert.equal(normalizer.push('Could match "5s"'), ' "5s"');
-    assert.equal(normalizer.push('Could match "5s" in "5s"'), ' in "5s"');
-    assert.equal(normalizer.value, 'Could match "5s" in "5s"');
+    assert.equal(normalizer.push({ text: 'a', source: 'reasoning', semantics: 'unknown' }), 'a');
+    assert.equal(normalizer.push({ text: 'ab', source: 'reasoning', semantics: 'unknown' }), 'b');
+    assert.equal(normalizer.push({ text: 'abc', source: 'reasoning', semantics: 'unknown' }), 'c');
+    assert.equal(normalizer.value, 'abc');
   });
 
-  it('leaves ordinary token deltas untouched', () => {
+  it('leaves explicit ordinary and repeated token deltas untouched', () => {
     const normalizer = new ReasoningDeltaNormalizer();
-    assert.equal(normalizer.push('Could '), 'Could ');
-    assert.equal(normalizer.push('match '), 'match ');
-    assert.equal(normalizer.push('"5s"'), '"5s"');
-    assert.equal(normalizer.value, 'Could match "5s"');
+    assert.equal(normalizer.push({ text: 'the ', source: 'reasoning_content', semantics: 'delta' }), 'the ');
+    assert.equal(normalizer.push({ text: 'the ', source: 'reasoning_content', semantics: 'delta' }), 'the ');
+    assert.equal(normalizer.value, 'the the ');
   });
 
-  it('drops an unchanged repeated snapshot', () => {
+  it('treats equal unknown observations as deltas', () => {
     const normalizer = new ReasoningDeltaNormalizer();
-    assert.equal(normalizer.push('A complete reasoning snapshot'), 'A complete reasoning snapshot');
-    assert.equal(normalizer.push('A complete reasoning snapshot'), '');
+    assert.equal(normalizer.push({ text: 'a', source: 'reasoning', semantics: 'unknown' }), 'a');
+    assert.equal(normalizer.push({ text: 'a', source: 'reasoning', semantics: 'unknown' }), 'a');
+    assert.equal(normalizer.value, 'aa');
+  });
+
+  it('drops an unchanged explicit snapshot', () => {
+    const normalizer = new ReasoningDeltaNormalizer();
+    const observation = {
+      text: 'A complete reasoning snapshot',
+      source: 'reasoning_details' as const,
+      semantics: 'snapshot' as const,
+    };
+    assert.equal(normalizer.push(observation), observation.text);
+    assert.equal(normalizer.push(observation), '');
+  });
+
+  it('does not compare raw snapshots from different sources', () => {
+    const normalizer = new ReasoningDeltaNormalizer();
+    assert.equal(normalizer.push({ text: 'a', source: 'reasoning', semantics: 'unknown' }), 'a');
+    assert.equal(normalizer.push({ text: 'ab', source: 'thinking', semantics: 'unknown' }), 'ab');
+    assert.equal(normalizer.value, 'aab');
   });
 });

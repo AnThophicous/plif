@@ -28,9 +28,11 @@ import { Readable } from 'node:stream';
 import { render } from 'ink';
 import React from 'react';
 
-import { Engine } from '@plif/core';
+import { Engine, ProviderCapabilityCache } from '@plif/core';
 
 import { App } from '../src/app.js';
+import { activateTheme, loadThemes } from '../src/themes.js';
+import { VERSION } from '../src/version.js';
 
 /** A writable that keeps every frame Ink paints instead of clearing them. */
 class FakeStdout extends EventEmitter {
@@ -64,9 +66,10 @@ class FakeStdout extends EventEmitter {
    */
   overflows: { columns: number; width: number; text: string }[] = [];
 
-  write(chunk: string): boolean {
-    this.frames.push(chunk);
-    for (const line of stripAnsi(chunk).split('\n')) {
+  write(chunk: string | Uint8Array): boolean {
+    const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+    this.frames.push(text);
+    for (const line of stripAnsi(text).split('\n')) {
       const width = [...line].length;
       if (width > this.columns) {
         this.overflows.push({ columns: this.columns, width, text: line.slice(0, 60) });
@@ -193,8 +196,8 @@ const SCENARIOS: Record<string, Step[]> = {
     { wait: 5000 },
   ],
 
-  /** The command menu, filtered as you type. */
-  completions: [{ wait: 150 }, { type: '/s' }, { wait: 400 }],
+  /** The command menu, opened by a bare slash. */
+  completions: [{ wait: 150 }, { type: '/' }, { wait: 400 }],
 
   /** The local provider catalog, filtered without a remote provider. */
   'model-catalog': [
@@ -691,11 +694,18 @@ const stdin = new FakeStdin();
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-preview-'));
 const engine = new Engine({ root });
 const report = await engine.start();
+const themeCatalogue = await loadThemes();
+activateTheme(themeCatalogue.themes[0]!);
+const capabilityCache = new ProviderCapabilityCache({
+  file: path.join(root, 'model-capabilities.json'),
+});
 
 const { OpenAIProvider, resolveConfig, validateModelConfig } = await import('@plif/core');
 const previewConfig = resolveConfig({});
 const previewCheck = validateModelConfig(previewConfig);
-const previewProvider = previewCheck.ok ? new OpenAIProvider(previewConfig) : null;
+const previewProvider = previewCheck.ok
+  ? new OpenAIProvider(previewConfig, { capabilityCache, bus: engine.bus })
+  : null;
 const previewProblem = previewCheck.ok ? null : (previewCheck.problem ?? 'model is not configured');
 
 const app = render(React.createElement(App, {
@@ -704,21 +714,23 @@ const app = render(React.createElement(App, {
     cwd: process.cwd(),
     session: await engine.sessions.create(process.cwd()),
     replay: [],
-    sessionCount: 3,
-    version: '0.1.0',
+    version: VERSION,
     // Resolved the same way the real CLI resolves it, rather than gated on a
     // key being exported. The default model needs none, so hard-coding that
     // condition made every agent scenario preview as "no model configured" on
     // exactly the configuration most people run.
     provider: previewProvider,
+    capabilityCache,
     providerProblem: previewProblem,
     tools: (await import('@plif/core')).DEFAULT_TOOLS,
     skillCatalogue: '',
     mcpCatalogue: '',
     skills: [],
     mcpStatuses: [],
+    initialThemeId: themeCatalogue.themes[0]?.id,
+    themeCatalogue,
   }), {
-  stdout: stdout as never,
+  stdout,
   stdin: stdin as never,
   exitOnCtrlC: false,
   patchConsole: false,

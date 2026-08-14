@@ -16,6 +16,7 @@ import {
 } from '../src/auth/mcp-oauth.js';
 import {
   MemoryMcpOAuthStore,
+  personalOAuthStorePath,
   WindowsDpapiOAuthStore,
   mcpOAuthKey,
 } from '../src/auth/store.js';
@@ -222,6 +223,13 @@ async function startProtectedMcp(
 }
 
 describe('MCP OAuth credential store', () => {
+  it('stores personal OAuth records inside the Plif root', () => {
+    assert.equal(
+      personalOAuthStorePath('C:/Users/Plif'),
+      path.join('C:/Users/Plif', '.plif', 'oauth'),
+    );
+  });
+
   it('isolates MCP keys and clears only the requested scope', async () => {
     const store = new MemoryMcpOAuthStore();
     await store.save('mcp:a', {
@@ -379,7 +387,8 @@ describe('OAuth-protected HTTP MCP', () => {
       assert.equal(fixture.counters.token, 1);
 
       const result = await registry.tools()[0]!.run({}, {} as ToolContext);
-      assert.equal(result.output, 'authenticated');
+      assert.match(result.output, /Status: success/);
+      assert.match(result.output, /Data:\nauthenticated/);
       assert.equal(result.ok, true);
       assert.equal(fixture.counters.call, 1);
 
@@ -413,7 +422,8 @@ describe('OAuth-protected HTTP MCP', () => {
       fixture.revokeTokens();
 
       const result = await registry.tools()[0]!.run({}, {} as ToolContext);
-      assert.equal(result.output, 'authenticated');
+      assert.match(result.output, /Status: success/);
+      assert.match(result.output, /Data:\nauthenticated/);
       assert.equal(fixture.counters.token, 2, 'the code was exchanged a second time');
       assert.equal(fixture.counters.call, 1, 'the original call ran once, after recovery');
       assert.equal(fixture.counters.register, 1, 'the stored client survived the reconnect');
@@ -450,7 +460,8 @@ describe('OAuth-protected HTTP MCP', () => {
       assert.equal(fixture.counters.register, 1, 'the stored client survived the login');
 
       const result = await registry.tools()[0]!.run({}, {} as ToolContext);
-      assert.equal(result.output, 'authenticated');
+      assert.match(result.output, /Status: success/);
+      assert.match(result.output, /Data:\nauthenticated/);
     } finally {
       await registry.close();
       await fixture.close();

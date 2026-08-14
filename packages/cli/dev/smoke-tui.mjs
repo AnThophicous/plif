@@ -12,7 +12,9 @@ process.env.FORCE_COLOR = '3';
 const { render } = await import('ink');
 const { Engine, DEFAULT_TOOLS, SkillRegistry, skillTool } = await import('@plif/core');
 const { App } = await import('../dist/app.js');
-const { renderBanner } = await import('../dist/banner.js');
+const { startInteractiveSurface } = await import('../dist/startup.js');
+const { VERSION, VERSION_LABEL } = await import('../dist/version.js');
+const { loadThemes, activateTheme } = await import('../dist/themes.js');
 
 class Out extends EventEmitter {
   constructor(columns, rows) {
@@ -51,22 +53,23 @@ async function trial(rows) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-smoke-'));
   const engine = new Engine({ root });
   const report = await engine.start();
-
-  const banner = renderBanner({
-    report,
-    workspace: process.cwd(),
-    sessions: 2,
-    version: '0.1.0',
-    width: 60,
-  });
+  const themeCatalogue = await loadThemes();
+  activateTheme(themeCatalogue.themes[0]);
+  startInteractiveSurface(out, { version: VERSION_LABEL, workspace: process.cwd() });
+  const skills = await SkillRegistry.load({ workspace: process.cwd(), root });
 
   const app = render(
     React.createElement(App, {
       engine, report, cwd: process.cwd(),
-      session: null, replay: [], sessionCount: 2, version: '0.1.0', provider: null,
-      tools: [...DEFAULT_TOOLS, skillTool(await SkillRegistry.load({ workspace: process.cwd(), root }))],
-      skillCatalogue: (await SkillRegistry.load({ workspace: process.cwd(), root })).catalogue(),
+      session: null, replay: [], version: VERSION, provider: null,
+      providerProblem: 'preview has no configured model',
+      tools: [...DEFAULT_TOOLS, skillTool(skills)],
+      skillCatalogue: skills.catalogue(),
       mcpCatalogue: '',
+      skills: skills.list(),
+      mcpStatuses: [],
+      initialThemeId: themeCatalogue.themes[0]?.id,
+      themeCatalogue,
     }),
     { stdout: out, stdin, exitOnCtrlC: false, patchConsole: false },
   );
@@ -78,7 +81,8 @@ async function trial(rows) {
   await new Promise((r) => setTimeout(r, 900));
 
   const all = strip(out.frames.join(''));
-  const inFrame = (all.match(/plif v0\.1\.0/g) || []).length;
+  const inkOutput = strip(out.frames.slice(2).join(''));
+  const inFrame = (inkOutput.match(new RegExp(`Plif ${VERSION_LABEL.replaceAll('.', '\\.')}`, 'g')) || []).length;
   const routed = /no model configured/.test(all);
   const spawned = /ENOENT/.test(all);
 
@@ -90,7 +94,7 @@ async function trial(rows) {
   app.unmount();
   await engine.shutdown();
   await fs.rm(root, { recursive: true, force: true });
-  return banner;
+  return out.frames[0] ?? '';
 }
 
 for (const rows of [40, 20, 12, 8]) await trial(rows);

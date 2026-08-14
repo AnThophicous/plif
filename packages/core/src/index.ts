@@ -58,9 +58,19 @@ export {
   validateOAuthAuthorizationUrl,
 } from './auth/mcp-oauth.js';
 export type { McpAuthEvent, McpOAuthConfig, McpOAuthCoordinatorOptions } from './auth/mcp-oauth.js';
-export { CredentialBroker, MemorySecretStore, WindowsDpapiSecretStore } from './auth/secrets.js';
+export {
+  CredentialBroker,
+  MemorySecretStore,
+  personalSecretStorePath,
+  WindowsDpapiSecretStore,
+} from './auth/secrets.js';
 export type { CredentialRequest, CredentialBrokerOptions, SecretStore } from './auth/secrets.js';
-export { MemoryMcpOAuthStore, WindowsDpapiOAuthStore, mcpOAuthKey } from './auth/store.js';
+export {
+  MemoryMcpOAuthStore,
+  personalOAuthStorePath,
+  WindowsDpapiOAuthStore,
+  mcpOAuthKey,
+} from './auth/store.js';
 export type { McpOAuthStore, OAuthCredentialScope, StoredMcpOAuthState } from './auth/store.js';
 export type { Question, QuestionChoice } from './harness/ask.js';
 export type { QuestionOption } from './events/bus.js';
@@ -72,8 +82,21 @@ export { MemoryStore, rankFacts, strategyId, strategyStatus, summariseMemory } f
 export type { Fact, FactKind, MemorySnapshot } from './harness/memory.js';
 export { DEFAULT_CONTEXT_TOKENS } from './harness/loop.js';
 export type { LoopOptions, LoopResult, LoopStop } from './harness/loop.js';
+export {
+  createHarnessCycle,
+  inspectionPaths,
+  isFileMutationTool,
+  isValidationObservation,
+  mutationGate,
+  mutationPaths,
+  observeHarnessCycle,
+  reviewGate,
+} from './harness/cycle.js';
+export type { CycleObservation, HarnessCycleState, HarnessPhase } from './harness/cycle.js';
 export { buildSystemPrompt } from './harness/prompt.js';
 export type { PromptContext, PromptMode, PromptModule } from './harness/prompt.js';
+export { compileAgentInstructions } from './agenting/compiler.js';
+export { listInstructionModules } from './agenting/instruction-loader.js';
 export { detectShell, resetShellCache, shellSection } from './harness/environment.js';
 export type { ShellReport } from './harness/environment.js';
 export {
@@ -89,6 +112,7 @@ export {
   listDir,
   readFile,
   remember,
+  setGoal,
   runCommand,
   shellCommand,
   toolsForEnvironment,
@@ -144,8 +168,32 @@ export { SERVERS, detectLanguages, languageIdFor, resolveServer, serverFor } fro
 export type { ResolvedServer, ServerSpec } from './lsp/servers.js';
 
 export { OpenAIProvider } from './model/openai.js';
-export { ReasoningSplitter, reasoningFromDelta } from './model/reasoning.js';
-export type { ReasoningSplit } from './model/reasoning.js';
+export {
+  CAPABILITY_TTL_MS,
+  ProviderCapabilityCache,
+  capabilityEndpointHash,
+  memoryCapabilityCache,
+} from './model/capabilities.js';
+export type {
+  CachedEffort,
+  CapabilityEntry,
+  EffortCapabilityCache,
+  ProviderCapabilityCacheOptions,
+} from './model/capabilities.js';
+export { redactedProviderId, streamTiming } from './model/stream-timing.js';
+export type { StreamDeltaKind, StreamTiming, StreamTimingPhase } from './model/stream-timing.js';
+export {
+  ReasoningDeltaNormalizer,
+  ReasoningSplitter,
+  reasoningFromDelta,
+  reasoningObservationFromDelta,
+} from './model/reasoning.js';
+export type {
+  ReasoningObservation,
+  ReasoningSemantics,
+  ReasoningSource,
+  ReasoningSplit,
+} from './model/reasoning.js';
 export { collect, NO_USAGE } from './model/provider.js';
 export type {
   Attachment,
@@ -162,6 +210,9 @@ export type {
 } from './model/provider.js';
 export {
   PRESETS,
+  adoptProvider,
+  forgetProviderKey,
+  supportedEfforts,
   describe,
   isFreeModel,
   isLocal,
@@ -188,13 +239,25 @@ export type {
   StoredConfig,
   VisionCandidate,
 } from './model/config.js';
+export { EFFORT_LEVELS } from './model/config.js';
 export {
   MODEL_CATALOG,
-  MODEL_CATALOG_DEFAULT,
   catalogSelection,
   findCatalogModel,
+  findCatalogProvider,
+  rankModelIds,
+  userCatalog,
 } from './model/catalog.js';
-export type { ModelCatalogModel, ModelCatalogProvider, ModelSelection } from './model/catalog.js';
+export type {
+  ModelCatalogModel,
+  ModelCatalogOrigin,
+  ModelCatalogProvider,
+  ModelSelection,
+} from './model/catalog.js';
+export { discoverProviderModels, forgetDiscoveredModels } from './model/discovery.js';
+export type { DiscoveredModels, DiscoverOptions } from './model/discovery.js';
+export { AnthropicProvider } from './model/anthropic.js';
+export { createModelProvider, isAnthropicEndpoint } from './model/factory.js';
 
 export { Session, SessionStore, workspaceKey } from './session/store.js';
 export type { SessionMeta, TranscriptEvent } from './session/store.js';
@@ -229,9 +292,13 @@ export type { AuditEventType, AuditRecord } from './audit/log.js';
 
 export {
   CONFIG_SCHEMA_URL,
+  configSchemaText,
   agentsOf,
   mcpServersOf,
   globalConfigPath,
+  legacyGlobalConfigPath,
+  legacyPlifConfigPath,
+  migrateLegacyGlobalConfig,
   isAutoApproveEnabled,
   loadGlobalConfig,
   permissionMode,

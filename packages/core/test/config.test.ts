@@ -5,7 +5,11 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
+  configSchemaText,
+  globalConfigPath,
+  legacyPlifConfigPath,
   loadGlobalConfig,
+  migrateLegacyGlobalConfig,
   mcpServersOf,
   saveGlobalConfig,
   stripJsonComments,
@@ -93,6 +97,11 @@ describe('reading a JSONC config', () => {
 });
 
 describe('the global config file', () => {
+  it('uses ~/.plif/config.toml as the only current personal config path', () => {
+    assert.equal(globalConfigPath('C:/Users/Plif'), path.join('C:/Users/Plif', '.plif', 'config.toml'));
+    assert.equal(legacyPlifConfigPath('C:/Users/Plif'), path.join('C:/Users/Plif', '.plif', 'config.json'));
+  });
+
   it('round-trips an MCP block written with comments and a trailing comma', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-config-'));
     const file = path.join(root, 'config.jsonc');
@@ -139,7 +148,7 @@ describe('the global config file', () => {
 
   it('writes what it can read back', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-config-'));
-    const file = path.join(root, 'config.jsonc');
+    const file = path.join(root, 'config.toml');
     const config = { model: 'x', mcp: { a: { command: 'node' } } } as GlobalConfig;
 
     await saveGlobalConfig(config, file);
@@ -148,5 +157,26 @@ describe('the global config file', () => {
     assert.equal(read.model, 'x');
     assert.deepEqual(mcpServersOf(read), { a: { command: 'node' } });
     await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('imports legacy JSONC once and writes a TOML configuration', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-config-'));
+    const legacy = path.join(root, 'legacy.jsonc');
+    const target = path.join(root, '.plif', 'config.toml');
+    await fs.writeFile(legacy, '{ "model": "local/deepseek", "mcp": { "docs": { "url": "https://mcp.example.test" } } }');
+
+    const config = await migrateLegacyGlobalConfig(target, legacy);
+    const toml = await fs.readFile(target, 'utf8');
+
+    assert.equal(config.model, 'local/deepseek');
+    assert.match(toml, /model = "local\/deepseek"/);
+    assert.equal((await loadGlobalConfig(target)).model, 'local/deepseek');
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('ships the schema text for agent configuration guidance', async () => {
+    const schema = await configSchemaText();
+    assert.match(schema, /"title": "Plif configuration"/);
+    assert.match(schema, /"provider"/);
   });
 });

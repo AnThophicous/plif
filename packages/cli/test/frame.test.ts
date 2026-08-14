@@ -18,6 +18,8 @@ import type { SessionState, TimelineEntry } from '../src/session.js';
 import { estimateHeight, tail } from '../src/components/Timeline.js';
 import {
   detachImmediateInkResize,
+  nextTerminalSize,
+  RESIZE_SETTLE_MS,
   resizeAppliesImmediately,
   terminalFrameRows,
 } from '../src/terminal-resize.js';
@@ -103,6 +105,23 @@ describe('terminal resize guard', () => {
 });
 
 describe('live controls', () => {
+  it('applies answer and reasoning frame patches in one reducer action', () => {
+    const answer = entry('answer', '', { status: 'active' });
+    const reasoning = entry('thinking', 'Thinking', { status: 'active' });
+    const state = withEntries([reasoning, answer]);
+
+    const framed = sessionReducer(state, {
+      type: 'stream.frame',
+      patches: [
+        { id: reasoning.id, patch: { detail: 'checking types' } },
+        { id: answer.id, patch: { detail: 'done' } },
+      ],
+    });
+
+    assert.equal(framed.entries[0]?.detail, 'checking types');
+    assert.equal(framed.entries[1]?.detail, 'done');
+  });
+
   it('updates discovery calls outside the timeline and flushes one final row', () => {
     let state = sessionReducer(initialSession, {
       type: 'discovery.start', id: 'read-1', kind: 'Read', target: 'src/one.ts',
@@ -295,5 +314,16 @@ describe('when a new terminal size may wait for the resize to settle', () => {
 
   it('applies a drag that shrinks one axis while growing the other', () => {
     assert.equal(resizeAppliesImmediately(size(200, 20), size(120, 40)), true);
+  });
+
+  it('keeps physical dimensions for a shrink and defers only growth', () => {
+    assert.deepEqual(
+      nextTerminalSize(size(80, 24), size(30, 8), 100),
+      { size: size(30, 8), deferredUntil: null },
+    );
+    assert.deepEqual(
+      nextTerminalSize(size(30, 8), size(48, 10), 100),
+      { size: size(30, 8), deferredUntil: 100 + RESIZE_SETTLE_MS },
+    );
   });
 });

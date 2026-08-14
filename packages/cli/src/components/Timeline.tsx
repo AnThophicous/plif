@@ -4,11 +4,11 @@ import { Box, Text } from 'ink';
 import { diffHeight } from './Diff.js';
 import { Markdown } from './Markdown.js';
 import { ToolCall } from './ToolCall.js';
-import { useSpinnerFrame } from './Spinner.js';
+import { BLOOM_MARK, useSpinnerFrame } from './Spinner.js';
 import type { EntryStatus, TimelineEntry } from '../session.js';
 import type { TranscriptCell } from '../transcript/types.js';
 import { highlightedClusters, toneBetween, useHighlightClock } from '../pulse.js';
-import { color, formatDuration, glyph, layout, supportsRichGlyphs, truncate, workedSeparator } from '../theme.js';
+import { color, formatDuration, formatWorkedDuration, glyph, layout, supportsRichGlyphs, truncate } from '../theme.js';
 
 interface TimelineProps {
   readonly entries: readonly TimelineEntry[];
@@ -110,7 +110,7 @@ function TranscriptCellRow({
   if (cell.kind === 'activity') {
     return <ActivityCellRow cell={cell} expanded={expanded} />;
   }
-  return <TimelineRow entry={entryFromTranscriptCell(cell)} width={width} />;
+  return <TimelineRow entry={entryFromTranscriptCell(cell, expanded)} width={width} />;
 }
 
 function ActivityCellRow({
@@ -153,7 +153,10 @@ export function cellSpacing({
   return previousTurnId !== null && previousTurnId !== turnId ? 1 : 0;
 }
 
-function entryFromTranscriptCell(cell: Exclude<TranscriptCell, { readonly kind: 'activity' }>): TimelineEntry {
+function entryFromTranscriptCell(
+  cell: Exclude<TranscriptCell, { readonly kind: 'activity' }>,
+  expanded = false,
+): TimelineEntry {
   const parsedAt = Date.parse(cell.at);
   const at = Number.isFinite(parsedAt) ? parsedAt : 0;
   switch (cell.kind) {
@@ -165,6 +168,16 @@ function entryFromTranscriptCell(cell: Exclude<TranscriptCell, { readonly kind: 
         kind: 'answer',
         title: cell.text,
         status: cell.finalized ? 'done' : 'active',
+        at,
+      };
+    case 'reasoning':
+      return {
+        id: cell.id,
+        kind: 'thinking',
+        title: cell.finalized ? 'Reasoning' : 'Thinking',
+        detail: cell.text,
+        expand: expanded,
+        status: cell.finalized ? undefined : 'active',
         at,
       };
     case 'diff':
@@ -209,6 +222,8 @@ export function measureTranscriptCell(cell: TranscriptCell, width: number): numb
     case 'user':
       return wrap(cell.text, Math.max(8, inner - 4)) + 4;
     case 'assistant':
+      return wrap(cell.text, Math.max(8, inner - 3)) + 2;
+    case 'reasoning':
       return wrap(cell.text, Math.max(8, inner - 3)) + 2;
     case 'activity':
       return 2 + cell.items.length;
@@ -316,6 +331,40 @@ export function thoughtLines(
   return rows.slice(-budget);
 }
 
+/** Wrap a settled thought without flattening its deliberate paragraph breaks. */
+export function wrappedThoughtLines(
+  text: string,
+  width: number,
+  budget = Number.MAX_SAFE_INTEGER,
+): readonly string[] {
+  const columns = Math.max(8, width);
+  const rows: string[] = [];
+
+  for (const source of text.split(/\r?\n/)) {
+    const flat = source.replace(/\s+/g, ' ').trim();
+    if (!flat) {
+      rows.push('');
+      continue;
+    }
+
+    let row = '';
+    for (const word of flat.split(' ')) {
+      for (let at = 0; at < word.length || at === 0; at += columns) {
+        const piece = word.slice(at, at + columns);
+        if (!row) row = piece;
+        else if (row.length + 1 + piece.length <= columns) row += ` ${piece}`;
+        else {
+          rows.push(row);
+          row = piece;
+        }
+      }
+    }
+    if (row) rows.push(row);
+  }
+
+  return rows.slice(-budget);
+}
+
 /**
  * How many terminal lines a row will occupy, rounded generously upward.
  *
@@ -325,8 +374,8 @@ export function thoughtLines(
  * full-repaint branch this whole mechanism exists to avoid.
  */
 export function estimateHeight(entry: TimelineEntry, width: number): number {
-  const wrap = (text: string): number =>
-    text.split('\n').reduce((total, line) => total + wrappedHeight(line, width), 0);
+  const wrap = (text: string, column = width): number =>
+    text.split('\n').reduce((total, line) => total + wrappedHeight(line, column), 0);
 
   if (entry.kind === 'input') return 5;
 
@@ -358,10 +407,10 @@ export function estimateHeight(entry: TimelineEntry, width: number): number {
       return 1 + thoughtLines(entry.detail ?? '', width - 4).length;
     }
     if (!entry.expand) return 1;
-    return 1 + wrap(entry.detail ?? '') + 1;
+    return 1 + wrap(entry.detail ?? '', width - 4) + 1;
   }
 
-  if (entry.kind === 'separator') return 3;
+  if (entry.kind === 'separator') return 2;
 
   if (entry.kind === 'tool') {
     if (entry.executions?.length) {
@@ -445,6 +494,9 @@ function ThinkingRow({
   const live = thinking ? thoughtLines(body, width - 4) : [];
   const clipped =
     entry.expand && maxLines !== undefined ? tail(body, width - 4, Math.max(3, maxLines - 2)) : body;
+  const expandedLines = entry.expand && body.trim()
+    ? wrappedThoughtLines(clipped, width - 4, maxLines === undefined ? undefined : Math.max(1, maxLines - 2))
+    : [];
 
   return (
     <Box flexDirection="column">
@@ -460,7 +512,7 @@ function ThinkingRow({
           </Text>
         ) : (
           <Text color={color('faint')}>
-            {entry.expand ? `${label}:` : formatDuration(entry.durationMs ?? 0)}
+            {entry.expand ? `${label}:` : `Thought for ${formatDuration(entry.durationMs ?? 0)}`}
           </Text>
         )}
         <Text color={color('ghost')}>
@@ -485,12 +537,10 @@ function ThinkingRow({
 
       {entry.expand && body.trim() && (
         <Box flexDirection="column" marginBottom={1}>
-          {clipped.split('\n').map((line, index) => (
+          {expandedLines.map((line, index) => (
             <Box key={index}>
               <Text color={color('ghost')}>{'  ' + glyph.rail + ' '}</Text>
-              <Text color={color('faint')} italic>
-                {truncate(line, Math.max(8, width - 4))}
-              </Text>
+              <Text color={color('faint')} italic>{line}</Text>
             </Box>
           ))}
         </Box>
@@ -499,10 +549,21 @@ function ThinkingRow({
   );
 }
 
+/**
+ * The line that closes out a run.
+ *
+ * It used to be a full-width rule drawn after every model/tool cycle, which
+ * meant a twenty-step task ended up with twenty horizontal rules through it —
+ * the transcript read as a stack of receipts rather than one piece of work.
+ * Now it appears once, when the agent has finished everything it had to do,
+ * and it is the same bloom that was turning while the work happened.
+ */
 function CycleSeparator({ entry, width }: { entry: TimelineEntry; width: number }): React.ReactElement {
+  void width;
   return (
-    <Box marginTop={1} marginBottom={1}>
-      <Text color={color('faint')}>{workedSeparator(entry.durationMs ?? 0, width)}</Text>
+    <Box marginTop={1}>
+      <Text color={color('accentDim')}>{BLOOM_MARK}</Text>
+      <Text color={color('faint')}> Worked for {formatWorkedDuration(entry.durationMs ?? 0)}</Text>
     </Box>
   );
 }
@@ -513,20 +574,14 @@ function CycleSeparator({ entry, width }: { entry: TimelineEntry; width: number 
  * Slower than the spinner on purpose — a fast animation next to the word
  * "Thinking" reads as urgency, and this is the calmest thing the agent does.
  */
-const PULSE_FRAMES = supportsRichGlyphs ? ['✦', '✧', '✶', '✧'] : ['*', '+', 'x', '+'];
-const PLIF_PULSE_FRAMES = supportsRichGlyphs ? ['◈', '◇', '✦', '◇'] : ['#', '+', '*', '+'];
+const PULSE_FRAMES = supportsRichGlyphs ? ['•', '·', '•', '·'] : ['*', '+', 'x', '+'];
+const PLIF_PULSE_FRAMES = supportsRichGlyphs ? ['+', '×', '+', '×'] : ['#', '+', '*', '+'];
 
 function usePulse(active: boolean, plif = false): string {
-  const [index, setIndex] = React.useState(0);
-  React.useEffect(() => {
-    if (!active) return;
-    const frames = plif ? PLIF_PULSE_FRAMES : PULSE_FRAMES;
-    const timer = setInterval(() => setIndex((value) => (value + 1) % frames.length), 240);
-    timer.unref?.();
-    return () => clearInterval(timer);
-  }, [active, plif]);
+  const clock = useHighlightClock(active, 420);
   const frames = plif ? PLIF_PULSE_FRAMES : PULSE_FRAMES;
-  return frames[index % frames.length] as string;
+  const index = Math.floor(clock / 420) % frames.length;
+  return frames[index] as string;
 }
 
 /**
@@ -537,14 +592,29 @@ function usePulse(active: boolean, plif = false): string {
  * scanning back for "what did I actually ask?" means reading everything.
  */
 function UserRow({ entry, width }: { entry: TimelineEntry; width: number }): React.ReactElement {
+  const time = formatClock(entry.at);
+  const titleWidth = Math.max(8, width - 8 - time.length);
+  const title = truncate(entry.title, titleWidth);
+  const fixedWidth = 1 + 2 + title.length + (time ? time.length + 1 : 0) + 1;
+  const fill = Math.max(0, width - fixedWidth);
+  const surface = color('surface');
   return (
     <Box flexDirection="column" marginTop={1} marginBottom={1}>
-      <Box borderStyle="round" borderColor={color('ghost')} paddingX={1} width="100%">
-        <Text color={color('muted')}>{glyph.prompt} </Text>
-        <Text color={color('text')}>{truncate(entry.title, width - 6)}</Text>
+      <Box width="100%">
+        <Text backgroundColor={surface}>{' '}</Text>
+        <Text backgroundColor={surface} color={color('muted')}>{glyph.prompt} </Text>
+        <Text backgroundColor={surface} color={color('text')}>{title}</Text>
+        <Text backgroundColor={surface}>{' '.repeat(fill)}</Text>
+        {time && <Text backgroundColor={surface} color={color('ghost')}>{` ${time}`}</Text>}
+        <Text backgroundColor={surface}>{' '}</Text>
       </Box>
     </Box>
   );
+}
+
+function formatClock(at: number): string {
+  if (!Number.isFinite(at) || at <= 0) return '';
+  return new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
 /**

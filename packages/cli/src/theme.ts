@@ -20,26 +20,15 @@
  */
 
 /**
- * Whether the terminal can draw the fine glyphs.
+ * Whether the terminal should draw the real interface glyphs.
  *
- * The legacy Windows console host cannot, and a mojibake prompt is worse than a
- * plain one — so this detects rather than hopes.
- *
- * The `TERM` check is load-bearing and easy to leave out. Over SSH into
- * Windows — say, from Termux on a phone — none of the local Windows markers
- * are set: no `WT_SESSION`, no `TERM_PROGRAM`, no `ConEmuANSI`. Without looking
- * at `TERM`, a perfectly capable UTF-8 terminal gets served the ASCII fallback
- * for no reason. A client that announces itself as `xterm` and friends has
- * handled box drawing for decades.
+ * Node writes Unicode correctly to current Windows console hosts, including a
+ * plain `cmd.exe`. Inferring capability from Windows Terminal environment
+ * markers turned their absence into an ASCII UI even when the console rendered
+ * box drawing perfectly. Unicode is the default everywhere; `PLIF_ASCII=1` is
+ * the explicit escape hatch for a genuinely limited remote terminal.
  */
-const richGlyphs =
-  process.platform !== 'win32' ||
-  process.env['WT_SESSION'] !== undefined ||
-  process.env['TERM_PROGRAM'] !== undefined ||
-  process.env['ConEmuANSI'] === 'ON' ||
-  /^(xterm|screen|tmux|rxvt|alacritty|kitty|foot|contour|wezterm|vt220)/.test(
-    process.env['TERM'] ?? '',
-  );
+const richGlyphs = process.env['PLIF_ASCII'] !== '1';
 
 /** Exported so components share one answer instead of each re-deriving it. */
 export const supportsRichGlyphs = richGlyphs;
@@ -47,35 +36,37 @@ export const supportsRichGlyphs = richGlyphs;
 /**
  * The brand blue, and the ramp derived from it.
  *
- * `#505081` is the identity colour. Measured against a near-black terminal it
- * lands at **2.59:1** contrast — below the 3:1 floor where thin monospace text
- * stops being comfortably readable, and well below 4.5:1. That is not a reason
- * to abandon it; it is a reason to give it the job it is good at.
+ * `#3b5578` is the identity colour. It belongs to the midnight-blue family and
+ * stays reserved for structure: frames, the infinity mark, and active meters.
+ * It is intentionally quieter than reading text, so the terminal can remain
+ * grey-first even when there is a lot happening.
  *
- * So the brand colour draws *structure* — panel borders, the infinity mark,
- * meter fills — where a low-contrast line reads as tasteful rather than as
- * strained. Anything that has to be **read** uses `accent`, which is the same
- * hue lifted to 6.2:1. The two are unmistakably the same colour family, so the
- * interface still reads as blue; it just does not ask anyone to squint.
+ * Anything that has to be **read** uses `accent`, a clearer blue from the same
+ * family. The hierarchy still reads as blue; it just does not ask anyone to
+ * squint.
  */
 const defaultPalette = {
   /** Primary reading colour. Used for content, never for chrome. */
   text: '#e6e6ea',
+  /** The full-bleed shell surface that holds the current Plif frame. */
+  panel: '#191b20',
+  /** Quiet filled surface for the developer's own message row. */
+  surface: '#25282f',
   /** Secondary: labels, metadata, anything you skim past. */
   muted: '#8b8b95',
   /** Tertiary: borders, separators, hints. Present but never competing. */
-  faint: '#55555f',
+  faint: '#4b5360',
   /** Barely there. Timestamps, inactive states. */
-  ghost: '#3a3a43',
+  ghost: '#373e49',
 
   /** The brand blue, exactly. Structure only — 2.59:1 is not a text colour. */
-  brand: '#505081',
+  brand: '#3b5578',
   /** Brand hue lifted to 6.2:1. This is what carries agent activity and focus. */
-  accent: '#8b8bd4',
+  accent: '#91afd0',
   /** A brighter blue-violet used only by the travelling active-work highlight. */
-  accentBright: '#b9c8ff',
+  accentBright: '#c0d7ed',
   /** Between the two, at 3.9:1. Secondary emphasis and de-emphasised accents. */
-  accentDim: '#6a6aa8',
+  accentDim: '#6683a8',
 
   success: '#6ec48a',
   warn: '#e0a458',
@@ -137,10 +128,12 @@ export function syntaxColor(key: SyntaxKey): string {
  * meaning, so a user on a legacy console loses polish but never information.
  */
 const glyphPairs = {
+  /** The Plif mark. */
+  infinity: ['oo', 'oo'],
   /** Input prompt. */
   prompt: ['❯', '>'],
   /** A step the agent took. */
-  step: ['✦', '*'],
+  step: ['•', '*'],
   /** An agent or task row. */
   task: ['∷', '::'],
   /** Currently running. */
@@ -159,8 +152,17 @@ const glyphPairs = {
   rail: ['│', '|'],
   /** Points at a nested detail. */
   branch: ['└', '`'],
+  /**
+   * Joins a compacted batch line to the one detail worth naming under it.
+   *
+   * Rounded rather than square, because it hangs off a summary rather than
+   * closing a list: `⎿` reads as "and specifically", `└` reads as "the last of".
+   */
+  hook: ['⎿', '`-'],
   /** Right-pointing marker. */
   caret: ['▸', '>'],
+  /** Disclosure marker used by compact trays and expandable surfaces. */
+  disclosure: ['▾', 'v'],
   /** Meter fill and track. */
   meterFull: ['█', '#'],
   meterEmpty: ['░', '-'],
@@ -219,6 +221,8 @@ const defaultGlyph = { ...glyph };
 const defaultLayout = {
   gutter: 1,
   boxPadX: 1,
+  surfacePadX: 1,
+  surfacePadY: 1,
   /** Width of the status column that `[done]`-style tags right-align into. */
   statusColumn: 12,
   /** Below this terminal width, drop right-aligned metadata rather than wrap. */
@@ -262,6 +266,17 @@ export function applyTheme(theme: ThemeOverrides = {}): void {
   }
   Object.assign(glyph, defaultGlyph, theme.glyphs ?? {});
   Object.assign(layout, defaultLayout, theme.layout ?? {});
+}
+
+/** Overlay the effort accent without destroying the user's selected theme. */
+export function applyEffortPalette(effort?: string): void {
+  const accents: Record<string, Partial<Record<PaletteKey, string>>> = {
+    max: { brand: '#6337a8', accent: '#c49aff', accentBright: '#eadbff', accentDim: '#9568d0' },
+    ultra: { brand: '#96711f', accent: '#f2ca68', accentBright: '#fff0b0', accentDim: '#c19a3c' },
+    ultracode: { brand: '#a64b1d', accent: '#ff9a5c', accentBright: '#ffd0ac', accentDim: '#d66d37' },
+    plif: { brand: '#4a5fc4', accent: '#8aa4ff', accentBright: '#cbd9ff', accentDim: '#5f74d2' },
+  };
+  Object.assign(palette, accents[effort ?? ''] ?? {});
 }
 
 /** Terminal width, clamped to something a layout can reason about. */

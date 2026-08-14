@@ -1,5 +1,13 @@
 import type { WriteStream } from 'node:tty';
 
+export interface TerminalSize {
+  readonly columns: number;
+  readonly rows: number;
+}
+
+/** How long a growth burst must be quiet before it is committed. */
+export const RESIZE_SETTLE_MS = 40;
+
 /** Keep Ink's dynamic output strictly below its clear-and-replay threshold. */
 export function terminalFrameRows(rows: number): number {
   return Math.max(1, Math.floor(rows) - 1);
@@ -26,10 +34,35 @@ export function sessionFrameHeight(
  * there costs unused rows and nothing else.
  */
 export function resizeAppliesImmediately(
-  next: { columns: number; rows: number },
-  applied: { columns: number; rows: number },
+  next: TerminalSize,
+  applied: TerminalSize,
 ): boolean {
   return next.rows < applied.rows || next.columns < applied.columns;
+}
+
+export interface NextTerminalSize {
+  readonly size: TerminalSize;
+  /** Null means apply now; a timestamp means keep the current size until then. */
+  readonly deferredUntil: number | null;
+}
+
+/**
+ * Pure resize policy: a shrink is safety-critical and a growth is coalesced.
+ * Keeping this decision outside the hook makes the Windows resize contract
+ * testable without a terminal or React scheduler.
+ */
+export function nextTerminalSize(
+  current: TerminalSize,
+  measured: TerminalSize,
+  now: number,
+): NextTerminalSize {
+  if (measured.columns === current.columns && measured.rows === current.rows) {
+    return { size: current, deferredUntil: null };
+  }
+  if (resizeAppliesImmediately(measured, current)) {
+    return { size: measured, deferredUntil: null };
+  }
+  return { size: current, deferredUntil: now + RESIZE_SETTLE_MS };
 }
 
 /**

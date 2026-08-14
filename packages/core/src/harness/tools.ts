@@ -32,6 +32,7 @@ import { diagnosticsAfterWrite } from '../lsp/tools.js';
 import { describeStats, diffLines, diffStats, formatDiff } from './diff.js';
 import type { EditCoordinator } from './edits.js';
 import {
+  configSchemaText,
   globalConfigPath,
   isAutoApproveEnabled,
   loadGlobalConfig,
@@ -71,6 +72,8 @@ export interface ToolContext {
   /** Stable session dialect; absent means shell_command is unsupported. */
   readonly shellDialect?: ShellDialect;
   readonly activateProfile?: (name: string) => Promise<void>;
+  /** Set the interactive session's user-facing final objective. */
+  readonly setGoal?: (condition: string) => Promise<void>;
   /** Attachments from the user message that caused this tool call. */
   readonly attachments?: readonly Attachment[];
 }
@@ -91,6 +94,22 @@ export interface ToolResult {
   readonly diff?: string;
   /** Full terminal-facing transcript when the model-facing output is compacted. */
   readonly display?: string;
+}
+
+export interface ToolEnvelope {
+  readonly status: 'success' | 'error' | 'partial';
+  readonly summary: string;
+  readonly data?: string;
+  readonly next?: string;
+}
+
+export function formatToolEnvelope(envelope: ToolEnvelope): string {
+  return [
+    `Status: ${envelope.status}`,
+    `Summary: ${envelope.summary}`,
+    ...(envelope.data ? ['', 'Data:', envelope.data] : []),
+    ...(envelope.next ? ['', `Next: ${envelope.next}`] : []),
+  ].join('\n');
 }
 
 export interface Tool {
@@ -773,15 +792,23 @@ export function formatExecToolResult(result: ExecResult): ToolResult {
   if (result.truncated) parts.push('(output truncated at the container limit)');
   if (parts.length === 1) parts.push('(no output)');
 
+  const ok = result.exitCode === 0 && !result.killedBy;
   return {
-    output: clip(parts.join('\n')),
+    output: clip(formatToolEnvelope({
+      status: ok ? 'success' : 'error',
+      summary: `Process exited with code ${result.exitCode}${result.killedBy ? ` (${result.killedBy})` : ''}.`,
+      data: parts.join('\n'),
+      next: ok
+        ? 'Use this output as evidence for the current checkpoint.'
+        : 'Read stderr and exit status before changing the command or hypothesis.',
+    })),
     display: [
       `exit ${result.exitCode}${result.killedBy ? ` (${result.killedBy})` : ''}`,
       result.stdout.trimEnd(),
       result.stderr.trimEnd(),
       result.truncated ? '(output truncated at the container limit)' : '',
     ].filter(Boolean).join('\n'),
-    ok: result.exitCode === 0 && !result.killedBy,
+    ok,
   };
 }
 
@@ -806,6 +833,7 @@ export const askUser: Tool = {
         question: { type: 'string', description: 'The question, in one sentence' },
         options: {
           type: 'array',
+          maxItems: 3,
           items: {
             oneOf: [
               { type: 'string' },
@@ -828,12 +856,13 @@ export const askUser: Tool = {
           description: 'Why you are stuck, so the human can judge without re-reading everything',
         },
       },
-      required: ['question'],
+      required: ['question', 'context'],
       additionalProperties: false,
     },
   },
   async run(input, context) {
     const question = requireString(input, 'question');
+    const questionContext = requireString(input, 'context');
     const options = Array.isArray(input['options'])
       ? (input['options'] as unknown[]).flatMap<QuestionChoice>((option) => {
           if (typeof option === 'string') return [option];
@@ -848,10 +877,17 @@ export const askUser: Tool = {
         })
       : undefined;
 
+    if (Array.isArray(input['options']) && options?.length !== input['options'].length) {
+      throw new PlifError('INVALID_ARGUMENT', 'every ask_user option needs a string value or value and label');
+    }
+    if ((options?.length ?? 0) > 3) {
+      throw new PlifError('INVALID_ARGUMENT', 'ask_user accepts at most three options');
+    }
+
     const answer = await context.questions.ask({
       text: question,
       ...(options?.length ? { options } : {}),
-      ...(typeof input['context'] === 'string' ? { context: input['context'] } : {}),
+      context: questionContext,
     });
 
     if (answer === null) {
@@ -859,13 +895,23 @@ export const askUser: Tool = {
       // a default and note the assumption; an agent handed a fabricated answer
       // will proceed as if the human agreed to something they never saw.
       return {
-        output:
-          'No answer — the human did not respond in time. Choose the most defensible ' +
-          'default, state clearly which assumption you made, and continue.',
+        output: formatToolEnvelope({
+          status: 'partial',
+          summary: 'The human did not respond before the question timeout.',
+          next: 'Choose the most defensible default, state the assumption, and continue.',
+        }),
         ok: false,
       };
     }
-    return { output: `The human answered: ${answer}`, ok: true };
+    return {
+      output: formatToolEnvelope({
+        status: 'success',
+        summary: 'The human answered the requested decision.',
+        data: answer,
+        next: 'Apply this answer only to the decision the question described.',
+      }),
+      ok: true,
+    };
   },
 };
 
@@ -920,8 +966,22 @@ export const getConfig: Tool = {
     parameters: { type: 'object', properties: {}, additionalProperties: false },
   },
   async run() {
-    const config = await loadGlobalConfig();
-    return { output: JSON.stringify(redactedConfig(config), null, 2), ok: true };
+    const [config, schema] = await Promise.all([loadGlobalConfig(), configSchemaText()]);
+    return {
+      output: [
+        'Status: success',
+        `Summary: loaded personal configuration from ${globalConfigPath()}.`,
+        '',
+        'Configuration (credentials redacted):',
+        JSON.stringify(redactedConfig(config), null, 2),
+        '',
+        'Configuration schema:',
+        schema.trim(),
+        '',
+        'Next: preserve unrelated fields and use update_config with the smallest valid change.',
+      ].join('\n'),
+      ok: true,
+    };
   },
 };
 
@@ -1013,7 +1073,7 @@ export const updateConfig: Tool = {
       const answer = await context.questions.ask({
         text: 'Allow this Plif configuration change?',
         options: [
-          { value: 'approve', label: 'Apply change', description: 'Write this update to config.jsonc.' },
+          { value: 'approve', label: 'Apply change', description: 'Write this update to ~/.plif/config.toml.' },
           { value: 'cancel', label: 'Cancel', description: 'Leave the current configuration untouched.' },
         ],
         context: summary,
@@ -1022,7 +1082,15 @@ export const updateConfig: Tool = {
     }
 
     await saveGlobalConfig(next);
-    return { output: `Configuration updated: ${summary}.`, ok: true };
+    return {
+      output: [
+        'Status: success',
+        `Summary: configuration updated at ${globalConfigPath()}.`,
+        `Change: ${summary}.`,
+        'Next: use get_config to inspect the effective redacted configuration.',
+      ].join('\n'),
+      ok: true,
+    };
   },
 };
 
@@ -1060,7 +1128,7 @@ export const createProfile: Tool = {
       const answer = await context.questions.ask({
         text: `Save the AI profile "${name}" for future use?`,
         options: [
-          { value: 'approve', label: 'Save profile', description: 'Persist this model and identity in config.jsonc.' },
+          { value: 'approve', label: 'Save profile', description: 'Persist this model and identity in ~/.plif/config.toml.' },
           { value: 'cancel', label: 'Cancel', description: 'Do not change configuration.' },
         ],
         context: `Model: ${model}\nIdentity: ${systemPrompt}`,
@@ -1131,6 +1199,33 @@ export const remember: Tool = {
   },
 };
 
+export const setGoal: Tool = {
+  spec: {
+    name: 'set_goal',
+    description:
+      'Set the session goal that guides future turns. Use this only when the user has not set /goal themselves, ' +
+      'after asking clarifying questions with ask_user and using the Galileo skill to infer the underlying objective. ' +
+      'This records context only; it does not start work or claim completion.',
+    parameters: {
+      type: 'object',
+      properties: {
+        condition: { type: 'string', description: 'A concise description of the user\'s final desired outcome' },
+      },
+      required: ['condition'],
+      additionalProperties: false,
+    },
+  },
+  async run(input, context) {
+    if (!context.setGoal) return { output: 'Session goals are not available in this run.', ok: false };
+    const condition = requireString(input, 'condition').trim();
+    if (condition.length > 2000) {
+      throw new PlifError('INVALID_ARGUMENT', 'goal condition must be 2000 characters or fewer');
+    }
+    await context.setGoal(condition);
+    return { output: 'Session goal recorded. It will guide future turns without starting work by itself.', ok: true };
+  },
+};
+
 export type PlanStatus = 'pending' | 'in_progress' | 'completed';
 
 export interface PlanCheckpoint {
@@ -1143,7 +1238,7 @@ export const updatePlan: Tool = {
   spec: {
     name: 'update_plan',
     description:
-      'Set a short execution plan for genuinely multi-step work. Use 2-6 concise checkpoints, ' +
+      'Set a short execution plan before authorized file changes. Use 1-6 concise checkpoints, ' +
       'update it only at meaningful checkpoint boundaries, and keep at most one checkpoint in progress.',
     parameters: {
       type: 'object',
@@ -1341,6 +1436,7 @@ export const DEFAULT_TOOLS: readonly Tool[] = [
   updateConfig,
   updatePlan,
   remember,
+  setGoal,
   startTask,
   listTasks,
   taskStatus,

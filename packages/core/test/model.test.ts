@@ -20,6 +20,7 @@ import { after, before, describe, it } from 'node:test';
 
 import {
   PRESETS,
+  adoptProvider,
   describe as describeConfig,
   isFreeModel,
   keyOptional,
@@ -29,15 +30,33 @@ import {
 } from '../src/model/config.js';
 import {
   MODEL_CATALOG,
-  MODEL_CATALOG_DEFAULT,
   catalogSelection,
   findCatalogModel,
+  rankModelIds,
+  userCatalog,
 } from '../src/model/catalog.js';
+import { forgetProviderKey, supportedEfforts } from '../src/model/config.js';
 import { OpenAIProvider } from '../src/model/openai.js';
 import { collect } from '../src/model/provider.js';
 import { PlifError } from '../src/errors.js';
 
 describe('config precedence', () => {
+  it('limits the highest effort levels to the providers that support them', () => {
+    assert.ok(supportedEfforts(PRESETS.anthropic.baseURL, 'claude-opus-5').includes('ultracode'));
+    assert.ok(!supportedEfforts(PRESETS.openai.baseURL, 'gpt-4.1').includes('ultra'));
+    assert.ok(supportedEfforts(PRESETS.openai.baseURL, 'gpt-sol-5.6').includes('ultra'));
+    assert.ok(!supportedEfforts(PRESETS.openai.baseURL, 'gpt-terra').includes('ultra'));
+  });
+
+  it('removes a rejected provider credential without touching other providers', () => {
+    const next = forgetProviderKey({
+      preset: 'nvidia',
+      providerKeys: { nvidia: 'stale', openai: 'keep' },
+      model: 'z-ai/glm-5.2',
+    }, 'nvidia');
+    assert.deepEqual(next.providerKeys, { openai: 'keep' });
+    assert.equal(next.apiKey, undefined);
+  });
   it('resolves an OpenCode-style custom provider and qualified model', () => {
     const config = resolveConfig({
       model: 'al-local/al-thinking',
@@ -70,11 +89,15 @@ describe('config precedence', () => {
     assert.equal(config.model, 'from-env');
   });
 
-  it('falls back to the stored file, then to the default', () => {
+  it('falls back to the stored file, and to nothing at all after that', () => {
     assert.equal(resolveConfig({ model: 'from-file' }, { env: {} }).model, 'from-file');
+    // Plif ships unconfigured on purpose. Resolving nothing must produce no
+    // model rather than quietly aiming the agent at somebody's endpoint.
     const config = resolveConfig({}, { env: {} });
-    assert.equal(config.model, 'deepseek-v4-flash-free');
-    assert.equal(config.baseURL, PRESETS.opencode.baseURL);
+    assert.equal(config.model, '');
+    const check = validate(config);
+    assert.equal(check.ok, false);
+    assert.match(check.problem ?? '', /no model/);
   });
 
   it('prefers the preset own key variable over the generic one', () => {
@@ -89,9 +112,73 @@ describe('config precedence', () => {
 
   it('supplies a placeholder key for local endpoints', () => {
     // Ollama and LM Studio ignore the value, but the SDK refuses an empty one.
-    const config = resolveConfig({}, { preset: 'ollama', env: {} });
+    const config = resolveConfig({}, { preset: 'ollama', model: 'llama3.1', env: {} });
     assert.equal(config.apiKey, 'local');
     assert.equal(validate(config).ok, true);
+  });
+
+  it('does not let a configured local endpoint capture a provider picked later', () => {
+    // The bug this guards: root `baseURL`/`apiKey`/`NeedKey` belong to whatever
+    // provider was configured when they were written, and used to outrank a
+    // preset's own endpoint — so choosing Claude in the TUI posted Claude's
+    // model id to a local server on port 9000.
+    const stored = {
+      preset: 'localbridge',
+      baseURL: 'http://127.0.0.1:9000/v1',
+      apiKey: 'bridge-secret',
+      NeedKey: true,
+      provider: {
+        localbridge: { options: { baseURL: 'http://127.0.0.1:9000/v1' } },
+      },
+    };
+
+    const picked = resolveConfig(stored, {
+      preset: 'anthropic',
+      model: 'claude-opus-5',
+      env: {},
+    });
+    assert.equal(picked.baseURL, PRESETS.anthropic.baseURL);
+    assert.equal(picked.apiKey, '', 'the local endpoint key must not travel');
+
+    // Staying on the same provider still honours everything it wrote.
+    const same = resolveConfig(stored, { model: 'qwen3-coder', env: {} });
+    assert.equal(same.baseURL, 'http://127.0.0.1:9000/v1');
+    assert.equal(same.apiKey, 'bridge-secret');
+  });
+
+  it('files a root key under its provider when switching away from it', () => {
+    const next = adoptProvider(
+      {
+        preset: 'localbridge',
+        baseURL: 'http://127.0.0.1:9000/v1',
+        apiKey: 'bridge-secret',
+        provider: { localbridge: { options: { baseURL: 'http://127.0.0.1:9000/v1' } } },
+      },
+      { preset: 'anthropic', model: 'claude-opus-5' },
+      'sk-ant-new',
+    );
+
+    assert.equal(next.preset, 'anthropic');
+    assert.equal(next.model, 'claude-opus-5');
+    assert.equal(next.baseURL, undefined, 'the old endpoint must not linger');
+    assert.equal(next.apiKey, undefined);
+    // Nothing is lost: switching back finds the old key where it belongs.
+    assert.deepEqual(next.providerKeys, {
+      localbridge: 'bridge-secret',
+      anthropic: 'sk-ant-new',
+    });
+    assert.equal(
+      resolveConfig(next, { preset: 'localbridge', model: 'qwen3-coder', env: {} }).apiKey,
+      'bridge-secret',
+    );
+  });
+
+  it('keeps a hand-written base URL when re-picking within one provider', () => {
+    const next = adoptProvider(
+      { preset: 'openai', baseURL: 'https://gateway.internal/v1' },
+      { preset: 'openai', model: 'gpt-4o-mini' },
+    );
+    assert.equal(next.baseURL, 'https://gateway.internal/v1');
   });
 
   it('rejects an unknown preset with the list of real ones', () => {
@@ -103,10 +190,39 @@ describe('config precedence', () => {
   });
 
   it('reports a remote endpoint with no key as unusable', () => {
-    const config = resolveConfig({}, { baseURL: 'https://api.openai.com/v1', env: {} });
+    const config = resolveConfig(
+      {},
+      { baseURL: 'https://api.openai.com/v1', model: 'gpt-4o', env: {} },
+    );
     const check = validate(config);
     assert.equal(check.ok, false);
     assert.match(check.problem ?? '', /API key/);
+  });
+
+  it('honours NeedKey for a local model and leaves it actionable', () => {
+    const config = resolveConfig(
+      { preset: 'ollama', model: 'private-local', NeedKey: true },
+      { env: {} },
+    );
+    assert.equal(config.needKey, true);
+    assert.equal(config.apiKey, '');
+    const check = validate(config);
+    assert.equal(check.ok, false);
+    assert.match(check.hint ?? '', /\/models|API_KEY/);
+  });
+
+  it('accepts lower camel case needKey for custom local providers', () => {
+    const config = resolveConfig({
+      model: 'local/private',
+      provider: {
+        local: {
+          options: { baseURL: 'http://127.0.0.1:8790/v1', needKey: true },
+          models: { private: { name: 'Private local model' } },
+        },
+      },
+    }, { env: {} });
+    assert.equal(config.needKey, true);
+    assert.equal(validate(config).ok, false);
   });
 });
 
@@ -122,9 +238,13 @@ describe('the free tier needs no credential', () => {
     assert.equal(keyOptional('http://127.0.0.1:11434/v1', 'llama3.1'), true);
   });
 
-  it('runs the default configuration with nothing set at all', () => {
-    // What a first-time user has: no config file, no environment.
-    const config = resolveConfig({}, { env: {} });
+  it('needs no credential once the free tier is explicitly chosen', () => {
+    // There is no default any more, so the free tier is something a first-time
+    // user picks rather than something they land on.
+    const config = resolveConfig(
+      {},
+      { preset: 'opencode', model: 'deepseek-v4-flash-free', env: {} },
+    );
     assert.equal(config.apiKey, '');
     assert.equal(validate(config).ok, true);
   });
@@ -132,13 +252,21 @@ describe('the free tier needs no credential', () => {
   it('leaves the key empty rather than borrowing OPENAI_API_KEY', () => {
     // Zen answers a bare `Bearer` and rejects a key belonging to someone else,
     // so inheriting an unrelated credential is what breaks the free tier.
-    const config = resolveConfig({}, { env: { OPENAI_API_KEY: 'sk-not-for-this-host' } });
+    const config = resolveConfig({}, {
+      preset: 'opencode',
+      model: 'deepseek-v4-flash-free',
+      env: { OPENAI_API_KEY: 'sk-not-for-this-host' },
+    });
     assert.equal(config.apiKey, '');
     assert.equal(validate(config).ok, true);
   });
 
   it('still uses a key meant for this endpoint when there is one', () => {
-    const config = resolveConfig({}, { env: { OPENCODE_API_KEY: 'zen-key' } });
+    const config = resolveConfig({}, {
+      preset: 'opencode',
+      model: 'deepseek-v4-flash-free',
+      env: { OPENCODE_API_KEY: 'zen-key' },
+    });
     assert.equal(config.apiKey, 'zen-key');
   });
 
@@ -161,41 +289,93 @@ describe('the free tier needs no credential', () => {
   });
 
   it('says the key is not required instead of showing it as missing', () => {
-    const shown = describeConfig(resolveConfig({}, { env: {} }));
+    const shown = describeConfig(
+      resolveConfig({}, { preset: 'opencode', model: 'deepseek-v4-flash-free', env: {} }),
+    );
     assert.match(shown['key'] ?? '', /not required/);
   });
 });
 
 describe('model catalog', () => {
-  it('keeps OpenCode first and exposes the default model', () => {
-    assert.equal(MODEL_CATALOG[0]?.id, 'opencode');
-    assert.equal(MODEL_CATALOG_DEFAULT.provider, 'opencode');
-    assert.equal(MODEL_CATALOG_DEFAULT.model, 'deepseek-v4-flash-free');
-    assert.equal(
-      findCatalogModel('opencode', 'deepseek-v4-flash-free')?.badges.includes('default'),
-      true,
+  it('badges no model as the default, because there is no default', () => {
+    const badges = MODEL_CATALOG.flatMap((provider) =>
+      provider.models.flatMap((model) => model.badges),
     );
+    assert.equal(badges.includes('default'), false);
   });
 
-  it('returns both preset and model for a catalog selection', () => {
+  it('marks every shipped provider as built in', () => {
+    assert.ok(MODEL_CATALOG.every((provider) => provider.origin === 'builtin'));
+  });
+
+  it('reads the developer own providers out of their config', () => {
+    const mine = userCatalog({
+      providers: {
+        qwenbridge: {
+          name: 'Qwen bridge',
+          options: { baseURL: 'http://127.0.0.1:9000/v1' },
+          models: { 'qwen3-coder': { name: 'Qwen3 Coder' } },
+        },
+      },
+    });
+    assert.equal(mine.length, 1);
+    assert.equal(mine[0]?.origin, 'user');
+    assert.equal(mine[0]?.label, 'Qwen bridge');
+    assert.equal(mine[0]?.models[0]?.id, 'qwen3-coder');
+  });
+
+  it('returns both preset and model for any selection the picker can show', () => {
     assert.deepEqual(catalogSelection('opencode', 'deepseek-v4-flash-free'), {
       preset: 'opencode',
       model: 'deepseek-v4-flash-free',
     });
-    assert.equal(catalogSelection('missing', 'model'), null);
+    // A model discovered from a live endpoint is not in the curated list, and
+    // used to be silently unpickable for exactly that reason.
+    assert.deepEqual(catalogSelection('nvidia', 'some/newly-added-model'), {
+      preset: 'nvidia',
+      model: 'some/newly-added-model',
+    });
+    assert.equal(catalogSelection('', 'model'), null);
+  });
+
+  it('ranks curated models first, then free ones, then the rest', () => {
+    const ranked = rankModelIds('opencode', [
+      'zzz-unknown-paid',
+      'aaa-unknown-free',
+      'longcat-2.0-free',
+      'deepseek-v4-flash-free',
+    ]);
+    assert.deepEqual(ranked, [
+      'deepseek-v4-flash-free',
+      'longcat-2.0-free',
+      'aaa-unknown-free',
+      'zzz-unknown-paid',
+    ]);
   });
 
   it('contains the basic providers in stable display order', () => {
-    assert.deepEqual(MODEL_CATALOG.map((provider) => provider.id), [
-      'opencode',
-      'openrouter',
+    // Claude leads: it is the provider this agent is tuned against, and the
+    // one most people reach for first.
+    assert.deepEqual(MODEL_CATALOG.slice(0, 4).map((provider) => provider.id), [
+      'anthropic',
       'openai',
-      'ollama',
-      'lmstudio',
-      'groq',
-      'deepseek',
-      'together',
+      'openrouter',
+      'google',
     ]);
+    for (const id of ['groq', 'nvidia', 'deepseek', 'zai', 'ollama', 'lmstudio', 'opencode']) {
+      assert.ok(MODEL_CATALOG.some((provider) => provider.id === id), `${id} is missing`);
+    }
+    // Every provider must resolve to a real endpoint, or the picker offers a
+    // row that cannot possibly work.
+    for (const provider of MODEL_CATALOG) {
+      assert.ok(provider.endpoint.startsWith('http'), `${provider.id} has no endpoint`);
+    }
+  });
+
+  it('ranks NVIDIA GLM 5.2 first with the official NIM model id', () => {
+    const nvidia = MODEL_CATALOG.find((provider) => provider.id === 'nvidia');
+    assert.equal(nvidia?.models[0]?.id, 'z-ai/glm-5.2');
+    assert.equal(nvidia?.models[0]?.label, 'GLM 5.2');
   });
 });
 

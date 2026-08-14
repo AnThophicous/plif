@@ -7,7 +7,10 @@ import { after, before, describe, it } from 'node:test';
 import { compact, estimateTokens, pinnedIndices, protocolGroups } from '../src/harness/compaction.js';
 import { MemoryStore, strategyId, summariseMemory } from '../src/harness/memory.js';
 import { assess } from '../src/harness/learning.js';
-import { autoCompactionTarget, shouldAutoCompact } from '../src/harness/loop.js';
+import { autoCompactionTarget, runLoop, shouldAutoCompact } from '../src/harness/loop.js';
+import { updatePlan } from '../src/harness/tools.js';
+import type { Tool } from '../src/harness/tools.js';
+import { EventBus } from '../src/events/bus.js';
 import { StorePaths } from '../src/store/paths.js';
 import type { CompletionEvent, Message, ModelProvider } from '../src/model/provider.js';
 
@@ -293,4 +296,95 @@ function summaryProvider(text: string): ModelProvider {
     async probe() { return { ok: true, detail: 'ok' }; },
     async list() { return []; },
   };
+}
+
+describe('Plan → Work → Review loop gate', () => {
+  it('blocks unplanned edits and does not finish before reviewing the latest revision', async () => {
+    const phases: string[] = [];
+    const bus = new EventBus();
+    bus.on('agent.phase', (event) => phases.push(event.phase));
+
+    let requests = 0;
+    let writes = 0;
+    const provider: ModelProvider = {
+      info: { id: 'cycle-test', endpoint: 'test', contextWindow: undefined },
+      async *stream(request): AsyncGenerator<CompletionEvent> {
+        requests += 1;
+        const lastTool = [...request.messages].reverse().find((message) => message.role === 'tool')?.content ?? '';
+        const lastMessage = request.messages.at(-1)?.content ?? '';
+
+        if (requests === 1) {
+          yield toolCall('write-before-plan', 'write_file', { path: '/workspace/app.ts' });
+        } else if (requests === 2) {
+          assert.match(lastTool, /Plan gate/);
+          yield toolCall('plan', 'update_plan', {
+            plan: [
+              { step: 'Change the file', status: 'in_progress' },
+              { step: 'Review and validate the change', status: 'pending' },
+            ],
+          });
+        } else if (requests === 3) {
+          yield toolCall('write-after-plan', 'write_file', { path: '/workspace/app.ts' });
+        } else if (requests === 4) {
+          yield { kind: 'text', delta: 'I changed the file.' };
+        } else if (requests === 5) {
+          assert.match(lastMessage, /Review gate/);
+          yield toolCall('inspect', 'read_file', { path: '/workspace/app.ts' });
+        } else if (requests === 6) {
+          yield toolCall('validate', 'run_command', { argv: ['npm', 'test'] });
+        } else {
+          yield { kind: 'text', delta: 'The change is reviewed and validated.' };
+        }
+        yield { kind: 'done', reason: 'stop', usage: { promptTokens: 1, completionTokens: 1 } };
+      },
+      async probe() { return { ok: true, detail: 'ok' }; },
+      async list() { return []; },
+    };
+
+    const write: Tool = {
+      spec: { name: 'write_file', description: 'write', parameters: {} },
+      async run() {
+        writes += 1;
+        return { output: 'updated /workspace/app.ts', ok: true, diff: '--- app.ts\n+++ app.ts' };
+      },
+    };
+    const read: Tool = {
+      spec: { name: 'read_file', description: 'read', parameters: {} },
+      async run() { return { output: 'export const app = true;', ok: true }; },
+    };
+    const command: Tool = {
+      spec: { name: 'run_command', description: 'run', parameters: {} },
+      async run() { return { output: 'tests passed', ok: true }; },
+    };
+
+    const result = await runLoop(
+      [{ role: 'user', content: 'change app.ts' }],
+      {
+        provider,
+        container: {} as never,
+        questions: {} as never,
+        bus,
+        tools: [updatePlan, write, read, command],
+        maxIterations: 10,
+      },
+    );
+
+    assert.equal(
+      result.stop,
+      'complete',
+      result.error?.message ?? `requests=${requests}, messages=${JSON.stringify(result.messages.map((message) => message.content))}`,
+    );
+    assert.equal(
+      writes,
+      1,
+      result.error?.message ??
+        `stop=${result.stop}, requests=${requests}, messages=${JSON.stringify(result.messages.map((message) => message.content))}`,
+    );
+    assert.ok(requests >= 7);
+    assert.deepEqual(phases, ['plan', 'work', 'review', 'complete']);
+  });
+});
+
+function toolCall(id: string, name: string, input: Record<string, unknown>): CompletionEvent {
+  return { kind: 'tool', call: { id, name, arguments: JSON.stringify(input) } };
 }

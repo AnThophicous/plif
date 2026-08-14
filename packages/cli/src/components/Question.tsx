@@ -59,7 +59,7 @@ export function Question({
         <Text bold>
           <Text color={highlight}>{glyph.waiting}</Text>
           <Text color={color('accent')}>
-            {' '}Waiting on answers for {total} {total === 1 ? 'question' : 'questions'}
+            {' '}{question.secret ? 'Credential required' : `Waiting on answers for ${total} ${total === 1 ? 'question' : 'questions'}`}
           </Text>
         </Text>
         <Text color={color('ghost')}>

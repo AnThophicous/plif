@@ -8,7 +8,7 @@ export { plifDockItems } from '../live-status.js';
 
 /** One row for the dock, one for the divider that joins it to the prompt. */
 export function plifDockHeight(effort?: string): number {
-  return effort === 'plif' ? 2 : 0;
+  return ['plif', 'max', 'ultra', 'ultracode'].includes(effort ?? '') ? 2 : 0;
 }
 
 export function PlifDock({
@@ -26,7 +26,7 @@ export function PlifDock({
   readonly working: boolean;
   readonly width: number;
 }): React.ReactElement | null {
-  if (effort !== 'plif') return null;
+  if (!['plif', 'max', 'ultra', 'ultracode'].includes(effort ?? '')) return null;
 
   const inner = Math.max(18, width - 4);
   const narrow = inner < layout.narrowWidth;
@@ -49,7 +49,7 @@ export function PlifDock({
           {working ? ' working' : ' ready'}
           {'  ·  '}
           {truncate(shortenPath(cwd, pathWidth), pathWidth)}
-          {!narrow && '  ·  Plif'}
+          {!narrow && `  ·  ${effort === 'ultracode' ? 'UltraCode' : effort === 'plif' ? 'Plif' : effort === 'ultra' ? 'Ultra' : 'Max'}`}
         </Text>
       </Box>
       <Box marginLeft={1}>

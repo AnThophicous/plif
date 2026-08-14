@@ -13,6 +13,11 @@ export interface SecretStore {
   names(): Promise<string[]>;
 }
 
+/** The one durable home for Plif-owned credentials. */
+export function personalSecretStorePath(home = os.homedir()): string {
+  return path.join(home, '.plif', 'secrets');
+}
+
 export class MemorySecretStore implements SecretStore {
   readonly #values = new Map<string, string>();
 
@@ -47,7 +52,7 @@ export class MemorySecretStore implements SecretStore {
  */
 export class WindowsDpapiSecretStore implements SecretStore {
   constructor(
-    private readonly root = path.join(os.homedir(), '.config', 'PlifCode', 'secrets'),
+    private readonly root = personalSecretStorePath(),
     private readonly dpapi: DpapiRunner = runWindowsDpapi,
   ) {}
 
@@ -148,12 +153,17 @@ export class CredentialBroker {
     return this.#prompt !== undefined;
   }
 
-  async resolve(request: CredentialRequest): Promise<string | undefined> {
-    const fromEnvironment = this.#environment[request.variable];
-    if (fromEnvironment?.trim()) return fromEnvironment;
+  /** Read an existing credential without prompting the developer. */
+  async lookup(variable: string): Promise<string | undefined> {
+    const fromEnvironment = this.#environment[variable];
+    if (fromEnvironment?.trim()) return fromEnvironment.trim();
+    const stored = await this.#store.get(variable);
+    return stored?.trim() || undefined;
+  }
 
-    const stored = await this.#store.get(request.variable);
-    if (stored?.trim()) return stored;
+  async resolve(request: CredentialRequest): Promise<string | undefined> {
+    const existing = await this.lookup(request.variable);
+    if (existing) return existing;
 
     // Asking twice in one run for something already declined is nagging.
     if (!this.#prompt || this.#refused.has(request.variable)) return undefined;

@@ -12,10 +12,14 @@
  */
 
 import assert from 'node:assert/strict';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { afterEach, describe, it, mock } from 'node:test';
 import { APIConnectionError, APIConnectionTimeoutError, APIError } from 'openai';
 
 import { OpenAIProvider } from '../src/model/openai.js';
+import { memoryCapabilityCache } from '../src/model/capabilities.js';
+import type { EffortCapabilityCache } from '../src/model/capabilities.js';
 import { collect } from '../src/model/provider.js';
 import type { CompletionEvent } from '../src/model/provider.js';
 import { PlifError } from '../src/errors.js';
@@ -46,6 +50,10 @@ function retryAfterError(seconds: number): Error & { status: number; headers: Re
 
 function chunk(content: string): unknown {
   return { choices: [{ delta: { content }, finish_reason: null }] };
+}
+
+function reasoningSnapshot(text: string): unknown {
+  return { choices: [{ delta: { reasoning_details: [{ text }] }, finish_reason: null }] };
 }
 
 const FINISH = {
@@ -118,16 +126,55 @@ class StallThenSuccessProvider extends OpenAIProvider {
     return Promise.resolve();
   }
 
-  protected override streamIdleTimeoutMs(): number {
+  protected override interChunkTimeoutMs(): number {
     return 5;
   }
+
+  protected override firstChunkTimeoutMs(): number {
+    return 5;
+  }
+}
+
+class WaitlessHttpProvider extends OpenAIProvider {
+  protected override waitBeforeRetry(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+class ExposedTimeoutProvider extends OpenAIProvider {
+  first(): number {
+    return this.firstChunkTimeoutMs();
+  }
+
+  between(): number {
+    return this.interChunkTimeoutMs();
+  }
+}
+
+async function listen(
+  handler: Parameters<typeof http.createServer>[0],
+): Promise<{ server: http.Server; baseURL: string }> {
+  const server = http.createServer(handler);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  return { server, baseURL: `http://127.0.0.1:${port}/v1` };
+}
+
+async function close(server: http.Server): Promise<void> {
+  server.closeAllConnections();
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  });
 }
 
 class PlifCapabilityProvider extends OpenAIProvider {
   efforts: string[] = [];
 
-  constructor() {
-    super({ ...CONFIG, effort: 'plif' } as ConstructorParameters<typeof OpenAIProvider>[0]);
+  constructor(capabilityCache?: EffortCapabilityCache) {
+    super(
+      { ...CONFIG, effort: 'plif' } as ConstructorParameters<typeof OpenAIProvider>[0],
+      capabilityCache ? { capabilityCache } : {},
+    );
   }
 
   protected override createStream(
@@ -162,6 +209,18 @@ const ask = { messages: [{ role: 'user' as const, content: 'x' }] };
 afterEach(() => mock.restoreAll());
 
 describe('retry schedule', () => {
+  it('normalizes short cumulative reasoning through the provider event path', async () => {
+    const provider = new ScriptedProvider([
+      [reasoningSnapshot('a'), reasoningSnapshot('ab'), reasoningSnapshot('abc'), FINISH],
+    ]);
+
+    const all = await events(provider.stream(ask));
+    assert.deepEqual(
+      all.filter((event) => event.kind === 'reasoning').map((event) => event.delta),
+      ['a', 'b', 'c'],
+    );
+  });
+
   it('negotiates Plif down to the highest effort an endpoint accepts', async () => {
     const provider = new PlifCapabilityProvider();
 
@@ -169,6 +228,17 @@ describe('retry schedule', () => {
 
     assert.equal(result.text, 'negotiated');
     assert.deepEqual(provider.efforts, ['max', 'xhigh', 'high', 'medium']);
+  });
+
+  it('tries a cached accepted effort before probing the ladder', async () => {
+    const cache = memoryCapabilityCache({
+      endpoint: CONFIG.baseURL,
+      model: CONFIG.model,
+      effort: 'medium',
+    });
+    const provider = new PlifCapabilityProvider(cache);
+    await collect(provider.stream(ask));
+    assert.deepEqual(provider.efforts, ['medium']);
   });
 
   it('uses capped exponential backoff', async () => {
@@ -288,6 +358,88 @@ describe('retry schedule', () => {
     const result = await collect(provider.stream(ask));
     assert.equal(result.text, 'alive');
     assert.equal(provider.attempts, 2);
+  });
+
+  it('uses the configured timeout for first and inter-chunk waits', () => {
+    const provider = new ExposedTimeoutProvider({ ...CONFIG, timeoutMs: 120_000 });
+    assert.equal(provider.first(), 120_000);
+    assert.equal(provider.between(), 120_000);
+  });
+
+  it('resets and retries malformed JSON from a real SSE response', async () => {
+    let requests = 0;
+    const fixture = await listen((_request, response) => {
+      requests += 1;
+      response.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+      });
+      if (requests === 1) {
+        response.write(`data: ${JSON.stringify(reasoningSnapshot('a'))}\n\n`);
+        response.end('data: {"choices": [\n\n');
+        return;
+      }
+      response.write(`data: ${JSON.stringify(chunk('complete'))}\n\n`);
+      response.write(`data: ${JSON.stringify(FINISH)}\n\n`);
+      response.end('data: [DONE]\n\n');
+    });
+    mock.method(console, 'error', () => undefined);
+
+    try {
+      const provider = new WaitlessHttpProvider({
+        ...CONFIG,
+        baseURL: fixture.baseURL,
+        timeoutMs: 1_000,
+      });
+      const all = await events(provider.stream(ask));
+      assert.deepEqual(all.map((event) => event.kind), [
+        'reasoning',
+        'reset',
+        'retry',
+        'text',
+        'done',
+      ]);
+      const replayed = await collect((async function* () {
+        for (const event of all) yield event;
+      })());
+      assert.equal(replayed.reasoning, '');
+      assert.equal(replayed.text, 'complete');
+      assert.equal(requests, 2);
+    } finally {
+      await close(fixture.server);
+    }
+  });
+
+  it('cancels a real SSE wait without retrying', async () => {
+    let requests = 0;
+    const fixture = await listen((_request, response) => {
+      requests += 1;
+      response.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+      });
+      response.write(`data: ${JSON.stringify(reasoningSnapshot('a'))}\n\n`);
+    });
+
+    try {
+      const controller = new AbortController();
+      const provider = new WaitlessHttpProvider({
+        ...CONFIG,
+        baseURL: fixture.baseURL,
+        timeoutMs: 1_000,
+      });
+      const all: CompletionEvent[] = [];
+      for await (const event of provider.stream({ ...ask, signal: controller.signal })) {
+        all.push(event);
+        if (event.kind === 'reasoning') controller.abort();
+      }
+      assert.equal(all.at(-1)?.kind, 'done');
+      assert.ok(all.at(-1)?.kind === 'done' && all.at(-1)?.reason === 'cancelled');
+      assert.equal(all.some((event) => event.kind === 'retry'), false);
+      assert.equal(requests, 1);
+    } finally {
+      await close(fixture.server);
+    }
   });
 
   it('stops immediately when the developer cancels mid-wait', async () => {

@@ -100,6 +100,24 @@ describe('modular system prompt', () => {
     assert.doesNotMatch(prompt, /SECRET LONG DESCRIPTION|ANOTHER SECRET DESCRIPTION/);
   });
 
+  it('adds the Plan -> Work -> Review contract only for edit-capable tools', () => {
+    const editPrompt = buildSystemPrompt({
+      ...base,
+      tools: [
+        { name: 'update_plan', description: 'Plan.', parameters: {} },
+        { name: 'edit_file', description: 'Edit.', parameters: {} },
+      ],
+    });
+    const readOnlyPrompt = buildSystemPrompt({
+      ...base,
+      tools: [{ name: 'read_file', description: 'Read.', parameters: {} }],
+    });
+
+    assert.match(editPrompt, /Plan -> Work -> Review/);
+    assert.match(editPrompt, /inspect every changed file/);
+    assert.doesNotMatch(readOnlyPrompt, /Plan -> Work -> Review/);
+  });
+
   it('marks MCP results as untrusted data and mutations as external effects', () => {
     const prompt = buildSystemPrompt({
       ...base,

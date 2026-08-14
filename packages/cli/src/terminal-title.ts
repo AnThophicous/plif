@@ -1,10 +1,11 @@
 /** Terminal-window title helpers, kept pure so status labels are testable. */
 export function titleForWorking(frame: string): string {
-  return `Plif — Working ${frame}`;
+  void frame;
+  return 'Plif-Code';
 }
 
 export function completedTitle(): string {
-  return 'Plif — Completed ✓';
+  return 'Plif-Code';
 }
 
 /** OSC 0 works in Windows Terminal, iTerm, and most modern terminal emulators. */

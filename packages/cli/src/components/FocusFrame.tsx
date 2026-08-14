@@ -29,7 +29,7 @@ export function focusRule(
 ): readonly FocusCell[] {
   const size = Math.max(2, Math.floor(width));
   const span = size - 2;
-  const origin = span > 0 ? (elapsedMs / 70) % span : 0;
+  const origin = span > 0 ? (elapsedMs / 220) % span : 0;
   const endpoint = active ? toneBetween('accent', 'accentBright', 0.9) : color('faint');
   const cells: FocusCell[] = [{
     text: edge === 'top' ? glyphs.topLeft : glyphs.bottomLeft,
@@ -81,7 +81,7 @@ export function infinityCells(elapsedMs: number, active: boolean): readonly Focu
     return INFINITY_CELLS.map((text) => ({ text, color: color('accentDim') }));
   }
   const span = INFINITY_CELLS.length;
-  const origin = (elapsedMs / 150) % span;
+  const origin = (elapsedMs / 300) % span;
   return INFINITY_CELLS.map((text, index) => {
     const distance = Math.min(
       Math.abs(index - origin),
@@ -144,7 +144,7 @@ export function FocusFrame({
   );
 
   return (
-    <Box flexDirection="column" width={frameWidth}>
+    <Box flexDirection="column" width={frameWidth} flexShrink={0}>
       <FocusRule width={frameWidth} elapsed={elapsed} active={active} />
       {wall(children)}
       {footer !== undefined && (

@@ -21,6 +21,7 @@ export type TranscriptCell =
       readonly text: string;
       readonly phase: 'commentary' | 'final';
     })
+  | (CellBase<'reasoning'> & { readonly text: string })
   | (CellBase<'activity'> & {
       readonly items: readonly ActivityItem[];
       readonly expanded: boolean;
@@ -52,10 +53,18 @@ export interface TranscriptState {
 export type TranscriptAction =
   | { readonly type: 'event'; readonly event: import('@plif/core').ConversationEvent }
   | {
-      readonly type: 'assistant.delta';
+      readonly type: 'assistant.frame';
       readonly turnId: string;
       readonly at: string;
-      readonly delta: string;
+      readonly epoch: number;
+      readonly text: string;
     }
-  | { readonly type: 'assistant.reset'; readonly turnId: string }
+  | {
+      readonly type: 'reasoning.frame';
+      readonly turnId: string;
+      readonly at: string;
+      readonly epoch: number;
+      readonly text: string;
+    }
+  | { readonly type: 'stream.reset'; readonly turnId: string }
   | { readonly type: 'reset' };

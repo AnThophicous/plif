@@ -18,7 +18,7 @@
   },
   "additionalProperties": false,
   "$defs": {
-    "tone": { "enum": ["text", "muted", "faint", "ghost", "brand", "accent", "accentBright", "accentDim", "success", "warn", "danger", "info"] },
+    "tone": { "enum": ["text", "panel", "surface", "muted", "faint", "ghost", "brand", "accent", "accentBright", "accentDim", "success", "warn", "danger", "info"] },
     "paletteMap": {
       "type": "object",
       "propertyNames": { "$ref": "#/$defs/tone" },
@@ -65,6 +65,7 @@
       "type": "object",
       "properties": {
         "gutter": { "type": "number", "minimum": 0 }, "boxPadX": { "type": "number", "minimum": 0 },
+        "surfacePadX": { "type": "number", "minimum": 0 }, "surfacePadY": { "type": "number", "minimum": 0 },
         "statusColumn": { "type": "number", "minimum": 0 }, "narrowWidth": { "type": "number", "minimum": 0 },
         "maxTimelineRows": { "type": "number", "minimum": 0 }
       },

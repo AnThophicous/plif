@@ -36,13 +36,28 @@ import type { QuestionBroker } from './ask.js';
 import { compact, estimateTokens } from './compaction.js';
 import type { CompactionResult } from './compaction.js';
 import type { MemoryStore } from './memory.js';
-import { DEFAULT_TOOLS, toolRegistry, toolSpecs, toolsForEnvironment } from './tools.js';
+import {
+  DEFAULT_TOOLS,
+  toolRegistry,
+  toolSpecs,
+  toolsForEnvironment,
+} from './tools.js';
 import type { Tool, ToolResult } from './tools.js';
 import type { ShellDialect } from '../execution/shell-dialects.js';
 import type { TaskManager } from '../tasks/manager.js';
 import type { LspManager } from '../lsp/manager.js';
 import type { EditCoordinator } from './edits.js';
 import { eventBase } from '../session/events.js';
+import {
+  createHarnessCycle,
+  inspectionPaths,
+  isFileMutationTool,
+  isValidationObservation,
+  mutationGate,
+  mutationPaths,
+  observeHarnessCycle,
+  reviewGate,
+} from './cycle.js';
 
 export interface LoopOptions {
   readonly provider: ModelProvider;
@@ -62,6 +77,8 @@ export interface LoopOptions {
   readonly maxIterations?: number;
   /** Give up after this many tool failures in a row. */
   readonly maxConsecutiveFailures?: number;
+  /** Stop with an error instead of completing after this many unanswered review gates. */
+  readonly maxReviewReminders?: number;
   readonly signal?: AbortSignal;
   readonly memory?: MemoryStore;
   readonly workspace?: string;
@@ -74,6 +91,7 @@ export interface LoopOptions {
   /** Resolved once for the session and shared by tool registration and calls. */
   readonly shellDialect?: ShellDialect;
   readonly activateProfile?: (name: string) => Promise<void>;
+  readonly setGoal?: (condition: string) => Promise<void>;
   readonly attachments?: readonly Attachment[];
   /**
    * Anything the human typed since the turn started, taken and cleared.
@@ -124,6 +142,7 @@ export const AUTO_COMPACTION_TARGET_RATIO = 0.5;
 
 /** Below this, a loop pass was too quick to be a moment worth marking. */
 export const CYCLE_SEPARATOR_MIN_MS = 10_000;
+const DEFAULT_MAX_REVIEW_REMINDERS = 3;
 
 export function shouldAutoCompact(used: number, contextTokens: number): boolean {
   return contextTokens > 0 && used >= Math.floor(contextTokens * AUTO_COMPACTION_TRIGGER_RATIO);
@@ -257,12 +276,17 @@ export async function runLoop(
   );
   const registry = toolRegistry(tools);
   const specs = toolSpecs(tools);
+  const cycleEnabled = registry.has('update_plan') && [...registry.keys()].some(isFileMutationTool);
   // A model/tool mistake is recoverable work, not a reason to kill the task.
   // Keep an explicit cap for embedders that need one, but interactive Plif
   // sessions are uncapped and end through completion, cancellation, or a
   // structural error.
   const maxIterations = options.maxIterations ?? Number.POSITIVE_INFINITY;
   const maxFailures = options.maxConsecutiveFailures ?? 4;
+  const maxReviewReminders = Math.max(
+    0,
+    options.maxReviewReminders ?? DEFAULT_MAX_REVIEW_REMINDERS,
+  );
   const contextTokens = options.contextTokens ?? 0;
 
   const messages: Message[] = [...history];
@@ -274,11 +298,21 @@ export async function runLoop(
   let consecutiveFailures = 0;
   let promptTokens = 0;
   let completionTokens = 0;
-  let qualityDirty = false;
-  let qualityEvidence = false;
-  let qualityReminders = 0;
+  let cycle = createHarnessCycle();
+  let reviewReminders = 0;
   /** Sticky: thinking mode, once entered, applies to the whole conversation. */
   let sawReasoning = false;
+
+  const setCycle = (
+    next: typeof cycle,
+    reason: 'turn_started' | 'plan_ready' | 'change_applied' | 'review_required' | 'completed',
+  ): void => {
+    const changed = next.phase !== cycle.phase;
+    cycle = next;
+    if (cycleEnabled && changed) options.bus.emit('agent.phase', { phase: cycle.phase, reason });
+  };
+
+  if (cycleEnabled) options.bus.emit('agent.phase', { phase: cycle.phase, reason: 'turn_started' });
 
   while (iterations < maxIterations) {
     if (options.signal?.aborted) {
@@ -446,16 +480,26 @@ export async function runLoop(
 
     // No tools requested means the model considers itself finished.
     if (requested.length === 0) {
-      if (qualityDirty && !qualityEvidence && qualityReminders < 2) {
-        qualityReminders += 1;
-        messages.push({
-          role: 'user',
-          content:
-            'Validation gate: you changed code but did not provide verification evidence. ' +
-            'Run diagnostics for changed files when an LSP is available, then run the ' +
-            'relevant typecheck/build/tests and inspect their results before concluding.',
-        });
-        continue;
+      if (cycleEnabled) {
+        setCycle(
+          observeHarnessCycle(cycle, { type: 'review_requested' }),
+          'review_required',
+        );
+        const gate = reviewGate(cycle);
+        if (gate !== null) {
+          reviewReminders += 1;
+          if (reviewReminders > maxReviewReminders) {
+            return done(
+              'error',
+              new PlifError('INTERNAL', 'The review gate was not satisfied before completion.', {
+                hint: gate,
+              }),
+            );
+          }
+          messages.push({ role: 'user', content: gate });
+          continue;
+        }
+        setCycle(observeHarnessCycle(cycle, { type: 'complete' }), 'completed');
       }
       return done('complete');
     }
@@ -471,7 +515,17 @@ export async function runLoop(
     {
       if (options.signal?.aborted) return done('cancelled');
 
-      const prepared = batch.map((call) => prepare(call, recentCalls, registry));
+      const prepared = batch
+        .map((call) => prepare(call, recentCalls, registry))
+        .map((item) => {
+          if (!cycleEnabled || item.parseError !== null || item.refusal !== null) return item;
+          const gate = isFileMutationTool(item.call.name) ? mutationGate(cycle) : null;
+          if (gate === null) return item;
+          const signature = callSignature(item.call);
+          const recorded = recentCalls.lastIndexOf(signature);
+          if (recorded >= 0) recentCalls.splice(recorded, 1);
+          return { ...item, refusal: gate };
+        });
       toolCalls += prepared.length;
 
       for (const item of prepared) {
@@ -533,17 +587,32 @@ export async function runLoop(
         });
 
         messages.push({ role: 'tool', content: item.output, toolCallId: item.call.id });
-        if (item.call.name === 'write_file') {
-          qualityDirty = true;
-          qualityEvidence = false;
-        }
-        const validationCommand = (
-          item.call.name === 'run_command' || item.call.name === 'shell_command'
-        ) && /(?:test|typecheck|build|check|lint|verify)/i.test(
-          String(item.parsed[item.call.name === 'run_command' ? 'argv' : 'script'] ?? ''),
-        );
-        if (item.ok && (item.call.name === 'diagnostics' || validationCommand)) {
-          qualityEvidence = true;
+        if (cycleEnabled && item.ok) {
+          if (item.call.name === 'update_plan') {
+            setCycle(observeHarnessCycle(cycle, { type: 'plan_ready' }), 'plan_ready');
+          }
+
+          const actualMutation =
+            isFileMutationTool(item.call.name) &&
+            (item.call.name === 'resolve_edit_conflict' || item.diff !== undefined);
+          if (actualMutation) {
+            setCycle(
+              observeHarnessCycle(cycle, {
+                type: 'mutation',
+                paths: mutationPaths(item.call.name, item.parsed),
+              }),
+              'change_applied',
+            );
+            reviewReminders = 0;
+          } else {
+            const inspected = inspectionPaths(item.call.name, item.parsed);
+            if (inspected.length > 0) {
+              cycle = observeHarnessCycle(cycle, { type: 'inspection', paths: inspected });
+            }
+            if (isValidationObservation(item.call.name, item.parsed)) {
+              cycle = observeHarnessCycle(cycle, { type: 'validation' });
+            }
+          }
         }
       }
 
@@ -735,9 +804,11 @@ function prepare(
 /**
  * Feed the outcome back into the learning harness.
  *
- * Only command execution is recorded. A file read that worked proves nothing about
- * how this project is built, but "`npm test` succeeds here" is exactly the kind
- * of claim that should have to earn its confidence across sessions.
+ * Only command execution attached to a debugging signal is recorded. A plain
+ * "run the tests" is a basic task, not a learned bug-solving pattern. The
+ * reason supplied by the agent becomes a low-cardinality issue context, so the
+ * same approach must succeed on four distinct debugging situations before it
+ * becomes established guidance.
  *
  * Context is kept low-cardinality on purpose. Putting a timestamp or a file
  * hash in here would make every situation unique, so nothing would ever count
@@ -763,6 +834,8 @@ async function recordStrategy(
     : options.shellDialect?.executable ?? options.shellDialect?.id ?? 'shell';
   const approach = call.name === 'run_command' ? argv.join(' ') : script;
   if (!goal || !approach) return;
+  const reason = typeof parsed['reason'] === 'string' ? parsed['reason'].trim() : '';
+  if (!isDebuggingSignal(reason)) return;
 
   await options.memory
     .recordOutcome({
@@ -774,11 +847,26 @@ async function recordStrategy(
         os: process.platform,
         command: goal,
         container: options.container.name,
+        issue: learningContext(reason),
       },
       sessionId: options.sessionId ?? 'unknown',
       durationMs,
     })
     .catch(() => undefined);
+}
+
+const DEBUGGING_SIGNAL = /\b(?:bug|debug|error|failure|fail(?:ed|ing)?|broken|fix|repair|regression|crash|exception)\b/i;
+
+function isDebuggingSignal(reason: string): boolean {
+  return DEBUGGING_SIGNAL.test(reason);
+}
+
+function learningContext(reason: string): string {
+  return reason
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/\b(?:[a-z]:)?[\\/][^ ]+/g, '<path>')
+    .slice(0, 96);
 }
 
 async function executeCall(input: {
@@ -815,6 +903,7 @@ async function executeCall(input: {
       ...(options.agentId ? { agentId: options.agentId } : {}),
       ...(options.shellDialect ? { shellDialect: options.shellDialect } : {}),
       ...(options.activateProfile ? { activateProfile: options.activateProfile } : {}),
+      ...(options.setGoal ? { setGoal: options.setGoal } : {}),
       ...(options.attachments?.length ? { attachments: options.attachments } : {}),
     });
   } catch (error) {

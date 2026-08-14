@@ -1,9 +1,9 @@
-import { compileSystemPrompt } from './prompts/compiler.js';
-import type { PromptContext } from './prompts/types.js';
+import { compileAgentInstructions } from '../agenting/compiler.js';
+import type { PromptContext } from '../agenting/types.js';
 
-export type { PromptContext, PromptMode, PromptModule } from './prompts/types.js';
-export { readAgentInstructions } from './prompts/project.js';
+export type { PromptContext, PromptMode, PromptModule } from '../agenting/types.js';
+export { readAgentInstructions } from '../agenting/project-instructions.js';
 
 export function buildSystemPrompt(context: PromptContext): string {
-  return compileSystemPrompt(context);
+  return compileAgentInstructions(context);
 }

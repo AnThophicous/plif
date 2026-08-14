@@ -16,6 +16,7 @@ import type { Decision, PolicyAction, PolicyVerdict } from '../policy/policy.js'
 import type { SandboxCapabilityReport } from '@plif/sandbox';
 import type { McpAuthEvent } from '../auth/mcp-oauth.js';
 import type { ConversationEvent } from '../session/events.js';
+import type { StreamTiming } from '../model/stream-timing.js';
 
 export interface QuestionOption {
   /** Text submitted when this row is selected. */
@@ -118,6 +119,11 @@ export interface PlifEvents {
     iteration: number;
     maxIterations: number;
   };
+  /** The bounded Plan → Work → Review lifecycle used by edit-capable loops. */
+  'agent.phase': {
+    phase: 'plan' | 'work' | 'review' | 'complete';
+    reason: 'turn_started' | 'plan_ready' | 'change_applied' | 'review_required' | 'completed';
+  };
   /** A model/tool cycle finished and the loop is about to ask the model again. */
   'agent.cycle': {
     iteration: number;
@@ -172,6 +178,8 @@ export interface PlifEvents {
   };
   /** Discard the current turn's output; it is being redone from scratch. */
   'agent.reset': { reason: string };
+  /** Redacted request/stream paint timing for optional diagnostics. */
+  'stream.timing': StreamTiming;
   /** Messages the human queued mid-turn have been handed to the model. */
   'agent.dequeued': { count: number };
   'agent.tool': {

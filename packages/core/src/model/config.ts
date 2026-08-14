@@ -27,6 +27,8 @@ export interface ModelConfig {
   /** OpenAI-compatible base URL, including `/v1` where the server expects it. */
   readonly baseURL: string;
   readonly apiKey: string;
+  /** Explicit credential requirement; also true for ordinary paid remotes. */
+  readonly needKey?: boolean;
   readonly temperature: number;
   readonly maxTokens: number | undefined;
   /** Seconds before a request is abandoned. */
@@ -34,7 +36,33 @@ export interface ModelConfig {
   readonly effort?: Effort;
 }
 
-export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'plif';
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | 'ultracode' | 'plif';
+
+/** Ordered UI levels. Higher entries are deliberately opt-in by provider. */
+export const EFFORT_LEVELS: readonly Effort[] = Object.freeze([
+  'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode', 'plif',
+]);
+
+/**
+ * Return the levels that make sense for this endpoint/model combination.
+ * Plif is always available: it negotiates the strongest wire level the
+ * provider accepts. Ultra is reserved for the GPT Sol 5.6 family, while
+ * UltraCode is reserved for Claude/Anthropic models.
+ */
+export function supportedEfforts(baseURL: string, model: string): readonly Effort[] {
+  const endpoint = baseURL.toLowerCase();
+  const modelId = model.toLowerCase();
+  const base: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max', 'plif'];
+  if (endpoint.includes('anthropic.com') || endpoint.includes('claude') || modelId.includes('claude')) {
+    return [...base, 'ultracode'];
+  }
+  if ((endpoint.includes('openai.com') || endpoint.includes('chatgpt')) &&
+      /(?:gpt[-_ ]?sol|gpt[-_ ]?5\.6|sol[-_ ]?5\.6)/i.test(modelId) &&
+      !modelId.includes('claude')) {
+    return [...base, 'ultra'];
+  }
+  return base;
+}
 
 /**
  * Endpoints known to speak the OpenAI wire format.
@@ -94,6 +122,69 @@ export const PRESETS: Readonly<Record<string, { baseURL: string; keyEnv: string;
       keyEnv: 'TOGETHER_API_KEY',
       note: 'Together AI',
     },
+    nvidia: {
+      baseURL: 'https://integrate.api.nvidia.com/v1',
+      keyEnv: 'NIM_API_KEY',
+      note: 'NVIDIA NIM — hosted open models',
+    },
+    // Anthropic is the one preset here that is not OpenAI-shaped on the wire.
+    // The base URL is still recorded because everything that *displays* a
+    // provider reads it, and the adapter is chosen from the host.
+    anthropic: {
+      baseURL: 'https://api.anthropic.com/v1',
+      keyEnv: 'ANTHROPIC_API_KEY',
+      note: 'Anthropic — Claude, via the official SDK',
+    },
+    google: {
+      baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      keyEnv: 'GEMINI_API_KEY',
+      note: 'Google Gemini',
+    },
+    xai: {
+      baseURL: 'https://api.x.ai/v1',
+      keyEnv: 'XAI_API_KEY',
+      note: 'xAI Grok',
+    },
+    mistral: {
+      baseURL: 'https://api.mistral.ai/v1',
+      keyEnv: 'MISTRAL_API_KEY',
+      note: 'Mistral AI',
+    },
+    cerebras: {
+      baseURL: 'https://api.cerebras.ai/v1',
+      keyEnv: 'CEREBRAS_API_KEY',
+      note: 'Cerebras — very fast inference',
+    },
+    fireworks: {
+      baseURL: 'https://api.fireworks.ai/inference/v1',
+      keyEnv: 'FIREWORKS_API_KEY',
+      note: 'Fireworks AI',
+    },
+    zai: {
+      baseURL: 'https://api.z.ai/api/paas/v4',
+      keyEnv: 'ZAI_API_KEY',
+      note: 'Z.AI — GLM family',
+    },
+    moonshot: {
+      baseURL: 'https://api.moonshot.ai/v1',
+      keyEnv: 'MOONSHOT_API_KEY',
+      note: 'Moonshot AI — Kimi',
+    },
+    perplexity: {
+      baseURL: 'https://api.perplexity.ai',
+      keyEnv: 'PERPLEXITY_API_KEY',
+      note: 'Perplexity — search-grounded models',
+    },
+    hyperbolic: {
+      baseURL: 'https://api.hyperbolic.xyz/v1',
+      keyEnv: 'HYPERBOLIC_API_KEY',
+      note: 'Hyperbolic — hosted open models',
+    },
+    sambanova: {
+      baseURL: 'https://api.sambanova.ai/v1',
+      keyEnv: 'SAMBANOVA_API_KEY',
+      note: 'SambaNova Cloud',
+    },
   });
 
 export type PresetName = keyof typeof PRESETS;
@@ -138,6 +229,18 @@ export interface StoredConfig {
   readonly baseURL?: string;
   readonly preset?: string;
   readonly apiKey?: string;
+  /**
+   * One credential per provider, keyed by preset name.
+   *
+   * The root `apiKey` cannot answer "which provider is this for", so switching
+   * provider used to hand the new endpoint the previous one's key. These are
+   * unambiguous, and keeping them means a developer who has paid for three
+   * providers can move between them without re-pasting anything.
+   */
+  readonly providerKeys?: Readonly<Record<string, string>>;
+  /** Accept both spellings so TOML written by people and agents is friendly. */
+  readonly needKey?: boolean;
+  readonly NeedKey?: boolean;
   readonly temperature?: number;
   readonly maxTokens?: number;
   readonly timeoutMs?: number;
@@ -161,6 +264,8 @@ export interface CustomProviderModel {
   readonly modalities?: readonly ModelCapability[];
   /** Price is displayed before a vision subagent is allowed to start. */
   readonly cost?: ModelCost;
+  readonly needKey?: boolean;
+  readonly NeedKey?: boolean;
   readonly [key: string]: unknown;
 }
 
@@ -175,6 +280,8 @@ export interface CustomProvider {
   readonly options?: {
     readonly baseURL?: string;
     readonly apiKey?: string;
+    readonly needKey?: boolean;
+    readonly NeedKey?: boolean;
     readonly [key: string]: unknown;
   };
   readonly models?: Readonly<Record<string, CustomProviderModel>>;
@@ -223,9 +330,15 @@ export interface ResolveOptions {
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
+/**
+ * There is deliberately no default model or provider.
+ *
+ * Plif ships unconfigured: the first run opens the picker instead of quietly
+ * talking to somebody else's endpoint on the developer's behalf. A built-in
+ * default is a decision made for the user about where their code goes, and it
+ * is the one decision a coding agent has no business making silently.
+ */
 const DEFAULTS = {
-  preset: 'opencode',
-  model: 'deepseek-v4-flash-free',
   temperature: 0.2,
   timeoutMs: 120_000,
 } as const;
@@ -292,12 +405,11 @@ export function resolveConfig(
     ...asCustomProviders(stored.provider),
   };
   const ref = parseModelRef(
-    options.model ?? env['PLIF_MODEL'] ?? stored.model ?? DEFAULTS.model,
+    options.model ?? env['PLIF_MODEL'] ?? stored.model ?? '',
     customProviders,
   );
 
-  const presetName =
-    ref.preset ?? options.preset ?? env['PLIF_PRESET'] ?? stored.preset ?? DEFAULTS.preset;
+  const presetName = ref.preset ?? options.preset ?? env['PLIF_PRESET'] ?? stored.preset;
   const preset = presetName ? PRESETS[presetName] : undefined;
   const custom = presetName ? customProviders[presetName] : undefined;
   if (presetName && !preset && !custom) {
@@ -307,22 +419,52 @@ export function resolveConfig(
     });
   }
 
+  /**
+   * Do the loose top-level fields still describe the provider being resolved?
+   *
+   * `baseURL`, `apiKey` and `needKey` sit at the root of the config with no
+   * provider attached, so they belong to whichever provider was last written
+   * there — `stored.preset`. Once a different provider is asked for, those
+   * fields describe somebody else's endpoint, and applying them anyway is how
+   * choosing a hosted model in the picker ends up posting it to a local server
+   * that has never heard of it.
+   */
+  const rootFieldsApply = !presetName || !stored.preset || stored.preset === presetName;
+
   const baseURL =
     options.baseURL ??
     env['PLIF_BASE_URL'] ??
     env['OPENAI_BASE_URL'] ??
-    stored.baseURL ??
+    // A named provider knows its own endpoint, and that beats a leftover root
+    // `baseURL` even when the two belong together — the preset table is the
+    // more current of the two.
     preset?.baseURL ??
     custom?.options?.baseURL ??
+    (rootFieldsApply ? stored.baseURL : undefined) ??
     PRESETS['openai']!.baseURL;
 
   const model = ref.model;
+  const modelMetadata = custom?.models?.[model];
+  const configuredNeedKey = firstBoolean(
+    ...(rootFieldsApply ? [stored.NeedKey, stored.needKey] : []),
+    custom?.options?.NeedKey,
+    custom?.options?.needKey,
+    modelMetadata?.NeedKey,
+    modelMetadata?.needKey,
+  );
+  const needKey = configuredNeedKey ?? !keyOptional(baseURL, model);
 
   // Try the preset's own key variable before the generic one, so switching
-  // preset picks up the right credential without renaming anything.
+  // preset picks up the right credential without renaming anything. Everything
+  // that names a provider comes before everything that does not, for the same
+  // reason `rootFieldsApply` exists: a credential with no provider attached is
+  // a guess, and guessing wrong means posting somebody's key to a host it was
+  // never issued for.
   const apiKey =
     options.apiKey ??
     (preset ? env[preset.keyEnv] : undefined) ??
+    (presetName ? asStringRecord(stored.providerKeys)[presetName] : undefined) ??
+    custom?.options?.apiKey ??
     env['PLIF_API_KEY'] ??
     // The generic variable is the right fallback for an endpoint that needs a
     // credential, and exactly the wrong one for an endpoint that does not: an
@@ -330,20 +472,78 @@ export function resolveConfig(
     // developer who happens to have OPENAI_API_KEY exported would otherwise
     // find the free models broken for a reason nothing on screen explains.
     (keyOptional(baseURL, model) ? undefined : env['OPENAI_API_KEY']) ??
-    custom?.options?.apiKey ??
-    stored.apiKey ??
+    (rootFieldsApply ? stored.apiKey : undefined) ??
     // Local servers ignore the value but the SDK refuses an empty one.
-    (isLocal(baseURL) ? 'local' : '');
+    (isLocal(baseURL) && !needKey ? 'local' : '');
 
   return {
     model,
     baseURL,
     apiKey,
+    needKey,
     temperature: numberFrom(env['PLIF_TEMPERATURE']) ?? stored.temperature ?? DEFAULTS.temperature,
     maxTokens: numberFrom(env['PLIF_MAX_TOKENS']) ?? stored.maxTokens,
     timeoutMs: numberFrom(env['PLIF_TIMEOUT_MS']) ?? stored.timeoutMs ?? DEFAULTS.timeoutMs,
     effort: stored.effort,
   };
+}
+
+/**
+ * Rewrite the stored config so it describes the provider just chosen.
+ *
+ * Switching provider used to only rewrite `preset` and `model`, leaving the
+ * root `baseURL`, `apiKey` and `NeedKey` from the previous provider in place —
+ * and those win over a preset's own values in half the fields, so a model
+ * picked in the TUI kept going to whatever endpoint was configured before it.
+ *
+ * Nothing is thrown away: a root key is filed under the provider it belonged
+ * to on the way out, so switching away and back does not cost a re-paste.
+ */
+export function adoptProvider(
+  stored: StoredConfig,
+  selection: { readonly preset: string; readonly model: string },
+  apiKey?: string,
+): StoredConfig {
+  const next: Record<string, unknown> = { ...stored };
+  const providerKeys = { ...asStringRecord(stored.providerKeys) };
+
+  const rootKey = typeof stored.apiKey === 'string' ? stored.apiKey : '';
+  const rootKeyOwner = stored.preset;
+  if (rootKey && rootKeyOwner && !providerKeys[rootKeyOwner]) {
+    providerKeys[rootKeyOwner] = rootKey;
+  }
+  if (apiKey && selection.preset) providerKeys[selection.preset] = apiKey;
+
+  next['preset'] = selection.preset;
+  next['model'] = selection.model;
+  if (Object.keys(providerKeys).length > 0) next['providerKeys'] = providerKeys;
+
+  // Only a real change of provider invalidates the root fields. Re-picking a
+  // model from the same provider must not discard a hand-written base URL.
+  if (rootKeyOwner && rootKeyOwner !== selection.preset) {
+    delete next['baseURL'];
+    delete next['needKey'];
+    delete next['NeedKey'];
+  }
+  // Safe to drop only once it has an owner; an unattributable key stays put.
+  if (rootKey && rootKeyOwner) delete next['apiKey'];
+  return next as StoredConfig;
+}
+
+export function forgetProviderKey(stored: StoredConfig, preset: string): StoredConfig {
+  const providerKeys = { ...asStringRecord(stored.providerKeys) };
+  delete providerKeys[preset];
+  const next: Record<string, unknown> = { ...stored, providerKeys };
+  if (Object.keys(providerKeys).length === 0) delete next['providerKeys'];
+  if (stored.preset === preset && typeof stored.apiKey === 'string') delete next['apiKey'];
+  return next as StoredConfig;
+}
+
+function asStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => typeof entry === 'string' && entry),
+  ) as Record<string, string>;
 }
 
 function asCustomProviders(value: unknown): Record<string, CustomProvider> {
@@ -409,6 +609,15 @@ export function isLocal(baseURL: string): boolean {
  * instead of throwing while trying to display it.
  */
 export function validate(config: ModelConfig): { ok: boolean; problem?: string; hint?: string } {
+  // Model before URL: an unconfigured Plif has a plausible-looking base URL and
+  // no model, and "no model" is the problem the developer can actually act on.
+  if (!config.model) {
+    return {
+      ok: false,
+      problem: 'no model chosen yet',
+      hint: 'Run /model to pick a provider and model, or set PLIF_MODEL.',
+    };
+  }
   try {
     new URL(config.baseURL);
   } catch {
@@ -418,17 +627,14 @@ export function validate(config: ModelConfig): { ok: boolean; problem?: string; 
       hint: 'Set PLIF_BASE_URL, or pick a preset with --preset.',
     };
   }
-  if (!config.model) {
-    return { ok: false, problem: 'no model id', hint: 'Set PLIF_MODEL or run /model set <id>.' };
-  }
-  if (!config.apiKey && !keyOptional(config.baseURL, config.model)) {
+  if (!config.apiKey && (config.needKey ?? !keyOptional(config.baseURL, config.model))) {
     return {
       ok: false,
       problem: 'no API key for a remote endpoint',
-      hint: `Set ${
+      hint: `Use /models to enter it in Plif, or set ${
         Object.values(PRESETS).find((p) => config.baseURL.startsWith(p.baseURL))?.keyEnv ??
         'OPENAI_API_KEY'
-      }, or point --base-url at a local server.`,
+      } in your personal config/environment.`,
     };
   }
   return { ok: true };
@@ -444,8 +650,8 @@ export function describe(config: ModelConfig): Record<string, string> {
   return {
     model: config.model,
     endpoint: config.baseURL,
-    key:
-      config.apiKey || !keyOptional(config.baseURL, config.model)
+      key:
+      config.apiKey || (config.needKey ?? !keyOptional(config.baseURL, config.model))
         ? redact(config.apiKey)
         : '(not required — free model)',
     temperature: String(config.temperature),
@@ -465,4 +671,8 @@ function numberFrom(value: string | undefined): number | undefined {
   if (value === undefined) return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function firstBoolean(...values: readonly unknown[]): boolean | undefined {
+  return values.find((value): value is boolean => typeof value === 'boolean');
 }

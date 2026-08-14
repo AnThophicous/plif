@@ -53,6 +53,7 @@ export const MIDNIGHT_THEME: ThemeDefinition = {
   source: 'builtin',
   palette: {
     text: '#e9e9ef',
+    panel: '#000000',
     muted: '#8d8d98',
     faint: '#585863',
     ghost: '#3b3b45',

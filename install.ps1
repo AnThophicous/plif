@@ -37,10 +37,24 @@ Set-StrictMode -Version Latest
 
 $Package = '@plif/cli'
 $MinimumNode = [Version]'20.11.0'
+$Release = '0.3.0'
 
-function Write-Step { param([string] $Message) Write-Host "  $Message" -ForegroundColor Cyan }
-function Write-Done { param([string] $Message) Write-Host "  $Message" -ForegroundColor Green }
+function Write-Step { param([string] $Message) Write-Host "  > $Message" -ForegroundColor Cyan }
+function Write-Done { param([string] $Message) Write-Host "  [ok] $Message" -ForegroundColor Green }
 function Write-Note { param([string] $Message) Write-Host "  $Message" -ForegroundColor DarkGray }
+
+function Write-Banner {
+    Write-Host ''
+    Write-Host '   ____  __    ___  _____' -ForegroundColor Blue
+    Write-Host '  / __ \/ /   /   |/ ___/' -ForegroundColor Blue
+    Write-Host ' / /_/ / /   / /| |\\__ \' -ForegroundColor Blue
+    Write-Host '/ ____/ /___/ ___ /__/ /' -ForegroundColor Blue
+    Write-Host '/_/   /_____/_/  |_/____/' -ForegroundColor Blue
+    Write-Host ''
+    Write-Host "  Plif $Release  |  terminal coding agent" -ForegroundColor White
+    Write-Host '  Bring your model. Keep control of your workspace.' -ForegroundColor DarkGray
+    Write-Host ''
+}
 
 function Fail {
     param([string] $Message, [string] $Hint)
@@ -51,21 +65,18 @@ function Fail {
     exit 1
 }
 
-Write-Host ''
-Write-Host '  plif' -ForegroundColor White
-Write-Host '  a container-native coding agent for your terminal' -ForegroundColor DarkGray
-Write-Host ''
+Write-Banner
 
 # ---------------------------------------------------------------------------
 # Uninstall
 # ---------------------------------------------------------------------------
 
 if ($Uninstall) {
-    Write-Step 'removing plif'
+    Write-Step "removing $Package"
     & npm uninstall -g $Package
     if ($LASTEXITCODE -ne 0) { Fail 'npm could not remove plif.' "Try running: npm uninstall -g $Package" }
 
-    Write-Done 'plif removed'
+    Write-Done 'plif removed from this machine'
     Write-Host ''
     Write-Note 'Your sessions, containers and saved credentials were left alone:'
     Write-Note "  $(Join-Path $env:USERPROFILE '.plif')"
@@ -94,7 +105,8 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
     Fail 'npm was not found, though Node is installed.' 'Reinstall Node from https://nodejs.org so npm comes with it.'
 }
 
-Write-Note "node $rawVersion"
+Write-Done "Node.js $rawVersion detected"
+Write-Done "npm $((& npm --version).Trim()) detected"
 
 # ---------------------------------------------------------------------------
 # Install
@@ -120,9 +132,14 @@ $reported = (& plif version) -join ' '
 Write-Host ''
 Write-Done $reported.Trim()
 Write-Host ''
-Write-Host '  Run it:' -ForegroundColor White
+Write-Host '  Welcome to Plif.' -ForegroundColor White
+Write-Host '  You just installed a cleaner, more adaptive 0.3.0.' -ForegroundColor Gray
+Write-Host '  Your sessions, memory and configuration stay yours.' -ForegroundColor Gray
+Write-Host ''
+Write-Host '  Start it:' -ForegroundColor White
 Write-Host '    plif' -ForegroundColor Cyan
 Write-Host ''
 Write-Note 'plif ships with no model configured and no keys of anyone else''s.'
-Write-Note 'Start it, press / and pick a model. The default one is free.'
+Write-Note 'Start it, press / and pick the provider and model you want.'
+Write-Note 'Then try /goal, /plan and /skills.'
 Write-Host ''

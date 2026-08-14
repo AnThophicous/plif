@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
+
 import { PlifError } from '../errors.js';
 
 export type PermissionMode = 'ask' | 'auto-approve' | 'deny';
@@ -61,10 +63,12 @@ export interface GlobalConfig {
   readonly baseURL?: string;
   readonly preset?: string;
   readonly apiKey?: string;
+  readonly needKey?: boolean;
+  readonly NeedKey?: boolean;
   readonly temperature?: number;
   readonly maxTokens?: number;
   readonly timeoutMs?: number;
-  readonly effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'plif';
+  readonly effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | 'ultracode' | 'plif';
   readonly providers?: unknown;
   /** OpenCode-style custom provider map. `providers` remains accepted. */
   readonly provider?: unknown;
@@ -84,6 +88,8 @@ export function profilesOf(config: GlobalConfig): Record<string, ProfileConfig> 
 
 export const CONFIG_SCHEMA_URL =
   'https://raw.githubusercontent.com/AnThophicous/plif/main/packages/core/schema/config.schema.json';
+
+const CONFIG_SCHEMA_FILE = new URL('../../schema/config.schema.json', import.meta.url);
 
 /**
  * MCP servers, from whichever key the file uses.
@@ -112,24 +118,36 @@ export function agentsOf(config: GlobalConfig): Record<string, AgentConfig> {
 }
 
 export function globalConfigPath(home = os.homedir()): string {
+  return path.join(home, '.plif', 'config.toml');
+}
+
+export function legacyGlobalConfigPath(home = os.homedir()): string {
   return path.join(home, '.config', 'PlifCode', 'config.jsonc');
+}
+
+/** JSON used by early Plif builds before personal configuration became TOML. */
+export function legacyPlifConfigPath(home = os.homedir()): string {
+  return path.join(home, '.plif', 'config.json');
 }
 
 export async function loadGlobalConfig(file = globalConfigPath()): Promise<GlobalConfig> {
   try {
     const raw = await fs.readFile(file, 'utf8');
-    const parsed = JSON.parse(stripJsonComments(raw)) as unknown;
+    const parsed = parseConfig(raw, file);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error('root must be an object');
     }
     return parsed as GlobalConfig;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (path.resolve(file) !== path.resolve(globalConfigPath())) return {};
+      return await migrateFirstLegacyGlobalConfig();
+    }
     if (PlifError.is(error)) throw error;
-    throw new PlifError('INVALID_ARGUMENT', 'global config.jsonc could not be parsed', {
+    throw new PlifError('INVALID_ARGUMENT', 'global config.toml could not be parsed', {
       cause: error,
       detail: { file },
-      hint: 'Fix the JSONC, or remove the file to use defaults.',
+      hint: 'Fix the TOML, or remove the file to use defaults.',
     });
   }
 }
@@ -141,9 +159,61 @@ export async function saveGlobalConfig(
   await fs.mkdir(path.dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}.tmp`;
   const withSchema = config.$schema ? config : { $schema: CONFIG_SCHEMA_URL, ...config };
-  await fs.writeFile(temporary, JSON.stringify(withSchema, null, 2) + '\n', 'utf8');
+  // The canonical personal file is TOML. Keep an explicitly supplied legacy
+  // .jsonc path round-trippable for marketplace imports and older callers;
+  // production calls use ~/.plif/config.toml and never write JSON again.
+  const serialized = path.extname(file).toLowerCase() === '.jsonc'
+    ? JSON.stringify(withSchema, null, 2)
+    : stringifyToml(withSchema as Record<string, unknown>) + '\n';
+  await fs.writeFile(temporary, serialized, 'utf8');
   await fs.rename(temporary, file);
   await fs.chmod(file, 0o600).catch(() => undefined);
+}
+
+export async function configSchemaText(): Promise<string> {
+  return await fs.readFile(CONFIG_SCHEMA_FILE, 'utf8');
+}
+
+export async function migrateLegacyGlobalConfig(
+  target = globalConfigPath(),
+  legacy = legacyGlobalConfigPath(),
+): Promise<GlobalConfig> {
+  try {
+    const raw = await fs.readFile(legacy, 'utf8');
+    const parsed = JSON.parse(stripJsonComments(raw)) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('root must be an object');
+    }
+    const config = parsed as GlobalConfig;
+    await saveGlobalConfig(config, target);
+    return config;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw new PlifError('INVALID_ARGUMENT', 'legacy global config.jsonc could not be parsed', {
+      cause: error,
+      detail: { file: legacy },
+      hint: 'Fix the legacy JSONC before Plif can migrate it to ~/.plif/config.toml.',
+    });
+  }
+}
+
+async function migrateFirstLegacyGlobalConfig(): Promise<GlobalConfig> {
+  const target = globalConfigPath();
+  for (const legacy of [legacyGlobalConfigPath(), legacyPlifConfigPath()]) {
+    try {
+      await fs.access(legacy);
+      return await migrateLegacyGlobalConfig(target, legacy);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  return {};
+}
+
+function parseConfig(source: string, file: string): unknown {
+  return path.extname(file).toLowerCase() === '.jsonc'
+    ? JSON.parse(stripJsonComments(source))
+    : parseToml(source);
 }
 
 export async function setAutoApprove(

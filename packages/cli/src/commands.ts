@@ -12,12 +12,25 @@
 import path from 'node:path';
 
 import {
+  CredentialBroker,
   MODEL_CATALOG,
-  MODEL_CATALOG_DEFAULT,
+  PRESETS,
+  discoverProviderModels,
   rankFacts,
+  rankModelIds,
+  supportedEfforts,
   strategyStatus,
+  userCatalog,
 } from '@plif/core';
-import type { Container, Effort, Engine, ModelProvider, ModelSelection } from '@plif/core';
+import type {
+  Container,
+  Effort,
+  Engine,
+  ModelCatalogProvider,
+  ModelProvider,
+  ModelSelection,
+  StoredConfig,
+} from '@plif/core';
 import {
   globalConfigPath,
   isAutoApproveEnabled,
@@ -50,7 +63,15 @@ export interface CommandContext {
   readonly model: ModelProvider | null;
   readonly modelProblem: string | null;
   readonly switchModel: (selection: ModelSelection | string) => Promise<void>;
+  readonly credentials?: CredentialBroker;
   readonly setEffort: (effort: Effort | undefined) => Promise<void>;
+  readonly supportedEfforts?: () => readonly Effort[];
+  /** Enter or leave the read-only planning mode. */
+  readonly setPlanMode?: (enabled: boolean, description?: string) => Promise<void>;
+  /** Start a session-scoped completion condition. */
+  readonly startGoal?: (condition: string) => Promise<void>;
+  readonly goalStatus?: () => { readonly condition: string; readonly status: 'active' } | null;
+  readonly clearGoal?: () => void;
   readonly switchProfile: (name: string) => Promise<void>;
   /**
    * Shrink the conversation now, rather than waiting for the threshold.
@@ -69,6 +90,8 @@ export interface CommandContext {
   /** Pull an image off the clipboard and attach it to the line being typed. */
   readonly pasteImage: () => Promise<void>;
   readonly openPicker: (picker: FlatPickerRequest | CatalogPickerRequest) => void;
+  readonly copySession?: () => Promise<void>;
+  readonly saveSession?: () => Promise<void>;
   readonly themes: readonly ThemeDefinition[];
   readonly switchTheme: (id: string) => Promise<void>;
 }
@@ -102,6 +125,76 @@ const ok = (...entries: TimelineEntry[]): CommandResult => ({ entries });
 
 const formatTokens = (value: number): string =>
   value < 1000 ? `${value} tokens` : `${(value / 1000).toFixed(1)}k tokens`;
+
+/** Keep verified built-ins visible while adding everything the endpoint reports. */
+export function providerModelIds(
+  catalog: ModelCatalogProvider,
+  discoveredIds: readonly string[],
+  live: boolean,
+): string[] {
+  if (!live) return catalog.models.map((item) => item.id);
+  return [...new Set([
+    ...catalog.models.map((item) => item.id),
+    ...discoveredIds,
+  ])];
+}
+
+/**
+ * One provider, as a picker group.
+ *
+ * Asks the endpoint what it serves and shows that; the curated list is the
+ * fallback, not the source. Discovery declines instantly when no credential is
+ * available, so opening the picker costs a round trip only for the providers
+ * the developer has actually signed in to.
+ */
+async function providerGroup(
+  catalog: ModelCatalogProvider,
+  section: string,
+  currentModel: string | undefined,
+  stored: StoredConfig,
+  credentials: CredentialBroker | undefined,
+): Promise<PickerGroup> {
+  const keyEnv = PRESETS[catalog.id as keyof typeof PRESETS]?.keyEnv;
+  const key = keyEnv && credentials ? await credentials.lookup(keyEnv) : undefined;
+  const discovered = await discoverProviderModels(catalog.id, {
+    stored,
+    ...(key ? { apiKey: key } : {}),
+  });
+
+  const known = new Map(catalog.models.map((item) => [item.id, item]));
+  const ids = rankModelIds(catalog.id, providerModelIds(catalog, discovered.ids, discovered.live));
+  const items: PickerItem[] = discovered.live
+    ? ids.map((id) => {
+        const curated = known.get(id);
+        return {
+          value: id,
+          label: curated?.label ?? prettyModelId(id),
+          detail: curated?.description ?? id,
+          badges: curated?.badges ?? [],
+          current: id === currentModel,
+        };
+      })
+    : catalog.models.map((item) => ({
+        value: item.id,
+        label: item.label,
+        detail: item.description,
+        badges: item.badges,
+        current: item.id === currentModel,
+      }));
+
+  return {
+    id: catalog.id,
+    label: catalog.label,
+    section,
+    detail: discovered.live ? `${catalog.description} · live` : catalog.description,
+    items,
+  };
+}
+
+/** `moonshotai/kimi-k2-instruct` reads better as `kimi k2 instruct`. */
+function prettyModelId(id: string): string {
+  return id.slice(id.lastIndexOf('/') + 1).replace(/[-_]+/g, ' ');
+}
 
 export const COMMANDS: readonly Command[] = [
   {
@@ -556,24 +649,31 @@ export const COMMANDS: readonly Command[] = [
       // Opening the catalog is deliberately independent of the global config:
       // a malformed config or missing key must not hide the model chooser.
       const currentModel = context.model?.info.id;
-      const groups: PickerGroup[] = MODEL_CATALOG.map((catalogProvider) => ({
-        id: catalogProvider.id,
-        label: catalogProvider.label,
-        detail: catalogProvider.description,
-        items: catalogProvider.models.map((catalogModel) => ({
-          value: catalogModel.id,
-          label: catalogModel.label,
-          detail: catalogModel.description,
-          badges: catalogModel.badges,
-          current: catalogModel.id === currentModel,
-        })),
-      }));
+      const stored = (await loadGlobalConfig().catch(() => ({}))) as StoredConfig;
+
+      // The developer's own providers come first, and under their own heading.
+      // Somebody who wrote an endpoint into their config should find it at the
+      // top, not somewhere inside a list of things Plif happens to ship.
+      const mine = userCatalog(stored);
+      const groups: PickerGroup[] = await Promise.all([
+        ...mine.map((entryProvider) =>
+          providerGroup(entryProvider, 'your providers', currentModel, stored, context.credentials),
+        ),
+        ...MODEL_CATALOG.map((entryProvider) =>
+          providerGroup(entryProvider, 'built into plif', currentModel, stored, context.credentials),
+        ),
+      ]);
+
+      const currentGroup = groups.find((group) =>
+        group.items.some((item) => item.current),
+      );
+      const expanded = currentGroup ? [currentGroup.id] : [];
 
       context.openPicker({
-        title: 'select a model',
+        title: 'select a provider and model',
         groups,
-        expanded: [MODEL_CATALOG_DEFAULT.provider],
-        selected: 1,
+        expanded,
+        selected: Math.max(0, groups.findIndex((group) => group.id === currentGroup?.id)),
         onPick: (selection) => {
           if (typeof selection !== 'string') void context.switchModel(selection);
         },
@@ -584,20 +684,118 @@ export const COMMANDS: readonly Command[] = [
 
   {
     name: 'effort',
-    args: '[low|medium|high|xhigh|plif|default]',
+    args: '[low|medium|high|xhigh|max|ultra|ultracode|plif|default]',
     summary: 'Show or change model reasoning effort',
     run: async (argv, context) => {
       const stored = await loadGlobalConfig();
       const current = stored.effort ?? 'default';
       const value = argv[0];
       if (!value) return ok(entry('notice', `effort: ${current === 'plif' ? 'Plif' : current}`, { tone: 'accent' }));
-      if (!['low', 'medium', 'high', 'xhigh', 'plif', 'default'].includes(value)) {
-        throw new PlifError('INVALID_ARGUMENT', 'usage: /effort [low|medium|high|xhigh|plif|default]');
+      if (!['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode', 'plif', 'default'].includes(value)) {
+        throw new PlifError('INVALID_ARGUMENT', 'usage: /effort [low|medium|high|xhigh|max|ultra|ultracode|plif|default]');
+      }
+      if (value !== 'default' && context.supportedEfforts && !context.supportedEfforts().includes(value as Effort)) {
+        throw new PlifError('INVALID_ARGUMENT', `${value} is not supported by the selected model`);
       }
       await context.setEffort(value === 'default' ? undefined : value as Effort);
       return ok(entry('notice', `effort: ${value}`, {
         tone: 'accent',
         subtitle: 'conversation reset for the new model settings',
+      }));
+    },
+  },
+
+  {
+    name: 'plan',
+    args: '[description|off]',
+    summary: 'Enter read-only planning mode, or leave it',
+    run: async (argv, context) => {
+      if (!context.setPlanMode) {
+        return ok(entry('notice', 'plan mode is unavailable in this session', { tone: 'warn' }));
+      }
+      const value = argv.join(' ').trim();
+      const command = value.toLowerCase();
+      if (command === 'off' || command === 'clear' || command === 'execute' || command === 'work') {
+        await context.setPlanMode(false);
+        return ok(entry('notice', 'plan mode off', {
+          tone: 'accent',
+          subtitle: 'the next agent turn may make workspace changes',
+        }));
+      }
+      await context.setPlanMode(true, value || undefined);
+      return ok(entry('notice', 'plan mode on', {
+        tone: 'accent',
+        subtitle: value
+          ? 'the plan request was sent without write tools'
+          : 'inspect files and propose a plan; use /plan off to resume work',
+      }));
+    },
+  },
+
+  {
+    name: 'goal',
+    args: '[condition|clear]',
+    summary: 'Work until a verifiable completion condition is met',
+    run: async (argv, context) => {
+      if (!context.goalStatus || !context.startGoal || !context.clearGoal) {
+        return ok(entry('notice', 'goals are unavailable in this session', { tone: 'warn' }));
+      }
+      const value = argv.join(' ').trim();
+      const command = value.toLowerCase();
+      if (!value) {
+        const goal = context.goalStatus();
+        return ok(entry('notice', goal
+          ? `goal ${goal.status}: ${goal.condition}`
+          : 'no active goal', {
+            tone: goal ? 'accent' : 'muted',
+          }));
+      }
+      if (command === 'clear' || command === 'off' || command === 'reset') {
+        context.clearGoal();
+        return ok(entry('notice', 'goal cleared', { tone: 'accent' }));
+      }
+      if (value.length > 2000) {
+        throw new PlifError('INVALID_ARGUMENT', 'goal condition must be 2000 characters or fewer');
+      }
+      await context.startGoal(value);
+      return ok(entry('notice', 'goal active', {
+        tone: 'accent',
+        subtitle: value,
+      }));
+    },
+  },
+
+  {
+    name: 'export',
+    args: '[clipboard|file]',
+    summary: 'Copy or save the complete session transcript',
+    run: async (argv, context) => {
+      if (!context.copySession || !context.saveSession) {
+        return ok(entry('notice', 'session export is unavailable', { tone: 'warn' }));
+      }
+      const choice = argv[0]?.toLowerCase();
+      if (choice === 'clipboard' || choice === 'copy') {
+        await context.copySession();
+        return ok();
+      }
+      if (choice === 'file' || choice === 'save') {
+        await context.saveSession();
+        return ok();
+      }
+      context.openPicker({
+        title: 'export session',
+        items: [
+          { value: 'clipboard', label: 'Copy to clipboard', detail: 'the full transcript' },
+          { value: 'file', label: 'Save .txt in project', detail: 'creates a new file in the workspace' },
+        ],
+        selected: 0,
+        onPick: (value) => {
+          void (value === 'clipboard' ? context.copySession!() : context.saveSession!());
+        },
+      });
+      return ok(entry('notice', 'export session', {
+        tone: 'accent',
+        subtitle: 'choose copy to clipboard or save a .txt in the project',
       }));
     },
   },
@@ -862,6 +1060,12 @@ export function matchCommands(partial: string): Command[] {
     (command) => !command.name.startsWith(needle) && command.name.includes(needle),
   );
   return [...prefix, ...contains];
+}
+
+/** Return the command word while the user is typing a slash command. */
+export function commandPrefix(input: string): string | null {
+  const match = /^\/([^\s]*)/.exec(input);
+  return match ? match[1] ?? '' : null;
 }
 
 // ---------------------------------------------------------------------------

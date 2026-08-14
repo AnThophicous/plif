@@ -2,9 +2,49 @@
 
 All notable changes to plif. This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0-preview.0] — 2026-08-11
+## [0.3.0] — 2026-08-13
 
-Preview release for the new conversation harness, navigable Ink interface, MCP reliability work, and skill packages. 622 tests passing.
+### Added
+
+- **Anthropic provider.** Claude runs through the official `@anthropic-ai/sdk`
+  rather than an OpenAI-compatible shim, with streaming, tool use and verbatim
+  thinking replay. The adapter is chosen from the endpoint, so nothing else in
+  the harness needs to know which provider is in play.
+- **Eleven more providers.** Anthropic, Google Gemini, xAI, Mistral, Cerebras,
+  Fireworks, Z.AI, Moonshot (Kimi), Perplexity, Hyperbolic and SambaNova join
+  the built-in list; OpenAI is labelled ChatGPT so it can be found by the name
+  people use for it.
+- **Live model discovery.** `/model` asks each provider what it actually serves
+  instead of showing a list frozen at release time, ranked so the models people
+  reach for come first. Providers with no credential are skipped instantly, and
+  the answer is cached for the process.
+- **Paged provider lists.** A provider with more than ten models shows its top
+  ten and a "show N more" row, so one crowded gateway cannot push every other
+  provider off the screen.
+- **PowerShell installer.** The GitHub installer now has a compact ASCII
+  banner, clear preflight checks, safer failure messages, uninstall support and
+  a welcoming post-install guide.
+
+### Changed
+
+- **plif ships with no model.** There is no default provider and no default
+  model; the first run opens the picker instead of quietly pointing the agent
+  at an endpoint nobody chose.
+- **The model picker separates yours from ours.** Providers declared in your own
+  config appear first, under their own heading, above the ones plif ships.
+- The credential popup names the provider and the environment variable it would
+  accept instead, and entering a key immediately re-runs discovery for that
+  provider.
+
+### Fixed
+
+- Picking a model discovered from a live endpoint works. It previously did
+  nothing at all — the selection was validated against the hardcoded catalogue,
+  so any id the endpoint had added since release was silently unselectable.
+
+### Earlier 0.3.0 release notes — 2026-08-12
+
+Official release for the new conversation harness, navigable Ink interface, MCP reliability work, NVIDIA NIM support, and Markdown-native skills.
 
 ### Added
 
@@ -13,6 +53,8 @@ Preview release for the new conversation harness, navigable Ink interface, MCP r
 - **DME skill package and discovery tools.** Skills can be grouped, inspected, loaded on demand, and routed proactively without flooding the conversation. The DME package ships with focused design capabilities while flat legacy skills remain compatible.
 - **Work dock and Plif focus frame.** Background tasks and subagents share a compact surface, with responsive context/workspace information attached to the existing Ink composer identity.
 - **Durable memory ranking.** Reusable facts are ranked by confirmation, contradiction, recency, and prompt budget instead of being selected only by arrival order.
+- **NVIDIA NIM provider.** The model picker includes curated NVIDIA models and can expand the NVIDIA account catalogue when a stored credential is available.
+- **Markdown-native builtin skills.** Context ingestion, slide decks, deep engineering audits, Galileu, and Office rendering are loaded from the agenting skill tree.
 
 ### Changed
 
@@ -30,10 +72,10 @@ Preview release for the new conversation harness, navigable Ink interface, MCP r
 - OpenAI-compatible streaming handles interrupted/idle SSE responses, visible retry/reset behavior, reasoning-field variants, and reasoning-effort capability fallback more consistently.
 - The opening header is no longer pushed out of view by a terminal-height dynamic frame, and `Plif Thinking` is no longer duplicated inside the input.
 
-### Preview install
+### Install
 
 ```powershell
-npm install -g @plif/cli@preview
+npm install -g @plif/cli@latest
 ```
 
 ## [0.2.0] — 2026-08-09
@@ -74,6 +116,6 @@ npm install -g @plif/cli@preview
 
 First release.
 
-[0.3.0-preview.0]: https://github.com/AnThophicous/plif/compare/v0.2.0...v0.3.0-preview.0
+[0.3.0]: https://github.com/AnThophicous/plif/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/AnThophicous/plif/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/AnThophicous/plif/releases/tag/v0.1.0

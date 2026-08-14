@@ -12,8 +12,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { entry } from '../src/session.js';
-import { LIVE_THOUGHT_LINES, estimateHeight, thoughtLines } from '../src/components/Timeline.js';
-import { workedSeparator } from '../src/theme.js';
+import { LIVE_THOUGHT_LINES, estimateHeight, thoughtLines, wrappedThoughtLines } from '../src/components/Timeline.js';
+import { bloomFrameAt } from '../src/components/Spinner.js';
+import { supportsRichGlyphs, workedSeparator } from '../src/theme.js';
 
 const WIDTH = 40;
 
@@ -54,6 +55,15 @@ describe('thoughtLines', () => {
   it('flattens the newlines a stream sprinkles through reasoning', () => {
     assert.deepEqual(thoughtLines('first\n\nsecond\nthird', WIDTH), ['first second third']);
   });
+
+  it('wraps settled thoughts while retaining paragraph breaks', () => {
+    assert.deepEqual(wrappedThoughtLines('first paragraph\nsecond paragraph', 10), [
+      'first',
+      'paragraph',
+      'second',
+      'paragraph',
+    ]);
+  });
 });
 
 describe('the height a thinking row claims', () => {
@@ -79,10 +89,18 @@ describe('cycle separator', () => {
     const separator = workedSeparator(145_000, 60);
     assert.match(separator, /Worked for 2m 25s/);
     assert.ok(separator.length <= 60);
-    assert.equal(estimateHeight(entry('separator', 'Worked', { durationMs: 145_000 }), 60), 3);
+    assert.equal(estimateHeight(entry('separator', 'Worked', { durationMs: 145_000 }), 60), 2);
   });
 
   it('normalizes a rounded minute instead of showing sixty seconds', () => {
     assert.match(workedSeparator(59_950, 60), /Worked for 1m 00s/);
+  });
+});
+
+describe('working bloom', () => {
+  it('starts as a ball and opens into a flower', () => {
+    assert.equal(bloomFrameAt(0), supportsRichGlyphs ? '●' : 'o');
+    assert.notEqual(bloomFrameAt(0), bloomFrameAt(3));
+    assert.match(bloomFrameAt(5), /^[+*#]$/);
   });
 });

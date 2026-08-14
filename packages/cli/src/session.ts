@@ -10,7 +10,7 @@
 import { DEFAULT_CONTEXT_TOKENS, diffStats, parseDiff } from '@plif/core';
 import type { Catalog, Decision, PolicyAction } from '@plif/core';
 import type { ModelSelection } from '@plif/core';
-import { filterItems, filterPickerGroups, flattenPickerGroups } from './components/Picker.js';
+import { filterItems, filterPickerGroups, flattenPickerGroups, pickerRows, preservePickerSelection } from './components/Picker.js';
 import type { PickerGroup, PickerItem } from './components/Picker.js';
 import type { PastedAttachment } from './composer/state.js';
 export type { PastedAttachment, PastedImage, PastedText } from './composer/state.js';
@@ -321,6 +321,10 @@ export type SessionAction =
   | { type: 'append'; entry: TimelineEntry }
   | { type: 'gate'; entry: TimelineEntry }
   | { type: 'update'; id: string; patch: Partial<TimelineEntry> }
+  | {
+      type: 'stream.frame';
+      patches: readonly { readonly id: string; readonly patch: Partial<TimelineEntry> }[];
+    }
   /**
    * Remove a row that should never have been shown.
    *
@@ -504,6 +508,19 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       const entries = state.entries.map((entry) =>
         entry.id === action.id ? { ...entry, ...action.patch } : entry,
       );
+      return { ...state, entries: mergeAdjacentEdits(entries) };
+    }
+
+    case 'stream.frame': {
+      if (action.patches.length === 0) return state;
+      const patches = new Map<string, Partial<TimelineEntry>>();
+      for (const item of action.patches) {
+        patches.set(item.id, { ...patches.get(item.id), ...item.patch });
+      }
+      const entries = state.entries.map((entry) => {
+        const patch = patches.get(entry.id);
+        return patch ? { ...entry, ...patch } : entry;
+      });
       return { ...state, entries: mergeAdjacentEdits(entries) };
     }
 
@@ -855,9 +872,22 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
 
     case 'picker.filter': {
       if (!state.picker) return state;
-      const matches = state.picker.groups
-        ? flattenPickerGroups(filterPickerGroups(state.picker.groups, action.filter), state.picker.expanded ?? [])
-        : filterItems(state.picker.items ?? [], action.filter);
+      if (state.picker.groups) {
+        const matches = pickerRows(state.picker.groups, state.picker.expanded ?? [], action.filter);
+        const previous = pickerRows(state.picker.groups, state.picker.expanded ?? [], state.picker.filter);
+        return {
+          ...state,
+          picker: {
+            ...state.picker,
+            filter: action.filter,
+            selected: preservePickerSelection(previous, state.picker.selected, matches),
+          },
+        };
+      }
+      const matches = filterItems(state.picker.items ?? [], action.filter);
+      const previous = state.picker.groups
+        ? pickerRows(state.picker.groups, state.picker.expanded ?? [], state.picker.filter)
+        : [];
       return {
         ...state,
         picker: {
@@ -878,10 +908,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
 
     case 'picker.moveVisible': {
       if (!state.picker?.groups) return state;
-      const matches = flattenPickerGroups(
-        filterPickerGroups(state.picker.groups, state.picker.filter),
-        state.picker.expanded ?? [],
-      );
+      const matches = pickerRows(state.picker.groups, state.picker.expanded ?? [], state.picker.filter);
       if (matches.length === 0) return state;
       const next = (state.picker.selected + action.delta + matches.length) % matches.length;
       return { ...state, picker: { ...state.picker, selected: next } };
@@ -890,19 +917,24 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case 'picker.toggle': {
       if (!state.picker?.groups) return state;
       const expanded = new Set(state.picker.expanded ?? []);
-      if (expanded.has(action.id)) expanded.delete(action.id);
-      else expanded.add(action.id);
+      if (expanded.has(action.id)) {
+        expanded.delete(action.id);
+        // Collapsing a provider forgets that its long tail was showing, so
+        // reopening it starts from the ranked ten again rather than dumping
+        // two hundred models back onto the screen.
+        expanded.delete(`${action.id}:all`);
+      } else {
+        expanded.add(action.id);
+      }
       const nextExpanded = [...expanded];
-      const matches = flattenPickerGroups(
-        filterPickerGroups(state.picker.groups, state.picker.filter),
-        nextExpanded,
-      );
+      const previous = pickerRows(state.picker.groups, state.picker.expanded ?? [], state.picker.filter);
+      const matches = pickerRows(state.picker.groups, nextExpanded, state.picker.filter);
       return {
         ...state,
         picker: {
           ...state.picker,
           expanded: nextExpanded,
-          selected: Math.min(state.picker.selected, Math.max(0, matches.length - 1)),
+          selected: preservePickerSelection(previous, state.picker.selected, matches),
         },
       };
     }

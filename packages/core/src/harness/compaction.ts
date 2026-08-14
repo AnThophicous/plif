@@ -1,6 +1,6 @@
 import type { Message, ModelProvider } from '../model/provider.js';
 import { collect } from '../model/provider.js';
-import { compactionSystemPrompt } from './prompts/modes/index.js';
+import { compactionSystemPrompt } from '../agenting/compaction.js';
 
 export interface CompactionOptions {
   readonly maxTokens: number;

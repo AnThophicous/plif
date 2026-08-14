@@ -16,6 +16,7 @@ import {
   transcriptReducer,
 } from '../transcript/reducer.js';
 import type { TranscriptState } from '../transcript/types.js';
+import type { StreamFrame } from '../stream-frame.js';
 
 export interface TranscriptControllerOptions {
   readonly engine: Engine;
@@ -30,6 +31,8 @@ export interface TranscriptController {
   readonly persistenceWarning: string | null;
   readonly appendUserTurn: (text: string) => string;
   readonly persist: (event: ConversationEvent) => void;
+  readonly applyStreamFrame: (frame: StreamFrame) => void;
+  readonly resetStream: () => void;
 }
 
 function seedTranscript(events: readonly ConversationEvent[]): TranscriptState {
@@ -104,21 +107,34 @@ export function useTranscriptController({
     }
   }), [engine, persist]);
 
-  useEffect(() => {
-    const textOff = engine.bus.on('agent.text', ({ delta }) => {
-      const turnId = currentTurnId.current;
-      if (!turnId) return;
-      dispatch({ type: 'assistant.delta', turnId, at: new Date().toISOString(), delta });
-    });
-    const resetOff = engine.bus.on('agent.reset', () => {
-      const turnId = currentTurnId.current;
-      if (turnId) dispatch({ type: 'assistant.reset', turnId });
-    });
-    return () => {
-      textOff();
-      resetOff();
-    };
-  }, [engine]);
+  const applyStreamFrame = useCallback((frame: StreamFrame): void => {
+    const turnId = currentTurnId.current;
+    if (!turnId || frame.kind === 'reset') return;
+    const at = new Date().toISOString();
+    if (frame.reasoning) {
+      dispatch({
+        type: 'reasoning.frame',
+        turnId,
+        at,
+        epoch: frame.epoch,
+        text: frame.reasoning,
+      });
+    }
+    if (frame.answer) {
+      dispatch({
+        type: 'assistant.frame',
+        turnId,
+        at,
+        epoch: frame.epoch,
+        text: frame.answer,
+      });
+    }
+  }, []);
+
+  const resetStream = useCallback((): void => {
+    const turnId = currentTurnId.current;
+    if (turnId) dispatch({ type: 'stream.reset', turnId });
+  }, []);
 
   useEffect(() => {
     const turnFor = (requestId: string): string => currentTurnId.current ?? `dialog:${requestId}`;
@@ -168,5 +184,7 @@ export function useTranscriptController({
     persistenceWarning,
     appendUserTurn,
     persist,
+    applyStreamFrame,
+    resetStream,
   };
 }

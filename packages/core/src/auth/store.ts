@@ -14,6 +14,11 @@ import { PlifError } from '../errors.js';
 
 export type OAuthCredentialScope = 'all' | 'client' | 'tokens' | 'verifier' | 'discovery';
 
+/** The one durable home for Plif-owned MCP OAuth records. */
+export function personalOAuthStorePath(home = os.homedir()): string {
+  return path.join(home, '.plif', 'oauth');
+}
+
 export interface StoredMcpOAuthState {
   readonly tokens?: OAuthTokens;
   readonly clientInformation?: OAuthClientInformationMixed;
@@ -102,7 +107,7 @@ export function mcpOAuthKey(server: string, url: string): string {
 
 export class WindowsDpapiOAuthStore implements McpOAuthStore {
   constructor(
-    private readonly root = path.join(os.homedir(), '.config', 'PlifCode', 'oauth'),
+    private readonly root = personalOAuthStorePath(),
     private readonly dpapi: DpapiRunner = runWindowsDpapi,
   ) {}
 

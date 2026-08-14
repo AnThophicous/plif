@@ -8,6 +8,7 @@ interface CompletionsProps {
   readonly matches: readonly Command[];
   readonly selected: number;
   readonly width: number;
+  readonly maxRows?: number;
 }
 
 /**
@@ -25,13 +26,14 @@ export function Completions({
   matches,
   selected,
   width,
+  maxRows = 6,
 }: CompletionsProps): React.ReactElement | null {
   if (matches.length === 0) return null;
 
   // Cap the list and slide a window over it, keeping the selection visible.
-  const maxRows = 6;
-  const start = Math.max(0, Math.min(selected - maxRows + 2, matches.length - maxRows));
-  const visible = matches.slice(start, start + maxRows);
+  const rows = Math.max(1, maxRows);
+  const start = Math.max(0, Math.min(selected - rows + 2, matches.length - rows));
+  const visible = matches.slice(start, start + rows);
   const nameWidth = Math.max(...matches.map((command) => command.name.length)) + 2;
 
   return (
@@ -60,10 +62,10 @@ export function Completions({
         );
       })}
 
-      {start + maxRows < matches.length && (
+      {start + rows < matches.length && (
         <Text color={color('ghost')}>
           {'  '}
-          {glyph.pending} {matches.length - start - maxRows} more
+          {glyph.pending} {matches.length - start - rows} more
         </Text>
       )}
     </Box>
@@ -85,16 +87,18 @@ export function EmojiMenu({
   matches,
   selected,
   width,
+  maxRows = 6,
 }: {
   matches: readonly { name: string; emoji: string }[];
   selected: number;
   width: number;
+  maxRows?: number;
 }): React.ReactElement | null {
   if (matches.length === 0) return null;
 
-  const maxRows = 6;
-  const start = Math.max(0, Math.min(selected - maxRows + 2, matches.length - maxRows));
-  const visible = matches.slice(start, start + maxRows);
+  const rows = Math.max(1, maxRows);
+  const start = Math.max(0, Math.min(selected - rows + 2, matches.length - rows));
+  const visible = matches.slice(start, start + rows);
 
   return (
     <Box flexDirection="column" paddingX={layout.gutter + 1}>
@@ -114,10 +118,10 @@ export function EmojiMenu({
           </Box>
         );
       })}
-      {start + maxRows < matches.length && (
+      {start + rows < matches.length && (
         <Text color={color('ghost')}>
           {'  '}
-          {glyph.pending} {matches.length - start - maxRows} more
+          {glyph.pending} {matches.length - start - rows} more
         </Text>
       )}
     </Box>

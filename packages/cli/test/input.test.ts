@@ -13,9 +13,16 @@ import { describe, it } from 'node:test';
 
 import { isTerminalPaste, pastedContentToken, sanitizePastedText, splitPaste, tokenize } from '../src/format.js';
 import { IDLE_PASTE, hasPasteMarker, readPasteChunk } from '../src/paste.js';
-import { matchCommands, findCommand, COMMANDS } from '../src/commands.js';
+import { commandPrefix, matchCommands, findCommand, COMMANDS } from '../src/commands.js';
 import type { CatalogPickerRequest, CommandContext } from '../src/commands.js';
-import { filterPickerGroups, flattenPickerGroups } from '../src/components/Picker.js';
+import {
+  ALL_SUFFIX,
+  PICKER_GROUP_PAGE,
+  filterPickerGroups,
+  flattenPickerGroups,
+  pickerRows,
+  preservePickerSelection,
+} from '../src/components/Picker.js';
 import type { PickerGroup } from '../src/components/Picker.js';
 import type { Engine } from '@plif/core';
 import { initialSession, sessionReducer } from '../src/session.js';
@@ -41,6 +48,15 @@ describe('tokenize', () => {
     assert.deepEqual(tokenize('echo a && rm -rf b'), ['echo', 'a', '&&', 'rm', '-rf', 'b']);
     assert.deepEqual(tokenize('echo $HOME'), ['echo', '$HOME']);
     assert.deepEqual(tokenize('ls *.ts'), ['ls', '*.ts']);
+  });
+});
+
+describe('command completion input', () => {
+  it('keeps the command prefix when arguments are already being typed', () => {
+    assert.equal(commandPrefix('/model'), 'model');
+    assert.equal(commandPrefix('/model openai/gpt-4o-mini'), 'model');
+    assert.deepEqual(matchCommands(commandPrefix('/model --') ?? ''), [findCommand('model')]);
+    assert.equal(commandPrefix('plain text'), null);
   });
 });
 
@@ -234,6 +250,60 @@ describe('model catalog picker', () => {
     );
   });
 
+  it('shows only the first page of a crowded provider, with a way to see the rest', () => {
+    // A gateway with hundreds of models must not push every other provider off
+    // the screen the moment it is opened.
+    const crowded: readonly PickerGroup[] = [
+      {
+        id: 'openrouter',
+        label: 'OpenRouter',
+        items: Array.from({ length: 25 }, (_, index) => ({
+          value: `model-${index}`,
+          label: `Model ${index}`,
+        })),
+      },
+    ];
+
+    const paged = flattenPickerGroups(crowded, ['openrouter']);
+    assert.equal(paged.filter((row) => row.kind === 'item').length, PICKER_GROUP_PAGE);
+    const last = paged.at(-1);
+    assert.equal(last?.kind, 'more');
+    assert.equal(last?.kind === 'more' ? last.hidden : 0, 15);
+
+    const all = flattenPickerGroups(crowded, ['openrouter', `openrouter${ALL_SUFFIX}`]);
+    assert.equal(all.filter((row) => row.kind === 'item').length, 25);
+    assert.equal(all.some((row) => row.kind === 'more'), false);
+  });
+
+  it('opens matching providers while a model search is active', () => {
+    const filtered = filterPickerGroups(groups, 'flash');
+    const rows = flattenPickerGroups(filtered, [], 'flash');
+
+    assert.ok(rows.some((row) => row.kind === 'item'));
+  });
+
+  it('keeps the selected model identity when filtering changes its row index', () => {
+    const expanded = ['opencode', 'openai'];
+    const before = pickerRows(groups, expanded);
+    const selected = before.findIndex((row) => row.id === 'openai:gpt-4o-mini');
+    const after = pickerRows(groups, expanded, 'mini');
+    assert.equal(after[preservePickerSelection(before, selected, after)]?.id, 'openai:gpt-4o-mini');
+  });
+
+  it('forgets the long tail when a provider is collapsed', () => {
+    const opened = sessionReducer(initialSession, {
+      type: 'picker.open',
+      picker: {
+        title: 'select a model',
+        groups,
+        expanded: ['opencode', `opencode${ALL_SUFFIX}`],
+        onPick: () => undefined,
+      },
+    });
+    const collapsed = sessionReducer(opened, { type: 'picker.toggle', id: 'opencode' });
+    assert.deepEqual(collapsed.picker?.expanded, []);
+  });
+
   it('moves through visible rows and clamps after collapsing a provider', () => {
     const opened = sessionReducer(initialSession, {
       type: 'picker.open',
@@ -274,9 +344,22 @@ describe('model catalog picker', () => {
     const result = await findCommand('model')!.run([], context);
 
     assert.deepEqual(result.entries, []);
-    assert.equal(picker?.groups[0]?.id, 'opencode');
-    assert.deepEqual(picker?.expanded, ['opencode']);
-    assert.equal(picker?.selected, 1);
-    assert.equal(picker?.groups[0]?.items[0]?.value, 'deepseek-v4-flash-free');
+    // Nothing is expanded and nothing is pre-selected: with no model loaded
+    // there is no "current" provider to open, and Plif has no default to
+    // suggest one.
+    assert.deepEqual(picker?.expanded, []);
+    assert.equal(picker?.selected, 0);
+
+    // The developer's own providers, if they have any, sort ahead of the
+    // built-in ones and carry a different heading. This machine may have none,
+    // so the assertion is on the ordering rule rather than on a count.
+    const sections = picker!.groups.map((group) => group.section);
+    const firstBuiltin = sections.indexOf('built into plif');
+    assert.ok(firstBuiltin >= 0);
+    assert.ok(sections.slice(0, firstBuiltin).every((s) => s === 'your providers'));
+    assert.ok(sections.slice(firstBuiltin).every((s) => s === 'built into plif'));
+
+    const anthropic = picker!.groups.find((group) => group.id === 'anthropic');
+    assert.equal(anthropic?.items[0]?.value, 'claude-opus-5');
   });
 });

@@ -6,8 +6,11 @@
 ▀▄▄▀ ▀▄▄▀
 ```
 
-**A container-native coding agent for your terminal.**
-Bring your own model. Watch what it is allowed to do.
+**Plif 0.3.0 — the stable, adaptive coding agent for your terminal.**
+
+Bring your own model. Configure the provider yourself. Plif 0.3.0 is built for
+long coding sessions with durable memory, better adaptation to the user, a
+calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 
 [![npm](https://img.shields.io/npm/v/%40plif%2Fcli?color=0b7285&label=npm)](https://www.npmjs.com/package/@plif/cli)
 [![license](https://img.shields.io/badge/license-Apache--2.0-0b7285)](LICENSE)
@@ -18,6 +21,20 @@ Bring your own model. Watch what it is allowed to do.
 </div>
 
 ---
+
+## Why 0.3.0
+
+- **Adaptive memory.** Useful facts are ranked and reused without turning the
+  conversation into noise.
+- **Built-in skills.** Galileo, deep engineering audits, Office/rendering
+  skills, MCP discovery, and focused planning workflows are ready to use.
+- **Your model, your choice.** No hidden default model. `/model` discovers
+  real provider models, separates your providers from Plif's, and ranks the
+  most-used entries first.
+- **Long-session reliability.** Navigable transcript history, `/goal`, `/plan`,
+  `/export`, compaction and recovery keep large sessions usable.
+- **Safer execution.** Container-native workspaces, policy checks and an audit
+  trail show what the agent actually did.
 
 ## Install
 
@@ -41,7 +58,7 @@ You need Node 20.11 or newer. You do not need Docker, WSL, administrator, or an
 API key to start.
 
 To remove it: `npm uninstall -g @plif/cli`. Your sessions and credentials live
-in `~/.plif` and `~/.config/PlifCode` and are left alone unless you delete them.
+in `~/.plif` and are left alone unless you delete them.
 
 ---
 
@@ -64,11 +81,14 @@ Whatever the OS does not enforce is printed in warning colour in the opening
 banner of every session, not hidden behind a verbose flag. The table further
 down this page lists the gaps, including one that is genuinely awkward for us.
 
-**The model is yours.** plif speaks the OpenAI-compatible wire format and
-nothing else, so any endpoint that speaks it works: a hosted frontier model, a
-free tier, or Ollama on your own machine with no key at all. The default model
-is free. There is no account to make and nothing phones home except one cached
-version check you can switch off.
+**The model is yours.** plif speaks the OpenAI-compatible wire format, plus
+Anthropic's own, so any endpoint that speaks either works: a hosted frontier
+model, a free tier, or Ollama on your own machine with no key at all. There is
+no default model — plif installs empty and the first run opens the picker, so
+the first endpoint your code reaches is one you chose. `/model` asks each
+provider what it actually serves rather than trusting a list baked in at
+release time, and shows the models people reach for first. Nothing phones home
+except one cached version check you can switch off.
 
 ## Why not Claude Code or Codex
 
@@ -286,20 +306,22 @@ sees a prompt.
 
 ## MCP
 
-Both `mcp` and `mcpServers` are read from `~/.config/PlifCode/config.jsonc`.
-Local servers run over stdio; remote ones over HTTP.
+Both `mcp` and `mcpServers` are read from `~/.plif/config.toml`. Local servers
+run over stdio; remote ones over HTTP.
 
-```jsonc
-{
-  "mcp": {
-    "local":  { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] },
-    "remote": { "url": "https://service.example.com/mcp" },
-    "keyed":  {
-      "url": "https://service.example.com/mcp",
-      "headers": { "Authorization": "Bearer ${MCP_API_KEY}" }
-    }
-  }
-}
+```toml
+[mcp.local]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+
+[mcp.remote]
+url = "https://service.example.com/mcp"
+
+[mcp.keyed]
+url = "https://service.example.com/mcp"
+
+[mcp.keyed.headers]
+Authorization = "Bearer ${MCP_API_KEY}"
 ```
 
 `${VAR}` and `${VAR:-default}` expand from the process environment — literally

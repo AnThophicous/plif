@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { updatePlan } from '../src/harness/tools.js';
+import { setGoal, updatePlan } from '../src/harness/tools.js';
 import type { ToolContext } from '../src/harness/tools.js';
 
 const context = {} as ToolContext;
@@ -40,5 +40,19 @@ describe('update_plan', () => {
       }, context),
       /at most one checkpoint in progress/,
     );
+  });
+});
+
+describe('set_goal', () => {
+  it('records context without pretending to execute the objective', async () => {
+    let recorded = '';
+    const result = await setGoal.run(
+      { condition: 'all tests pass' },
+      { setGoal: async (condition) => { recorded = condition; } } as never,
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(recorded, 'all tests pass');
+    assert.match(result.output, /without starting work/);
   });
 });

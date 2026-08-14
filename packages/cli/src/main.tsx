@@ -15,6 +15,7 @@
 
 import process from 'node:process';
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 
 import { render } from 'ink';
 import React from 'react';
@@ -23,7 +24,7 @@ import {
   CredentialBroker,
   DEVELOPER_POLICY,
   Engine,
-  OpenAIProvider,
+  createModelProvider,
   WindowsDpapiSecretStore,
   resolveServerConfigs,
   PlifError,
@@ -59,8 +60,9 @@ import {
   profilesOf,
   readAgentInstructions,
   visionTools,
+  ProviderCapabilityCache,
 } from '@plif/core';
-import type { GlobalConfig, Session } from '@plif/core';
+import type { EffortCapabilityCache, GlobalConfig, ModelProvider, Session } from '@plif/core';
 
 import { App } from './app.js';
 import { HELP_TOPICS, USAGE, parseArgv } from './argv.js';
@@ -71,8 +73,8 @@ import { containerMount, containerWorkdir } from './container-paths.js';
 import { activateTheme, loadThemes } from './themes.js';
 import { detachImmediateInkResize } from './terminal-resize.js';
 import { disableBracketedPaste, enableBracketedPaste } from './paste.js';
-
-const VERSION = '0.2.0';
+import { startInteractiveSurface } from './startup.js';
+import { VERSION, VERSION_LABEL } from './version.js';
 
 function buildEngine(flags: GlobalFlags): Engine {
   return new Engine({
@@ -116,7 +118,7 @@ async function main(): Promise<void> {
 
   switch (invocation.kind) {
     case 'version':
-      process.stdout.write(`plif ${VERSION}\n`);
+      process.stdout.write(`plif ${VERSION_LABEL}\n`);
       return;
 
     case 'help': {
@@ -335,7 +337,13 @@ async function runMcp(invocation: Extract<Invocation, { kind: 'mcp' }>): Promise
 }
 
 /** Build a provider from the resolved configuration, or explain why not. */
-async function buildProvider(engine: Engine, flags: GlobalFlags): Promise<OpenAIProvider> {
+async function buildProvider(
+  engine: Engine,
+  flags: GlobalFlags,
+  capabilityCache: EffortCapabilityCache = new ProviderCapabilityCache({
+    file: path.join(engine.paths.root, 'model-capabilities.json'),
+  }),
+): Promise<ModelProvider> {
   const stored = await loadStoredConfig(engine.paths);
   const activeName = typeof stored.activeProfile === 'string' ? stored.activeProfile : undefined;
   const active = activeName ? profilesOf(stored)[activeName] : undefined;
@@ -353,7 +361,7 @@ async function buildProvider(engine: Engine, flags: GlobalFlags): Promise<OpenAI
       ...(check.hint ? { hint: check.hint } : {}),
     });
   }
-  return new OpenAIProvider(config);
+  return createModelProvider(config, { capabilityCache, bus: engine.bus });
 }
 
 async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): Promise<void> {
@@ -371,7 +379,10 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
   );
   const done = installTeardown(engine);
 
-  const provider = await buildProvider(engine, invocation.flags);
+  const capabilityCache = new ProviderCapabilityCache({
+    file: path.join(engine.paths.root, 'model-capabilities.json'),
+  });
+  const provider = await buildProvider(engine, invocation.flags, capabilityCache);
   const promptConfig = resolveConfig(await loadStoredConfig(engine.paths), {
     ...(invocation.flags.model ? { model: invocation.flags.model } : {}),
     ...(invocation.flags.baseURL ? { baseURL: invocation.flags.baseURL } : {}),
@@ -398,20 +409,26 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
   const abort = new AbortController();
   process.on('SIGINT', () => abort.abort());
 
-  // The agent works in a container with the current directory mounted. Read-only by
-  // default: a one-shot question should never be able to edit the project,
-  // and `--write` is the explicit opt-in.
-  const image = await engine.ensureBaseImage();
-  const container = await engine.run({
+  // The first prompt needs several independent inputs. Start their I/O
+  // together so memory/instructions/config latency overlaps image/container
+  // preparation instead of extending time to provider dispatch.
+  const snapshotPromise = engine.memory.snapshot(invocation.flags.workspace);
+  const instructionsPromise = readAgentInstructions(invocation.flags.workspace);
+  const storedPromise = loadStoredConfig(engine.paths);
+  const skillsPromise = SkillRegistry.load({
+    workspace: invocation.flags.workspace,
+    root: engine.paths.root,
+  });
+  const containerPromise = engine.ensureBaseImage().then((image) => engine.run({
     image: image.reference,
     mounts: [
       { ...containerMount(invocation.flags.workspace), mode: invocation.flags.write ? 'rw' : 'ro' },
     ],
     workdir: containerWorkdir(invocation.flags.workspace),
-    // Network is a ceiling, not a licence: policy still asks per host, and in a
-    // one-shot run that question is answered by `--yes` or denied immediately.
+    // Network is a ceiling, not a licence: policy still asks per host, and in
+    // a one-shot run that question is answered by `--yes` or denied immediately.
     capabilities: { network: true, ...(invocation.flags.write ? { hostWrite: true } : {}) },
-  });
+  }));
 
   // Narrate tool use on stderr so stdout stays the answer and stays pipeable.
   engine.bus.on('agent.tool', (event) => {
@@ -427,7 +444,7 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
   // splitter exists at all for models that write `<think>` into content.
   engine.bus.on('agent.thinking', (event) => {
     if (event.phase !== 'end') return;
-    process.stderr.write(`  ${'✦'} thought for ${Math.round((event.durationMs ?? 0) / 100) / 10}s\n`);
+    process.stderr.write(`  ${'•'} thought for ${Math.round((event.durationMs ?? 0) / 100) / 10}s\n`);
   });
 
   engine.bus.on('agent.cycle', (event) => {
@@ -464,13 +481,13 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
     engine.approvals.respond(request.id, { decision: 'deny', remember: true });
   });
 
-  const snapshot = await engine.memory.snapshot(invocation.flags.workspace);
-  const agentInstructions = await readAgentInstructions(invocation.flags.workspace);
-  const skills = await SkillRegistry.load({
-    workspace: invocation.flags.workspace,
-    root: engine.paths.root,
-  });
-  const stored = await loadStoredConfig(engine.paths);
+  const [container, snapshot, agentInstructions, skills, stored] = await Promise.all([
+    containerPromise,
+    snapshotPromise,
+    instructionsPromise,
+    skillsPromise,
+    storedPromise,
+  ]);
   const activeProfileName = typeof stored.activeProfile === 'string' ? stored.activeProfile : undefined;
   const activeProfile = activeProfileName ? profilesOf(stored)[activeProfileName] : undefined;
   const mcp = await McpRegistry.connect(
@@ -490,7 +507,7 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
   const tools = [...DEFAULT_TOOLS, skillTool(skills), createSkillTool(skills), ...mcp.tools()];
   const tasks = new TaskManager({ container, bus: engine.bus, approvals: engine.approvals });
   const lsp = new LspManager({ root: await container.hostPathFor(container.workdir), bus: engine.bus });
-  await lsp.warmup();
+  void lsp.warmup().catch(() => undefined);
   // The subagent inherits the LSP tools but not the parent's own subagent tool
   // — that is what stops recursion, and it is enforced here rather than trusted
   // to the prompt.
@@ -627,7 +644,7 @@ async function runModel(invocation: Extract<Invocation, { kind: 'model' }>): Pro
     return;
   }
 
-  const provider = new OpenAIProvider(config);
+  const provider = createModelProvider(config);
 
   if (invocation.action === 'list') {
     const models = await provider.list();
@@ -665,6 +682,11 @@ async function runInteractive(
     process.exitCode = 1;
     return;
   }
+
+  startInteractiveSurface(process.stdout, {
+    version: VERSION_LABEL,
+    workspace: invocation.flags.workspace,
+  });
 
   const startedAt = Date.now();
   const engine = buildEngine(invocation.flags);
@@ -719,10 +741,13 @@ async function runInteractive(
   // creates one on the first message, so quitting without saying anything
   // leaves no empty row in `plif sessions`.
 
-  let provider: OpenAIProvider | null = null;
+  let provider: ModelProvider | null = null;
   let providerProblem: string | null = null;
+  const capabilityCache = new ProviderCapabilityCache({
+    file: path.join(engine.paths.root, 'model-capabilities.json'),
+  });
   try {
-    provider = await buildProvider(engine, invocation.flags);
+    provider = await buildProvider(engine, invocation.flags, capabilityCache);
   } catch (error) {
     providerProblem = PlifError.is(error)
       ? [error.message, error.hint].filter(Boolean).join('\n')
@@ -763,6 +788,7 @@ async function runInteractive(
       replay={replay}
       version={VERSION}
       provider={provider}
+      capabilityCache={capabilityCache}
       providerProblem={providerProblem}
       effort={appearance.effort}
       initialThemeId={initialTheme.id}
@@ -778,7 +804,7 @@ async function runInteractive(
       themeCatalogue={themeCatalogue}
     />,
     // Ink's own Ctrl+C handling would exit before containers are reaped.
-    { exitOnCtrlC: false },
+    { exitOnCtrlC: false, stdout: process.stdout },
   );
   detachImmediateInkResize(process.stdout, resizeListenersBefore);
 

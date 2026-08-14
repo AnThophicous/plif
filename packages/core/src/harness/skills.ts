@@ -1,9 +1,13 @@
 import fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { PlifError } from '../errors.js';
 import type { Tool, ToolContext, ToolResult } from './tools.js';
 import { DME_SKILLS, DME_SKILL_PACKAGE } from './skill-packages/dme.js';
+import { DEEP_ENGINEERING_AUDIT_SKILL } from './skill-packages/deep-engineering-audit.js';
+import { EDS_BUILTIN_SKILLS } from './skill-packages/eds-builtin-skills.js';
 
 export type SkillScope = 'project' | 'user' | 'builtin';
 
@@ -98,7 +102,11 @@ export class SkillRegistry {
     const registry = new SkillRegistry();
     registry.#sources = sources;
 
-    for (const skill of sources.builtin ?? BUILTIN_SKILLS) registry.#add(skill);
+    const builtin = sources.builtin ?? [
+      ...BUILTIN_SKILLS,
+      ...(await readSkillsFrom(builtinSkillDirectory(), 'builtin')),
+    ];
+    for (const skill of builtin) registry.#add(skill);
     for (const skill of await readSkillsFrom(path.join(sources.root, 'skills'), 'user')) {
       registry.#add(skill);
     }
@@ -202,6 +210,15 @@ export class SkillRegistry {
     }
     return sections.join('\n\n');
   }
+}
+
+function builtinSkillDirectory(): string {
+  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.join(moduleDirectory, '../agenting/skills/builtin'),
+    path.resolve(moduleDirectory, '../../src/agenting/skills/builtin'),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
 }
 
 export function skillTool(registry: SkillRegistry): Tool {
@@ -866,6 +883,8 @@ state and supported size, and did you inspect the final pixels after the last
 change? If any answer is no, the interface is not finished.`,
   },
   ...DME_SKILLS,
+  ...EDS_BUILTIN_SKILLS,
+  DEEP_ENGINEERING_AUDIT_SKILL,
   {
     name: 'investigate',
     description: 'Find the cause of a bug or failure before changing anything',

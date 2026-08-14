@@ -12,8 +12,16 @@ import {
   reconcileCompletionUsage,
 } from '../src/interaction-metrics.js';
 import { sessionFrameHeight } from '../src/terminal-resize.js';
+import { color, glyph } from '../src/theme.js';
 
 describe('minimal TUI hierarchy', () => {
+  it('keeps the quiet shell on one surface with one disclosure marker', () => {
+    assert.notEqual(color('panel'), color('surface'));
+    assert.equal(color('surface'), '#25282f');
+    assert.ok(glyph.disclosure.length > 0);
+    assert.ok(glyph.caret.length > 0);
+  });
+
   it('shows one authoritative running state by priority', () => {
     assert.deepEqual(
       deriveLiveStatus({ agent: true, mcp: 'connecting github', compacting: false, queued: 2 }),

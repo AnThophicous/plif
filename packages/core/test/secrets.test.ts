@@ -7,6 +7,7 @@ import { describe, it } from 'node:test';
 import {
   CredentialBroker,
   MemorySecretStore,
+  personalSecretStorePath,
   WindowsDpapiSecretStore,
 } from '../src/auth/secrets.js';
 import { EventBus } from '../src/events/bus.js';
@@ -69,6 +70,13 @@ describe('the configuration the model is allowed to read', () => {
 });
 
 describe('the credential store', () => {
+  it('stores personal credentials inside the Plif root', () => {
+    assert.equal(
+      personalSecretStorePath('C:/Users/Plif'),
+      path.join('C:/Users/Plif', '.plif', 'secrets'),
+    );
+  });
+
   it('round-trips a value without writing it in the clear', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-secrets-'));
     const runner = async (_mode: 'protect' | 'unprotect', input: string) =>

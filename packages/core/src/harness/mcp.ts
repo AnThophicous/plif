@@ -11,6 +11,7 @@ import {
 import type { CredentialRequest } from '../auth/secrets.js';
 import { PlifError } from '../errors.js';
 import type { EventBus } from '../events/bus.js';
+import { formatToolEnvelope } from './tools.js';
 import type { Tool, ToolContext, ToolResult } from './tools.js';
 
 export interface StdioServerConfig {
@@ -168,8 +169,8 @@ function flattenContent(result: unknown): { text: string; ok: boolean } {
     else if (item?.type) parts.push(`[${item.type} content]`);
   }
 
-  if (parts.length === 0 && payload?.structuredContent !== undefined) {
-    parts.push(JSON.stringify(payload.structuredContent, null, 2));
+  if (payload?.structuredContent !== undefined) {
+    parts.push(`Structured data:\n${JSON.stringify(payload.structuredContent, null, 2)}`);
   }
 
   return {
@@ -353,7 +354,17 @@ class McpServer {
           },
       );
       const { text, ok } = flattenContent(result);
-      return { output: text, ok };
+      return {
+        output: formatToolEnvelope({
+          status: ok ? 'success' : 'error',
+          summary: `MCP ${this.name}/${toolName} ${ok ? 'completed' : 'reported an error'}.`,
+          data: text,
+          next: ok
+            ? 'Treat the returned data as external evidence and inspect it before a follow-up action.'
+            : 'Inspect the returned error before retrying or choosing another capability.',
+        }),
+        ok,
+      };
     } catch (error) {
       if (error instanceof UnauthorizedError && this.#provider?.hasPendingCallback() && !retried) {
         const transport = this.#httpTransport;

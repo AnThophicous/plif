@@ -27,8 +27,8 @@ const VERBS = [
   'Resolving',
 ];
 
-const PULSE = supportsRichGlyphs ? ['✦', '✧', '✦', '✶'] : ['*', '+', '*', 'x'];
-const PLIF_PULSE = supportsRichGlyphs ? ['◈', '◇', '✦', '◇'] : ['#', '+', '*', '+'];
+const PULSE = supportsRichGlyphs ? ['•', '·', '•', '·'] : ['*', '+', '*', 'x'];
+const PLIF_PULSE = supportsRichGlyphs ? ['+', '×', '+', '×'] : ['#', '+', '*', '+'];
 
 const TIPS = [
   'Esc cancels without killing the container',
@@ -40,7 +40,7 @@ const TIPS = [
 ];
 
 const VERB_EVERY_MS = 4_000;
-const PULSE_EVERY_MS = 80;
+const PULSE_EVERY_MS = 360;
 const TIP_AFTER_MS = 12_000;
 
 export interface ThinkingProps {

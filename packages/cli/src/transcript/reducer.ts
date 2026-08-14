@@ -36,6 +36,49 @@ function appendFinalized(state: TranscriptState, cell: TranscriptCell): Transcri
   return { ...state, finalized: [...state.finalized, finalized(cell)] };
 }
 
+function streamCellId(
+  lane: 'assistant' | 'reasoning',
+  turnId: string,
+  epoch: number,
+): string {
+  return `stream:${lane}:${turnId}:${epoch}`;
+}
+
+function isStreamCell(cell: TranscriptCell, turnId: string, lane?: 'assistant' | 'reasoning'): boolean {
+  const prefix = lane ? `stream:${lane}:${turnId}:` : 'stream:';
+  return cell.turnId === turnId && cell.id.startsWith(prefix);
+}
+
+/** Replace every ephemeral cell for one lane with its single durable form. */
+function replaceStreamLane(
+  state: TranscriptState,
+  lane: 'assistant' | 'reasoning',
+  turnId: string,
+  cell: TranscriptCell,
+): { state: TranscriptState; replaced: boolean } {
+  const first = state.finalized.findIndex((item) => isStreamCell(item, turnId, lane));
+  const activeMatches = state.active ? isStreamCell(state.active, turnId, lane) : false;
+  if (first < 0 && !activeMatches) return { state, replaced: false };
+
+  if (first >= 0) {
+    const without = state.finalized.filter((item) => !isStreamCell(item, turnId, lane));
+    return {
+      replaced: true,
+      state: {
+        ...state,
+        finalized: [
+          ...without.slice(0, first),
+          finalized(cell),
+          ...without.slice(first),
+        ],
+        active: activeMatches ? null : state.active,
+      },
+    };
+  }
+
+  return { replaced: true, state: { ...state, active: cell } };
+}
+
 function cellBase(event: ConversationEvent) {
   return {
     id: event.eventId,
@@ -69,29 +112,29 @@ function project(state: TranscriptState, event: ConversationEvent): TranscriptSt
       if (!event.text.trim()) return state;
       return beginCell(state, { ...cellBase(event), kind: 'user', text: event.text });
 
-    case 'assistant.message':
-      if (!event.text.trim()) return state;
-      if (
-        state.active?.kind === 'assistant' &&
-        state.active.turnId === event.turnId &&
-        state.active.id === `stream:${event.turnId}`
-      ) {
-        return {
-          ...state,
-          active: {
-            ...cellBase(event),
-            kind: 'assistant',
-            text: event.text,
-            phase: event.phase,
-          },
+    case 'assistant.message': {
+      let next = state;
+      if (event.reasoning?.trim()) {
+        const reasoning: TranscriptCell = {
+          ...cellBase(event),
+          id: `${event.eventId}:reasoning`,
+          kind: 'reasoning',
+          text: event.reasoning,
         };
+        const replacement = replaceStreamLane(next, 'reasoning', event.turnId, reasoning);
+        next = replacement.replaced ? replacement.state : beginCell(next, reasoning);
       }
-      return beginCell(state, {
+
+      if (!event.text.trim()) return next;
+      const assistant: TranscriptCell = {
         ...cellBase(event),
         kind: 'assistant',
         text: event.text,
         phase: event.phase,
-      });
+      };
+      const replacement = replaceStreamLane(next, 'assistant', event.turnId, assistant);
+      return replacement.replaced ? replacement.state : beginCell(next, assistant);
+    }
 
     case 'tool.started': {
       const calls = new Map(state.calls);
@@ -273,32 +316,43 @@ export function transcriptReducer(
   action: TranscriptAction,
 ): TranscriptState {
   if (action.type === 'reset') return initialTranscriptState;
-  if (action.type === 'assistant.reset') {
-    return state.active?.kind === 'assistant' &&
-      state.active.id === `stream:${action.turnId}`
-      ? { ...state, active: null }
-      : state;
+  if (action.type === 'stream.reset') {
+    return {
+      ...state,
+      finalized: state.finalized.filter((cell) => !isStreamCell(cell, action.turnId)),
+      active: state.active && isStreamCell(state.active, action.turnId) ? null : state.active,
+    };
   }
-  if (action.type === 'assistant.delta') {
-    if (!action.delta) return state;
-    if (
-      state.active?.kind === 'assistant' &&
-      state.active.turnId === action.turnId &&
-      state.active.id === `stream:${action.turnId}`
-    ) {
+  if (action.type === 'assistant.frame' || action.type === 'reasoning.frame') {
+    if (!action.text) return state;
+    const lane = action.type === 'assistant.frame' ? 'assistant' : 'reasoning';
+    const id = streamCellId(lane, action.turnId, action.epoch);
+    if (state.active?.id === id && state.active.kind === lane) {
       return {
         ...state,
-        active: { ...state.active, text: state.active.text + action.delta },
+        active: { ...state.active, text: action.text },
+      };
+    }
+    const finalizedIndex = state.finalized.findIndex((cell) => cell.id === id && cell.kind === lane);
+    if (finalizedIndex >= 0) {
+      return {
+        ...state,
+        finalized: state.finalized.map((cell, index) =>
+          index === finalizedIndex && (cell.kind === 'assistant' || cell.kind === 'reasoning')
+            ? { ...cell, text: action.text }
+            : cell,
+        ),
       };
     }
     return beginCell(state, {
-      id: `stream:${action.turnId}`,
+      id,
       turnId: action.turnId,
       at: action.at,
-      kind: 'assistant',
       finalized: false,
-      text: action.delta,
-      phase: 'final',
+      text: action.text,
+      ...(lane === 'assistant'
+        ? { kind: 'assistant' as const, phase: 'final' as const }
+        : { kind: 'reasoning' as const }),
     });
   }
   if (state.seenEventIds.has(action.event.eventId)) return state;

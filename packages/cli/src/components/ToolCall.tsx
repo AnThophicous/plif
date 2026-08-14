@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
-import { Diff } from './Diff.js';
+import { Diff, DiffSummary } from './Diff.js';
 import { useSpinnerFrame } from './Spinner.js';
 import { highlightShell } from '../shell-highlight.js';
 import { color, glyph, syntaxColor, truncate } from '../theme.js';
@@ -51,19 +51,35 @@ export function ToolCall({ name, category = 'tool', target, summary, output, dif
   const hidden = outputLines.length - shown.length;
   const quiet = name === 'Executed';
 
+  /*
+    `Update(path)` rather than `± Edit · Update path 3 lines ✓`.
+
+    The old header said the same thing up to four ways: a category glyph, a
+    category label, the verb, and a tick that only ever meant "not red". A
+    reader scanning twenty of these does not need the taxonomy — they need the
+    verb and what it was done to, which is exactly what a function call already
+    reads as. Failure keeps its mark, because that is the one status worth
+    interrupting the scan for; success is carried by the bullet's colour.
+  */
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={color(identity.tone)}>{glyph[identity.marker]} </Text>
-        <Text color={color(identity.tone)} bold={!quiet}>{identity.label}</Text>
-        <Text color={color('ghost')}> · {name}</Text>
-        {targetLines[0] ? <><Text> </Text><Command value={targetLines[0]} shell={category === 'shell'} /></> : null}
-        {summary ? <Text color={color('ghost')}> {summary}</Text> : null}
-        <Text color={color(running ? 'accent' : ok ? 'success' : 'danger')}> {running ? spinner : ok ? glyph.done : glyph.failed}</Text>
+        <Text color={color(running ? 'accent' : ok ? 'accentDim' : 'danger')}>
+          {running ? spinner : glyph.tool}{' '}
+        </Text>
+        <Text color={color(quiet ? 'muted' : 'text')} bold={!quiet}>{name}</Text>
+        {targetLines[0] ? (
+          <>
+            <Text color={color('ghost')}>(</Text>
+            <Command value={targetLines[0]} shell={category === 'shell'} />
+            <Text color={color('ghost')}>{targetLines.length > 1 ? '…' : ''})</Text>
+          </>
+        ) : null}
+        {!ok && <Text color={color('danger')}> {glyph.failed}</Text>}
       </Box>
-      {targetLines.slice(1).map((line, index) => (
-        <Box key={`target-${index}`}><Text color={color('ghost')}>  {glyph.rail} </Text><Command value={line} shell={category === 'shell'} /></Box>
-      ))}
+      {summary && !diff && !edits?.length ? (
+        <Box><Text color={color('ghost')}>  {summary}</Text></Box>
+      ) : null}
       {executions?.length ? (
         <ExecutionGroup executions={executions} expand={expand} width={width} />
       ) : planItems?.length ? (
@@ -73,12 +89,18 @@ export function ToolCall({ name, category = 'tool', target, summary, output, dif
           {edits.map((edit, index) => (
             <Box key={`${edit.path}:${index}`} flexDirection="column" paddingLeft={2}>
               <Box><Text color={color('ghost')}>{glyph.branch} </Text><Text color={color('muted')} bold>{edit.path}</Text></Box>
+              <Box paddingLeft={2}><DiffSummary diff={edit.diff} /></Box>
               <Diff diff={edit.diff} width={width - 6} path={edit.path} expand={expand} />
             </Box>
           ))}
         </Box>
       ) : diff ? (
-        <Diff diff={diff} width={width - 4} expand={expand} {...(target ? { path: target } : {})} />
+        <Box flexDirection="column">
+          {/* What changed, before how it changed. The count is the part most
+              reads of a diff actually stop at. */}
+          <Box paddingLeft={2}><DiffSummary diff={diff} /></Box>
+          <Diff diff={diff} width={width - 4} expand={expand} {...(target ? { path: target } : {})} />
+        </Box>
       ) : shown.length > 0 ? (
         <Box flexDirection="column">
           <Text color={color('ghost')}>  {glyph.branch}</Text>
@@ -91,8 +113,50 @@ export function ToolCall({ name, category = 'tool', target, summary, output, dif
   );
 }
 
+/**
+ * How many of each thing a batch did, in one line.
+ *
+ * "Reading 6 files, running 11 shell commands" is what a person would say if
+ * you asked them what the agent was up to. Eleven separate rows saying `Bash`
+ * is what a log says, and a log is not what somebody watching wants.
+ */
+export function summariseExecutions(
+  executions: readonly { readonly kind?: 'Read' | 'List'; readonly target?: string }[],
+  running: boolean,
+): string {
+  const counts = new Map<string, number>();
+  for (const execution of executions) {
+    const noun = execution.kind === 'Read' ? 'file' : execution.kind === 'List' ? 'directory' : 'shell command';
+    counts.set(noun, (counts.get(noun) ?? 0) + 1);
+  }
+  const verbFor = (noun: string): string =>
+    noun === 'file' ? (running ? 'reading' : 'read')
+      : noun === 'directory' ? (running ? 'listing' : 'listed')
+      : running ? 'running' : 'ran';
+
+  const parts = [...counts].map(
+    ([noun, count]) => `${verbFor(noun)} ${count} ${count === 1 ? noun : `${noun}s`}`,
+  );
+  const joined = parts.join(', ');
+  return joined.charAt(0).toUpperCase() + joined.slice(1);
+}
+
 function ExecutionGroup({ executions, expand, width }: { readonly executions: readonly { readonly kind?: 'Read' | 'List'; readonly target?: string; readonly output?: string; readonly ok?: boolean }[]; readonly expand: boolean; readonly width: number }): React.ReactElement | null {
-  if (!expand) return null;
+  if (!expand) {
+    // Collapsed, a batch is one line plus the single item worth naming — the
+    // most recent one, because that is the one still in flight.
+    const last = executions.at(-1)?.target;
+    return (
+      <Box flexDirection="column" paddingLeft={2}>
+        <Text color={color('ghost')}>{summariseExecutions(executions, false)}</Text>
+        {last ? (
+          <Text color={color('faint')}>
+            {glyph.hook}  {truncate(last, Math.max(12, width - 6))}
+          </Text>
+        ) : null}
+      </Box>
+    );
+  }
   return (
     <Box flexDirection="column" paddingLeft={2}>
       {executions.map((execution, index) => (

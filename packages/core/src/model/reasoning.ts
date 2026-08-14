@@ -144,17 +144,42 @@ function partialTagLength(haystack: string, tags: readonly string[]): number {
  * is not enough — OpenRouter sends `{ text }` under some upstreams and a plain
  * string under others, on the same endpoint.
  */
-export function reasoningFromDelta(delta: unknown): string | undefined {
+export type ReasoningSemantics = 'delta' | 'snapshot' | 'unknown';
+
+export type ReasoningSource =
+  | 'reasoning_content'
+  | 'reasoning'
+  | 'thinking'
+  | 'thought'
+  | 'reasoning_details';
+
+export interface ReasoningObservation {
+  readonly text: string;
+  readonly source: ReasoningSource;
+  readonly semantics: ReasoningSemantics;
+}
+
+/**
+ * Preserve the wire field alongside its text so normalization can keep one raw
+ * cursor per source. String side channels vary by host; structured detail
+ * arrays are cumulative snapshots in the OpenAI-compatible shape.
+ */
+export function reasoningObservationFromDelta(delta: unknown): ReasoningObservation | undefined {
   if (!delta || typeof delta !== 'object') return undefined;
   const fields = delta as Record<string, unknown>;
 
-  for (const key of ['reasoning_content', 'reasoning', 'thinking', 'thought']) {
+  const stringSources = ['reasoning_content', 'reasoning', 'thinking', 'thought'] as const;
+  for (const key of stringSources) {
     const value = fields[key];
-    if (typeof value === 'string' && value) return value;
+    if (typeof value === 'string' && value) {
+      return { text: value, source: key, semantics: 'unknown' };
+    }
     if (value && typeof value === 'object') {
       const text = (value as { text?: unknown; content?: unknown }).text ??
         (value as { content?: unknown }).content;
-      if (typeof text === 'string' && text) return text;
+      if (typeof text === 'string' && text) {
+        return { text, source: key, semantics: 'unknown' };
+      }
     }
   }
 
@@ -168,10 +193,17 @@ export function reasoningFromDelta(delta: unknown): string | undefined {
           : '',
       )
       .join('');
-    if (joined) return joined;
+    if (joined) {
+      return { text: joined, source: 'reasoning_details', semantics: 'snapshot' };
+    }
   }
 
   return undefined;
+}
+
+/** Backwards-compatible text-only extraction for existing consumers. */
+export function reasoningFromDelta(delta: unknown): string | undefined {
+  return reasoningObservationFromDelta(delta)?.text;
 }
 
 /**
@@ -180,21 +212,41 @@ export function reasoningFromDelta(delta: unknown): string | undefined {
  */
 export class ReasoningDeltaNormalizer {
   #value = '';
+  #lastRawBySource = new Map<ReasoningSource, string>();
 
   get value(): string {
     return this.#value;
   }
 
-  push(incoming: string): string {
+  push(input: string | ReasoningObservation): string {
+    const observation: ReasoningObservation = typeof input === 'string'
+      ? { text: input, source: 'reasoning', semantics: 'unknown' }
+      : input;
+    const incoming = observation.text;
     if (!incoming) return '';
-    // Four characters is long enough to avoid mistaking ordinary one-token
-    // repetition for a snapshot, while catching cumulative streams early.
-    if (this.#value.length >= 4 && incoming.startsWith(this.#value)) {
-      const delta = incoming.slice(this.#value.length);
-      this.#value = incoming;
-      return delta;
+
+    const previousRaw = this.#lastRawBySource.get(observation.source) ?? '';
+    this.#lastRawBySource.set(observation.source, incoming);
+
+    let emitted = incoming;
+    if (observation.semantics === 'snapshot') {
+      if (incoming === previousRaw) emitted = '';
+      else if (previousRaw && incoming.startsWith(previousRaw)) {
+        emitted = incoming.slice(previousRaw.length);
+      }
+    } else if (
+      observation.semantics === 'unknown' &&
+      previousRaw &&
+      incoming.length > previousRaw.length &&
+      incoming.startsWith(previousRaw)
+    ) {
+      // Equality remains a delta. It is a common token-stream shape and there
+      // is no information on the wire that can distinguish it from a repeated
+      // snapshot. Only a strict extension is safe to infer as cumulative.
+      emitted = incoming.slice(previousRaw.length);
     }
-    this.#value += incoming;
-    return incoming;
+
+    this.#value += emitted;
+    return emitted;
   }
 }
