@@ -37,7 +37,7 @@ export function useHighlightClock(active = true, frameMs = 16): number {
   const frame = useAnimationFrame();
   if (!active) return 0;
   // Keep this helper's old elapsed-millisecond contract for the pure colour
-  // functions while sourcing every tick from the single shared 90 ms clock.
+  // functions while sourcing every tick from the single shared animation clock.
   // The argument remains for source compatibility and phase tuning at the
   // call sites; it must not create a second timer.
   void frameMs;
