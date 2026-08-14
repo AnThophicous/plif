@@ -1,11 +1,5 @@
 <div align="center">
 
-```
-▄▀▀▄ ▄▀▀▄
-▌   ▀   ▐    p l i f
-▀▄▄▀ ▀▄▄▀
-```
-
 **Plif 0.3.0 — the stable, adaptive coding agent for your terminal.**
 
 Bring your own model. Configure the provider yourself. Plif 0.3.0 is built for
