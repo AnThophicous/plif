@@ -885,9 +885,6 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         };
       }
       const matches = filterItems(state.picker.items ?? [], action.filter);
-      const previous = state.picker.groups
-        ? pickerRows(state.picker.groups, state.picker.expanded ?? [], state.picker.filter)
-        : [];
       return {
         ...state,
         picker: {
@@ -902,7 +899,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       if (!state.picker) return state;
       const matches = filterItems(state.picker.items ?? [], state.picker.filter);
       if (matches.length === 0) return state;
-      const next = (state.picker.selected + action.delta + matches.length) % matches.length;
+      const next = Math.max(0, Math.min(matches.length - 1, state.picker.selected + action.delta));
       return { ...state, picker: { ...state.picker, selected: next } };
     }
 
@@ -910,7 +907,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       if (!state.picker?.groups) return state;
       const matches = pickerRows(state.picker.groups, state.picker.expanded ?? [], state.picker.filter);
       if (matches.length === 0) return state;
-      const next = (state.picker.selected + action.delta + matches.length) % matches.length;
+      const next = Math.max(0, Math.min(matches.length - 1, state.picker.selected + action.delta));
       return { ...state, picker: { ...state.picker, selected: next } };
     }
 

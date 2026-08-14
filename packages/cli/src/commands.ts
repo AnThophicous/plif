@@ -44,6 +44,7 @@ import {
 } from '@plif/core';
 
 import { formatCapabilities } from './format.js';
+import { effortLabel, effortPickerItems } from './components/Picker.js';
 import type { PickerGroup, PickerItem } from './components/Picker.js';
 
 import { entry } from './session.js';
@@ -187,8 +188,27 @@ async function providerGroup(
     label: catalog.label,
     section,
     detail: discovered.live ? `${catalog.description} · live` : catalog.description,
+    current: items.some((item) => item.current),
     items,
   };
+}
+
+/** Keep a provider picker responsive when several configured endpoints answer slowly. */
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  limit: number,
+  work: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const result: R[] = [];
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < values.length) {
+      const index = cursor++;
+      result[index] = await work(values[index]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, () => worker()));
+  return result;
 }
 
 /** `moonshotai/kimi-k2-instruct` reads better as `kimi k2 instruct`. */
@@ -254,7 +274,7 @@ export const COMMANDS: readonly Command[] = [
   {
     name: 'mcp',
     args: '[<server> login]',
-    summary: 'Browse MCP servers, skills, and the Claude plugin marketplace',
+    summary: 'Browse and manage MCP servers, skills, and the plugin marketplace',
     /**
      * Both word orders are accepted. `/mcp github login` reads as a sentence
      * and `/mcp login github` is the shape every other CLI uses; guessing
@@ -655,14 +675,13 @@ export const COMMANDS: readonly Command[] = [
       // Somebody who wrote an endpoint into their config should find it at the
       // top, not somewhere inside a list of things Plif happens to ship.
       const mine = userCatalog(stored);
-      const groups: PickerGroup[] = await Promise.all([
-        ...mine.map((entryProvider) =>
-          providerGroup(entryProvider, 'your providers', currentModel, stored, context.credentials),
-        ),
-        ...MODEL_CATALOG.map((entryProvider) =>
-          providerGroup(entryProvider, 'built into plif', currentModel, stored, context.credentials),
-        ),
-      ]);
+      const providers = [
+        ...mine.map((entryProvider) => ({ entryProvider, section: 'your providers' })),
+        ...MODEL_CATALOG.map((entryProvider) => ({ entryProvider, section: 'built into Codex' })),
+      ];
+      const groups: PickerGroup[] = await mapWithConcurrency(providers, 3, ({ entryProvider, section }) =>
+        providerGroup(entryProvider, section, currentModel, stored, context.credentials),
+      );
 
       const currentGroup = groups.find((group) =>
         group.items.some((item) => item.current),
@@ -670,7 +689,7 @@ export const COMMANDS: readonly Command[] = [
       const expanded = currentGroup ? [currentGroup.id] : [];
 
       context.openPicker({
-        title: 'select a provider and model',
+        title: 'Select provider → model',
         groups,
         expanded,
         selected: Math.max(0, groups.findIndex((group) => group.id === currentGroup?.id)),
@@ -690,15 +709,36 @@ export const COMMANDS: readonly Command[] = [
       const stored = await loadGlobalConfig();
       const current = stored.effort ?? 'default';
       const value = argv[0];
-      if (!value) return ok(entry('notice', `effort: ${current === 'plif' ? 'Plif' : current}`, { tone: 'accent' }));
+      const available = context.supportedEfforts?.() ?? [];
+      if (!value) {
+        context.openPicker({
+          title: `Select effort · ${context.model?.info.id ?? 'current model'}`,
+          items: [
+            {
+              value: 'default',
+              label: 'Default',
+              detail: 'let the provider choose',
+              current: current === 'default',
+            },
+            ...effortPickerItems(available, current),
+          ],
+          onPick: (picked) => {
+            void context.setEffort(picked === 'default' ? undefined : picked as Effort);
+          },
+        });
+        return ok(entry('notice', 'select reasoning effort', {
+          tone: 'accent',
+          subtitle: `current: ${effortLabel(current)}`,
+        }));
+      }
       if (!['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode', 'plif', 'default'].includes(value)) {
         throw new PlifError('INVALID_ARGUMENT', 'usage: /effort [low|medium|high|xhigh|max|ultra|ultracode|plif|default]');
       }
-      if (value !== 'default' && context.supportedEfforts && !context.supportedEfforts().includes(value as Effort)) {
+      if (value !== 'default' && !available.includes(value as Effort)) {
         throw new PlifError('INVALID_ARGUMENT', `${value} is not supported by the selected model`);
       }
       await context.setEffort(value === 'default' ? undefined : value as Effort);
-      return ok(entry('notice', `effort: ${value}`, {
+      return ok(entry('notice', `effort: ${effortLabel(value)}`, {
         tone: 'accent',
         subtitle: 'conversation reset for the new model settings',
       }));
