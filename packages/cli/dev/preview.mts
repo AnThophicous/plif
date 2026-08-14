@@ -210,6 +210,19 @@ const SCENARIOS: Record<string, Step[]> = {
     { capture: 'filtro por provider e modelo' },
   ],
 
+  /** The credential flow: context first, masked entry second, storage choice third. */
+  'api-key': [
+    { wait: 150 },
+    { type: '\x1b' },
+    { wait: 120 },
+    { type: '/model z-ai/glm-5.2\r' },
+    { wait: 1500 },
+    { capture: 'provider e modelo antes da chave' },
+    { type: 'sk-preview-demo' },
+    { wait: 400 },
+    { capture: 'campo mascarado e escolhas de armazenamento' },
+  ],
+
   /** The agent answering with markdown, tool rows, and the thinking line. */
   agent: [
     { wait: 150 },
@@ -577,6 +590,19 @@ const SCENARIOS: Record<string, Step[]> = {
     { capture: 'moved down, detail follows' },
   ],
 
+  /** Fixed statuses so the MCP browser can be inspected without local config. */
+  'mcp-statuses': [
+    { wait: 200 },
+    { type: '\x1b' },
+    { wait: 120 },
+    { emit: ['mcp.status', { server: 'docs', transport: 'http', connected: true, toolCount: 4, detail: '4 tools' }] },
+    { emit: ['mcp.status', { server: 'calendar', transport: 'http', connected: false, toolCount: 0, detail: 'closed' }] },
+    { emit: ['mcp.status', { server: 'search', transport: 'http', connected: false, toolCount: 0, detail: '401 Unauthorized' }] },
+    { type: '/mcp\r' },
+    { wait: 600 },
+    { capture: 'MCP connected, disconnected and error states' },
+  ],
+
   /** The compaction bar, part-way up the ladder. */
   compaction: [
     { wait: 200 },
@@ -707,6 +733,11 @@ const previewProvider = previewCheck.ok
   ? new OpenAIProvider(previewConfig, { capabilityCache, bus: engine.bus })
   : null;
 const previewProblem = previewCheck.ok ? null : (previewCheck.problem ?? 'model is not configured');
+// Only the catalogue scenario is about the automatic first-run chooser. The
+// other previews need their scripted command to reach the screen under test.
+const previewProblemForScenario = scenarioName === 'model-catalog'
+  ? previewProblem
+  : previewCheck.ok ? null : 'preview unavailable';
 
 const app = render(React.createElement(App, {
     engine,
@@ -721,7 +752,7 @@ const app = render(React.createElement(App, {
     // exactly the configuration most people run.
     provider: previewProvider,
     capabilityCache,
-    providerProblem: previewProblem,
+    providerProblem: previewProblemForScenario,
     tools: (await import('@plif/core')).DEFAULT_TOOLS,
     skillCatalogue: '',
     mcpCatalogue: '',

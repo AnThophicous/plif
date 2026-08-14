@@ -1442,7 +1442,7 @@ export function App({
       }
 
       const plugins = browser.catalog
-        ? searchPlugins(browser.catalog.plugins, browser.filter, 400)
+        ? searchPlugins(browser.catalog.plugins, browser.filter, 120)
         : [];
       return plugins.map((plugin) => ({
         id: plugin.name,
@@ -1460,7 +1460,15 @@ export function App({
   /** Recompute the visible list whenever anything it derives from moves. */
   useEffect(() => {
     if (!state.browser) return;
-    dispatch({ type: 'browser.rows', rows: browserRows(state.browser) });
+    const nextRows = browserRows(state.browser);
+    const unchanged = state.browser.rows.length === nextRows.length &&
+      state.browser.rows.every((row, index) => {
+        const next = nextRows[index];
+        return next !== undefined && row.id === next.id && row.title === next.title &&
+          row.mark === next.mark && row.tone === next.tone;
+      });
+    if (unchanged) return;
+    dispatch({ type: 'browser.rows', rows: nextRows });
     // `rows` is intentionally not a dependency: this action sets it, and
     // depending on it would loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3506,7 +3514,7 @@ export function App({
     (showCompletions ? suggestionRows + (completions.length > suggestionRows ? 1 : 0) : 0) +
     (showEmoji ? suggestionRows + (emojiMatches.length > suggestionRows ? 1 : 0) : 0) +
     queueHeight(state.queue) +
-    (state.picker ? pickerRows + 8 : 0) +
+    (state.picker && !state.question ? pickerRows + 10 : 0) +
     (state.approval ? approvalHeight(compactDialogs) : 0) +
     (state.question ? questionHeight(state.question, compactDialogs, state.questionExpanded) : 0) +
     (state.compaction ? COMPACTION_HEIGHT + 1 : 0) +
