@@ -35,7 +35,7 @@ const EFFORT_LABELS: Readonly<Record<string, string>> = {
   max: 'Max',
   ultra: 'Ultra',
   ultracode: 'UltraCode',
-  plif: 'Codex',
+  plif: 'PLIF',
 };
 
 /** Keep the internal compatibility value `plif` out of the user-facing UI. */
