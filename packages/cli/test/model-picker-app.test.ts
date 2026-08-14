@@ -61,12 +61,12 @@ test('/model can request a missing provider key from the mounted app', async () 
 
   const stdout = new CaptureOutput();
   const stdin = new TypedInput();
-  let asked = '';
+  const asked: string[] = [];
   const askedPromise = new Promise<void>((resolve) => {
     engine.bus.on('question.asked', (event) => {
-      asked = event.text;
-      engine.questions.answer(event.id, 'test-key');
-      resolve();
+      asked.push(event.text);
+      engine.questions.answer(event.id, asked.length === 1 ? 'test-key' : 'cancel');
+      if (asked.length === 2) resolve();
     });
   });
   const app = render(
@@ -101,7 +101,8 @@ test('/model can request a missing provider key from the mounted app', async () 
       askedPromise,
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`model key prompt timed out\n${stdout.output}`)), 2_000)),
     ]);
-    assert.match(asked, /API key required for z-ai\/glm-5\.2/);
+    assert.match(asked[0] ?? '', /API key · NVIDIA NIM \/ z-ai\/glm-5\.2/);
+    assert.match(asked[1] ?? '', /Use this key for NVIDIA NIM \/ z-ai\/glm-5\.2/);
   } finally {
     app.unmount();
     await engine.shutdown();

@@ -143,6 +143,7 @@ import { preToolProseAction } from './pre-tool-prose.js';
 import { applyEffortPalette, color, formatCount, formatDuration, glyph, layout } from './theme.js';
 import { containerMount, containerWorkdir } from './container-paths.js';
 import { authNotice } from './auth.js';
+import { CREDENTIAL_USE_OPTIONS, credentialChoice, credentialProbeFailure, credentialPrompt } from './credentials.js';
 import { completedTitle, titleForWorking, writeTerminalTitle } from './terminal-title.js';
 import { sessionFrameHeight, terminalFrameRows } from './terminal-resize.js';
 import { activateTheme } from './themes.js';
@@ -647,6 +648,10 @@ export function App({
        * minutes of the agent waiting for an answer nobody had been shown.
        */
       engine.bus.on('question.asked', (event) => {
+        // A credential question can be raised by a picker selection. Keep one
+        // interaction surface visible at a time so the provider/model context
+        // and the masked field do not compete for the same terminal rows.
+        dispatch({ type: 'picker.close' });
         dispatch({
           type: 'question.push',
           question: {
@@ -1472,21 +1477,42 @@ export function App({
     return () => clearInterval(timer);
   }, []);
 
-  const requestModelKey = useCallback(async (modelName: string, hint?: string): Promise<string | null> => {
+  const requestModelKey = useCallback(async (
+    providerName: string,
+    modelName: string,
+    keyEnv: string | undefined,
+    hint?: string,
+  ): Promise<{ key: string; persist: boolean } | null> => {
+    dispatch({ type: 'picker.close' });
+    const prompt = credentialPrompt(providerName, modelName, keyEnv);
     const answer = await engine.questions.ask({
-      text: `API key required for ${modelName}. Paste it below.`,
-      secret: true,
-      context: hint ?? 'This model is marked NeedKey. Esc cancels; the key is stored in your personal Plif configuration.',
+      text: prompt.text,
+      secret: prompt.secret,
+      context: [prompt.context, hint].filter(Boolean).join('\n'),
     });
     const key = answer?.trim();
-    if (key) return key;
-    push(
-      entry('notice', 'model key was not entered', {
+    if (!key) {
+      push(entry('notice', 'API key entry cancelled', {
         tone: 'warn',
-        subtitle: 'Use /models to choose the model again and reopen this credential popup.',
-      }),
-    );
-    return null;
+        subtitle: 'The current model and session are unchanged.',
+      }));
+      return null;
+    }
+
+    const use = credentialChoice(await engine.questions.ask({
+      text: `Use this key for ${providerName} / ${modelName}?`,
+      secret: true,
+      options: CREDENTIAL_USE_OPTIONS,
+      context: 'Choose how this key should live. Esc cancels without changing the session.',
+    }));
+    if (use === 'cancel') {
+      push(entry('notice', 'API key discarded', {
+        tone: 'warn',
+        subtitle: 'Nothing was saved and the current session is unchanged.',
+      }));
+      return null;
+    }
+    return { key, persist: use === 'save' };
   }, [engine, push]);
 
   const recoverModelAuth = useCallback(async (error: unknown): Promise<boolean> => {
@@ -1494,20 +1520,36 @@ export function App({
     const stored = await loadStoredConfig(engine.paths);
     const preset = stored.preset ?? '';
     const model = providerRef.current?.info.id ?? stored.model ?? 'the selected model';
+    const providerName = findCatalogProvider(preset)?.label ?? (preset || 'This provider');
+    const keyEnv = PRESETS[preset as keyof typeof PRESETS]?.keyEnv;
     const cleared = forgetProviderKey(stored, preset);
     await saveStoredConfig(engine.paths, cleared);
-    const key = await requestModelKey(model, [
-      `${preset || 'This provider'} rejected the saved API key.`,
+    const credential = await requestModelKey(providerName, model, keyEnv, [
+      `${providerName} rejected the saved API key.`,
       'The old credential was removed from this provider only.',
-      'Paste a new API key to save it, or press Esc to keep the model unconfigured.',
+      'Enter a replacement key, or press Esc to keep the model unconfigured.',
     ].join('\n'));
-    if (!key) return true;
-    const next = adoptProvider(cleared, { preset, model }, key);
-    await saveStoredConfig(engine.paths, next);
-    providerRef.current = createModelProvider(resolveConfig(next));
+    if (!credential) return true;
+    const next = adoptProvider(cleared, { preset, model }, credential.key);
+    const ready = resolveConfig(next);
+    const candidate = createModelProvider(ready);
+    const probe = await candidate.probe();
+    if (!probe.ok) {
+      const failure = credentialProbeFailure(providerName, model, probe.detail);
+      push(entry('notice', failure.title, {
+        tone: 'danger',
+        subtitle: failure.subtitle,
+        detail: probe.detail,
+      }));
+      return true;
+    }
+    if (credential.persist) await saveStoredConfig(engine.paths, next);
+    providerRef.current = candidate;
     push(entry('notice', 'provider credential updated', {
       tone: 'accent',
-      subtitle: 'Retry the message to use the new key.',
+      subtitle: credential.persist
+        ? 'Saved to ~/.plif/config.toml. Retry the message to use it.'
+        : 'Used for this session only. Retry the message to use it.',
     }));
     return true;
   }, [engine, push, requestModelKey]);
@@ -1550,19 +1592,20 @@ export function App({
         model: selection.model,
         preset: selection.preset,
       });
+      let storedSelection = adoptProvider(stored, selection);
       let check = validateModelConfig(config);
       if (!check.ok) {
         if (!config.apiKey && config.needKey) {
           const providerLabel =
             findCatalogProvider(selection.preset)?.label ?? (selection.preset || 'This provider');
           const keyEnv = PRESETS[selection.preset as keyof typeof PRESETS]?.keyEnv;
-          const key = await requestModelKey(selection.model, [
+          const credential = await requestModelKey(providerLabel, selection.model, keyEnv, [
             `${providerLabel} serves this model from ${config.baseURL}.`,
             keyEnv ? `The same value can live in ${keyEnv} instead, if you prefer.` : '',
-            'Paste its API key to save it in your personal Plif configuration, or press Esc to cancel.',
+            'The key will be checked before the model is switched.',
           ].filter(Boolean).join('\n'));
-          if (!key) return;
-          const next = adoptProvider(stored, selection, key);
+          if (!credential) return;
+          const next = adoptProvider(stored, selection, credential.key);
           config = resolveConfig(next, { model: selection.model, preset: selection.preset });
           check = validateModelConfig(config);
           if (!check.ok) {
@@ -1572,7 +1615,18 @@ export function App({
             }));
             return;
           }
-          await saveStoredConfig(engine.paths, next);
+          const candidate = createModelProvider(config);
+          const probe = await candidate.probe();
+          if (!probe.ok) {
+            const failure = credentialProbeFailure(providerLabel, selection.model, probe.detail);
+            push(entry('notice', failure.title, {
+              tone: 'danger',
+              subtitle: failure.subtitle,
+              detail: probe.detail,
+            }));
+            return;
+          }
+          storedSelection = credential.persist ? next : adoptProvider(stored, selection);
           // The key is what discovery was missing. Drop the cached "this
           // provider lists nothing" answer so the next /model shows the real
           // catalogue instead of the curated stand-in.
@@ -1589,16 +1643,7 @@ export function App({
       }
 
       providerRef.current = createModelProvider(config);
-      await saveStoredConfig(
-        engine.paths,
-        adoptProvider(
-          stored,
-          selection,
-          // "local" is the SDK's placeholder, not a credential. Writing it to
-          // disk would make a local endpoint look configured.
-          config.apiKey && config.apiKey !== 'local' ? config.apiKey : undefined,
-        ),
-      );
+      await saveStoredConfig(engine.paths, storedSelection);
       // A model swap changes what the assistant is; carrying the old exchange
       // into it would attribute the previous model's turns to the new one.
       conversation.current = [];
@@ -2944,6 +2989,12 @@ export function App({
       escape?: boolean;
       upArrow?: boolean;
       downArrow?: boolean;
+      leftArrow?: boolean;
+      rightArrow?: boolean;
+      pageUp?: boolean;
+      pageDown?: boolean;
+      home?: boolean;
+      end?: boolean;
       backspace?: boolean;
       delete?: boolean;
       ctrl?: boolean;
@@ -2963,6 +3014,30 @@ export function App({
     }
     if (key.downArrow) {
       dispatch({ type: picker.groups ? 'picker.moveVisible' : 'picker.move', delta: 1 });
+      return;
+    }
+    if (key.pageUp || key.pageDown || key.home || key.end) {
+      const delta = key.home || key.pageUp
+        ? (key.home ? -100_000 : -Math.max(1, pickerRows - 2))
+        : (key.end ? 100_000 : Math.max(1, pickerRows - 2));
+      dispatch({ type: picker.groups ? 'picker.moveVisible' : 'picker.move', delta });
+      return;
+    }
+    if (picker.groups && (key.leftArrow || key.rightArrow)) {
+      const matches = visiblePickerRows(picker.groups, picker.expanded ?? [], picker.filter);
+      const chosen = matches[picker.selected];
+      if (!chosen) return;
+      const expand = key.rightArrow;
+      if (chosen.kind === 'group') {
+        const isExpanded = (picker.expanded ?? []).includes(chosen.group.id);
+        if ((expand && !isExpanded) || (!expand && isExpanded)) {
+          dispatch({ type: 'picker.toggle', id: chosen.group.id });
+        }
+        return;
+      }
+      if (!expand) {
+        dispatch({ type: 'picker.toggle', id: chosen.groupId });
+      }
       return;
     }
     if (key.return) {
@@ -2991,6 +3066,10 @@ export function App({
       const chosen = matches[picker.selected];
       dispatch({ type: 'picker.close' });
       if (chosen) picker.onPick(chosen.value);
+      return;
+    }
+    if (key.ctrl && char === 'u') {
+      dispatch({ type: 'picker.filter', filter: '' });
       return;
     }
     if (key.backspace || key.delete) {
@@ -3038,6 +3117,12 @@ export function App({
       return;
     }
     if (key.escape || (key.ctrl && char === 'c')) {
+      if (question.secret) {
+        // Credential dialogs are cancellable inputs, not agent decisions. Do
+        // not abort the surrounding session when the developer backs out.
+        engine.questions.abandonAll();
+        return;
+      }
       engine.questions.abandonAll();
       cancelRunning();
       return;
@@ -3173,22 +3258,37 @@ export function App({
       try {
         const stored = await loadStoredConfig(engine.paths);
         const currentConfig = resolveConfig(stored);
-        const key = await requestModelKey(currentConfig.model, [
+        const providerName = findCatalogProvider(stored.preset ?? '')?.label ?? (stored.preset || 'This provider');
+        const keyEnv = PRESETS[stored.preset as keyof typeof PRESETS]?.keyEnv;
+        const credential = await requestModelKey(providerName, currentConfig.model, keyEnv, [
           'Plif could not start the configured model because its credential is missing.',
-          'You can also set NeedKey = true in ~/.plif/config.toml and use /models later to reconfigure it.',
+          'You can also set NeedKey = true in ~/.plif/config.toml and use /model later to reconfigure it.',
         ].join('\n'));
-        if (!key) return;
+        if (!credential) return;
         const next = adoptProvider(
           stored,
           { preset: stored.preset ?? '', model: currentConfig.model },
-          key,
+          credential.key,
         );
         const ready = resolveConfig(next);
-        providerRef.current = createModelProvider(ready);
-        await saveStoredConfig(engine.paths, next);
-        push(entry('notice', `credential saved for ${ready.model}`, {
+        const candidate = createModelProvider(ready);
+        const probe = await candidate.probe();
+        if (!probe.ok) {
+          const failure = credentialProbeFailure(providerName, ready.model, probe.detail);
+          push(entry('notice', failure.title, {
+            tone: 'danger',
+            subtitle: failure.subtitle,
+            detail: probe.detail,
+          }));
+          return;
+        }
+        providerRef.current = candidate;
+        if (credential.persist) await saveStoredConfig(engine.paths, next);
+        push(entry('notice', `credential ready for ${ready.model}`, {
           tone: 'accent',
-          subtitle: 'The model is ready. The key is redacted from the transcript.',
+          subtitle: credential.persist
+            ? 'Saved to ~/.plif/config.toml. The key is redacted from the transcript.'
+            : 'Used for this session only. The key is redacted from the transcript.',
         }));
       } catch (error) {
         push(entry('notice', 'could not save the model credential', {
@@ -3232,6 +3332,7 @@ export function App({
     ? [
         { key: 'type', label: 'filter' },
         { key: '↑↓', label: 'choose' },
+        ...(state.picker.groups ? [{ key: '←→', label: 'expand' }] : []),
         { key: 'Enter', label: 'select' },
         { key: 'Esc', label: 'cancel' },
       ]
@@ -3385,7 +3486,7 @@ export function App({
           width={width}
           height={terminalFrameRows(rows)}
         />
-      ) : state.browser ? (
+      ) : state.browser && !state.question ? (
         /*
           Full-screen, replacing the normal panel rather than sitting above it.
           Browser and transcript views keep the physical terminal dimensions so
@@ -3437,7 +3538,7 @@ export function App({
               />
             </Box>
 
-            {state.picker && (
+            {state.picker && !state.question && (
               <Box paddingX={1}>
                 <Picker
                   title={state.picker.title}
