@@ -365,8 +365,8 @@ describe('model catalog picker', () => {
     assert.equal(anthropic?.items[0]?.value, 'claude-opus-5');
   });
 
-  it('labels the internal adaptive effort as Codex and marks the active effort', () => {
-    assert.equal(effortLabel('plif'), 'Codex');
+  it('labels the internal adaptive effort as PLIF and marks the active effort', () => {
+    assert.equal(effortLabel('plif'), 'PLIF');
     assert.equal(effortLabel(undefined), 'Default');
     assert.deepEqual(
       effortPickerItems(['low', 'plif'], 'plif').map((item) => ({
@@ -376,7 +376,7 @@ describe('model catalog picker', () => {
       })),
       [
         { value: 'low', label: 'Low', current: false },
-        { value: 'plif', label: 'Codex', current: true },
+        { value: 'plif', label: 'PLIF', current: true },
       ],
     );
   });
