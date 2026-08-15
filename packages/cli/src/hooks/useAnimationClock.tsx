@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 
 /**
  * Terminal animation is deliberately discrete. A coding session does not need
@@ -39,6 +39,8 @@ function createAnimationClock(): AnimationClockSource {
 export interface AnimationClockProviderProps {
   readonly active: boolean;
   readonly children: React.ReactNode;
+  /** Optional work that must share the same terminal paint pulse. */
+  readonly onTick?: () => void;
   /** Exposed for deterministic tests; the runtime uses 120 ms. */
   readonly intervalMs?: number;
 }
@@ -46,14 +48,18 @@ export interface AnimationClockProviderProps {
 export function AnimationClockProvider({
   active,
   children,
+  onTick,
   intervalMs = ANIMATION_INTERVAL_MS,
 }: AnimationClockProviderProps): React.ReactElement {
   const clock = useMemo(createAnimationClock, []);
+  const onTickRef = useRef(onTick);
+  onTickRef.current = onTick;
 
   useEffect(() => {
     if (!active) return;
     const timer = setInterval(() => {
       clock.tick();
+      onTickRef.current?.();
     }, Math.max(1, intervalMs));
     // An animation must never keep a CLI process alive by itself.
     timer.unref?.();
