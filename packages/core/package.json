@@ -1,6 +1,6 @@
 {
   "name": "@plif/core",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "plif's runtime: container engine, path jail, policy, audit log, agent loop.",
   "license": "Apache-2.0",
   "author": "Anthophicous",
@@ -32,7 +32,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@plif/sandbox": "0.3.0",
+    "@plif/sandbox": "0.3.1",
     "openai": "^4.104.0",
     "smol-toml": "^1.8.0",
     "vscode-jsonrpc": "^9.0.1",

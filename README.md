@@ -1,8 +1,8 @@
 <div align="center">
 
-**Plif 0.3.0 — the stable, adaptive coding agent for your terminal.**
+**Plif 0.3.1 — the stable, adaptive coding agent for your terminal.**
 
-Bring your own model. Configure the provider yourself. Plif 0.3.0 is built for
+Bring your own model. Configure the provider yourself. Plif 0.3.1 is built for
 long coding sessions with durable memory, better adaptation to the user, a
 calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 
@@ -16,7 +16,7 @@ calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 
 ---
 
-## Why 0.3.0
+## Why 0.3.1
 
 - **Adaptive memory.** Useful facts are ranked and reused without turning the
   conversation into noise.
