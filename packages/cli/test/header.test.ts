@@ -25,8 +25,8 @@ class CaptureStdout extends EventEmitter {
 describe('CLI header', () => {
   it('rasterizes the supplied transparent PNG into stable terminal cells', () => {
     const cells = pngHeaderCells('#191b20');
-    assert.equal(PNG_HEADER_ART_WIDTH, 22);
-    assert.equal(PNG_HEADER_ART_HEIGHT, 13);
+    assert.equal(PNG_HEADER_ART_WIDTH, 20);
+    assert.equal(PNG_HEADER_ART_HEIGHT, 12);
     assert.equal(cells.length, PNG_HEADER_ART_HEIGHT);
     assert.ok(cells.every((row) => row.length === PNG_HEADER_ART_WIDTH));
     assert.ok(cells.some((row) => row.some((cell) => cell.foreground !== '#191b20')));
@@ -36,7 +36,7 @@ describe('CLI header', () => {
   });
 
   it('reports its real footprint so the input frame stays in the viewport', () => {
-    assert.equal(headerHeight(96), 22);
+    assert.equal(headerHeight(96), 21);
     assert.equal(headerHeight(60), 8);
   });
 

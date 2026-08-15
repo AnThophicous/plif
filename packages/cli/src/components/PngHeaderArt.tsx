@@ -31,7 +31,7 @@ export interface PngHeaderCell {
 
 const ASSET_URL = new URL('../../assets/piroquinha.png', import.meta.url);
 const PANEL_FALLBACK = '#191b20';
-const TARGET_WIDTH = 22;
+const TARGET_WIDTH = 20;
 const CELL_HEIGHT = 2;
 
 function readUInt32(bytes: Uint8Array, offset: number): number {
