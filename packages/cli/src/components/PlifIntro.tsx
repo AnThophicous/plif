@@ -6,28 +6,17 @@ import { color, type PaletteKey } from '../theme.js';
 
 export const PLIF_INTRO_DURATION_MS = 5_200;
 
-/** The Plif ASCII that rises into the prompt when `/effort plif` is applied. */
+/** The large PLIF wordmark that rises into the prompt on `/effort plif`. */
 export const PLIF_ASCII_ART = [
-  '       ▄▀█▄',
-  '    ▄▄▄▀  ▀█▄',
-  '  ▄▀▀ ▄▄▀   ▀█▄',
-  '▄▀   ▄▄▄▄▄    ▀█▄',
-  '▀▄▄▀▀    ▀█▄    ▀█▄',
-  '           ▀█     ▀█▄',
-  '            ▀█      ██▄▄',
-  '             ▀█        ▀█▄▄▄',
-  '              █           ▀██▄▄▄▄▄▄▄▄▄',
-  '              █                      ▀▀█▄',
-  '              ▀█                        ▀█',
-  '               █                         ██',
-  '               ▀█       ▄▄▄▄▄▄▄▄        █ █',
-  '                ▀█     █▀      ▀█       █ █',
-  '                 ▀█   █▀         █▄▄   █  █',
-  '                  ▀█  █            ██  █  █',
-  '                   █  █             █  █▄▀',
-  '                    █ █              █ █',
-  '                   ▄█ █             ▄█ █',
-  '                  ▀▄▄▄▀            ▀▄▄▄▀',
+  '▄███████▄  ▄█        ▄█     ▄████████',
+  '███    ███ ███       ███    ███    ███',
+  '███    ███ ███       ███▌   ███    █▀',
+  '███    ███ ███       ███▌  ▄███▄▄▄',
+  '▀█████████▀ ███       ███▌ ▀▀███▀▀▀',
+  '███        ███       ███    ███',
+  '███        ███▌    ▄ ███    ███',
+  '▄████▀      █████▄▄██ █▀     ███',
+  '            ▀',
 ] as const;
 
 export interface PlifIntroFrame {
