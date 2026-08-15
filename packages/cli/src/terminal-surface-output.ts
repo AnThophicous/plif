@@ -78,17 +78,27 @@ function diffInkFrame(
   const rows = Math.max(previous.length, next.length);
   if (rows === 0) return '';
 
-  let patch = `\u001b[${previous.length}A${CURSOR_COLUMN}`;
-  for (let index = 0; index < rows; index += 1) {
-    const before = previous[index];
-    const after = next[index];
-    if (before !== after) patch += `${ERASE_LINE}${after ?? ''}`;
-    if (index < rows - 1) patch += `${CURSOR_DOWN_ONE}${CURSOR_COLUMN}`;
+  const changed = Array.from({ length: rows }, (_, index) => index).filter(
+    (index) => previous[index] !== next[index],
+  );
+  if (changed.length === 0) return '';
+
+  const first = changed[0]!;
+  let patch = cursorDelta(first - previous.length);
+  let current = first;
+  for (const index of changed) {
+    if (index !== first) {
+      patch += cursorDelta(index - current);
+    }
+    patch += `${ERASE_LINE}${next[index] ?? ''}`;
+    current = index;
   }
 
-  // The previous loop ends on the last row it visited. Ink expects the cursor
-  // at the first row after the new frame, ready for the reserved surface row.
-  patch += cursorDelta(next.length - rows + 1);
+  // Ink expects the cursor at the first row after the new frame, ready for the
+  // reserved surface row. Jump there directly from the last changed row;
+  // walking through every unchanged row makes terminal animation visibly
+  // stutter on larger frames.
+  patch += cursorDelta(next.length - current);
   return patch;
 }
 
@@ -110,6 +120,7 @@ export function createTerminalSurfaceStream<T extends TerminalSurfaceStream>(
   backgroundColor: () => string,
 ): T {
   let previousFrame: readonly string[] | null = null;
+  let lastSurfaceTail = '';
 
   const write = (
     chunk: string | Uint8Array,
@@ -128,6 +139,7 @@ export function createTerminalSurfaceStream<T extends TerminalSurfaceStream>(
     // discard our frame coordinates until Ink paints the next live frame.
     if (erase && erase.length === text.length) {
       previousFrame = null;
+      lastSurfaceTail = '';
       if (encoding === undefined) return done ? stream.write(chunk, done) : stream.write(chunk);
       return done ? stream.write(chunk, encoding, done) : stream.write(chunk, encoding);
     }
@@ -138,7 +150,14 @@ export function createTerminalSurfaceStream<T extends TerminalSurfaceStream>(
         const before = previousFrame;
         previousFrame = next;
         const patch = diffInkFrame(before, next);
-        const value = patch + surfaceTailColor(backgroundColor());
+        const surfaceTail = surfaceTailColor(backgroundColor());
+        const tail = surfaceTail === lastSurfaceTail ? '' : surfaceTail;
+        const value = patch + tail;
+        if (!value) {
+          done?.();
+          return true;
+        }
+        lastSurfaceTail = surfaceTail;
         if (encoding === undefined) return done ? stream.write(value, done) : stream.write(value);
         return done ? stream.write(value, encoding, done) : stream.write(value, encoding);
       }
@@ -156,6 +175,7 @@ export function createTerminalSurfaceStream<T extends TerminalSurfaceStream>(
     }
 
     const tail = needsTerminalSurfaceTail(text) ? surfaceTailColor(backgroundColor()) : '';
+    if (tail) lastSurfaceTail = tail;
 
     if (!tail) {
       if (encoding === undefined) return done ? stream.write(chunk, done) : stream.write(chunk);
