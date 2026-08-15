@@ -47,7 +47,11 @@ import {
 } from '@plif/core';
 
 import { formatCapabilities } from './format.js';
-import { effortLabel, effortPickerItems } from './components/Picker.js';
+import {
+  effortLabel,
+  effortPickerItems,
+  pickerSelectionForCurrentModel,
+} from './components/Picker.js';
 import { formatStatus } from './status.js';
 import type { StatusInput } from './status.js';
 import type { PickerGroup, PickerItem } from './components/Picker.js';
@@ -765,7 +769,7 @@ export const COMMANDS: readonly Command[] = [
         hint: '[vision] reads images directly · [vision helper] delegates through inspect_image',
         groups,
         expanded,
-        selected: Math.max(0, groups.findIndex((group) => group.id === currentGroup?.id)),
+        selected: pickerSelectionForCurrentModel(groups, expanded, currentGroup?.id),
         onPick: (selection) => {
           if (typeof selection !== 'string') void context.switchModel(selection);
         },

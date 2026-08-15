@@ -146,6 +146,29 @@ export function pickerRows(
   return flattenPickerGroups(filterPickerGroups(groups, filter), expanded, filter);
 }
 
+/**
+ * Select the active model when a grouped catalog opens.
+ *
+ * `selected` addresses the flattened rows rendered by the picker, not the
+ * provider array. The active provider's header is therefore not the active
+ * model's row. If the current model is outside the first page, keep the
+ * bounded catalog behavior and land on that provider's header instead.
+ */
+export function pickerSelectionForCurrentModel(
+  groups: readonly PickerGroup[],
+  expanded: readonly string[],
+  currentGroupId: string | undefined,
+): number {
+  const rows = pickerRows(groups, expanded);
+  const currentModel = rows.findIndex((row) => row.kind === 'item' && row.item.current);
+  if (currentModel >= 0) return currentModel;
+
+  const currentGroup = rows.findIndex(
+    (row) => row.kind === 'group' && row.group.id === currentGroupId,
+  );
+  return Math.max(0, currentGroup);
+}
+
 export function preservePickerSelection(
   previous: readonly PickerRow[],
   selected: number,
