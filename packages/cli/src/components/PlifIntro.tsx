@@ -6,28 +6,16 @@ import { color, type PaletteKey } from '../theme.js';
 
 export const PLIF_INTRO_DURATION_MS = 5_200;
 
-/** The controlled-test ASCII supplied for the Plif entrance animation. */
-export const PLIF_ASCII_ART = [
-  '       ▄▀█▄',
-  '    ▄▄▄▀  ▀█▄',
-  '  ▄▀▀ ▄▄▀   ▀█▄',
-  '▄▀   ▄▄▄▄▄    ▀█▄',
-  '▀▄▄▀▀    ▀█▄    ▀█▄',
-  '           ▀█     ▀█▄',
-  '            ▀█      ██▄▄',
-  '             ▀█        ▀█▄▄▄',
-  '              █           ▀██▄▄▄▄▄▄▄▄▄',
-  '              █                      ▀▀█▄',
-  '              ▀█                        ▀█',
-  '               █                         ██',
-  '               ▀█       ▄▄▄▄▄▄▄▄        █ █',
-  '                ▀█     █▀      ▀█       █ █',
-  '                 ▀█   █▀         █▄▄   █  █',
-  '                  ▀█  █            ██  █  █',
-  '                   █  █             █  █▄▀',
-  '                    █ █              █ █',
-  '                   ▄█ █             ▄█ █',
-  '                  ▀▄▄▄▀            ▀▄▄▄▀',
+const BIG_PLIF = [
+  '▄███████▄  ▄█        ▄█     ▄████████',
+  '███    ███ ███       ███    ███    ███',
+  '███    ███ ███       ███▌   ███    █▀',
+  '███    ███ ███       ███▌  ▄███▄▄▄',
+  '▀█████████▀ ███       ███▌ ▀▀███▀▀▀',
+  '███        ███       ███    ███',
+  '███        ███▌    ▄ ███    ███',
+  '▄████▀      █████▄▄██ █▀     ███',
+  '            ▀',
 ] as const;
 
 export interface PlifIntroFrame {
@@ -109,7 +97,7 @@ export function PlifIntro({
   const frame = plifIntroFrame(elapsed, height);
   if (frame.progress >= 1) return null;
   const stops = ['brand', 'accentDim', 'accent', 'accentBright'] as const;
-  const largeTitle: readonly string[] = width < 64 ? ['PLIF'] : PLIF_ASCII_ART;
+  const largeTitle: readonly string[] = width < 64 ? ['PLIF'] : BIG_PLIF;
   const stageHeight = largeTitle.length + 2;
   const showLargeTitle = frame.largeOpacity >= frame.compactOpacity;
 

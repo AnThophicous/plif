@@ -22,12 +22,14 @@ class CaptureStdout extends EventEmitter {
 }
 
 describe('CLI header', () => {
-  it('uses the Plif cat mark in the live header', () => {
-    assert.equal(HEADER_INFINITY, '▗▖  ▗▛▀▜▄▛▀▜▖\n▝▜▄▄█▌ ▘█▝ ▐█▄▄▛▘\n   ▝▜█▛ ▜█▛▘\n    ▝▘   ▝▘');
+  it('uses the supplied ASCII mark in the live header', () => {
+    assert.equal(HEADER_INFINITY.split('\n').length, 20);
+    assert.equal(HEADER_INFINITY.split('\n')[0], '       ▄▀█▄');
+    assert.equal(HEADER_INFINITY.split('\n').at(-1), '                  ▀▄▄▄▀            ▀▄▄▄▀');
   });
 
   it('reports its real footprint so the input frame stays in the viewport', () => {
-    assert.equal(headerHeight(96), 13);
+    assert.equal(headerHeight(96), 29);
     assert.equal(headerHeight(60), 8);
   });
 
