@@ -3,12 +3,35 @@ import { Box, Text } from 'ink';
 
 import { color, shortenPath, truncate } from '../theme.js';
 
-export const HEADER_INFINITY = '▗▖  ▗▛▀▜▄▛▀▜▖\n▝▜▄▄█▌ ▘█▝ ▐█▄▄▛▘\n   ▝▜█▛ ▜█▛▘\n    ▝▘   ▝▘';
-export const HEADER_INFINITY_COMPACT = '▗▖';
+/** The controlled-test ASCII supplied for the live Plif header. */
+export const HEADER_INFINITY = [
+  '       ▄▀█▄',
+  '    ▄▄▄▀  ▀█▄',
+  '  ▄▀▀ ▄▄▀   ▀█▄',
+  '▄▀   ▄▄▄▄▄    ▀█▄',
+  '▀▄▄▀▀    ▀█▄    ▀█▄',
+  '           ▀█     ▀█▄',
+  '            ▀█      ██▄▄',
+  '             ▀█        ▀█▄▄▄',
+  '              █           ▀██▄▄▄▄▄▄▄▄▄',
+  '              █                      ▀▀█▄',
+  '              ▀█                        ▀█',
+  '               █                         ██',
+  '               ▀█       ▄▄▄▄▄▄▄▄        █ █',
+  '                ▀█     █▀      ▀█       █ █',
+  '                 ▀█   █▀         █▄▄   █  █',
+  '                  ▀█  █            ██  █  █',
+  '                   █  █             █  █▄▀',
+  '                    █ █              █ █',
+  '                   ▄█ █             ▄█ █',
+  '                  ▀▄▄▄▀            ▀▄▄▄▀',
+].join('\n');
+export const HEADER_INFINITY_COMPACT = '▄▀█▄';
+const HEADER_INFINITY_WIDTH = Math.max(...HEADER_INFINITY.split('\n').map((line) => line.length));
 
 /** Rows occupied by the live header, including its breathing margin. */
 export function headerHeight(width: number): number {
-  return width < 74 ? 8 : 13;
+  return width < 74 ? 8 : HEADER_INFINITY.split('\n').length + 9;
 }
 
 export interface HeaderProps {
@@ -56,7 +79,9 @@ export function Header({
     );
   }
 
-  const leftWidth = Math.max(22, Math.min(30, Math.floor(width * 0.32)));
+  // The supplied mark is 43 cells wide. Give it its own measured column so
+  // Ink never wraps the art into a different shape while laying out the header.
+  const leftWidth = Math.max(22, Math.min(HEADER_INFINITY_WIDTH + 2, width - 18));
   const rightWidth = Math.max(10, width - leftWidth - 3);
 
   return (
@@ -75,7 +100,9 @@ export function Header({
           {truncate(modelLabel, Math.max(8, leftWidth - 4))}{effort ? ` · ${effort}` : ''}
         </Text>
       </Box>
-      <Text color={color('faint')}>{'│\n'.repeat(7)}│</Text>
+      <Text color={color('faint')}>
+        {'│\n'.repeat(Math.max(0, HEADER_INFINITY.split('\n').length + 3))}│
+      </Text>
       <Box
         flexDirection="column"
         width={rightWidth}
