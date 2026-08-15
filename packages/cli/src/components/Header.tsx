@@ -5,16 +5,26 @@ import { color, shortenPath, truncate } from '../theme.js';
 
 /** The controlled-test ASCII supplied for the live Plif header. */
 export const HEADER_INFINITY = [
-  '  ▄▟▀▙▖',
-  '▄▀▞█▙ ▀▙▖',
-  '▀▀▘ ▝▜▖ ▀▙▖',
-  '      ▜▖  ▀▜▄▄',
-  '       ▌     ▀▀▀▀▀▜▄▖',
-  '       ▜            ▜▖',
-  '       ▝▙  ▗▛▀▀▜▖   ▌▌',
-  '        ▝▙ ▛    ▝▜▖▐ ▌',
-  '         ▝▖▌      ▞▐▀',
-  '         ▟▙▌     ▗█▟',
+  '       ▄▀█▄',
+  '    ▄▄▄▀  ▀█▄',
+  '  ▄▀▀ ▄▄▀   ▀█▄',
+  '▄▀   ▄▄▄▄▄    ▀█▄',
+  '▀▄▄▀▀    ▀█▄    ▀█▄',
+  '           ▀█     ▀█▄',
+  '            ▀█      ██▄▄',
+  '             ▀█        ▀█▄▄▄',
+  '              █           ▀██▄▄▄▄▄▄▄▄▄',
+  '              █                      ▀▀█▄',
+  '              ▀█                        ▀█',
+  '               █                         ██',
+  '               ▀█       ▄▄▄▄▄▄▄▄        █ █',
+  '                ▀█     █▀      ▀█       █ █',
+  '                 ▀█   █▀         █▄▄   █  █',
+  '                  ▀█  █            ██  █  █',
+  '                   █  █             █  █▄▀',
+  '                    █ █              █ █',
+  '                   ▄█ █             ▄█ █',
+  '                  ▀▄▄▄▀            ▀▄▄▄▀',
 ].join('\n');
 export const HEADER_INFINITY_COMPACT = '▄▀█▄';
 const HEADER_INFINITY_WIDTH = Math.max(...HEADER_INFINITY.split('\n').map((line) => line.length));
@@ -69,7 +79,7 @@ export function Header({
     );
   }
 
-  // The compact mark is 22 cells wide. Give it its own measured column so
+  // The supplied mark is 43 cells wide. Give it its own measured column so
   // Ink never wraps the art into a different shape while laying out the header.
   const leftWidth = Math.max(22, Math.min(HEADER_INFINITY_WIDTH + 2, width - 18));
   const rightWidth = Math.max(10, width - leftWidth - 3);
