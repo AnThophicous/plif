@@ -291,9 +291,21 @@ export function applyTheme(theme: ThemeOverrides = {}): void {
 /** Overlay the effort accent without destroying the user's selected theme. */
 export function applyEffortPalette(effort?: string): void {
   const accents: Record<string, Partial<Record<PaletteKey, string>>> = {
-    max: { brand: '#6337a8', accent: '#c49aff', accentBright: '#eadbff', accentDim: '#9568d0' },
-    ultra: { brand: '#96711f', accent: '#f2ca68', accentBright: '#fff0b0', accentDim: '#c19a3c' },
-    ultracode: { brand: '#a64b1d', accent: '#ff9a5c', accentBright: '#ffd0ac', accentDim: '#d66d37' },
+    max: {
+      text: '#eadbff', muted: '#c49aff', faint: '#6337a8', ghost: '#432775',
+      brand: '#6337a8', accent: '#c49aff', accentBright: '#eadbff', accentDim: '#9568d0',
+      info: '#c49aff', warn: '#9568d0',
+    },
+    ultra: {
+      text: '#fff0b0', muted: '#f2ca68', faint: '#96711f', ghost: '#604711',
+      brand: '#96711f', accent: '#f2ca68', accentBright: '#fff0b0', accentDim: '#c19a3c',
+      info: '#f2ca68', warn: '#c19a3c',
+    },
+    ultracode: {
+      text: '#ffd0ac', muted: '#ff9a5c', faint: '#a64b1d', ghost: '#6b3014',
+      brand: '#a64b1d', accent: '#ff9a5c', accentBright: '#ffd0ac', accentDim: '#d66d37',
+      info: '#ff9a5c', warn: '#d66d37',
+    },
   };
   Object.assign(palette, activeThemePalette, accents[effort ?? ''] ?? {});
 }

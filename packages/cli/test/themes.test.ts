@@ -23,19 +23,37 @@ describe('user themes', () => {
   it('keeps the legacy visual palettes for Max, Ultra and UltraCode', () => {
     activateTheme(MINIMAL_THEME);
     const expected = {
-      max: { brand: '#6337a8', accent: '#c49aff', accentBright: '#eadbff', accentDim: '#9568d0' },
-      ultra: { brand: '#96711f', accent: '#f2ca68', accentBright: '#fff0b0', accentDim: '#c19a3c' },
-      ultracode: { brand: '#a64b1d', accent: '#ff9a5c', accentBright: '#ffd0ac', accentDim: '#d66d37' },
+      max: {
+        text: '#eadbff', muted: '#c49aff', faint: '#6337a8', ghost: '#432775',
+        brand: '#6337a8', accent: '#c49aff', accentBright: '#eadbff', accentDim: '#9568d0',
+        info: '#c49aff', warn: '#9568d0',
+      },
+      ultra: {
+        text: '#fff0b0', muted: '#f2ca68', faint: '#96711f', ghost: '#604711',
+        brand: '#96711f', accent: '#f2ca68', accentBright: '#fff0b0', accentDim: '#c19a3c',
+        info: '#f2ca68', warn: '#c19a3c',
+      },
+      ultracode: {
+        text: '#ffd0ac', muted: '#ff9a5c', faint: '#a64b1d', ghost: '#6b3014',
+        brand: '#a64b1d', accent: '#ff9a5c', accentBright: '#ffd0ac', accentDim: '#d66d37',
+        info: '#ff9a5c', warn: '#d66d37',
+      },
     } as const;
 
     for (const [effort, paletteValues] of Object.entries(expected)) {
       applyEffortPalette(effort);
       assert.deepEqual(
         {
+          text: palette.text,
+          muted: palette.muted,
+          faint: palette.faint,
+          ghost: palette.ghost,
           brand: palette.brand,
           accent: palette.accent,
           accentBright: palette.accentBright,
           accentDim: palette.accentDim,
+          info: palette.info,
+          warn: palette.warn,
         },
         paletteValues,
         effort,
