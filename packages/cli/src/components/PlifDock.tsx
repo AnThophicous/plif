@@ -16,6 +16,7 @@ export function plifDockHeight(effort?: string): number {
 
 export function PlifDock({
   cwd,
+  model,
   effort,
   contextUsed,
   contextMax,
@@ -25,6 +26,8 @@ export function PlifDock({
   width,
 }: {
   readonly cwd: string;
+  /** Active provider model, shown immediately before the context meter. */
+  readonly model?: string;
   readonly effort?: string;
   readonly contextUsed: number;
   readonly contextMax: number;
@@ -44,7 +47,11 @@ export function PlifDock({
   const narrow = inner < layout.narrowWidth;
   const compact = inner < 28;
   const percent = Math.round((contextUsed / Math.max(1, contextMax)) * 100);
-  const pathWidth = Math.max(10, inner - 32);
+  const modelWidth = compact
+    ? Math.max(3, inner - 21)
+    : Math.min(28, Math.max(12, Math.floor(inner * 0.28)));
+  const modelLabel = model?.trim() ? truncate(model.trim(), modelWidth) : '';
+  const pathWidth = Math.max(10, inner - 32 - (modelLabel ? modelWidth + 4 : 0));
 
   return (
     <Box width="100%" justifyContent="space-between">
@@ -79,7 +86,13 @@ export function PlifDock({
           </Text>
         )}
       </Box>
-      <Box marginLeft={1}>
+      <Box marginLeft={1} flexShrink={1}>
+        {modelLabel && (
+          <Text color={color('text')} bold>
+            {modelLabel}
+          </Text>
+        )}
+        {modelLabel && !compact && <Text color={color('ghost')}> {'·'} </Text>}
         {!compact && <Text color={color('muted')}>{narrow ? 'Context ' : '  ·  Context '}</Text>}
         <Text color={color('ghost')}>[</Text>
         <Meter
