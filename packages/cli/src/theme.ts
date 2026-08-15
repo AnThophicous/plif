@@ -312,9 +312,9 @@ export function applyEffortPalette(effort?: string): void {
       info: '#D99A21', warn: '#A96A0C',
     },
     max: {
-      text: '#F0D7FF', muted: '#B978E8', faint: '#5A2B91', ghost: '#32184F',
-      brand: '#5A2B91', accent: '#B978E8', accentBright: '#F0D7FF', accentDim: '#8548BD',
-      info: '#B978E8', warn: '#8548BD',
+      text: '#eadbff', muted: '#c49aff', faint: '#6337a8', ghost: '#432775',
+      brand: '#6337a8', accent: '#c49aff', accentBright: '#eadbff', accentDim: '#9568d0',
+      info: '#c49aff', warn: '#9568d0',
     },
     ultra: {
       text: '#FFCB20', muted: '#DC9513', faint: '#9E5A09', ghost: '#5F3806',
