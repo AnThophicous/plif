@@ -32,6 +32,7 @@ import {
   filterPickerGroups,
   flattenPickerGroups,
   pickerRows,
+  pickerSelectionForCurrentModel,
   preservePickerSelection,
 } from '../src/components/Picker.js';
 import type { PickerGroup } from '../src/components/Picker.js';
@@ -365,6 +366,42 @@ describe('model catalog picker', () => {
     const selected = before.findIndex((row) => row.id === 'openai:gpt-4o-mini');
     const after = pickerRows(groups, expanded, 'mini');
     assert.equal(after[preservePickerSelection(before, selected, after)]?.id, 'openai:gpt-4o-mini');
+  });
+
+  it('starts on the active model row instead of its provider header', () => {
+    const activeGroups: readonly PickerGroup[] = [
+      groups[0]!,
+      {
+        ...groups[1]!,
+        items: [{ ...groups[1]!.items[0]!, current: true }, ...groups[1]!.items.slice(1)],
+      },
+    ];
+    const expanded = ['openai'];
+    const rows = pickerRows(activeGroups, expanded);
+    const selected = pickerSelectionForCurrentModel(activeGroups, expanded, 'openai');
+
+    assert.equal(rows[selected]?.id, 'openai:gpt-4o-mini');
+    assert.equal(selected, 2);
+  });
+
+  it('keeps a crowded catalog bounded when the active model is outside its first page', () => {
+    const crowded: readonly PickerGroup[] = [
+      {
+        id: 'openrouter',
+        label: 'OpenRouter',
+        items: Array.from({ length: 25 }, (_, index) => ({
+          value: `model-${index}`,
+          label: `Model ${index}`,
+          current: index === 24,
+        })),
+      },
+    ];
+    const expanded = ['openrouter'];
+    const rows = pickerRows(crowded, expanded);
+    const selected = pickerSelectionForCurrentModel(crowded, expanded, 'openrouter');
+
+    assert.equal(rows[selected]?.id, 'openrouter');
+    assert.equal(rows.filter((row) => row.kind === 'item').length, PICKER_GROUP_PAGE);
   });
 
   it('forgets the long tail when a provider is collapsed', () => {
