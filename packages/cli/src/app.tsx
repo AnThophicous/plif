@@ -93,7 +93,7 @@ import type { Hint } from './components/Footer.js';
 import { Header, headerHeight } from './components/Header.js';
 import { Picker, filterItems, filterPickerGroups, flattenPickerGroups, pickerRows as visiblePickerRows } from './components/Picker.js';
 import { Prompt, promptBodyRows, promptHeight } from './components/Prompt.js';
-import { PlifDock } from './components/PlifDock.js';
+import { PlifDock, plifDockHeight } from './components/PlifDock.js';
 import { PlifIntro, PLIF_INTRO_DURATION_MS } from './components/PlifIntro.js';
 import { terminalSurfaceLayout } from './components/TerminalSurface.js';
 import { Working } from './components/Spinner.js';
@@ -3841,7 +3841,7 @@ export function App({
   const compactDialogs = rows < 34;
   const suggestionRows = Math.max(1, Math.min(6, surface.contentHeight - 8));
 
-  const effortFrame = ['plif', 'max', 'ultra', 'ultracode'].includes(effort ?? '');
+  const effortFrame = plifDockHeight(effort) > 0;
   const promptFooterRows = (promptStatus ? 1 : 0) + (effortFrame ? 1 : 0);
   const promptQueueRows = queueHeight(state.queue);
   const inputRows = promptBodyRows(input, cursor, surface.contentWidth);

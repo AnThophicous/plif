@@ -240,11 +240,13 @@ describe('Plif focus frame', () => {
     applyEffortPalette();
   });
 
-  it('reserves the dock row and its divider, and nothing outside Plif effort', () => {
+  it('reserves the dock row and its divider for every visible effort', () => {
     // The dock shares the prompt's walls, so it costs its own row plus the
     // inset rule that joins it — budgeting one would let the frame overrun.
     assert.equal(plifDockHeight(undefined), 0);
-    assert.equal(plifDockHeight('plif'), 2);
+    for (const effort of ['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode', 'plif']) {
+      assert.equal(plifDockHeight(effort), 2, effort);
+    }
   });
 
   it('collapses ambient dock facts before they can wrap a compact terminal', async () => {
