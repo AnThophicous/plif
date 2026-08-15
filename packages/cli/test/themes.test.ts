@@ -9,6 +9,17 @@ import { semanticWave } from '../src/pulse.js';
 import { activateTheme, loadThemes, MINIMAL_THEME, parseTheme } from '../src/themes.js';
 
 describe('user themes', () => {
+  it('uses the controlled-test gold roles in the default theme', () => {
+    activateTheme(MINIMAL_THEME);
+    assert.equal(color('brand'), '#CC9A3A');
+    assert.equal(color('faint'), '#CC9A3A');
+    assert.equal(color('accentDim'), '#C68E17');
+    assert.equal(color('muted'), '#E8C170');
+    assert.equal(color('accentBright'), '#E8C170');
+    assert.equal(color('text'), '#FFD700');
+    assert.equal(color('accent'), '#E0A526');
+  });
+
   it('accepts the complete override surface and applies semantic values', () => {
     const theme = parseTheme({
       id: 'quiet', name: 'Quiet',
