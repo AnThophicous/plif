@@ -6,16 +6,28 @@ import { color, type PaletteKey } from '../theme.js';
 
 export const PLIF_INTRO_DURATION_MS = 5_200;
 
-const BIG_PLIF = [
-  '▄███████▄  ▄█        ▄█     ▄████████',
-  '███    ███ ███       ███    ███    ███',
-  '███    ███ ███       ███▌   ███    █▀',
-  '███    ███ ███       ███▌  ▄███▄▄▄',
-  '▀█████████▀ ███       ███▌ ▀▀███▀▀▀',
-  '███        ███       ███    ███',
-  '███        ███▌    ▄ ███    ███',
-  '▄████▀      █████▄▄██ █▀     ███',
-  '            ▀',
+/** The Plif ASCII that rises into the prompt when `/effort plif` is applied. */
+export const PLIF_ASCII_ART = [
+  '       ▄▀█▄',
+  '    ▄▄▄▀  ▀█▄',
+  '  ▄▀▀ ▄▄▀   ▀█▄',
+  '▄▀   ▄▄▄▄▄    ▀█▄',
+  '▀▄▄▀▀    ▀█▄    ▀█▄',
+  '           ▀█     ▀█▄',
+  '            ▀█      ██▄▄',
+  '             ▀█        ▀█▄▄▄',
+  '              █           ▀██▄▄▄▄▄▄▄▄▄',
+  '              █                      ▀▀█▄',
+  '              ▀█                        ▀█',
+  '               █                         ██',
+  '               ▀█       ▄▄▄▄▄▄▄▄        █ █',
+  '                ▀█     █▀      ▀█       █ █',
+  '                 ▀█   █▀         █▄▄   █  █',
+  '                  ▀█  █            ██  █  █',
+  '                   █  █             █  █▄▀',
+  '                    █ █              █ █',
+  '                   ▄█ █             ▄█ █',
+  '                  ▀▄▄▄▀            ▀▄▄▄▀',
 ] as const;
 
 export interface PlifIntroFrame {
@@ -97,7 +109,7 @@ export function PlifIntro({
   const frame = plifIntroFrame(elapsed, height);
   if (frame.progress >= 1) return null;
   const stops = ['brand', 'accentDim', 'accent', 'accentBright'] as const;
-  const largeTitle: readonly string[] = width < 64 ? ['PLIF'] : BIG_PLIF;
+  const largeTitle: readonly string[] = width < 64 ? ['PLIF'] : PLIF_ASCII_ART;
   const stageHeight = largeTitle.length + 2;
   const showLargeTitle = frame.largeOpacity >= frame.compactOpacity;
 
