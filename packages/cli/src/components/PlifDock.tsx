@@ -9,9 +9,11 @@ import { Meter } from './Meter.js';
 import { PlifGlow } from './PlifGlow.js';
 export { plifDockItems } from '../live-status.js';
 
+const DOCK_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode', 'plif'] as const;
+
 /** One row for the dock, one for the divider that joins it to the prompt. */
 export function plifDockHeight(effort?: string): number {
-  return ['plif', 'max', 'ultra', 'ultracode'].includes(effort ?? '') ? 2 : 0;
+  return DOCK_EFFORTS.includes(effort as (typeof DOCK_EFFORTS)[number]) ? 2 : 0;
 }
 
 export function PlifDock({
@@ -40,7 +42,7 @@ export function PlifDock({
   const visual = effortVisual(effort);
   const animated = working || transitioning || ambientAnimation;
   const elapsed = useHighlightClock(animated);
-  if (!['plif', 'max', 'ultra', 'ultracode'].includes(effort ?? '')) return null;
+  if (plifDockHeight(effort) === 0) return null;
 
   const pulse = effortPulseCells(effort, elapsed, animated);
   const inner = Math.max(18, width - 4);
