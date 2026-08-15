@@ -210,6 +210,17 @@ const SCENARIOS: Record<string, Step[]> = {
     { capture: 'filtro por provider e modelo' },
   ],
 
+  /** The bounded effort picker, including a keyboard move. */
+  'effort-picker': [
+    { wait: 150 },
+    { type: '/effort\r' },
+    { wait: 1000 },
+    { capture: 'effort picker with the active PLIF row' },
+    { type: '\x1b[A' },
+    { wait: 250 },
+    { capture: 'effort picker after one keyboard move' },
+  ],
+
   /** The credential flow: context first, masked entry second, storage choice third. */
   'api-key': [
     { wait: 150 },

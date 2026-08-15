@@ -235,6 +235,7 @@ export interface PickerState {
   readonly items?: readonly PickerItem[];
   readonly groups?: readonly PickerGroup[];
   readonly expanded?: readonly string[];
+  readonly closeAfterPick?: boolean;
   readonly filter: string;
   readonly selected: number;
   readonly onPick: (value: string | ModelSelection) => void | Promise<void>;
@@ -283,6 +284,8 @@ export interface SessionState {
   readonly busyLabel: string;
   /** When the current work started, for the elapsed counter. Null when idle. */
   readonly busySince: number | null;
+  /** The selected reasoning effort, kept with picker state for atomic changes. */
+  readonly effort?: import('@plif/core').Effort;
   readonly contextUsed: number;
   readonly contextMax: number;
   readonly exiting: boolean;
@@ -396,6 +399,7 @@ export type SessionAction =
   | { type: 'discovery.flush' }
   | { type: 'container'; name: string | null; state: string | null }
   | { type: 'busy'; busy: boolean; label?: string; since?: number }
+  | { type: 'effort.apply'; effort?: import('@plif/core').Effort }
   | { type: 'context'; used: number; max?: number }
   | {
       type: 'picker.open';
@@ -857,6 +861,10 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         busySince: action.busy ? (action.since ?? Date.now()) : null,
       };
 
+    case 'effort.apply':
+      if (state.effort === action.effort && state.picker === null) return state;
+      return { ...state, effort: action.effort, picker: null };
+
     case 'context':
       return {
         ...state,
@@ -937,7 +945,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     }
 
     case 'picker.close':
-      return { ...state, picker: null };
+      return state.picker === null ? state : { ...state, picker: null };
 
     case 'exit':
       return { ...state, exiting: true };

@@ -400,4 +400,20 @@ describe('model catalog picker', () => {
     const stillBottom = sessionReducer(bottom, { type: 'picker.move', delta: 1 });
     assert.equal(stillBottom.picker?.selected, 1);
   });
+
+  it('applies an effort and closes its picker in one state transition', () => {
+    const opened = sessionReducer(initialSession, {
+      type: 'picker.open',
+      picker: {
+        title: 'select an effort',
+        items: [{ value: 'max', label: 'Max' }, { value: 'plif', label: 'PLIF' }],
+        onPick: () => undefined,
+      },
+    });
+    const applied = sessionReducer(opened, { type: 'effort.apply', effort: 'plif' });
+
+    assert.equal(applied.effort, 'plif');
+    assert.equal(applied.picker, null);
+    assert.equal(sessionReducer(applied, { type: 'picker.close' }), applied);
+  });
 });

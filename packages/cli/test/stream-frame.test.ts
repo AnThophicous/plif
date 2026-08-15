@@ -138,4 +138,26 @@ describe('StreamFrameScheduler', () => {
     clock.advance(100);
     assert.throws(() => stream.append('answer', 'late'), /disposed/);
   });
+
+  it('can flush from a shared terminal clock without creating its own timer', () => {
+    const { clock, frames } = harness();
+    const stream = new StreamFrameScheduler({
+      clock,
+      clockDriven: true,
+      frameMs: 33,
+      onFrame: (frame) => frames.push(frame),
+    });
+
+    stream.append('answer', 'first');
+    stream.append('answer', ' second');
+    assert.equal(frames.length, 1);
+
+    clock.advance(32);
+    stream.tick();
+    assert.equal(frames.length, 1);
+    clock.advance(1);
+    stream.tick();
+    assert.equal(frames.at(-1)?.answer, 'first second');
+    assert.equal(frames.length, 2);
+  });
 });

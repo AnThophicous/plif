@@ -91,6 +91,7 @@ export interface CommandContext {
   /** Pull an image off the clipboard and attach it to the line being typed. */
   readonly pasteImage: () => Promise<void>;
   readonly openPicker: (picker: FlatPickerRequest | CatalogPickerRequest) => void;
+  readonly closePicker?: () => void;
   readonly copySession?: () => Promise<void>;
   readonly saveSession?: () => Promise<void>;
   readonly themes: readonly ThemeDefinition[];
@@ -100,6 +101,8 @@ export interface CommandContext {
 export interface FlatPickerRequest {
   readonly title: string;
   readonly items: readonly PickerItem[];
+  /** Async callbacks may close the picker together with their state update. */
+  readonly closeAfterPick?: boolean;
   readonly onPick: (value: string | ModelSelection) => void | Promise<void>;
 }
 
@@ -108,6 +111,8 @@ export interface CatalogPickerRequest {
   readonly groups: readonly PickerGroup[];
   readonly expanded: readonly string[];
   readonly selected: number;
+  /** Async callbacks may close the picker together with their state update. */
+  readonly closeAfterPick?: boolean;
   readonly onPick: (selection: string | ModelSelection) => void | Promise<void>;
 }
 
@@ -230,7 +235,14 @@ export const COMMANDS: readonly Command[] = [
           detail: theme.description ?? (theme.source === 'user' ? '~/.plif' : 'built in'),
           current: (stored.theme ?? 'minimal') === theme.id,
         })),
-        onPick: (value) => context.switchTheme(String(value)),
+        closeAfterPick: false,
+        onPick: async (value) => {
+          try {
+            await context.switchTheme(String(value));
+          } finally {
+            context.closePicker?.();
+          }
+        },
       });
       return ok();
     },
@@ -693,8 +705,13 @@ export const COMMANDS: readonly Command[] = [
         groups,
         expanded,
         selected: Math.max(0, groups.findIndex((group) => group.id === currentGroup?.id)),
-        onPick: (selection) => {
-          if (typeof selection !== 'string') return context.switchModel(selection);
+        closeAfterPick: false,
+        onPick: async (selection) => {
+          try {
+            if (typeof selection !== 'string') await context.switchModel(selection);
+          } finally {
+            context.closePicker?.();
+          }
         },
       });
       return ok();
@@ -722,9 +739,14 @@ export const COMMANDS: readonly Command[] = [
             },
             ...effortPickerItems(available, current),
           ],
-          onPick: (picked) => context.setEffort(
-            picked === 'default' ? undefined : picked as Effort,
-          ),
+          closeAfterPick: false,
+          onPick: async (picked) => {
+            try {
+              await context.setEffort(picked === 'default' ? undefined : picked as Effort);
+            } finally {
+              context.closePicker?.();
+            }
+          },
         });
         return ok(entry('notice', 'select reasoning effort', {
           tone: 'accent',

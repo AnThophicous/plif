@@ -118,7 +118,7 @@ import type { PasteState } from './paste.js';
 import { expandShortcodes, matchEmoji, openShortcode } from './emoji.js';
 import { stepLeft, stepRight } from './text.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
-import { AnimationClockProvider } from './hooks/useAnimationClock.js';
+import { ANIMATION_INTERVAL_MS, AnimationClockProvider } from './hooks/useAnimationClock.js';
 import { useTranscriptController } from './hooks/useTranscriptController.js';
 import { entry, initialSession, sessionReducer } from './session.js';
 import type { BrowserRow, BrowserState, QueuedMessage, TimelineEntry } from './session.js';
@@ -194,7 +194,7 @@ const STREAM_FLUSH_MS = 90;
  * keep the first chunk immediate, then let the terminal breathe between
  * semantic updates without dropping any accumulated text.
  */
-const SEMANTIC_STREAM_FRAME_MS = 90;
+const SEMANTIC_STREAM_FRAME_MS = ANIMATION_INTERVAL_MS;
 /** Window in which a second Ctrl+C means "really quit". */
 const DOUBLE_INTERRUPT_MS = 1500;
 const PLAN_BLOCKED_TOOLS = new Set([
@@ -287,7 +287,11 @@ export function App({
   credentials,
   themeCatalogue,
 }: AppProps): React.ReactElement {
-  const [state, dispatch] = useReducer(sessionReducer, initialSession);
+  const [state, dispatch] = useReducer(
+    sessionReducer,
+    initialSession,
+    (base) => ({ ...base, effort: initialEffort }),
+  );
   const [composer, composerDispatch] = useReducer(composerReducer, initialComposerState);
   const input = composer.draft;
   const cursor = composer.cursor;
@@ -323,7 +327,7 @@ export function App({
   const [turn, setTurn] = useState(() => countAgentTurns(replay));
   const [agentTurnStartedAt, setAgentTurnStartedAt] = useState<number | null>(null);
   const [interruptArmed, setInterruptArmed] = useState(false);
-  const [effort, setEffortState] = useState<Effort | undefined>(initialEffort);
+  const effort = state.effort;
   useEffect(() => {
     applyEffortPalette(effort);
   }, [effort]);
@@ -415,16 +419,22 @@ export function App({
   transcriptRef.current = transcript;
   const semanticStartedAt = useRef<number | null>(null);
   const paintedEpoch = useRef<number | null>(null);
+  const transcriptViewportOpen = useRef(transcriptViewport.open);
+  transcriptViewportOpen.current = transcriptViewport.open;
+  const latestStreamFrame = useRef<StreamFrame | null>(null);
   const semanticFrames = useRef<StreamFrameScheduler | null>(null);
   semanticFrames.current ??= new StreamFrameScheduler({
     frameMs: SEMANTIC_STREAM_FRAME_MS,
+    clockDriven: true,
     onFrame: (frame: StreamFrame) => {
       if (frame.kind === 'reset') {
         semanticStartedAt.current = null;
         paintedEpoch.current = null;
+        latestStreamFrame.current = null;
         transcriptRef.current.resetStream();
         return;
       }
+      latestStreamFrame.current = frame;
 
       if (frame.kind === 'data' && frame.lanes.length > 0 && paintedEpoch.current !== frame.epoch) {
         paintedEpoch.current = frame.epoch;
@@ -465,7 +475,12 @@ export function App({
         completionMeterRef.current = meter;
         setCompletionMeter(meter);
       }
-      transcriptRef.current.applyStreamFrame(frame);
+      // The normal shell renders `state.entries`; the transcript controller is
+      // only visible inside Ctrl+T. Updating its second reducer for every
+      // token otherwise creates another root reconciliation with no visible
+      // consumer. When the overlay opens, the cumulative frame below keeps it
+      // current without making the common response path pay that cost.
+      if (transcriptViewportOpen.current) transcriptRef.current.applyStreamFrame(frame);
       if (frame.kind === 'complete' || frame.kind === 'dispose') {
         semanticStartedAt.current = null;
         paintedEpoch.current = null;
@@ -1746,6 +1761,7 @@ export function App({
         }),
       );
     },
+    closePicker: () => dispatch({ type: 'picker.close' }),
     setEffort: async (effort) => {
       const stored = await loadStoredConfig(engine.paths);
       const next = { ...stored, ...(effort ? { effort } : {}) };
@@ -1785,7 +1801,7 @@ export function App({
       }
       applyEffortPalette(effort);
       effortRef.current = effort;
-      setEffortState(effort);
+      dispatch({ type: 'effort.apply', effort });
     },
     setPlanMode: async (enabled, description) => {
       planModeRef.current = enabled;
@@ -2550,6 +2566,8 @@ export function App({
 
   useEffect(() => {
     if (!transcriptViewport.open) return;
+    const frame = latestStreamFrame.current;
+    if (frame) transcriptRef.current.applyStreamFrame(frame);
     dispatchTranscriptViewport({
       type: 'resize',
       contentLines: transcriptContentLines,
@@ -3117,9 +3135,11 @@ export function App({
 
       if (result && typeof result.then === 'function') {
         void result.then(
-          () => dispatch({ type: 'picker.close' }),
+          () => {
+            if (activePicker.closeAfterPick !== false) dispatch({ type: 'picker.close' });
+          },
           (error: unknown) => {
-            dispatch({ type: 'picker.close' });
+            if (activePicker.closeAfterPick !== false) dispatch({ type: 'picker.close' });
             push(entry('notice', 'selection could not be applied', {
               tone: 'danger',
               detail: error instanceof Error ? error.message : String(error),
@@ -3594,7 +3614,10 @@ export function App({
       The surface dimensions are derived from the current terminal size on each
       render, so the intermediate frame fits and the erase is exact.
     */
-    <AnimationClockProvider active={animationActive}>
+    <AnimationClockProvider
+      active={animationActive}
+      onTick={() => semanticFrames.current?.tick()}
+    >
     <Box flexDirection="column">
       {/*
         Scrollback. Ink prints each item once, above the frame, and never again
