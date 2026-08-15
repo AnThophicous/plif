@@ -20,23 +20,43 @@ describe('user themes', () => {
     assert.equal(color('accent'), '#E0A526');
   });
 
-  it('keeps the legacy visual palettes for Max, Ultra and UltraCode', () => {
+  it('strengthens the gold interface as effort increases', () => {
     activateTheme(MINIMAL_THEME);
     const expected = {
+      low: {
+        text: '#FFF1B2', muted: '#F5D98A', faint: '#D8B565', ghost: '#947A45',
+        brand: '#D8B565', accent: '#F0C96C', accentBright: '#FFF1B2', accentDim: '#D4A646',
+        info: '#F0C96C', warn: '#D4A646',
+      },
+      medium: {
+        text: '#FFE99A', muted: '#F0CE72', faint: '#D2A849', ghost: '#896A31',
+        brand: '#D2A849', accent: '#E9BE55', accentBright: '#FFE99A', accentDim: '#CC941F',
+        info: '#E9BE55', warn: '#CC941F',
+      },
+      high: {
+        text: '#FFDF75', muted: '#E9BB4A', faint: '#C28D23', ghost: '#79591D',
+        brand: '#C28D23', accent: '#E2AA35', accentBright: '#FFDF75', accentDim: '#B67A13',
+        info: '#E2AA35', warn: '#B67A13',
+      },
+      xhigh: {
+        text: '#FFD957', muted: '#E3AD2F', faint: '#B87916', ghost: '#6E4A13',
+        brand: '#B87916', accent: '#D99A21', accentBright: '#FFD957', accentDim: '#A96A0C',
+        info: '#D99A21', warn: '#A96A0C',
+      },
       max: {
-        text: '#eadbff', muted: '#c49aff', faint: '#6337a8', ghost: '#432775',
-        brand: '#6337a8', accent: '#c49aff', accentBright: '#eadbff', accentDim: '#9568d0',
-        info: '#c49aff', warn: '#9568d0',
+        text: '#FFD23D', muted: '#DFA11F', faint: '#A8690D', ghost: '#633D09',
+        brand: '#A8690D', accent: '#D58C16', accentBright: '#FFD23D', accentDim: '#9B5A07',
+        info: '#D58C16', warn: '#9B5A07',
       },
       ultra: {
-        text: '#fff0b0', muted: '#f2ca68', faint: '#96711f', ghost: '#604711',
-        brand: '#96711f', accent: '#f2ca68', accentBright: '#fff0b0', accentDim: '#c19a3c',
-        info: '#f2ca68', warn: '#c19a3c',
+        text: '#FFCB20', muted: '#DC9513', faint: '#9E5A09', ghost: '#5F3806',
+        brand: '#9E5A09', accent: '#D17F0A', accentBright: '#FFCB20', accentDim: '#924E04',
+        info: '#D17F0A', warn: '#924E04',
       },
       ultracode: {
-        text: '#ffd0ac', muted: '#ff9a5c', faint: '#a64b1d', ghost: '#6b3014',
-        brand: '#a64b1d', accent: '#ff9a5c', accentBright: '#ffd0ac', accentDim: '#d66d37',
-        info: '#ff9a5c', warn: '#d66d37',
+        text: '#FFC20A', muted: '#D58A08', faint: '#955005', ghost: '#582D04',
+        brand: '#955005', accent: '#C87304', accentBright: '#FFC20A', accentDim: '#894502',
+        info: '#C87304', warn: '#894502',
       },
     } as const;
 
@@ -58,6 +78,8 @@ describe('user themes', () => {
         paletteValues,
         effort,
       );
+      assert.notEqual(palette.accent, '#E0A526', `${effort} should not use the Plif accent`);
+      assert.notEqual(palette.text, '#FFD700', `${effort} should not use the Plif text`);
     }
     applyEffortPalette();
   });

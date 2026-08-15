@@ -4,11 +4,18 @@ import { describe, it } from 'node:test';
 import {
   cubicEaseInOut,
   cubicEaseOut,
+  PLIF_ASCII_ART,
   plifIntroFrame,
   PLIF_INTRO_DURATION_MS,
 } from '../src/components/PlifIntro.js';
 
 describe('Plif effort entrance', () => {
+  it('keeps the rising Plif ASCII separate from the static header art', () => {
+    assert.equal(PLIF_ASCII_ART.length, 20);
+    assert.equal(PLIF_ASCII_ART[0], '       ▄▀█▄');
+    assert.equal(PLIF_ASCII_ART.at(-1), '                  ▀▄▄▄▀            ▀▄▄▄▀');
+  });
+
   it('uses a fast cubic launch and a soft landing', () => {
     assert.equal(cubicEaseOut(0), 0);
     assert.equal(cubicEaseOut(1), 1);
