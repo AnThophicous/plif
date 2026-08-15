@@ -76,10 +76,38 @@ async function renderCompactDock(width: number): Promise<string> {
       { width },
       React.createElement(PlifDock, {
         cwd: 'C:\\Users\\Elaine Araújo\\Documents\\Plif-Code',
+        model: 'deepseek-v4-flash-free',
         effort: 'plif',
         contextUsed: 50,
         contextMax: 100,
         working: true,
+        width,
+      }),
+    ),
+    {
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      exitOnCtrlC: false,
+      patchConsole: false,
+    },
+  );
+  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  app.unmount();
+  return stdout.output.replace(ANSI, '').replace(/\r/g, '');
+}
+
+async function renderDock(width: number, model: string): Promise<string> {
+  const stdout = new CaptureStdout(width, 4);
+  const app = render(
+    React.createElement(
+      Box,
+      { width },
+      React.createElement(PlifDock, {
+        cwd: 'C:\\Users\\Elaine Araújo\\Documents\\Plif-Code',
+        model,
+        effort: 'max',
+        contextUsed: 50,
+        contextMax: 100,
+        working: false,
         width,
       }),
     ),
@@ -225,6 +253,12 @@ describe('Plif focus frame', () => {
     assert.equal(lines.length, 1);
     assert.ok(lines.every((line) => displayWidth(line) <= 24));
     assert.doesNotMatch(rendered, /Documents|Context/);
+  });
+
+  it('shows the active model immediately before the context meter', async () => {
+    const rendered = await renderDock(100, 'deepseek-v4-flash-free');
+    assert.ok(rendered.indexOf('deepseek-v4-flash-free') >= 0);
+    assert.ok(rendered.indexOf('deepseek-v4-flash-free') < rendered.indexOf('Context'));
   });
 });
 

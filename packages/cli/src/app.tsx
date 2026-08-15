@@ -4095,6 +4095,7 @@ export function App({
                       frameFooter: (
                         <PlifDock
                           cwd={cwd}
+                          model={providerRef.current?.info.id ?? provider?.info.id ?? ''}
                           effort={effort}
                           contextUsed={state.contextUsed}
                           contextMax={state.contextMax}
