@@ -78,7 +78,7 @@ test('/model can request a missing provider key from the mounted app', async () 
       replay: [],
       version: '0.3.0',
       provider: null,
-      providerProblem: 'preview unavailable',
+      providerProblem: 'no API key for a remote endpoint',
       tools: DEFAULT_TOOLS,
       skillCatalogue: '',
       mcpCatalogue: '',
@@ -96,6 +96,7 @@ test('/model can request a missing provider key from the mounted app', async () 
 
   try {
     await new Promise<void>((resolve) => setTimeout(resolve, 30));
+    assert.deepEqual(asked, [], 'startup must not ask for a provider key before an explicit model choice');
     await stdin.type('/model z-ai/glm-5.2\r');
     await Promise.race([
       askedPromise,

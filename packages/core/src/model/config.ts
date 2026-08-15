@@ -14,11 +14,10 @@
  * leaks into a log or a transcript is a key that has to be rotated.
  */
 
-import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { PlifError } from '../errors.js';
-import { globalConfigPath, loadGlobalConfig, saveGlobalConfig } from '../config/global.js';
+import { loadGlobalConfig, saveGlobalConfig } from '../config/global.js';
 import type { StorePaths } from '../store/paths.js';
 
 export interface ModelConfig {
@@ -344,43 +343,18 @@ const DEFAULTS = {
 } as const;
 
 export async function loadStoredConfig(paths: StorePaths): Promise<StoredConfig> {
-  void paths;
-  return (await loadGlobalConfig()) as StoredConfig;
-  /* legacy project-local config path retained below for source compatibility */
-  const file = path.join(paths.root, 'config.json');
-  try {
-    const raw = await fs.readFile(file, 'utf8');
-    // A UTF-8 BOM is invisible and makes JSON.parse fail on the first character.
-    // Windows tooling writes one by default — PowerShell's Set-Content does —
-    // so a config file that looks perfect is rejected with a message about
-    // position 0 that helps nobody.
-    return JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw) as StoredConfig;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
-    throw new PlifError('INVALID_ARGUMENT', 'config.json could not be parsed', {
-      cause: error,
-      detail: { file },
-      hint: 'Fix the JSON, or delete the file to fall back to environment variables.',
-    });
-  }
+  // The engine root is ~/.plif in production and a temporary directory in
+  // tests. Reading through the root keeps both paths isolated; the previous
+  // implementation ignored `paths` and let an app test overwrite the user's
+  // real ~/.plif/config.toml.
+  return (await loadGlobalConfig(path.join(paths.root, 'config.toml'))) as StoredConfig;
 }
 
 export async function saveStoredConfig(
   paths: StorePaths,
   config: StoredConfig,
 ): Promise<void> {
-  void paths;
-  await saveGlobalConfig(config, globalConfigPath());
-  return;
-  /* legacy project-local config path retained below for source compatibility */
-  const file = path.join(paths.root, 'config.json');
-  await fs.mkdir(paths.root, { recursive: true });
-  const temp = `${file}.tmp`;
-  await fs.writeFile(temp, JSON.stringify(config, null, 2), 'utf8');
-  await fs.rename(temp, file);
-  // Best effort on POSIX; a no-op on Windows, where the store already sits in
-  // the user profile and inherits its ACL.
-  await fs.chmod(file, 0o600).catch(() => undefined);
+  await saveGlobalConfig(config, path.join(paths.root, 'config.toml'));
 }
 
 /**

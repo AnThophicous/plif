@@ -35,6 +35,7 @@ import {
   globalConfigPath,
   isAutoApproveEnabled,
   loadGlobalConfig,
+  loadStoredConfig,
   permissionMode,
   setAutoApprove,
   setPermissionMode,
@@ -681,7 +682,7 @@ export const COMMANDS: readonly Command[] = [
       // Opening the catalog is deliberately independent of the global config:
       // a malformed config or missing key must not hide the model chooser.
       const currentModel = context.model?.info.id;
-      const stored = (await loadGlobalConfig().catch(() => ({}))) as StoredConfig;
+      const stored = await loadStoredConfig(context.engine.paths).catch(() => ({} as StoredConfig));
 
       // The developer's own providers come first, and under their own heading.
       // Somebody who wrote an endpoint into their config should find it at the
@@ -723,7 +724,7 @@ export const COMMANDS: readonly Command[] = [
     args: '[low|medium|high|xhigh|max|ultra|ultracode|plif|default]',
     summary: 'Show or change model reasoning effort',
     run: async (argv, context) => {
-      const stored = await loadGlobalConfig();
+      const stored = await loadStoredConfig(context.engine.paths);
       const current = stored.effort ?? 'default';
       const value = argv[0];
       const available = context.supportedEfforts?.() ?? [];
