@@ -490,7 +490,6 @@ export function App({
   /** Everything said so far, minus the system prompt, carried across turns. */
   const conversation = useRef<Message[]>([]);
   const providerRef = useRef<ModelProvider | null>(provider);
-  const modelKeyPrompted = useRef(false);
   /** The empty-install picker opens once per session, not once per render. */
   const modelPickerPrompted = useRef(false);
   const effortRef = useRef<Effort | undefined>(initialEffort);
@@ -3396,54 +3395,6 @@ export function App({
     );
     void findCommand('model')?.run([], context);
   }, [providerProblem, push]);
-
-  useEffect(() => {
-    if (modelKeyPrompted.current || !providerProblem || !/api key|credential/i.test(providerProblem)) return;
-    modelKeyPrompted.current = true;
-    void (async () => {
-      try {
-        const stored = await loadStoredConfig(engine.paths);
-        const currentConfig = resolveConfig(stored);
-        const providerName = findCatalogProvider(stored.preset ?? '')?.label ?? (stored.preset || 'This provider');
-        const keyEnv = PRESETS[stored.preset as keyof typeof PRESETS]?.keyEnv;
-        const credential = await requestModelKey(providerName, currentConfig.model, keyEnv, [
-          'Plif could not start the configured model because its credential is missing.',
-          'You can also set NeedKey = true in ~/.plif/config.toml and use /model later to reconfigure it.',
-        ].join('\n'));
-        if (!credential) return;
-        const next = adoptProvider(
-          stored,
-          { preset: stored.preset ?? '', model: currentConfig.model },
-          credential.key,
-        );
-        const ready = resolveConfig(next);
-        const candidate = createModelProvider(ready);
-        const probe = await candidate.probe();
-        if (!probe.ok) {
-          const failure = credentialProbeFailure(providerName, ready.model, probe.detail);
-          push(entry('notice', failure.title, {
-            tone: 'danger',
-            subtitle: failure.subtitle,
-            detail: probe.detail,
-          }));
-          return;
-        }
-        providerRef.current = candidate;
-        if (credential.persist) await saveStoredConfig(engine.paths, next);
-        push(entry('notice', `credential ready for ${ready.model}`, {
-          tone: 'accent',
-          subtitle: credential.persist
-            ? 'Saved to ~/.plif/config.toml. The key is redacted from the transcript.'
-            : 'Used for this session only. The key is redacted from the transcript.',
-        }));
-      } catch (error) {
-        push(entry('notice', 'could not save the model credential', {
-          tone: 'danger',
-          detail: String(error),
-        }));
-      }
-    })();
-  }, [engine, providerProblem, push, requestModelKey]);
 
   // ---- render ------------------------------------------------------------
 
