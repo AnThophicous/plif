@@ -2,36 +2,13 @@ import React from 'react';
 import { Box, Text } from 'ink';
 
 import { color, shortenPath, truncate } from '../theme.js';
+import { PNG_HEADER_ART_HEIGHT, PNG_HEADER_ART_WIDTH, PngHeaderArt } from './PngHeaderArt.js';
 
-/** The controlled-test ASCII supplied for the live Plif header. */
-export const HEADER_INFINITY = [
-  '       ▄▀█▄',
-  '    ▄▄▄▀  ▀█▄',
-  '  ▄▀▀ ▄▄▀   ▀█▄',
-  '▄▀   ▄▄▄▄▄    ▀█▄',
-  '▀▄▄▀▀    ▀█▄    ▀█▄',
-  '           ▀█     ▀█▄',
-  '            ▀█      ██▄▄',
-  '             ▀█        ▀█▄▄▄',
-  '              █           ▀██▄▄▄▄▄▄▄▄▄',
-  '              █                      ▀▀█▄',
-  '              ▀█                        ▀█',
-  '               █                         ██',
-  '               ▀█       ▄▄▄▄▄▄▄▄        █ █',
-  '                ▀█     █▀      ▀█       █ █',
-  '                 ▀█   █▀         █▄▄   █  █',
-  '                  ▀█  █            ██  █  █',
-  '                   █  █             █  █▄▀',
-  '                    █ █              █ █',
-  '                   ▄█ █             ▄█ █',
-  '                  ▀▄▄▄▀            ▀▄▄▄▀',
-].join('\n');
 export const HEADER_INFINITY_COMPACT = '▄▀█▄';
-const HEADER_INFINITY_WIDTH = Math.max(...HEADER_INFINITY.split('\n').map((line) => line.length));
 
 /** Rows occupied by the live header, including its breathing margin. */
 export function headerHeight(width: number): number {
-  return width < 74 ? 8 : HEADER_INFINITY.split('\n').length + 9;
+  return width < 74 ? 8 : PNG_HEADER_ART_HEIGHT + 9;
 }
 
 export interface HeaderProps {
@@ -79,16 +56,16 @@ export function Header({
     );
   }
 
-  // The supplied mark is 43 cells wide. Give it its own measured column so
+  // The PNG raster is 22 cells wide. Give it its own measured column so
   // Ink never wraps the art into a different shape while laying out the header.
-  const leftWidth = Math.max(22, Math.min(HEADER_INFINITY_WIDTH + 2, width - 18));
+  const leftWidth = Math.max(22, Math.min(PNG_HEADER_ART_WIDTH + 2, width - 18));
   const rightWidth = Math.max(10, width - leftWidth - 3);
 
   return (
     <Box borderStyle="round" borderColor={color('faint')} width="100%" marginBottom={1}>
       <Box flexDirection="column" width={leftWidth} paddingX={1} paddingY={1}>
         <Box flexDirection="column">
-          <Text color={color('accentDim')} bold>{HEADER_INFINITY}</Text>
+          <PngHeaderArt />
           <Text color={color('text')} bold>PLIF</Text>
         </Box>
         <Box justifyContent="space-between">
@@ -101,7 +78,7 @@ export function Header({
         </Text>
       </Box>
       <Text color={color('faint')}>
-        {'│\n'.repeat(Math.max(0, HEADER_INFINITY.split('\n').length + 3))}│
+        {'│\n'.repeat(Math.max(0, PNG_HEADER_ART_HEIGHT + 3))}│
       </Text>
       <Box
         flexDirection="column"
