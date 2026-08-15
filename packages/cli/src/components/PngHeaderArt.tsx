@@ -32,7 +32,11 @@ export interface PngHeaderCell {
 const ASSET_URL = new URL('../../assets/piroquinha.png', import.meta.url);
 const PANEL_FALLBACK = '#191b20';
 const TARGET_WIDTH = 22;
-const CELL_HEIGHT = 2;
+const HALF_ROWS_PER_CELL = 2;
+// A terminal half-block is physically taller than one character column on
+// the Windows terminal fonts Plif targets. Compensate before sampling so a
+// square source mark remains square on screen instead of becoming vertical.
+const HALF_ROW_ASPECT = 1.15;
 
 function readUInt32(bytes: Uint8Array, offset: number): number {
   return (
@@ -201,8 +205,11 @@ function composite(pixelValue: Rgba, background: readonly [number, number, numbe
 const image = decodePng(new Uint8Array(fs.readFileSync(ASSET_URL)));
 const crop = visibleCrop(image);
 export const PNG_HEADER_ART_WIDTH = TARGET_WIDTH;
+export const PNG_HEADER_ART_PIXEL_HEIGHT = Math.max(1, Math.round(
+  TARGET_WIDTH * crop.height / crop.width / HALF_ROW_ASPECT,
+));
 export const PNG_HEADER_ART_HEIGHT = Math.max(1, Math.ceil(
-  Math.round(TARGET_WIDTH * crop.height / crop.width) / CELL_HEIGHT,
+  PNG_HEADER_ART_PIXEL_HEIGHT / HALF_ROWS_PER_CELL,
 ));
 
 const cellsByBackground = new Map<string, readonly (readonly PngHeaderCell[])[]>();
@@ -212,26 +219,31 @@ export function pngHeaderCells(backgroundColor = color('panel')): readonly (read
   if (cached) return cached;
 
   const background = parseHex(backgroundColor || PANEL_FALLBACK);
-  const targetPixelHeight = PNG_HEADER_ART_HEIGHT * CELL_HEIGHT;
+  const targetPixelHeight = PNG_HEADER_ART_PIXEL_HEIGHT;
   const rows: PngHeaderCell[][] = [];
 
   for (let cellY = 0; cellY < PNG_HEADER_ART_HEIGHT; cellY += 1) {
     const row: PngHeaderCell[] = [];
     for (let cellX = 0; cellX < PNG_HEADER_ART_WIDTH; cellX += 1) {
-      const topY = Math.min(
-        crop.height - 1,
-        Math.max(0, Math.round((cellY * CELL_HEIGHT + 0.5) * crop.height / targetPixelHeight - 0.5)),
-      );
-      const bottomY = Math.min(
-        crop.height - 1,
-        Math.max(0, Math.round((cellY * CELL_HEIGHT + 1.5) * crop.height / targetPixelHeight - 0.5)),
-      );
       const sourceX = Math.min(
         crop.width - 1,
         Math.max(0, Math.round((cellX + 0.5) * crop.width / PNG_HEADER_ART_WIDTH - 0.5)),
       );
-      const topPixel = pixel(image, crop.left + sourceX, crop.top + topY);
-      const bottomPixel = pixel(image, crop.left + sourceX, crop.top + bottomY);
+      const sourceY = (halfRow: number): number | undefined => {
+        if (halfRow >= targetPixelHeight) return undefined;
+        return Math.min(
+          crop.height - 1,
+          Math.max(0, Math.round((halfRow + 0.5) * crop.height / targetPixelHeight - 0.5)),
+        );
+      };
+      const topY = sourceY(cellY * HALF_ROWS_PER_CELL);
+      const bottomY = sourceY(cellY * HALF_ROWS_PER_CELL + 1);
+      const topPixel: Rgba = topY === undefined
+        ? [0, 0, 0, 0]
+        : pixel(image, crop.left + sourceX, crop.top + topY);
+      const bottomPixel: Rgba = bottomY === undefined
+        ? [0, 0, 0, 0]
+        : pixel(image, crop.left + sourceX, crop.top + bottomY);
       const topVisible = topPixel[3] > 8;
       const bottomVisible = bottomPixel[3] > 8;
       row.push({
