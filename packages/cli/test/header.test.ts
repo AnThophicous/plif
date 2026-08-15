@@ -31,6 +31,8 @@ describe('CLI header', () => {
     assert.ok(cells.every((row) => row.length === PNG_HEADER_ART_WIDTH));
     assert.ok(cells.some((row) => row.some((cell) => cell.foreground !== '#191b20')));
     assert.ok(cells.some((row) => row.some((cell) => cell.glyph === '▀')));
+    assert.ok(cells.some((row) => row.some((cell) => cell.glyph === ' ' && cell.background === undefined)));
+    assert.ok(cells.some((row) => row.some((cell) => cell.glyph === '▄')));
   });
 
   it('reports its real footprint so the input frame stays in the viewport', () => {

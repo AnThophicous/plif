@@ -22,9 +22,11 @@ interface Crop {
 }
 
 export interface PngHeaderCell {
-  readonly foreground: string;
-  readonly background: string;
-  readonly glyph: '▀' | ' ';
+  /** Undefined means: let the surface beneath the art show through. */
+  readonly foreground?: string;
+  /** Undefined means: do not paint a terminal background for this half-cell. */
+  readonly background?: string;
+  readonly glyph: '▀' | '▄' | ' ';
 }
 
 const ASSET_URL = new URL('../../assets/piroquinha.png', import.meta.url);
@@ -220,10 +222,18 @@ export function pngHeaderCells(backgroundColor = color('panel')): readonly (read
       );
       const topPixel = pixel(image, crop.left + sourceX, crop.top + topY);
       const bottomPixel = pixel(image, crop.left + sourceX, crop.top + bottomY);
+      const topVisible = topPixel[3] > 8;
+      const bottomVisible = bottomPixel[3] > 8;
       row.push({
-        foreground: composite(topPixel, background),
-        background: composite(bottomPixel, background),
-        glyph: topPixel[3] > 8 || bottomPixel[3] > 8 ? '▀' : ' ',
+        // A transparent half must not receive an explicit background colour:
+        // doing so paints the PNG's crop rectangle instead of preserving the
+        // header surface behind it. Use the lower-half glyph when only the
+        // bottom pixel is visible so both transparent directions stay clean.
+        foreground: topVisible
+          ? composite(topPixel, background)
+          : bottomVisible ? composite(bottomPixel, background) : undefined,
+        background: bottomVisible ? composite(bottomPixel, background) : undefined,
+        glyph: topVisible ? '▀' : bottomVisible ? '▄' : ' ',
       });
     }
     rows.push(row);
