@@ -3,8 +3,13 @@ import { Box, Text } from 'ink';
 
 import { color, shortenPath, truncate } from '../theme.js';
 
-export const HEADER_INFINITY = '▗▛▀▜▄▛▀▜▖\n█▌ ▘█▝ ▐█\n▝▜█▛ ▜█▛▘';
-export const HEADER_INFINITY_COMPACT = '▗▛▜▖';
+export const HEADER_INFINITY = '▗▖  ▗▛▀▜▄▛▀▜▖\n▝▜▄▄█▌ ▘█▝ ▐█▄▄▛▘\n   ▝▜█▛ ▜█▛▘\n    ▝▘   ▝▘';
+export const HEADER_INFINITY_COMPACT = '▗▖';
+
+/** Rows occupied by the live header, including its breathing margin. */
+export function headerHeight(width: number): number {
+  return width < 74 ? 8 : 13;
+}
 
 export interface HeaderProps {
   readonly cwd: string;

@@ -9,6 +9,9 @@ export interface MarkdownInstruction {
   readonly order: number;
   readonly modes: readonly PromptMode[] | undefined;
   readonly effort: string | undefined;
+  readonly tools: readonly string[] | undefined;
+  readonly minContext: number | undefined;
+  readonly maxContext: number | undefined;
   readonly relativePath: string;
   readonly source: string;
 }
@@ -82,26 +85,78 @@ function walk(root: string): string[] {
 function parseInstruction(root: string, file: string): MarkdownInstruction {
   const raw = fs.readFileSync(file, 'utf8');
   const match = DIRECTIVE.exec(raw);
-  const metadata = new Map<string, string>();
-  for (const part of (match?.[1] ?? '').split(/\s+/)) {
-    const separator = part.indexOf('=');
-    if (separator > 0) metadata.set(part.slice(0, separator), part.slice(separator + 1));
-  }
+  const directive = (match?.[1] ?? '').trim().replace(/,\s+/g, ',');
+  const metadata = parseInstructionMetadata(directive, path.basename(file));
 
   const relativePath = path.relative(root, file).replaceAll(path.sep, '/');
   const id = metadata.get('id') ?? relativePath.replace(/\.md$/, '');
   const order = Number.parseInt(metadata.get('order') ?? '50', 10);
   if (!Number.isFinite(order)) throw new Error(`Invalid instruction order in ${relativePath}`);
   const rawModes = metadata.get('modes');
-  const modes = rawModes ? rawModes.split(',').filter(isPromptMode) : undefined;
+  const modeNames = rawModes ? parseCsvMetadata(rawModes, 'mode', relativePath) : undefined;
+  if (modeNames?.some((mode) => !isPromptMode(mode))) {
+    throw new Error(`Invalid instruction mode in ${relativePath}: ${rawModes}`);
+  }
+  const modes = modeNames as PromptMode[] | undefined;
+  const rawTools = metadata.get('tools');
+  const tools = rawTools ? parseCsvMetadata(rawTools, 'tool', relativePath) : undefined;
+  if (tools?.some((name) => !/^[a-z0-9_.:-]+$/i.test(name))) {
+    throw new Error(`Invalid instruction tool in ${relativePath}: ${rawTools}`);
+  }
   return {
     id,
     order,
-    modes: modes?.length ? modes : undefined,
+    modes,
     effort: metadata.get('effort'),
+    tools,
+    minContext: optionalPositiveInteger(metadata.get('minContext'), 'minContext', relativePath),
+    maxContext: optionalPositiveInteger(metadata.get('maxContext'), 'maxContext', relativePath),
     relativePath,
     source: raw.slice(match?.[0].length ?? 0).trim(),
   };
+}
+
+export function parseInstructionMetadata(
+  directive: string,
+  sourceName = 'instruction',
+): ReadonlyMap<string, string> {
+  const metadata = new Map<string, string>();
+  const allowedMetadata = new Set(['id', 'order', 'modes', 'effort', 'tools', 'minContext', 'maxContext']);
+  for (const part of directive ? directive.split(/\s+/) : []) {
+    const separator = part.indexOf('=');
+    if (separator <= 0) throw new Error(`Invalid instruction metadata in ${sourceName}: ${part}`);
+    const key = part.slice(0, separator);
+    const value = part.slice(separator + 1);
+    if (!allowedMetadata.has(key)) throw new Error(`Unknown instruction metadata in ${sourceName}: ${key}`);
+    if (metadata.has(key)) throw new Error(`Duplicate instruction metadata in ${sourceName}: ${key}`);
+    if (!value) throw new Error(`Empty instruction metadata in ${sourceName}: ${key}`);
+    metadata.set(key, value);
+  }
+  for (const kind of ['modes', 'tools'] as const) {
+    const value = metadata.get(kind);
+    if (value) parseCsvMetadata(value, kind === 'modes' ? 'mode' : 'tool', sourceName);
+  }
+  return metadata;
+}
+
+function optionalPositiveInteger(value: string | undefined, key: string, sourceName: string): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid instruction ${key} in ${sourceName}: ${value}`);
+  }
+  return parsed;
+}
+
+function parseCsvMetadata(value: string, kind: string, sourceName: string): string[] {
+  const values = value.split(',').map((entry) => entry.trim());
+  if (values.some((entry) => !entry)) {
+    throw new Error(`Invalid instruction ${kind} list in ${sourceName}: ${value}`);
+  }
+  if (new Set(values).size !== values.length) {
+    throw new Error(`Duplicate instruction ${kind} in ${sourceName}: ${value}`);
+  }
+  return values;
 }
 
 function isPromptMode(value: string): value is PromptMode {
@@ -111,4 +166,3 @@ function isPromptMode(value: string): value is PromptMode {
     value === 'review' ||
     value === 'compaction';
 }
-

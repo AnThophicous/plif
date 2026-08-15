@@ -1,7 +1,9 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
+import { useHighlightClock } from '../pulse.js';
 import { color, glyph } from '../theme.js';
+import { PlifGlow } from './PlifGlow.js';
 
 interface MeterProps {
   readonly value: number;
@@ -12,6 +14,9 @@ interface MeterProps {
   /** Fill turns warn/danger past these fractions. */
   readonly warnAt?: number;
   readonly dangerAt?: number;
+  /** Use the Plif colour wave while real work is active. */
+  readonly plif?: boolean;
+  readonly active?: boolean;
 }
 
 /**
@@ -29,15 +34,26 @@ export function Meter({
   label,
   warnAt = 0.75,
   dangerAt = 0.9,
+  plif = false,
+  active = false,
 }: MeterProps): React.ReactElement {
   const ratio = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
   const filled = Math.round(ratio * width);
+  const elapsed = useHighlightClock(plif && active);
 
   const tone = ratio >= dangerAt ? 'danger' : ratio >= warnAt ? 'warn' : 'accentDim';
 
   return (
     <Box>
-      <Text color={color(tone)}>{glyph.meterFull.repeat(filled)}</Text>
+      {plif && active ? (
+        <PlifGlow
+          value={glyph.meterFull.repeat(filled)}
+          elapsedMs={elapsed}
+          stops={['brand', 'accentDim', 'accent', 'accentBright']}
+        />
+      ) : (
+        <Text color={color(tone)}>{glyph.meterFull.repeat(filled)}</Text>
+      )}
       <Text color={color('ghost')}>{glyph.meterEmpty.repeat(Math.max(0, width - filled))}</Text>
       {label !== undefined && (
         <Text color={color(ratio >= warnAt ? tone : 'muted')}> {label}</Text>

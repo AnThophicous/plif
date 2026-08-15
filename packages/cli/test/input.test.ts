@@ -11,7 +11,16 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { isTerminalPaste, pastedContentToken, sanitizePastedText, splitPaste, tokenize } from '../src/format.js';
+import {
+  PASTE_ATTACHMENT_MIN_CHARS,
+  imagePathsInPaste,
+  isTerminalPaste,
+  pastedContentToken,
+  sanitizePastedText,
+  shouldAttachPastedText,
+  splitPaste,
+  tokenize,
+} from '../src/format.js';
 import { IDLE_PASTE, hasPasteMarker, readPasteChunk } from '../src/paste.js';
 import { commandPrefix, matchCommands, findCommand, COMMANDS } from '../src/commands.js';
 import type { CatalogPickerRequest, CommandContext } from '../src/commands.js';
@@ -89,7 +98,73 @@ describe('splitPaste', () => {
   it('keeps complete pasted text available for an attachment', () => {
     assert.equal(sanitizePastedText('one\r\ntwo\u001b[31m'), 'one\ntwo[31m');
     assert.equal(pastedContentToken(1, 'one\ntwo'), '[Pasted Content #1 - 2 Lines]');
-    assert.equal(pastedContentToken(2), '[Pasted Content #2 - 0 Lines]');
+    assert.equal(pastedContentToken(2), '[Pasted Image #2]');
+  });
+});
+
+describe('when a paste becomes an attachment', () => {
+  it('leaves anything shorter than the threshold as ordinary typing', () => {
+    assert.equal(shouldAttachPastedText(''), false);
+    assert.equal(shouldAttachPastedText('a stack trace line'), false);
+    assert.equal(shouldAttachPastedText('x'.repeat(PASTE_ATTACHMENT_MIN_CHARS - 1)), false);
+  });
+
+  it('attaches once the paste reaches the threshold', () => {
+    assert.equal(shouldAttachPastedText('x'.repeat(PASTE_ATTACHMENT_MIN_CHARS)), true);
+    assert.equal(shouldAttachPastedText('x'.repeat(PASTE_ATTACHMENT_MIN_CHARS + 1)), true);
+  });
+
+  it('measures characters, not lines, so a short multi-line paste stays inline', () => {
+    assert.equal(PASTE_ATTACHMENT_MIN_CHARS, 500);
+    assert.equal(shouldAttachPastedText('one\ntwo\nthree\nfour'), false);
+    assert.equal(shouldAttachPastedText(Array.from({ length: 60 }, () => 'line').join('\n')), false);
+  });
+});
+
+describe('image files arriving as pasted text', () => {
+  it('recognises a Windows path to an image', () => {
+    assert.deepEqual(
+      imagePathsInPaste('C:\\Users\\dev\\Pictures\\erro.png'),
+      ['C:\\Users\\dev\\Pictures\\erro.png'],
+    );
+  });
+
+  it('unwraps the quotes Explorer puts around a copied path', () => {
+    assert.deepEqual(
+      imagePathsInPaste('"C:\\Users\\dev\\Pictures\\meu print.PNG"'),
+      ['C:\\Users\\dev\\Pictures\\meu print.PNG'],
+    );
+  });
+
+  it('takes several images pasted as one block', () => {
+    assert.deepEqual(
+      imagePathsInPaste('C:\\a\\one.png\nC:\\a\\two.jpeg'),
+      ['C:\\a\\one.png', 'C:\\a\\two.jpeg'],
+    );
+  });
+
+  it('decodes a file:// URI back into a path', () => {
+    assert.deepEqual(
+      imagePathsInPaste('file:///C:/Users/dev/Pictures/erro%20novo.png'),
+      ['C:\\Users\\dev\\Pictures\\erro novo.png'],
+    );
+  });
+
+  it('accepts posix paths too', () => {
+    assert.deepEqual(imagePathsInPaste('/home/dev/shot.webp'), ['/home/dev/shot.webp']);
+    assert.deepEqual(imagePathsInPaste('./docs/diagram.gif'), ['./docs/diagram.gif']);
+  });
+
+  it('refuses anything that is not entirely image paths', () => {
+    assert.deepEqual(imagePathsInPaste('olha esse erro aqui'), []);
+    assert.deepEqual(imagePathsInPaste('C:\\Users\\dev\\notes.txt'), []);
+    assert.deepEqual(imagePathsInPaste('C:\\a\\one.png\nand also this text'), []);
+    assert.deepEqual(imagePathsInPaste('png'), []);
+    assert.deepEqual(imagePathsInPaste(''), []);
+  });
+
+  it('does not mistake a sentence mentioning a png for a path', () => {
+    assert.deepEqual(imagePathsInPaste('salvei em erro.png'), []);
   });
 });
 
@@ -351,6 +426,7 @@ describe('model catalog picker', () => {
     // suggest one.
     assert.deepEqual(picker?.expanded, []);
     assert.equal(picker?.selected, 0);
+    assert.match(picker?.hint ?? '', /\[vision\].*\[vision helper\]/);
 
     // The developer's own providers, if they have any, sort ahead of the
     // built-in ones and carry a different heading. This machine may have none,

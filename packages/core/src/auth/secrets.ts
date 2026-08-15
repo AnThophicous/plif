@@ -161,6 +161,26 @@ export class CredentialBroker {
     return stored?.trim() || undefined;
   }
 
+  /** Read only the encrypted store, ignoring an environment override. */
+  async stored(variable: string): Promise<string | undefined> {
+    const value = await this.#store.get(variable);
+    return value?.trim() || undefined;
+  }
+
+  /** Persist a credential without exposing it to configuration or prompts. */
+  async remember(variable: string, value: string): Promise<void> {
+    const normalized = value.trim();
+    if (!normalized) throw new PlifError('INVALID_ARGUMENT', 'credential cannot be empty');
+    this.#refused.delete(variable);
+    await this.#store.set(variable, normalized);
+  }
+
+  /** Remove a saved credential and allow a later resolve to ask again. */
+  async forget(variable: string): Promise<void> {
+    this.#refused.delete(variable);
+    await this.#store.delete(variable);
+  }
+
   async resolve(request: CredentialRequest): Promise<string | undefined> {
     const existing = await this.lookup(request.variable);
     if (existing) return existing;
@@ -174,7 +194,7 @@ export class CredentialBroker {
       return undefined;
     }
 
-    await this.#store.set(request.variable, typed.trim());
+    await this.remember(request.variable, typed);
     return typed.trim();
   }
 

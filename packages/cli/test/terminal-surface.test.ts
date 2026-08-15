@@ -32,6 +32,12 @@ describe('full-bleed terminal surface', () => {
     assert.ok(tiny.contentHeight >= 1);
   });
 
+  it('budgets the live panel below the header instead of extending the scroll frame', () => {
+    const withHeader = terminalSurfaceLayout(96, 40, 13);
+    assert.equal(withHeader.panelHeight, withHeader.canvasHeight - 13);
+    assert.ok(withHeader.contentHeight < terminalSurfaceLayout(96, 40).contentHeight);
+  });
+
   it('uses a distinct panel token', () => {
     assert.notEqual(color('panel'), color('surface'));
     assert.equal(color('panel'), '#191b20');

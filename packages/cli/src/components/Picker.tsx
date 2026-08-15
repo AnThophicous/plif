@@ -159,6 +159,7 @@ export function preservePickerSelection(
 
 interface PickerProps {
   readonly title: string;
+  readonly hint?: string;
   readonly items?: readonly PickerItem[];
   readonly groups?: readonly PickerGroup[];
   readonly expanded?: readonly string[];
@@ -179,6 +180,7 @@ export function filterItems(items: readonly PickerItem[], filter: string): Picke
 
 export function Picker({
   title,
+  hint,
   items,
   groups,
   expanded,
@@ -226,6 +228,10 @@ export function Picker({
             {grouped ? `${count} providers` : `${count} ${count === 1 ? 'match' : 'matches'}`}
           </Text>
         </Box>
+
+        {hint && (
+          <Text color={color('ghost')}>{truncate(hint, inner)}</Text>
+        )}
 
         <Box marginTop={1}>
           <Text color={color('muted')}>{glyph.prompt} </Text>

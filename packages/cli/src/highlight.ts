@@ -16,11 +16,11 @@
  * the change itself harder to see, which is backwards.
  */
 
-import type { PaletteKey } from './theme.js';
+import type { SyntaxKey } from './theme.js';
 
 export interface Token {
   readonly text: string;
-  readonly tone: PaletteKey;
+  readonly kind: SyntaxKey;
 }
 
 const KEYWORDS: Readonly<Record<string, readonly string[]>> = {
@@ -52,6 +52,15 @@ const KEYWORDS: Readonly<Record<string, readonly string[]>> = {
     'case', 'do', 'done', 'elif', 'else', 'esac', 'fi', 'for', 'function', 'if', 'in', 'local',
     'return', 'then', 'until', 'while',
   ],
+  cpp: [
+    'alignas', 'alignof', 'auto', 'bool', 'break', 'case', 'catch', 'char', 'class',
+    'const', 'constexpr', 'continue', 'default', 'delete', 'do', 'double', 'else', 'enum',
+    'explicit', 'export', 'extern', 'false', 'float', 'for', 'friend', 'if', 'inline',
+    'int', 'long', 'namespace', 'new', 'noexcept', 'nullptr', 'operator', 'private',
+    'protected', 'public', 'return', 'short', 'signed', 'sizeof', 'static', 'struct',
+    'switch', 'template', 'this', 'throw', 'true', 'try', 'typedef', 'typename',
+    'union', 'unsigned', 'using', 'virtual', 'void', 'volatile', 'while',
+  ],
 };
 
 const LITERALS = ['true', 'false', 'null', 'undefined', 'None', 'True', 'False', 'nil'];
@@ -62,7 +71,11 @@ const COMMENT_PREFIX: Readonly<Record<string, readonly string[]>> = {
   go: ['//'],
   rs: ['//'],
   sh: ['#'],
-  json: [],
+  cpp: ['//', '/*', '*/', '*'],
+  json: ['//', '/*', '*/', '*'],
+  toml: ['#'],
+  css: ['/*', '*/', '*'],
+  html: ['<!--', '-->'],
   md: [],
 };
 
@@ -88,9 +101,29 @@ export function languageOf(path: string): string {
     case 'bash':
     case 'zsh':
       return 'sh';
+    case 'ps1':
+    case 'psm1':
+    case 'psd1':
+      return 'sh';
+    case 'c':
+    case 'h':
+    case 'cc':
+    case 'cpp':
+    case 'hpp':
+    case 'cxx':
+      return 'cpp';
     case 'json':
     case 'jsonc':
       return 'json';
+    case 'toml':
+      return 'toml';
+    case 'html':
+    case 'htm':
+      return 'html';
+    case 'css':
+    case 'scss':
+    case 'less':
+      return 'css';
     case 'md':
       return 'md';
     default:
@@ -107,8 +140,8 @@ export function languageOf(path: string): string {
  * developer is shown, only how it looks.
  */
 export function highlight(line: string, language: string): Token[] {
-  if (!line) return [{ text: '', tone: 'text' }];
-  if (language === 'plain' || language === 'md') return [{ text: line, tone: 'text' }];
+  if (!line) return [{ text: '', kind: 'plain' }];
+  if (language === 'plain' || language === 'md') return [{ text: line, kind: 'plain' }];
 
   const comments = COMMENT_PREFIX[language] ?? [];
   const keywords = new Set(KEYWORDS[language] ?? []);
@@ -117,26 +150,26 @@ export function highlight(line: string, language: string): Token[] {
   // the one where tokenising the contents produces obvious nonsense — every
   // English word in a sentence lit up as an identifier.
   const trimmed = line.trimStart();
-  if (comments.some((prefix) => trimmed.startsWith(prefix))) {
-    return [{ text: line, tone: 'faint' }];
+  if (comments.some((prefix) => prefix !== '*' && trimmed.startsWith(prefix))) {
+    return [{ text: line, kind: 'comment' }];
   }
 
   const tokens: Token[] = [];
   let index = 0;
 
-  const push = (text: string, tone: PaletteKey): void => {
+  const push = (text: string, kind: SyntaxKey): void => {
     const last = tokens[tokens.length - 1];
-    if (last && last.tone === tone) tokens[tokens.length - 1] = { text: last.text + text, tone };
-    else tokens.push({ text, tone });
+    if (last && last.kind === kind) tokens[tokens.length - 1] = { text: last.text + text, kind };
+    else tokens.push({ text, kind });
   };
 
   while (index < line.length) {
     const rest = line.slice(index);
 
     // Trailing comment.
-    const comment = comments.find((prefix) => prefix.length > 1 && rest.startsWith(prefix));
+    const comment = comments.find((prefix) => prefix !== '*' && rest.startsWith(prefix));
     if (comment || (comments.includes('#') && rest.startsWith('#'))) {
-      push(rest, 'faint');
+      push(rest, 'comment');
       break;
     }
 
@@ -151,37 +184,50 @@ export function highlight(line: string, language: string): Token[] {
           break;
         } else end += 1;
       }
-      push(rest.slice(0, end), 'faint');
+      push(rest.slice(0, end), 'string');
       index += end;
       continue;
     }
 
     const word = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(rest)?.[0];
     if (word) {
-      const tone: PaletteKey = keywords.has(word)
-        ? 'text'
-        : LITERALS.includes(word)
-          ? 'muted'
-          : // A name immediately followed by `(` is being called, and calls are
-            // the landmarks a reader scans a diff for.
-            /^\s*\(/.test(rest.slice(word.length))
-            ? 'text'
-            : 'text';
-      push(word, tone);
+      const before = line.slice(0, index);
+      const after = rest.slice(word.length);
+      const kind: SyntaxKey = keywords.has(word) || LITERALS.includes(word)
+        ? 'keyword'
+        : language === 'toml' && /^\s*=/.test(after)
+          ? 'property'
+          : language === 'css' && /^\s*:/.test(after)
+            ? 'property'
+            : /(?:\.|\?\.)$/.test(before)
+              ? 'property'
+              : /<\/?$/.test(before) || /^[A-Z]/.test(word)
+                ? 'type'
+                : /^\s*\(/.test(after)
+                  ? 'function'
+                  : 'variable';
+      push(word, kind);
       index += word.length;
       continue;
     }
 
     const number = /^0[xXbBoO][0-9a-fA-F_]+|^\d[\d_]*(\.\d+)?([eE][+-]?\d+)?/.exec(rest)?.[0];
     if (number) {
-      push(number, 'muted');
+      push(number, 'number');
       index += number.length;
       continue;
     }
 
-    push(rest[0] as string, /[{}()[\].,;:]/.test(rest[0] as string) ? 'muted' : 'text');
+    const operator = /^(?:=>|===|!==|==|!=|<=|>=|&&|\|\||\?\?|\?\.|\+\+|--|\*\*|[=+\-*/%<>!&|^~?:{}()[\].,;])/.exec(rest)?.[0];
+    if (operator) {
+      push(operator, 'operator');
+      index += operator.length;
+      continue;
+    }
+
+    push(rest[0] as string, 'plain');
     index += 1;
   }
 
-  return tokens.length ? tokens : [{ text: line, tone: 'text' }];
+  return tokens.length ? tokens : [{ text: line, kind: 'plain' }];
 }

@@ -1,4 +1,4 @@
-<!-- plif: id=00-kernel order=0 -->
+<!-- plif: id=00-kernel order=0 minContext=32768 -->
 # Plif default instructions
 
 You are Plif, an expert software-engineering agent working with a developer in a

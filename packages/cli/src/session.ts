@@ -8,7 +8,7 @@
  */
 
 import { DEFAULT_CONTEXT_TOKENS, diffStats, parseDiff } from '@plif/core';
-import type { Catalog, Decision, PolicyAction } from '@plif/core';
+import type { Catalog, Decision, Effort, PolicyAction } from '@plif/core';
 import type { ModelSelection } from '@plif/core';
 import { filterItems, filterPickerGroups, flattenPickerGroups, pickerRows, preservePickerSelection } from './components/Picker.js';
 import type { PickerGroup, PickerItem } from './components/Picker.js';
@@ -89,6 +89,7 @@ export interface TimelineEntry {
   readonly diff?: string;
   readonly edits?: readonly { readonly path: string; readonly diff: string }[];
   readonly planItems?: readonly import('./format.js').PlanDisplayItem[];
+  readonly searchResults?: readonly import('./format.js').SearchHit[];
   readonly executions?: readonly {
     readonly kind?: 'Read' | 'List';
     readonly target?: string;
@@ -232,13 +233,13 @@ export interface PendingApproval {
 
 export interface PickerState {
   readonly title: string;
+  readonly hint?: string;
   readonly items?: readonly PickerItem[];
   readonly groups?: readonly PickerGroup[];
   readonly expanded?: readonly string[];
-  readonly closeAfterPick?: boolean;
   readonly filter: string;
   readonly selected: number;
-  readonly onPick: (value: string | ModelSelection) => void | Promise<void>;
+  readonly onPick: (value: string | ModelSelection) => void;
 }
 
 export interface SessionState {
@@ -284,10 +285,9 @@ export interface SessionState {
   readonly busyLabel: string;
   /** When the current work started, for the elapsed counter. Null when idle. */
   readonly busySince: number | null;
-  /** The selected reasoning effort, kept with picker state for atomic changes. */
-  readonly effort?: import('@plif/core').Effort;
   readonly contextUsed: number;
   readonly contextMax: number;
+  readonly effort?: Effort;
   readonly exiting: boolean;
 }
 
@@ -317,6 +317,7 @@ export const initialSession: SessionState = {
   busySince: null,
   contextUsed: 0,
   contextMax: DEFAULT_CONTEXT_TOKENS,
+  effort: undefined,
   exiting: false,
 };
 
@@ -367,6 +368,7 @@ export type SessionAction =
   | { type: 'queue.drop'; id: string }
   /** Everything queued has been handed to the agent. */
   | { type: 'queue.clear' }
+  | { type: 'queue.deliver'; ids: readonly string[] }
   | { type: 'subagent.start'; view: SubagentView }
   | {
       type: 'subagent.activity';
@@ -399,8 +401,8 @@ export type SessionAction =
   | { type: 'discovery.flush' }
   | { type: 'container'; name: string | null; state: string | null }
   | { type: 'busy'; busy: boolean; label?: string; since?: number }
-  | { type: 'effort.apply'; effort?: import('@plif/core').Effort }
-  | { type: 'context'; used: number; max?: number }
+  | { type: 'context'; used?: number; max?: number }
+  | { type: 'effort.apply'; effort?: Effort }
   | {
       type: 'picker.open';
       picker: Omit<PickerState, 'filter' | 'selected'> & { selected?: number };
@@ -715,6 +717,11 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case 'queue.clear':
       return { ...state, queue: [] };
 
+    case 'queue.deliver': {
+      const delivered = new Set(action.ids);
+      return { ...state, queue: state.queue.filter((item) => !delivered.has(item.id)) };
+    }
+
     case 'subagent.start':
       return {
         ...state,
@@ -861,16 +868,15 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         busySince: action.busy ? (action.since ?? Date.now()) : null,
       };
 
-    case 'effort.apply':
-      if (state.effort === action.effort && state.picker === null) return state;
-      return { ...state, effort: action.effort, picker: null };
-
     case 'context':
       return {
         ...state,
-        contextUsed: action.used,
+        contextUsed: action.used ?? state.contextUsed,
         contextMax: action.max ?? state.contextMax,
       };
+
+    case 'effort.apply':
+      return { ...state, effort: action.effort, picker: null };
 
     case 'picker.open':
       return {
@@ -893,6 +899,9 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         };
       }
       const matches = filterItems(state.picker.items ?? [], action.filter);
+      const previous = state.picker.groups
+        ? pickerRows(state.picker.groups, state.picker.expanded ?? [], state.picker.filter)
+        : [];
       return {
         ...state,
         picker: {

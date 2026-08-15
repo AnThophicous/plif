@@ -160,6 +160,49 @@ const columnsArg = Number(process.argv[2] ?? 96);
 const rows = Number(process.argv[4] ?? 40);
 
 const SCENARIOS: Record<string, Step[]> = {
+  /** A Plif-styled prompt at rest must settle instead of repainting forever. */
+  'idle-plif': [{ wait: 900 }],
+
+  /** A live tool row with the Chromatic Reactor working treatment. */
+  'working-plif': [
+    { wait: 200 },
+    {
+      emit: [
+        'agent.tool',
+        {
+          id: 'preview-working',
+          name: 'run_command',
+          input: { command: 'npm test' },
+          phase: 'start',
+        },
+      ],
+    },
+    { wait: 600 },
+    { capture: 'working-plif' },
+  ],
+
+  /** An active reasoning row, without a model call. */
+  'thinking-plif': [
+    { wait: 200 },
+    { emit: ['agent.thinking', { phase: 'start' }] },
+    { emit: ['agent.reasoning', { delta: 'Tracing the active theme and the shared animation clock.' }] },
+    { wait: 600 },
+    { capture: 'thinking-plif' },
+  ],
+
+  /** A compaction stage, without invoking a provider. */
+  'compact-plif': [
+    { wait: 200 },
+    {
+      emit: [
+        'agent.compacting',
+        { stage: 'summarising older turns', step: 2, steps: 4, before: 142_000, target: 84_000 },
+      ],
+    },
+    { wait: 600 },
+    { capture: 'compact-plif' },
+  ],
+
   /** Start a container, run something, approve it. The everyday screen. */
   default: [
     { wait: 150 },
@@ -208,30 +251,6 @@ const SCENARIOS: Record<string, Step[]> = {
     { type: 'deep' },
     { wait: 500 },
     { capture: 'filtro por provider e modelo' },
-  ],
-
-  /** The bounded effort picker, including a keyboard move. */
-  'effort-picker': [
-    { wait: 150 },
-    { type: '/effort\r' },
-    { wait: 1000 },
-    { capture: 'effort picker with the active PLIF row' },
-    { type: '\x1b[A' },
-    { wait: 250 },
-    { capture: 'effort picker after one keyboard move' },
-  ],
-
-  /** The credential flow: context first, masked entry second, storage choice third. */
-  'api-key': [
-    { wait: 150 },
-    { type: '\x1b' },
-    { wait: 120 },
-    { type: '/model z-ai/glm-5.2\r' },
-    { wait: 1500 },
-    { capture: 'provider e modelo antes da chave' },
-    { type: 'sk-preview-demo' },
-    { wait: 400 },
-    { capture: 'campo mascarado e escolhas de armazenamento' },
   ],
 
   /** The agent answering with markdown, tool rows, and the thinking line. */
@@ -601,19 +620,6 @@ const SCENARIOS: Record<string, Step[]> = {
     { capture: 'moved down, detail follows' },
   ],
 
-  /** Fixed statuses so the MCP browser can be inspected without local config. */
-  'mcp-statuses': [
-    { wait: 200 },
-    { type: '\x1b' },
-    { wait: 120 },
-    { emit: ['mcp.status', { server: 'docs', transport: 'http', connected: true, toolCount: 4, detail: '4 tools' }] },
-    { emit: ['mcp.status', { server: 'calendar', transport: 'http', connected: false, toolCount: 0, detail: 'closed' }] },
-    { emit: ['mcp.status', { server: 'search', transport: 'http', connected: false, toolCount: 0, detail: '401 Unauthorized' }] },
-    { type: '/mcp\r' },
-    { wait: 600 },
-    { capture: 'MCP connected, disconnected and error states' },
-  ],
-
   /** The compaction bar, part-way up the ladder. */
   compaction: [
     { wait: 200 },
@@ -744,11 +750,6 @@ const previewProvider = previewCheck.ok
   ? new OpenAIProvider(previewConfig, { capabilityCache, bus: engine.bus })
   : null;
 const previewProblem = previewCheck.ok ? null : (previewCheck.problem ?? 'model is not configured');
-// Only the catalogue scenario is about the automatic first-run chooser. The
-// other previews need their scripted command to reach the screen under test.
-const previewProblemForScenario = scenarioName === 'model-catalog'
-  ? previewProblem
-  : previewCheck.ok ? null : 'preview unavailable';
 
 const app = render(React.createElement(App, {
     engine,
@@ -763,12 +764,17 @@ const app = render(React.createElement(App, {
     // exactly the configuration most people run.
     provider: previewProvider,
     capabilityCache,
-    providerProblem: previewProblemForScenario,
+    // Plif visual scenarios are event-only; the model picker would obscure
+    // the surface being previewed when this machine has no provider config.
+    providerProblem: scenarioName.endsWith('-plif') ? null : previewProblem,
     tools: (await import('@plif/core')).DEFAULT_TOOLS,
     skillCatalogue: '',
     mcpCatalogue: '',
     skills: [],
     mcpStatuses: [],
+    ...(['idle-plif', 'working-plif', 'thinking-plif', 'compact-plif'].includes(scenarioName)
+      ? { effort: 'plif' as const }
+      : {}),
     initialThemeId: themeCatalogue.themes[0]?.id,
     themeCatalogue,
   }), {

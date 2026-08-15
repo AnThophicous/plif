@@ -58,6 +58,7 @@ export type ComposerAction =
   | { readonly type: 'draft.set'; readonly text: string; readonly cursor?: number }
   | { readonly type: 'reset.draft' }
   | { readonly type: 'attachment.add'; readonly attachment: PastedAttachment }
+  | { readonly type: 'attachment.paste'; readonly attachment: PastedAttachment }
   | { readonly type: 'attachment.remove'; readonly token: string }
   | { readonly type: 'attachments.set'; readonly attachments: readonly PastedAttachment[] }
   | { readonly type: 'queue.current'; readonly id: string }
@@ -162,6 +163,14 @@ export function composerReducer(state: ComposerState, action: ComposerAction): C
         ...state,
         attachments: [...state.attachments, action.attachment],
       };
+    case 'attachment.paste': {
+      const before = state.draft.slice(0, state.cursor);
+      const separator = before && !/\s$/.test(before) ? ' ' : '';
+      return {
+        ...insert(state, separator + action.attachment.token),
+        attachments: [...state.attachments, action.attachment],
+      };
+    }
     case 'attachment.remove':
       return {
         ...state,

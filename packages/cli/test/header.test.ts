@@ -5,7 +5,7 @@ import { describe, it } from 'node:test';
 import { render } from 'ink';
 import React from 'react';
 
-import { HEADER_INFINITY, Header } from '../src/components/Header.js';
+import { HEADER_INFINITY, Header, headerHeight } from '../src/components/Header.js';
 
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
@@ -22,6 +22,15 @@ class CaptureStdout extends EventEmitter {
 }
 
 describe('CLI header', () => {
+  it('uses the Plif cat mark in the live header', () => {
+    assert.equal(HEADER_INFINITY, '▗▖  ▗▛▀▜▄▛▀▜▖\n▝▜▄▄█▌ ▘█▝ ▐█▄▄▛▘\n   ▝▜█▛ ▜█▛▘\n    ▝▘   ▝▘');
+  });
+
+  it('reports its real footprint so the input frame stays in the viewport', () => {
+    assert.equal(headerHeight(96), 13);
+    assert.equal(headerHeight(60), 8);
+  });
+
   it('keeps the Plif mark, workspace, model, and operating cues in a stable order', async () => {
     const stdout = new CaptureStdout();
     const app = render(

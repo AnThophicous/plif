@@ -12,8 +12,10 @@
  * mean three round trips.
  */
 
+import { createHash } from 'node:crypto';
+
 import { findCatalogProvider, rankModelIds } from './catalog.js';
-import { PRESETS, resolveConfig, type StoredConfig } from './config.js';
+import { PRESETS, resolveConfig, type ModelConfig, type StoredConfig } from './config.js';
 import { createModelProvider } from './factory.js';
 
 /** Long enough for a healthy endpoint, short enough not to feel like a hang. */
@@ -47,31 +49,57 @@ export async function discoverProviderModels(
   providerId: string,
   options: DiscoverOptions = {},
 ): Promise<DiscoveredModels> {
-  const cached = cache.get(providerId);
+  let config: ModelConfig;
+  try {
+    config = resolveConfig(options.stored ?? {}, {
+      preset: providerId,
+      // A model id is irrelevant to listing, but the adapter wants one.
+      model: 'list',
+      ...(options.apiKey ? { apiKey: options.apiKey } : {}),
+    });
+  } catch {
+    return { ids: [], live: false };
+  }
+  const cacheKey = discoveryCacheKey(providerId, config, options.timeoutMs);
+  const cached = cache.get(cacheKey);
   if (cached && !options.refresh) return cached;
 
-  const result = await probe(providerId, options);
-  cache.set(providerId, result);
+  const result = await probe(providerId, options, config);
+  cache.set(cacheKey, result);
   return result;
 }
 
 /** Drop what discovery remembers. Used when a key is entered or changed. */
 export function forgetDiscoveredModels(providerId?: string): void {
-  if (providerId) cache.delete(providerId);
-  else cache.clear();
+  if (!providerId) {
+    cache.clear();
+    return;
+  }
+  for (const key of cache.keys()) {
+    if (key.startsWith(`${providerId}\0`)) cache.delete(key);
+  }
 }
 
-async function probe(providerId: string, options: DiscoverOptions): Promise<DiscoveredModels> {
+function discoveryCacheKey(providerId: string, config: ModelConfig, timeoutMs?: number): string {
+  // Endpoint and credential changes must invalidate a previous discovery, but
+  // neither value belongs in a diagnostic, heap snapshot, or Map inspector.
+  const target = createHash('sha256')
+    .update(config.baseURL, 'utf8')
+    .update('\0')
+    .update(config.apiKey, 'utf8')
+    .digest('hex')
+    .slice(0, 20);
+  return `${providerId}\0${target}\0${timeoutMs ?? DISCOVERY_TIMEOUT_MS}`;
+}
+
+async function probe(
+  providerId: string,
+  options: DiscoverOptions,
+  config: ModelConfig,
+): Promise<DiscoveredModels> {
   const empty: DiscoveredModels = { ids: [], live: false };
   const preset = PRESETS[providerId as keyof typeof PRESETS];
   try {
-    const config = resolveConfig(options.stored ?? {}, {
-      preset: providerId,
-      // A model id is irrelevant to listing, but `resolveConfig` reports an
-      // unusable config without one and the adapter wants something non-empty.
-      model: 'list',
-      ...(options.apiKey ? { apiKey: options.apiKey } : {}),
-    });
     // A remote that needs a credential and has none will 401 on every id it
     // would have returned. Skipping the call keeps the picker instant and the
     // curated list is the honest answer until a key is entered. Hosts that

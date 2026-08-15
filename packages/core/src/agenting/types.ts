@@ -14,6 +14,8 @@ export interface PromptContext {
   readonly isolation: string;
   readonly mode?: PromptMode;
   readonly effort?: Effort;
+  /** Provider context capacity, used to select full or compact instruction layers. */
+  readonly contextTokens?: number;
   readonly tools?: readonly ToolSpec[];
   readonly skills?: string;
   readonly mcpServers?: string;

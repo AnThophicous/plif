@@ -21,6 +21,24 @@ const FILE_MUTATION_TOOLS = new Set(['write_file', 'edit_file', 'apply_patch', '
 const REVIEW_INSPECTION_TOOLS = new Set(['read_file', 'diagnostics']);
 const VALIDATION_WORDS = /\b(?:test|tests|typecheck|build|check|lint|verify|verification)\b/i;
 const DIFF_COMMAND = /\bgit(?:\.exe)?\s+(?:diff|status)\b/i;
+const SHELL_MUTATION = new RegExp(
+  [
+    // PowerShell filesystem and file-output primitives.
+    '\\b(?:Set|Add)-Content\\b',
+    '\\bOut-File\\b',
+    '\\b(?:Remove|Move|Copy|Rename|New)-Item\\b',
+    '\\[System\\.IO\\.File\\]::(?:WriteAllText|WriteAllLines|AppendAllText)',
+    // Common POSIX/cmd mutators and redirection. Require command boundaries so
+    // words in test names do not turn a read-only command into a mutation.
+    '(?:^|[;&|]\\s*|\\s)(?:rm|mv|cp|mkdir|rmdir|touch|del|erase|move|copy)(?:\\.exe)?\\s',
+    '\\bsed\\s+[^\\r\\n]*\\s-i(?:\\s|$)',
+    '(?:^|[^<>])>>?(?!=)',
+    // VCS/package operations that write the checkout even without redirection.
+    '\\bgit(?:\\.exe)?\\s+(?:apply|am|checkout|restore|reset|clean|mv|rm)\\b',
+    '\\b(?:npm|pnpm|yarn|bun)\\s+(?:install|add|remove|update|upgrade|uninstall)\\b',
+  ].join('|'),
+  'i',
+);
 
 export function createHarnessCycle(): HarnessCycleState {
   return {
@@ -101,7 +119,17 @@ export function isFileMutationTool(name: string): boolean {
   return FILE_MUTATION_TOOLS.has(name);
 }
 
+/** Shell calls whose command text declares an ordinary workspace mutation. */
+export function isShellMutation(
+  name: string,
+  input: Record<string, unknown>,
+): boolean {
+  if (name !== 'run_command' && name !== 'shell_command') return false;
+  return SHELL_MUTATION.test(commandText(name, input));
+}
+
 export function mutationPaths(name: string, input: Record<string, unknown>): readonly string[] {
+  if (isShellMutation(name, input)) return ['*'];
   if (name === 'resolve_edit_conflict') return ['*'];
   if (name === 'write_file' || name === 'edit_file') {
     return typeof input['path'] === 'string' && input['path'].trim() ? [input['path']] : ['*'];

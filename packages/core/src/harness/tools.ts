@@ -33,6 +33,7 @@ import { describeStats, diffLines, diffStats, formatDiff } from './diff.js';
 import type { EditCoordinator } from './edits.js';
 import {
   configSchemaText,
+  formatConfigToml,
   globalConfigPath,
   isAutoApproveEnabled,
   loadGlobalConfig,
@@ -661,7 +662,21 @@ export const applyPatch: Tool = {
     const summary = staged
       .map((item) => `${item.edit.path} — ${describeStats(diffStats(diffLines(item.before, item.after)))?.toLowerCase() ?? 'updated'}`)
       .join('\n');
-    return { output: summary, diff: diffs.join('\n'), ok: true };
+    const lspNotes: string[] = [];
+    if (context.lsp) {
+      for (const item of staged) {
+        const note = await diagnosticsAfterWrite(
+          context.lsp,
+          await context.container.hostPathFor(item.edit.path),
+        ).catch(() => null);
+        if (note) lspNotes.push(`${item.edit.path}${note}`);
+      }
+    }
+    return {
+      output: `${summary}${lspNotes.length > 0 ? `\n\n${lspNotes.join('\n\n')}` : ''}`,
+      diff: diffs.join('\n'),
+      ok: !lspNotes.some((note) => /\berror\(s\)/.test(note)),
+    };
   },
 };
 
@@ -926,6 +941,7 @@ export const listProfiles: Tool = {
 };
 
 const SECRET_KEY = /api[-_]?key|token|secret|password|credential/i;
+const SECRET_MAP = /^provider[_-]?keys?$/i;
 /**
  * Containers whose contents are credentials whatever the keys are called.
  *
@@ -940,6 +956,14 @@ const SECRET_CONTAINER = /^(headers|env)$/i;
 export function redactedConfig(config: GlobalConfig): unknown {
   const hide = (value: unknown, key: string, sealed: boolean): unknown => {
     if (SECRET_KEY.test(key)) return value ? '[redacted]' : value;
+    if (SECRET_MAP.test(key) && value && typeof value === 'object' && !Array.isArray(value)) {
+      return Object.fromEntries(
+        Object.entries(value).map(([provider, credential]) => [
+          provider,
+          credential ? '[redacted]' : credential,
+        ]),
+      );
+    }
     if (sealed && (value === null || typeof value !== 'object')) {
       return value ? '[redacted]' : value;
     }
@@ -972,10 +996,10 @@ export const getConfig: Tool = {
         'Status: success',
         `Summary: loaded personal configuration from ${globalConfigPath()}.`,
         '',
-        'Configuration (credentials redacted):',
-        JSON.stringify(redactedConfig(config), null, 2),
+        'Configuration (TOML, credentials redacted):',
+        formatConfigToml(redactedConfig(config) as GlobalConfig).trim(),
         '',
-        'Configuration schema:',
+        'Configuration reference (TOML):',
         schema.trim(),
         '',
         'Next: preserve unrelated fields and use update_config with the smallest valid change.',
@@ -1000,7 +1024,6 @@ export const updateConfig: Tool = {
         provider: { type: 'string', description: 'Provider id for upsert_provider' },
         name: { type: 'string', description: 'Human-readable provider name' },
         baseURL: { type: 'string', description: 'OpenAI-compatible API base URL' },
-        apiKey: { type: 'string', description: 'Optional provider credential; never shown in transcripts' },
         model: { type: 'string', description: 'Optional model id to add to the provider' },
         modelName: { type: 'string', description: 'Optional human-readable model name' },
         modalities: { type: 'array', items: { type: 'string', enum: ['text', 'image'] } },
@@ -1012,6 +1035,16 @@ export const updateConfig: Tool = {
     },
   },
   async run(input, context) {
+    // Credentials belong to the encrypted broker or a provider-specific
+    // environment variable. Accepting one here would either leak it into a
+    // model tool call or claim success after the TOML writer strips it.
+    if (Object.prototype.hasOwnProperty.call(input, 'apiKey')) {
+      throw new PlifError(
+        'INVALID_ARGUMENT',
+        'update_config does not accept API keys',
+        { hint: 'Use /models to open the encrypted credential prompt, or set the provider-specific environment variable.' },
+      );
+    }
     const operation = requireString(input, 'operation');
     const current = await loadGlobalConfig();
     let next: GlobalConfig;
@@ -1059,7 +1092,6 @@ export const updateConfig: Tool = {
         options: {
           ...previousOptions,
           baseURL,
-          ...(typeof input['apiKey'] === 'string' ? { apiKey: input['apiKey'] } : {}),
         },
         models: model ? { ...previousModels, [model]: modelEntry } : previousModels,
       };
@@ -1239,13 +1271,18 @@ export const updatePlan: Tool = {
     name: 'update_plan',
     description:
       'Set a short execution plan before authorized file changes. Use 1-6 concise checkpoints, ' +
-      'update it only at meaningful checkpoint boundaries, and keep at most one checkpoint in progress.',
+      'update it only at meaningful checkpoint boundaries, and keep at most one checkpoint in progress. ' +
+      'In workspace runs the runtime also writes a durable Markdown checkpoint mirror under .plif/plans/.',
     parameters: {
       type: 'object',
       properties: {
         explanation: {
           type: 'string',
           description: 'Optional one-sentence reason the plan changed; do not narrate routine progress.',
+        },
+        objective: {
+          type: 'string',
+          description: 'Optional concise objective for the durable Markdown checkpoint mirror.',
         },
         plan: {
           type: 'array',
@@ -1266,7 +1303,7 @@ export const updatePlan: Tool = {
       additionalProperties: false,
     },
   },
-  async run(input) {
+  async run(input, context) {
     const raw = input['plan'];
     if (!Array.isArray(raw) || raw.length < 1 || raw.length > 6) {
       throw new PlifError('INVALID_ARGUMENT', 'update_plan needs between 1 and 6 checkpoints');
@@ -1294,10 +1331,63 @@ export const updatePlan: Tool = {
 
     const completed = checkpoints.filter((checkpoint) => checkpoint.status === 'completed').length;
     const active = checkpoints.find((checkpoint) => checkpoint.status === 'in_progress');
+    let durable = '';
+    if (context.workspace) {
+      const root = context.container.workdir.replace(/[\\/]+$/, '');
+      const child = context.agentId?.startsWith('subagent:')
+        ? `/subagents/${context.agentId.replace(/[^a-z0-9_.-]+/gi, '-').slice(0, 96)}.md`
+        : '/current.md';
+      const planPath = `${root}/.plif/plans${child}`;
+      const objective = typeof input['objective'] === 'string' && input['objective'].trim()
+        ? input['objective'].trim()
+        : checkpoints[0]!.step;
+      const explanation = typeof input['explanation'] === 'string' && input['explanation'].trim()
+        ? input['explanation'].trim()
+        : 'No additional checkpoint rationale was supplied.';
+      const rows = checkpoints.map((checkpoint) => {
+        const mark = checkpoint.status === 'completed' ? 'x' : checkpoint.status === 'in_progress' ? '-' : ' ';
+        return `- [${mark}] ${checkpoint.step} _(${checkpoint.status})_`;
+      });
+      const markdown = [
+        '# Plif execution checkpoint',
+        '',
+        '## Objective',
+        '',
+        objective,
+        '',
+        '## Current evidence',
+        '',
+        explanation,
+        '',
+        '## Checkpoints with acceptance evidence',
+        '',
+        ...rows,
+        '',
+        '## Delegated ownership',
+        '',
+        context.agentId ? `- Owner: ${context.agentId}` : '- Owner: primary agent',
+        '',
+        '## Verification matrix',
+        '',
+        '- Record commands and observed results in the detailed task plan.',
+        '',
+        '## Review and audit findings',
+        '',
+        '- Pending synchronization from the detailed task plan.',
+        '',
+        '## Current status and exact next action',
+        '',
+        active?.step ?? (completed === checkpoints.length ? 'All visible checkpoints are complete.' : 'Select the next pending checkpoint.'),
+        '',
+      ].join('\n');
+      await context.container.writeFile(planPath, markdown);
+      durable = ` Durable checkpoint: ${planPath}.`;
+    }
     return {
       output:
         `Plan updated: ${completed}/${checkpoints.length} checkpoints completed.` +
-        (active ? ` Current checkpoint: ${active.step}` : ''),
+        (active ? ` Current checkpoint: ${active.step}.` : '') +
+        durable,
       ok: true,
     };
   },

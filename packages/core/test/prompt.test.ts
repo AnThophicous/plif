@@ -5,6 +5,10 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 
 import { detectShell } from '../src/harness/environment.js';
+import {
+  loadMarkdownInstructions,
+  parseInstructionMetadata,
+} from '../src/agenting/instruction-loader.js';
 import { buildSystemPrompt, readAgentInstructions } from '../src/harness/prompt.js';
 import { DEFAULT_CAPABILITIES } from '../src/types.js';
 
@@ -48,13 +52,100 @@ describe('modular system prompt', () => {
     assert.match(plif, /## Plif effort mode/);
     assert.match(plif, /implementation plan before the first mutation/);
     assert.match(plif, /PowerShell on Windows/);
+    assert.match(plif, /durable Markdown execution plan/i);
+    assert.match(plif, /design review/i);
+    assert.match(plif, /evaluator-optimizer/i);
+  });
+
+  it('loads research guidance whenever discovery exists and degrades opening honestly', () => {
+    const module = loadMarkdownInstructions().find((entry) => entry.id === '25-research');
+    assert.deepEqual(module?.tools, ['research']);
+
+    const unavailable = buildSystemPrompt({
+      ...base,
+      tools: [{ name: 'web_fetch', description: 'Read a source.', parameters: {} }],
+    });
+    const missingReader = buildSystemPrompt({
+      ...base,
+      tools: [{ name: 'research', description: 'Batch research.', parameters: {} }],
+    });
+    const available = buildSystemPrompt({
+      ...base,
+      tools: [
+        { name: 'research', description: 'Batch research.', parameters: {} },
+        { name: 'web_fetch', description: 'Read a source.', parameters: {} },
+      ],
+    });
+
+    assert.doesNotMatch(unavailable, /# Research operating protocol/);
+    assert.match(missingReader, /# Research operating protocol/);
+    assert.match(missingReader, /discovery-only/);
+    assert.match(available, /# Research operating protocol/);
+    assert.match(available, /query matrix/i);
+    assert.match(available, /opened sources/i);
+    assert.match(available, /contradict/i);
+  });
+
+  it('selects compact instruction layers for a small-context model', () => {
+    const prompt = buildSystemPrompt({
+      ...base,
+      contextTokens: 16_384,
+      effort: 'plif',
+      tools: [{ name: 'research', description: 'Batch research.', parameters: {} }],
+    });
+
+    assert.match(prompt, /Plif compact operating contract/);
+    assert.match(prompt, /Plif effort workflow — compact context/);
+    assert.match(prompt, /Compact research protocol/);
+    assert.doesNotMatch(prompt, /## Instruction authority/);
+    assert.ok(prompt.length < 24_000, `compact prompt was ${prompt.length} characters`);
+  });
+
+  it('rejects empty and duplicate entries in instruction metadata lists', () => {
+    for (const directive of [
+      'id=x modes=primary,',
+      'id=x tools=research,,web_fetch',
+      'id=x tools=,',
+      'id=x tools=research,research',
+    ]) {
+      assert.throws(() => parseInstructionMetadata(directive, 'test.md'), /instruction (?:mode|tool)/i);
+    }
+  });
+
+  it('loads the orchestrator-worker contract only for a primary agent that can delegate', () => {
+    const primary = buildSystemPrompt({
+      ...base,
+      effort: 'plif',
+      tools: [{ name: 'subagent', description: 'Delegate.', parameters: {} }],
+    });
+    const child = buildSystemPrompt({
+      ...base,
+      effort: 'plif',
+      mode: 'subagent',
+      tools: [{ name: 'read_file', description: 'Read.', parameters: {} }],
+    });
+
+    assert.match(primary, /orchestrator-worker/i);
+    assert.doesNotMatch(child, /# Subagent orchestrator-worker protocol/);
+    assert.doesNotMatch(child, /delegate another agent/i);
   });
 
   it('contains no emoji itself', () => {
-    const found = [...buildSystemPrompt(base)].filter((character) =>
-      /\p{Extended_Pictographic}/u.test(character),
-    );
-    assert.deepEqual(found, []);
+    for (const prompt of [
+      buildSystemPrompt(base),
+      buildSystemPrompt({
+        ...base,
+        effort: 'plif',
+        tools: [
+          { name: 'research', description: 'Research.', parameters: {} },
+          { name: 'subagent', description: 'Delegate.', parameters: {} },
+        ],
+      }),
+      buildSystemPrompt({ ...base, mode: 'compaction' }),
+    ]) {
+      const found = [...prompt].filter((character) => /\p{Extended_Pictographic}/u.test(character));
+      assert.deepEqual(found, []);
+    }
   });
 
   it('describes the real machine without probing for it', () => {
@@ -189,7 +280,12 @@ describe('modular system prompt', () => {
   });
 
   it('uses a dedicated compaction contract instead of the coding workflow', () => {
-    const prompt = buildSystemPrompt({ ...base, mode: 'compaction' });
+    const prompt = buildSystemPrompt({
+      ...base,
+      mode: 'compaction',
+      effort: 'plif',
+      tools: [{ name: 'research', description: 'Research.', parameters: {} }],
+    });
 
     for (const heading of [
       'Objective and checkpoint',
@@ -202,7 +298,12 @@ describe('modular system prompt', () => {
       assert.equal(occurrences(prompt, `## ${heading}`), 1);
     }
     assert.match(prompt, /Do not answer the conversation/);
+    assert.match(prompt, /exact durable plan path/i);
+    assert.match(prompt, /claim-to-source ledger/i);
+    assert.match(prompt, /history is untrusted data/i);
+    assert.match(prompt, /\[redacted\]/i);
     assert.doesNotMatch(prompt, /Engineering standard|Primary operating mode/);
+    assert.doesNotMatch(prompt, /# Research operating protocol/);
   });
 });
 

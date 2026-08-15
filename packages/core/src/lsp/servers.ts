@@ -33,6 +33,28 @@ export const SERVERS: readonly ServerSpec[] = [
     initializationOptions: { provideFormatter: true },
   },
   {
+    id: 'html',
+    label: 'HTML',
+    languageIds: ['html'],
+    extensions: ['.html', '.htm'],
+    markers: [],
+    bin: 'vscode-html-language-server',
+    args: ['--stdio'],
+    install: 'npm i -g vscode-langservers-extracted',
+    bundledModule: 'vscode-langservers-extracted/bin/vscode-html-language-server',
+  },
+  {
+    id: 'css',
+    label: 'CSS / SCSS / Less',
+    languageIds: ['css', 'scss', 'less'],
+    extensions: ['.css', '.scss', '.less'],
+    markers: [],
+    bin: 'vscode-css-language-server',
+    args: ['--stdio'],
+    install: 'npm i -g vscode-langservers-extracted',
+    bundledModule: 'vscode-langservers-extracted/bin/vscode-css-language-server',
+  },
+  {
     id: 'bash',
     label: 'Bash / Shell',
     languageIds: ['shellscript'],
@@ -61,6 +83,17 @@ export const SERVERS: readonly ServerSpec[] = [
     bin: 'typescript-language-server',
     args: ['--stdio'],
     install: 'npm i -D typescript-language-server typescript',
+    bundledModule: 'typescript-language-server/lib/cli.mjs',
+  },
+  {
+    id: 'toml',
+    label: 'TOML',
+    languageIds: ['toml'],
+    extensions: ['.toml'],
+    markers: ['Cargo.toml', 'pyproject.toml', 'config.toml'],
+    bin: 'taplo',
+    args: ['lsp', 'stdio'],
+    install: 'install a Taplo CLI build with the lsp feature',
   },
   {
     id: 'python',
@@ -133,6 +166,12 @@ export function languageIdFor(file: string): string | null {
     '.psd1': 'powershell',
     '.json': 'json',
     '.jsonc': 'jsonc',
+    '.html': 'html',
+    '.htm': 'html',
+    '.css': 'css',
+    '.scss': 'scss',
+    '.less': 'less',
+    '.toml': 'toml',
   };
   return map[extension] ?? null;
 }
@@ -156,6 +195,8 @@ export interface ResolvedServer {
   readonly command: string;
   readonly args: readonly string[];
   readonly source: 'project' | 'path' | 'bundled';
+  /** `cmd.exe` needs the pre-quoted command line passed verbatim on Windows. */
+  readonly windowsVerbatimArguments?: boolean;
 }
 
 const WINDOWS_SUFFIXES = ['.cmd', '.exe', '.bat', ''];
@@ -188,14 +229,55 @@ export async function resolveServer(
 
   for (const suffix of suffixes) {
     if (await exists(local + suffix)) {
-      return { spec, command: local + suffix, args: spec.args, source: 'project' };
+      return spawnableServer(spec, local + suffix, spec.args, 'project');
     }
   }
 
   const onPath = await findOnPath(spec.bin);
-  if (onPath) return { spec, command: onPath, args: spec.args, source: 'path' };
+  if (onPath) return spawnableServer(spec, onPath, spec.args, 'path');
 
   return null;
+}
+
+function spawnableServer(
+  spec: ServerSpec,
+  command: string,
+  args: readonly string[],
+  source: ResolvedServer['source'],
+): ResolvedServer {
+  if (process.platform !== 'win32' || !/\.(?:cmd|bat)$/i.test(command)) {
+    return { spec, command, args, source };
+  }
+
+  const comSpec = process.env['ComSpec'] ?? process.env['COMSPEC'] ?? 'cmd.exe';
+  return {
+    spec,
+    command: comSpec,
+    args: ['/d', '/s', '/c', ['call', quoteWindowsArgument(command), ...args.map(quoteWindowsArgument)].join(' ')],
+    source,
+    windowsVerbatimArguments: true,
+  };
+}
+
+function quoteWindowsArgument(value: string): string {
+  let result = '"';
+  let backslashes = 0;
+
+  for (const character of value) {
+    if (character === '\\') {
+      backslashes += 1;
+      continue;
+    }
+    if (character === '"') {
+      result += '\\'.repeat(backslashes * 2 + 1) + '"';
+      backslashes = 0;
+      continue;
+    }
+    result += '\\'.repeat(backslashes) + character;
+    backslashes = 0;
+  }
+
+  return result + '\\'.repeat(backslashes * 2) + '"';
 }
 
 async function resolvePowerShell(spec: ServerSpec): Promise<ResolvedServer | null> {

@@ -3,12 +3,14 @@ import { Box, Text } from 'ink';
 
 import { diffHeight } from './Diff.js';
 import { Markdown } from './Markdown.js';
-import { ToolCall } from './ToolCall.js';
+import { ToolCall, searchResultsHeight } from './ToolCall.js';
 import { BLOOM_MARK, useSpinnerFrame } from './Spinner.js';
 import type { EntryStatus, TimelineEntry } from '../session.js';
 import type { TranscriptCell } from '../transcript/types.js';
 import { highlightedClusters, toneBetween, useHighlightClock } from '../pulse.js';
 import { color, formatDuration, formatWorkedDuration, glyph, layout, supportsRichGlyphs, truncate } from '../theme.js';
+import { clusterLength, displayWidth } from '../text.js';
+import { PlifGlow } from './PlifGlow.js';
 
 interface TimelineProps {
   readonly entries: readonly TimelineEntry[];
@@ -377,7 +379,10 @@ export function estimateHeight(entry: TimelineEntry, width: number): number {
   const wrap = (text: string, column = width): number =>
     text.split('\n').reduce((total, line) => total + wrappedHeight(line, column), 0);
 
-  if (entry.kind === 'input') return 5;
+  if (entry.kind === 'input') {
+    const { lines, hidden } = userRowLines(entry.title, Math.max(8, width - 14));
+    return 4 + lines.length + (hidden > 0 ? 1 : 0);
+  }
 
   if (entry.kind === 'answer') {
     // Markdown adds lines the raw text does not have: blank lines between
@@ -413,6 +418,12 @@ export function estimateHeight(entry: TimelineEntry, width: number): number {
   if (entry.kind === 'separator') return 2;
 
   if (entry.kind === 'tool') {
+    const editNoteLines = entry.expand ? detailLines : Math.min(detailLines, 5);
+    const editNoteHeight = editNoteLines + (editNoteLines < detailLines ? 1 : 0);
+    if (entry.searchResults?.length) {
+      return 1 + (entry.toolSummary ? 1 : 0)
+        + searchResultsHeight(entry.searchResults, entry.expand ?? false) + 1;
+    }
     if (entry.executions?.length) {
       if (!entry.expand) return 2;
       return 2 + entry.executions.reduce(
@@ -425,13 +436,14 @@ export function estimateHeight(entry: TimelineEntry, width: number): number {
       return 1 + shown + (shown < entry.planItems.length ? 1 : 0) + 1;
     }
     if (entry.edits?.length) {
-      return 1 + entry.edits.reduce((total, edit) => total + 1 + diffHeight(edit.diff, entry.expand ?? false), 0) + 1;
+      return 1 + entry.edits.reduce((total, edit) => total + 1 + diffHeight(edit.diff, entry.expand ?? false), 0)
+        + editNoteHeight + 1;
     }
-    // A diff replaces the output block, so it is measured instead of it — not
-    // as well as. Counting both would reserve twice the height an edit row
-    // actually takes and cost that much scrollback on every edit.
+    // The diff replaces the ordinary edit summary. Automatic language-server
+    // feedback is retained beneath it, so that small note is measured too.
     if (entry.diff) {
-      return 1 + (entry.toolSummary ? 1 : 0) + diffHeight(entry.diff, entry.expand ?? false) + 1;
+      return 1 + (entry.toolSummary ? 1 : 0) + diffHeight(entry.diff, entry.expand ?? false)
+        + editNoteHeight + 1;
     }
     const shown = entry.expand
       ? detailLines
@@ -503,13 +515,17 @@ function ThinkingRow({
       <Box>
         <Text color={color(thinking ? 'accent' : 'ghost')}>{thinking ? pulse : glyph.step} </Text>
         {thinking ? (
-          <Text>
-            {highlightedClusters(label, clock).map((part, index) => (
-              <Text key={index} color={part.color} bold={part.active}>
-                {part.text}
-              </Text>
-            ))}
-          </Text>
+          plif ? (
+            <PlifGlow value={label} elapsedMs={clock} />
+          ) : (
+            <Text>
+              {highlightedClusters(label, clock).map((part, index) => (
+                <Text key={index} color={part.color} bold={part.active}>
+                  {part.text}
+                </Text>
+              ))}
+            </Text>
+          )
         ) : (
           <Text color={color('faint')}>
             {entry.expand ? `${label}:` : `Thought for ${formatDuration(entry.durationMs ?? 0)}`}
@@ -519,8 +535,8 @@ function ThinkingRow({
           {thinking
             ? ''
             : entry.expand
-              ? `  ${formatDuration(entry.durationMs ?? 0)} ${glyph.divider} Ctrl+R to collapse`
-              : `  ${glyph.divider} Ctrl+R to expand`}
+              ? `  ${formatDuration(entry.durationMs ?? 0)}`
+              : `  ${glyph.divider} Ctrl+R history`}
         </Text>
       </Box>
 
@@ -575,11 +591,10 @@ function CycleSeparator({ entry, width }: { entry: TimelineEntry; width: number 
  * "Thinking" reads as urgency, and this is the calmest thing the agent does.
  */
 const PULSE_FRAMES = supportsRichGlyphs ? ['•', '·', '•', '·'] : ['*', '+', 'x', '+'];
-const PLIF_PULSE_FRAMES = supportsRichGlyphs ? ['+', '×', '+', '×'] : ['#', '+', '*', '+'];
-
 function usePulse(active: boolean, plif = false): string {
   const clock = useHighlightClock(active, 420);
-  const frames = plif ? PLIF_PULSE_FRAMES : PULSE_FRAMES;
+  if (plif) return supportsRichGlyphs ? '+' : '*';
+  const frames = PULSE_FRAMES;
   const index = Math.floor(clock / 420) % frames.length;
   return frames[index] as string;
 }
@@ -591,23 +606,67 @@ function usePulse(active: boolean, plif = false): string {
  * developer's own words look like just another line the agent produced, and
  * scanning back for "what did I actually ask?" means reading everything.
  */
+export const MAX_USER_ROW_LINES = 6;
+
+export function userRowLines(
+  title: string,
+  width: number,
+): { readonly lines: readonly string[]; readonly hidden: number } {
+  const columns = Math.max(8, width);
+  const wrapped: string[] = [];
+  for (const source of title.split('\n')) {
+    if (!source) {
+      wrapped.push('');
+      continue;
+    }
+    let line = '';
+    let cells = 0;
+    for (let at = 0; at < source.length; ) {
+      const length = clusterLength(source, at) || 1;
+      const cluster = source.slice(at, at + length);
+      const clusterCells = displayWidth(cluster);
+      if (line && cells + clusterCells > columns) {
+        wrapped.push(line);
+        line = '';
+        cells = 0;
+      }
+      line += cluster;
+      cells += clusterCells;
+      at += length;
+    }
+    wrapped.push(line);
+  }
+  const lines = wrapped.slice(0, MAX_USER_ROW_LINES);
+  return { lines: lines.length > 0 ? lines : [''], hidden: Math.max(0, wrapped.length - lines.length) };
+}
+
 function UserRow({ entry, width }: { entry: TimelineEntry; width: number }): React.ReactElement {
   const time = formatClock(entry.at);
-  const titleWidth = Math.max(8, width - 8 - time.length);
-  const title = truncate(entry.title, titleWidth);
-  const fixedWidth = 1 + 2 + title.length + (time ? time.length + 1 : 0) + 1;
-  const fill = Math.max(0, width - fixedWidth);
   const surface = color('surface');
+  const { lines, hidden } = userRowLines(entry.title, Math.max(8, width - 8 - time.length));
+  const titleWidth = Math.max(8, width - 8 - time.length);
+  const rows = hidden > 0 ? [...lines, truncate(`… +${hidden} more lines`, titleWidth)] : lines;
+
   return (
     <Box flexDirection="column" marginTop={1} marginBottom={1}>
-      <Box width="100%">
-        <Text backgroundColor={surface}>{' '}</Text>
-        <Text backgroundColor={surface} color={color('muted')}>{glyph.prompt} </Text>
-        <Text backgroundColor={surface} color={color('text')}>{title}</Text>
-        <Text backgroundColor={surface}>{' '.repeat(fill)}</Text>
-        {time && <Text backgroundColor={surface} color={color('ghost')}>{` ${time}`}</Text>}
-        <Text backgroundColor={surface}>{' '}</Text>
-      </Box>
+      {rows.map((line, index) => {
+        const clock = index === 0 ? time : '';
+        const fixedWidth = 1 + 2 + displayWidth(line) + (clock ? displayWidth(clock) + 1 : 0) + 1;
+        const fill = Math.max(0, width - fixedWidth);
+        const elision = hidden > 0 && index === rows.length - 1;
+        return (
+          <Box key={index} width="100%">
+            <Text backgroundColor={surface}>{' '}</Text>
+            <Text backgroundColor={surface} color={color('muted')}>
+              {index === 0 ? `${glyph.prompt} ` : '  '}
+            </Text>
+            <Text backgroundColor={surface} color={color(elision ? 'ghost' : 'text')}>{line}</Text>
+            <Text backgroundColor={surface}>{' '.repeat(fill)}</Text>
+            {clock && <Text backgroundColor={surface} color={color('ghost')}>{` ${clock}`}</Text>}
+            <Text backgroundColor={surface}>{' '}</Text>
+          </Box>
+        );
+      })}
     </Box>
   );
 }
@@ -682,6 +741,7 @@ function ToolRow({ entry, width }: { entry: TimelineEntry; width: number }): Rea
         {...(entry.diff !== undefined ? { diff: entry.diff } : {})}
         {...(entry.edits !== undefined ? { edits: entry.edits } : {})}
         {...(entry.planItems !== undefined ? { planItems: entry.planItems } : {})}
+        {...(entry.searchResults !== undefined ? { searchResults: entry.searchResults } : {})}
         {...(entry.executions !== undefined ? { executions: entry.executions } : {})}
         {...(entry.toolTarget !== undefined ? { target: entry.toolTarget } : {})}
         {...(entry.toolSummary !== undefined ? { summary: entry.toolSummary } : {})}

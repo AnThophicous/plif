@@ -23,10 +23,11 @@ import OpenAI, {
   APIError,
   APIUserAbortError,
 } from 'openai';
+import type { ClientOptions } from 'openai';
 
 import { PlifError } from '../errors.js';
 import type { ModelConfig } from './config.js';
-import { isLocal } from './config.js';
+import { isLocal, keyOptional } from './config.js';
 import type { CachedEffort, EffortCapabilityCache } from './capabilities.js';
 import { redactedProviderId, streamTiming } from './stream-timing.js';
 import type { StreamTiming } from './stream-timing.js';
@@ -232,15 +233,25 @@ export class OpenAIProvider implements ModelProvider {
     this.#onTiming = options.onTiming ?? (options.bus
       ? (timing) => options.bus!.emit('stream.timing', timing)
       : undefined);
+    const anonymous = !config.apiKey && keyOptional(config.baseURL, config.model);
+    type SdkFetch = NonNullable<ClientOptions['fetch']>;
+    const anonymousFetch = anonymous
+      ? (async (...args: Parameters<SdkFetch>): Promise<Awaited<ReturnType<SdkFetch>>> => {
+          const [input, init] = args;
+          const headers = new globalThis.Headers(init?.headers as any);
+          headers.delete('authorization');
+          return await globalThis.fetch(input as any, { ...init, headers } as any) as unknown as Awaited<ReturnType<SdkFetch>>;
+        }) as SdkFetch
+      : undefined;
     this.#client = new OpenAI({
-      // Empty, not a placeholder. The SDK only rejects `undefined`, and an
-      // empty string sends a bare `Authorization: Bearer` — which a host with
-      // an anonymous tier accepts. A stand-in like "unused" does not read as
-      // "no credential" to a gateway; it reads as a wrong one, and comes back
-      // 401 on exactly the models that were supposed to need nothing.
-      apiKey: config.apiKey,
+      // The SDK requires a non-empty constructor key, but OpenCode's free tier
+      // is genuinely anonymous. Use an internal sentinel only to satisfy the
+      // SDK, then strip Authorization in the fetch wrapper before the request
+      // leaves the process. Paid providers still use their real credential.
+      apiKey: config.apiKey || (anonymous ? 'plif-anonymous' : ''),
       baseURL: config.baseURL,
       timeout: config.timeoutMs,
+      ...(anonymousFetch ? { fetch: anonymousFetch } : {}),
       // Retry belongs to this provider so attempts, waits, cancellation and
       // partial-output resets share one budget and remain visible to the UI.
       maxRetries: 0,
@@ -248,7 +259,7 @@ export class OpenAIProvider implements ModelProvider {
     this.info = {
       id: config.model,
       endpoint: config.baseURL,
-      contextWindow: undefined,
+      contextWindow: config.contextWindow,
     };
   }
 

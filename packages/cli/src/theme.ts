@@ -18,6 +18,8 @@
  * theme, and the accent sits at a lightness that holds up on both black and
  * near-black backgrounds, since we do not control the user's background.
  */
+import { clusterLength, displayWidth } from './text.js';
+
 
 /**
  * Whether the terminal should draw the real interface glyphs.
@@ -76,13 +78,27 @@ const defaultPalette = {
 
 export type PaletteKey = keyof typeof defaultPalette;
 export const palette: Record<PaletteKey, string> = { ...defaultPalette };
+let activeThemePalette: Record<PaletteKey, string> = { ...defaultPalette };
 
-export type SyntaxKey = 'command' | 'parameter' | 'string' | 'variable' | 'operator' | 'number' | 'comment' | 'plain';
+export type SyntaxKey =
+  | 'command'
+  | 'parameter'
+  | 'keyword'
+  | 'function'
+  | 'type'
+  | 'property'
+  | 'string'
+  | 'variable'
+  | 'operator'
+  | 'number'
+  | 'comment'
+  | 'plain';
 export type EmphasisKey = 'normal' | 'important' | 'active' | 'metadata';
 
 export const syntax: Record<SyntaxKey, PaletteKey> = {
-  command: 'text', parameter: 'muted', string: 'faint', variable: 'muted',
-  operator: 'ghost', number: 'muted', comment: 'ghost', plain: 'muted',
+  command: 'text', parameter: 'muted', keyword: 'accentDim', function: 'info',
+  type: 'accent', property: 'muted', string: 'faint', variable: 'text',
+  operator: 'ghost', number: 'warn', comment: 'ghost', plain: 'muted',
 };
 
 export const borders = { panel: 'faint' as PaletteKey, focus: 'muted' as PaletteKey, danger: 'danger' as PaletteKey };
@@ -246,9 +262,11 @@ export interface ThemeOverrides {
 
 export function applyTheme(theme: ThemeOverrides = {}): void {
   Object.assign(palette, defaultPalette, theme.palette ?? {});
+  activeThemePalette = { ...palette };
   Object.assign(syntax, {
-    command: 'text', parameter: 'muted', string: 'faint', variable: 'muted',
-    operator: 'ghost', number: 'muted', comment: 'ghost', plain: 'muted',
+    command: 'text', parameter: 'muted', keyword: 'accentDim', function: 'info',
+    type: 'accent', property: 'muted', string: 'faint', variable: 'text',
+    operator: 'ghost', number: 'warn', comment: 'ghost', plain: 'muted',
   }, theme.syntax ?? {});
   Object.assign(borders, { panel: 'faint', focus: 'muted', danger: 'danger' }, theme.borders ?? {});
   Object.assign(diffStyle, {
@@ -274,9 +292,8 @@ export function applyEffortPalette(effort?: string): void {
     max: { brand: '#6337a8', accent: '#c49aff', accentBright: '#eadbff', accentDim: '#9568d0' },
     ultra: { brand: '#96711f', accent: '#f2ca68', accentBright: '#fff0b0', accentDim: '#c19a3c' },
     ultracode: { brand: '#a64b1d', accent: '#ff9a5c', accentBright: '#ffd0ac', accentDim: '#d66d37' },
-    plif: { brand: '#4a5fc4', accent: '#8aa4ff', accentBright: '#cbd9ff', accentDim: '#5f74d2' },
   };
-  Object.assign(palette, accents[effort ?? ''] ?? {});
+  Object.assign(palette, activeThemePalette, accents[effort ?? ''] ?? {});
 }
 
 /** Terminal width, clamped to something a layout can reason about. */
@@ -286,9 +303,22 @@ export function terminalWidth(): number {
 
 /** Truncate to `width`, with an ellipsis that respects the glyph fallback. */
 export function truncate(value: string, width: number): string {
-  if (value.length <= width) return value;
-  if (width <= 1) return value.slice(0, width);
-  return value.slice(0, width - 1) + (richGlyphs ? '…' : '~');
+  const available = Math.max(0, Math.floor(width));
+  if (displayWidth(value) <= available) return value;
+  if (available === 0) return '';
+  const marker = richGlyphs ? '…' : '~';
+  const target = Math.max(0, available - displayWidth(marker));
+  let used = 0;
+  let at = 0;
+  while (at < value.length) {
+    const length = clusterLength(value, at) || 1;
+    const cluster = value.slice(at, at + length);
+    const cells = displayWidth(cluster);
+    if (used + cells > target) break;
+    used += cells;
+    at += length;
+  }
+  return value.slice(0, at) + marker;
 }
 
 /**

@@ -45,6 +45,7 @@ describe('the configuration the model is allowed to read', () => {
         env: { GH_PAT: SECRET, NODE_ENV: 'production' },
       },
     },
+    providerKeys: { openai: SECRET },
   } as unknown as GlobalConfig;
 
   it('leaves no credential anywhere in the rendered output', () => {
@@ -58,6 +59,7 @@ describe('the configuration the model is allowed to read', () => {
     assert.equal(out['mcpServers']['local']['env']['GH_PAT'], '[redacted]');
     assert.equal(out['provider']['house']['options']['headers']['X-Tenant'], '[redacted]');
     assert.equal(out['provider']['house']['options']['apiKey'], '[redacted]');
+    assert.equal(out['providerKeys']['openai'], '[redacted]');
   });
 
   it('keeps what the model needs in order to propose a change', () => {
@@ -164,6 +166,16 @@ describe('finding a credential', () => {
     assert.equal(await broker.resolve(request), SECRET);
     assert.equal(asks, 1, 'the second read came from the store');
     assert.equal(await store.get('C7_KEY'), SECRET);
+  });
+
+  it('remembers and forgets a model key without going through a question', async () => {
+    const store = new MemorySecretStore();
+    const broker = new CredentialBroker({ store, environment: {} });
+    await broker.remember(request.variable, SECRET);
+    assert.equal(await broker.stored(request.variable), SECRET);
+    assert.equal(await broker.lookup(request.variable), SECRET);
+    await broker.forget(request.variable);
+    assert.equal(await broker.lookup(request.variable), undefined);
   });
 
   it('does not nag after a refusal', async () => {

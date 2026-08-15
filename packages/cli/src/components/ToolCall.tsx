@@ -5,7 +5,8 @@ import { Diff, DiffSummary } from './Diff.js';
 import { useSpinnerFrame } from './Spinner.js';
 import { highlightShell } from '../shell-highlight.js';
 import { color, glyph, syntaxColor, truncate } from '../theme.js';
-import type { PlanDisplayItem, ToolCategory } from '../format.js';
+import { displayUrl } from '../format.js';
+import type { PlanDisplayItem, SearchHit, ToolCategory } from '../format.js';
 
 export interface ToolCallProps {
   readonly name: string;
@@ -16,6 +17,7 @@ export interface ToolCallProps {
   readonly diff?: string;
   readonly edits?: readonly { readonly path: string; readonly diff: string }[];
   readonly planItems?: readonly PlanDisplayItem[];
+  readonly searchResults?: readonly SearchHit[];
   readonly executions?: readonly { readonly kind?: 'Read' | 'List'; readonly target?: string; readonly output?: string; readonly ok?: boolean }[];
   readonly expand?: boolean;
   readonly ok: boolean;
@@ -25,6 +27,9 @@ export interface ToolCallProps {
 }
 
 const COLLAPSED_OUTPUT_LINES = 5;
+const COLLAPSED_HEAD_LINES = 3;
+const COLLAPSED_TAIL_LINES = 2;
+export const COLLAPSED_SEARCH_HITS = 3;
 
 const CATEGORY: Record<ToolCategory, { label: string; marker: keyof typeof glyph; tone: Parameters<typeof color>[0] }> = {
   shell: { label: 'Shell', marker: 'shell', tone: 'accent' },
@@ -41,13 +46,15 @@ const CATEGORY: Record<ToolCategory, { label: string; marker: keyof typeof glyph
   tool: { label: 'Tool', marker: 'tool', tone: 'muted' },
 };
 
-export function ToolCall({ name, category = 'tool', target, summary, output, diff, edits, planItems, executions, expand = false, ok, running, width, maxOutputLines }: ToolCallProps): React.ReactElement {
+export function ToolCall({ name, category = 'tool', target, summary, output, diff, edits, planItems, searchResults, executions, expand = false, ok, running, width, maxOutputLines }: ToolCallProps): React.ReactElement {
   const spinner = useSpinnerFrame(80, running);
   const identity = CATEGORY[category];
   const targetLines = target ? wrapLine(target, Math.max(18, width - identity.label.length - name.length - 7)) : [];
   const outputLines = cleanOutput(output ?? '');
   const limit = maxOutputLines ?? COLLAPSED_OUTPUT_LINES;
-  const shown = expand || outputLines.length <= limit ? outputLines : [...outputLines.slice(0, 2), ...outputLines.slice(-2)];
+  const shown = expand || outputLines.length <= limit
+    ? outputLines
+    : [...outputLines.slice(0, COLLAPSED_HEAD_LINES), ...outputLines.slice(-COLLAPSED_TAIL_LINES)];
   const hidden = outputLines.length - shown.length;
   const quiet = name === 'Executed';
 
@@ -80,7 +87,9 @@ export function ToolCall({ name, category = 'tool', target, summary, output, dif
       {summary && !diff && !edits?.length ? (
         <Box><Text color={color('ghost')}>  {summary}</Text></Box>
       ) : null}
-      {executions?.length ? (
+      {searchResults?.length ? (
+        <SearchResults hits={searchResults} expand={expand} width={width} />
+      ) : executions?.length ? (
         <ExecutionGroup executions={executions} expand={expand} width={width} />
       ) : planItems?.length ? (
         <PlanItems items={planItems} expand={expand} width={width} />
@@ -105,8 +114,20 @@ export function ToolCall({ name, category = 'tool', target, summary, output, dif
         <Box flexDirection="column">
           <Text color={color('ghost')}>  {glyph.branch}</Text>
           {shown.map((line, index) => <Text key={index} color={color(ok ? 'muted' : 'warn')}>{'    '}{truncate(line, Math.max(12, width - 4))}</Text>)}
-          {hidden > 0 ? <Text color={color('ghost')}>{'    '}… +{hidden} lines (ctrl + t to view transcript)</Text> : null}
-          {expand && outputLines.length > limit ? <Text color={color('ghost')}>{'    '}ctrl + t to collapse transcript</Text> : null}
+          {hidden > 0 ? <Text color={color('ghost')}>{'    '}… {hidden} more {hidden === 1 ? 'line' : 'lines'} hidden {glyph.divider} Ctrl+E</Text> : null}
+          {expand && outputLines.length > limit ? <Text color={color('ghost')}>{'    '}{outputLines.length} lines {glyph.divider} Ctrl+E to collapse</Text> : null}
+        </Box>
+      ) : null}
+      {(diff || edits?.length) && outputLines.length > 0 ? (
+        <Box flexDirection="column" paddingLeft={2}>
+          {shown.map((line, index) => (
+            <Text key={index} color={color(ok ? 'muted' : 'warn')}>
+              {index === 0 ? `${glyph.hook} ` : '  '}{truncate(line, Math.max(12, width - 6))}
+            </Text>
+          ))}
+          {hidden > 0 ? (
+            <Text color={color('ghost')}>… {hidden} more {hidden === 1 ? 'line' : 'lines'} · Ctrl+E</Text>
+          ) : null}
         </Box>
       ) : null}
     </Box>
@@ -171,9 +192,51 @@ function ExecutionGroup({ executions, expand, width }: { readonly executions: re
           ))}
         </Box>
       ))}
-      <Text color={color('ghost')}>ctrl + t to collapse transcript</Text>
+      <Text color={color('ghost')}>Ctrl+E to collapse</Text>
     </Box>
   );
+}
+
+function SearchResults({ hits, expand, width }: { readonly hits: readonly SearchHit[]; readonly expand: boolean; readonly width: number }): React.ReactElement {
+  const visible = expand ? hits : hits.slice(0, COLLAPSED_SEARCH_HITS);
+  const hidden = hits.length - visible.length;
+  const column = Math.max(12, width - 8);
+
+  return (
+    <Box flexDirection="column" paddingLeft={2}>
+      {visible.map((hit) => (
+        <Box key={`${hit.rank}:${hit.url}`} flexDirection="column">
+          <Box>
+            <Text color={color('ghost')}>{glyph.hook} </Text>
+            <Text color={color('text')}>{truncate(hit.title, column)}</Text>
+          </Box>
+          <Box>
+            <Text color={color('ghost')}>{'   '}</Text>
+            <Text color={color('accentDim')}>{displayUrl(hit.url, column)}</Text>
+          </Box>
+          {expand && hit.snippet ? (
+            <Box>
+              <Text color={color('ghost')}>{'   '}</Text>
+              <Text color={color('faint')}>{truncate(hit.snippet, column)}</Text>
+            </Box>
+          ) : null}
+        </Box>
+      ))}
+      {hidden > 0 ? (
+        <Text color={color('ghost')}>… {hidden} more {hidden === 1 ? 'result' : 'results'} {glyph.divider} Ctrl+E</Text>
+      ) : null}
+      {expand && hits.length > COLLAPSED_SEARCH_HITS ? (
+        <Text color={color('ghost')}>{hits.length} results {glyph.divider} Ctrl+E to collapse</Text>
+      ) : null}
+    </Box>
+  );
+}
+
+export function searchResultsHeight(hits: readonly SearchHit[], expand: boolean): number {
+  const visible = expand ? hits.length : Math.min(hits.length, COLLAPSED_SEARCH_HITS);
+  const snippets = expand ? hits.filter((hit) => hit.snippet).length : 0;
+  const trailer = (expand ? hits.length > COLLAPSED_SEARCH_HITS : hits.length > visible) ? 1 : 0;
+  return visible * 2 + snippets + trailer;
 }
 
 function PlanItems({ items, expand, width }: { readonly items: readonly PlanDisplayItem[]; readonly expand: boolean; readonly width: number }): React.ReactElement {
@@ -190,8 +253,8 @@ function PlanItems({ items, expand, width }: { readonly items: readonly PlanDisp
           </Text>
         );
       })}
-      {hidden > 0 ? <Text color={color('ghost')}>… +{hidden} checkpoints (ctrl + t to view plan)</Text> : null}
-      {expand && items.length > 4 ? <Text color={color('ghost')}>ctrl + t to collapse plan</Text> : null}
+      {hidden > 0 ? <Text color={color('ghost')}>… +{hidden} checkpoints · Ctrl+E to expand</Text> : null}
+      {expand && items.length > 4 ? <Text color={color('ghost')}>Ctrl+E to collapse</Text> : null}
     </Box>
   );
 }

@@ -77,10 +77,10 @@ export type { QuestionOption } from './events/bus.js';
 export { runLoop, runCompaction } from './harness/loop.js';
 export type { CompactionRun } from './harness/loop.js';
 export { COMPACTION_STAGES, compact, estimateTokens, pinnedIndices } from './harness/compaction.js';
-export type { CompactionOptions, CompactionResult } from './harness/compaction.js';
+export type { CompactionFailure, CompactionOptions, CompactionResult } from './harness/compaction.js';
 export { MemoryStore, rankFacts, strategyId, strategyStatus, summariseMemory } from './harness/memory.js';
 export type { Fact, FactKind, MemorySnapshot } from './harness/memory.js';
-export { DEFAULT_CONTEXT_TOKENS } from './harness/loop.js';
+export { DEFAULT_CONTEXT_TOKENS, answerDanglingToolCalls } from './harness/loop.js';
 export type { LoopOptions, LoopResult, LoopStop } from './harness/loop.js';
 export {
   createHarnessCycle,
@@ -211,6 +211,8 @@ export type {
 export {
   PRESETS,
   adoptProvider,
+  credentialVariableForProvider,
+  customProvidersOf,
   forgetProviderKey,
   supportedEfforts,
   describe,
@@ -219,10 +221,14 @@ export {
   keyOptional,
   formatModelRef,
   loadStoredConfig,
+  migrateProviderCredentials,
   parseModelRef,
+  providerIdForConfig,
   redact,
   resolveConfig,
   saveStoredConfig,
+  storedProviderCredentials,
+  stripStoredCredentials,
   validate as validateModelConfig,
   visionCandidates,
 } from './model/config.js';
@@ -235,6 +241,8 @@ export type {
   ModelConfig,
   ModelRef,
   PresetName,
+  ProviderCredentialMigration,
+  ProviderCredentialVault,
   ResolveOptions,
   StoredConfig,
   VisionCandidate,
@@ -245,6 +253,7 @@ export {
   catalogSelection,
   findCatalogModel,
   findCatalogProvider,
+  modelVisionBadge,
   rankModelIds,
   userCatalog,
 } from './model/catalog.js';
@@ -293,12 +302,15 @@ export type { AuditEventType, AuditRecord } from './audit/log.js';
 export {
   CONFIG_SCHEMA_URL,
   configSchemaText,
+  formatConfigToml,
   agentsOf,
   mcpServersOf,
   globalConfigPath,
   legacyGlobalConfigPath,
   legacyPlifConfigPath,
   migrateLegacyGlobalConfig,
+  pendingLegacyGlobalConfigPath,
+  removePendingLegacyGlobalConfigs,
   isAutoApproveEnabled,
   loadGlobalConfig,
   permissionMode,
@@ -377,4 +389,4 @@ export {
 
 export { SEARCH_HOSTS, parseResults, resolveRedirect, search, stripTags } from './web/duckduckgo.js';
 export type { InstantAnswer, SearchOptions, SearchResponse, SearchResult } from './web/duckduckgo.js';
-export { WEB_TOOLS, curl, webFetch, webSearch } from './web/tools.js';
+export { WEB_TOOLS, curl, research, webFetch, webSearch } from './web/tools.js';
