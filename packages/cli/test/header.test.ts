@@ -23,13 +23,14 @@ class CaptureStdout extends EventEmitter {
 
 describe('CLI header', () => {
   it('uses the supplied ASCII mark in the live header', () => {
-    assert.equal(HEADER_INFINITY.split('\n').length, 20);
-    assert.equal(HEADER_INFINITY.split('\n')[0], '       ▄▀█▄');
-    assert.equal(HEADER_INFINITY.split('\n').at(-1), '                  ▀▄▄▄▀            ▀▄▄▄▀');
+    assert.equal(HEADER_INFINITY.split('\n').length, 10);
+    assert.equal(Math.max(...HEADER_INFINITY.split('\n').map((line) => line.length)), 22);
+    assert.equal(HEADER_INFINITY.split('\n')[0], '  ▄▟▀▙▖');
+    assert.equal(HEADER_INFINITY.split('\n').at(-1), '         ▟▙▌     ▗█▟');
   });
 
   it('reports its real footprint so the input frame stays in the viewport', () => {
-    assert.equal(headerHeight(96), 29);
+    assert.equal(headerHeight(96), 19);
     assert.equal(headerHeight(60), 8);
   });
 
