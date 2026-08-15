@@ -16,8 +16,11 @@ import {
 } from '../src/auth/mcp-oauth.js';
 import {
   MemoryMcpOAuthStore,
+  canUseSystemdCreds,
   personalOAuthStorePath,
   WindowsDpapiOAuthStore,
+  SystemdCredsOAuthStore,
+  platformMcpOAuthStore,
   mcpOAuthKey,
 } from '../src/auth/store.js';
 import { PlifError } from '../src/errors.js';
@@ -274,6 +277,50 @@ describe('MCP OAuth credential store', () => {
     assert.equal(disk.includes('private-token'), false);
     assert.equal((await store.load('server'))?.tokens?.access_token, 'private-token');
   });
+
+  it('persists Linux OAuth state through the systemd credentials seam', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'plif-linux-oauth-store-'));
+    const runner = async (_mode: 'protect' | 'unprotect', input: string, _name: string) =>
+      [...input].reverse().join('');
+    const store = new SystemdCredsOAuthStore(root, runner);
+    await store.save('server', {
+      tokens: { access_token: 'private-token', token_type: 'Bearer' },
+    });
+    const files = await import('node:fs/promises').then((fs) => fs.readdir(root));
+    const file = path.join(root, files[0]!);
+    assert.equal((await readFile(file, 'utf8')).includes('private-token'), false);
+    assert.equal((await import('node:fs/promises').then((fs) => fs.stat(file))).mode & 0o777, 0o600);
+    assert.equal((await store.load('server'))?.tokens?.access_token, 'private-token');
+  });
+
+  it('binds Linux OAuth state to its endpoint key', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'plif-linux-oauth-store-'));
+    const runner = async (_mode: 'protect' | 'unprotect', input: string, _name: string) =>
+      [...input].reverse().join('');
+    const store = new SystemdCredsOAuthStore(root, runner);
+    await store.save('A', { tokens: { access_token: 'one', token_type: 'Bearer' } });
+    await store.save('B', { tokens: { access_token: 'two', token_type: 'Bearer' } });
+    const fs = await import('node:fs/promises');
+    const files = await fs.readdir(root);
+    const first = path.join(root, files[0]!);
+    const second = path.join(root, files[1]!);
+    const [firstValue, secondValue] = await Promise.all([readFile(first, 'utf8'), readFile(second, 'utf8')]);
+    await Promise.all([fs.writeFile(first, secondValue), fs.writeFile(second, firstValue)]);
+    const bindingError = (error: unknown): boolean =>
+      error instanceof Error
+      && error.cause instanceof Error
+      && error.cause.message.includes('binding');
+    await assert.rejects(store.load('A'), bindingError);
+    await assert.rejects(store.load('B'), bindingError);
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('selects the native OAuth store for the current platform', () => {
+    const store = platformMcpOAuthStore();
+    if (process.platform === 'win32') assert.ok(store instanceof WindowsDpapiOAuthStore);
+    if (canUseSystemdCreds()) assert.ok(store instanceof SystemdCredsOAuthStore);
+    if (process.platform !== 'win32' && !canUseSystemdCreds()) assert.ok(store instanceof MemoryMcpOAuthStore);
+  });
 });
 
 describe('MCP OAuth provider', () => {
@@ -287,12 +334,33 @@ describe('MCP OAuth provider', () => {
     });
     await coordinator.start();
     const provider = coordinator.providerFor('github', new URL('https://mcp.example.test/mcp'));
-    await provider.saveTokens({ access_token: 'never-in-events', token_type: 'Bearer' });
-    await provider.saveCodeVerifier('private-verifier');
+    await Promise.all([
+      provider.saveTokens({ access_token: 'never-in-events', token_type: 'Bearer' }),
+      provider.saveCodeVerifier('private-verifier'),
+    ]);
 
     assert.equal((await provider.tokens())?.access_token, 'never-in-events');
     assert.equal(await provider.codeVerifier(), 'private-verifier');
     assert.equal(JSON.stringify(events).includes('never-in-events'), false);
+    await coordinator.close();
+  });
+
+  it('serializes OAuth updates from providers sharing an endpoint', async () => {
+    const store = new MemoryMcpOAuthStore();
+    const coordinator = new McpOAuthCoordinator(undefined, {
+      store,
+      openBrowser: async () => undefined,
+    });
+    await coordinator.start();
+    const endpoint = new URL('https://mcp.example.test/mcp');
+    const first = coordinator.providerFor('github', endpoint);
+    const second = coordinator.providerFor('github', endpoint);
+    await Promise.all([
+      first.saveTokens({ access_token: 'token', token_type: 'Bearer' }),
+      second.saveCodeVerifier('verifier'),
+    ]);
+    assert.equal((await first.tokens())?.access_token, 'token');
+    assert.equal(await second.codeVerifier(), 'verifier');
     await coordinator.close();
   });
 

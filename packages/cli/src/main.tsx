@@ -25,7 +25,7 @@ import {
   DEVELOPER_POLICY,
   Engine,
   createModelProvider,
-  WindowsDpapiSecretStore,
+  platformSecretStore,
   resolveServerConfigs,
   PlifError,
   STRICT_POLICY,
@@ -499,7 +499,7 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
     // an interactive session already saved, so `plif prompt` inherits the login.
     await resolveServerConfigs(
       mcpServersOf(stored as GlobalConfig),
-      new CredentialBroker({ store: new WindowsDpapiSecretStore() }),
+      new CredentialBroker({ store: platformSecretStore() }),
     ),
     engine.bus,
   );
@@ -764,7 +764,7 @@ async function runInteractive(
   // encrypted store. It is never put on the bus, so no subscriber — timeline,
   // transcript, audit log — is in a position to leak it.
   const credentials = new CredentialBroker({
-    store: new WindowsDpapiSecretStore(),
+    store: platformSecretStore(),
     prompt: (request) =>
       engine.questions.ask({
         text: `${request.variable} for ${request.purpose}`,

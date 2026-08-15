@@ -8,8 +8,11 @@ import {
   CredentialBroker,
   MemorySecretStore,
   personalSecretStorePath,
+  platformSecretStore,
+  SystemdCredsSecretStore,
   WindowsDpapiSecretStore,
 } from '../src/auth/secrets.js';
+import { canUseSystemdCreds } from '../src/auth/store.js';
 import { EventBus } from '../src/events/bus.js';
 import { QuestionBroker } from '../src/harness/ask.js';
 import { missingMcpCredentials, parseServerConfigs, resolveServerConfigs } from '../src/harness/mcp.js';
@@ -106,6 +109,66 @@ describe('the credential store', () => {
     assert.deepEqual(await store.names(), ['CONTEXT7_API_KEY'], 'but the record still knows');
 
     await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('round-trips Linux credentials without cleartext or service names', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-linux-secrets-'));
+    const runner = async (_mode: 'protect' | 'unprotect', input: string, _name: string) =>
+      [...input].reverse().join('');
+    const store = new SystemdCredsSecretStore(root, runner);
+    await store.set('CONTEXT7_API_KEY', SECRET);
+    const files = await fs.readdir(root);
+    const disk = await fs.readFile(path.join(root, files[0] as string), 'utf8');
+    assert.equal(disk.includes(SECRET), false);
+    assert.equal(files.some((file) => file.includes('CONTEXT7')), false);
+    assert.equal((await fs.stat(path.join(root, files[0] as string))).mode & 0o777, 0o600);
+    assert.equal(await store.get('CONTEXT7_API_KEY'), SECRET);
+    assert.deepEqual(await store.names(), ['CONTEXT7_API_KEY']);
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('binds Linux credentials to their logical names', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-linux-secrets-'));
+    const runner = async (_mode: 'protect' | 'unprotect', input: string, _name: string) =>
+      [...input].reverse().join('');
+    const store = new SystemdCredsSecretStore(root, runner);
+    await store.set('A', 'one');
+    await store.set('B', 'two');
+    const files = await fs.readdir(root);
+    const first = path.join(root, files[0] as string);
+    const second = path.join(root, files[1] as string);
+    const [firstValue, secondValue] = await Promise.all([
+      fs.readFile(first, 'utf8'),
+      fs.readFile(second, 'utf8'),
+    ]);
+    await Promise.all([
+      fs.writeFile(first, secondValue),
+      fs.writeFile(second, firstValue),
+    ]);
+    const bindingError = (error: unknown): boolean =>
+      error instanceof Error
+      && error.cause instanceof Error
+      && error.cause.message.includes('binding');
+    await assert.rejects(store.get('A'), bindingError);
+    await assert.rejects(store.get('B'), bindingError);
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('allows concurrent Linux credential writes', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-linux-secrets-'));
+    const runner = async (_mode: 'protect' | 'unprotect', input: string, _name: string) =>
+      [...input].reverse().join('');
+    const store = new SystemdCredsSecretStore(root, runner);
+    await Promise.all([store.set('A', 'one'), store.set('A', 'two')]);
+    assert.ok(['one', 'two'].includes((await store.get('A')) ?? ''));
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('selects the native credential store for the current platform', () => {
+    const store = platformSecretStore();
+    if (process.platform === 'win32') assert.ok(store instanceof WindowsDpapiSecretStore);
+    if (canUseSystemdCreds()) assert.ok(store instanceof SystemdCredsSecretStore);
+    if (process.platform !== 'win32' && !canUseSystemdCreds()) assert.ok(store instanceof MemorySecretStore);
   });
 
   it('forgets what it is told to forget', async () => {

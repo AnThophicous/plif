@@ -323,7 +323,7 @@ backend on this machine, and every gap it has.
 Trust tiers each demand a minimum, and the runtime refuses to start below it:
 
   trusted        any backend
-  semi-trusted   job-level confinement (Windows Job Object, Linux cgroup)
+  semi-trusted   kernel-enforced process and resource confinement
   untrusted      kernel namespaces or a microVM
 
 --strict selects the untrusted tier, so it will refuse to run on a machine that

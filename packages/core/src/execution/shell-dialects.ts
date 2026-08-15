@@ -49,7 +49,6 @@ export class PowerShellDialect implements ShellDialect {
   }
 }
 
-/** Contract-compatible future adapter. Resolution does not activate it yet. */
 export class BashDialect implements ShellDialect {
   readonly id = 'bash' as const;
   readonly displayName = 'Bash';
@@ -76,18 +75,15 @@ export class BashDialect implements ShellDialect {
   }
 }
 
-/**
- * Resolve once from the cached environment report and carry the returned
- * object through the session. Windows is PowerShell-only; Bash remains dormant
- * until Linux activation has its own policy and integration work.
- */
 export function resolveShellDialect(
   environment: ShellDialectEnvironment,
 ): ShellDialectResolution {
   if (environment.platform !== 'win32') {
+    const bash = findInterpreter(environment.interpreters, 'bash');
+    if (bash) return Object.freeze({ dialect: new BashDialect(bash), reason: null });
     return Object.freeze({
       dialect: null,
-      reason: 'No shell dialect is activated for this platform yet; use direct argv tools.',
+      reason: 'Bash was not found on PATH; shell_command is unavailable.',
     });
   }
 
