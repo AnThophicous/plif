@@ -23,6 +23,75 @@ function surfaceTailColor(backgroundColor: string): string {
   return `\u001b[48;2;${red};${green};${blue}m\u001b[2K\u001b[49m`;
 }
 
+const ERASE_LINE = '\u001b[2K';
+const CURSOR_UP_ONE = '\u001b[1A';
+const CURSOR_COLUMN = '\u001b[G';
+const CURSOR_DOWN_ONE = '\u001b[1B';
+
+interface InkErasePrefix {
+  readonly length: number;
+  readonly lines: number;
+}
+
+/**
+ * Ink's log-update writes `eraseLines(previousLineCount) + frame`. The
+ * default implementation erases every live row before writing the next one,
+ * even when an animation changed only the prompt dock. Recognising that
+ * prefix lets the surface stream replace the full erase with a row diff.
+ */
+function inkErasePrefix(value: string): InkErasePrefix | null {
+  let offset = 0;
+  let lines = 0;
+  const up = `${ERASE_LINE}${CURSOR_UP_ONE}`;
+
+  while (value.startsWith(up, offset)) {
+    offset += up.length;
+    lines += 1;
+  }
+
+  const final = `${ERASE_LINE}${CURSOR_COLUMN}`;
+  if (!value.startsWith(final, offset)) return null;
+  return { length: offset + final.length, lines: lines + 1 };
+}
+
+function frameRows(value: string): readonly string[] | null {
+  if (!value.endsWith('\n')) return null;
+  return value.slice(0, -1).split('\n');
+}
+
+function cursorDelta(delta: number): string {
+  if (delta === 0) return '';
+  return delta > 0
+    ? `\u001b[${delta}B${CURSOR_COLUMN}`
+    : `\u001b[${Math.abs(delta)}A${CURSOR_COLUMN}`;
+}
+
+/**
+ * Produce a terminal patch while preserving Ink's cursor position. The
+ * cursor is at the first row after the previous frame when log-update calls
+ * us. Only changed rows are erased and written; unchanged rows are skipped.
+ */
+function diffInkFrame(
+  previous: readonly string[],
+  next: readonly string[],
+): string {
+  const rows = Math.max(previous.length, next.length);
+  if (rows === 0) return '';
+
+  let patch = `\u001b[${previous.length}A${CURSOR_COLUMN}`;
+  for (let index = 0; index < rows; index += 1) {
+    const before = previous[index];
+    const after = next[index];
+    if (before !== after) patch += `${ERASE_LINE}${after ?? ''}`;
+    if (index < rows - 1) patch += `${CURSOR_DOWN_ONE}${CURSOR_COLUMN}`;
+  }
+
+  // The previous loop ends on the last row it visited. Ink expects the cursor
+  // at the first row after the new frame, ready for the reserved surface row.
+  patch += cursorDelta(next.length - rows + 1);
+  return patch;
+}
+
 export function needsTerminalSurfaceTail(chunk: string): boolean {
   return chunk.includes('\n') || chunk.includes('\u001b[2J') || chunk.includes('\u001b[3J');
 }
@@ -40,6 +109,8 @@ export function createTerminalSurfaceStream<T extends TerminalSurfaceStream>(
   stream: T,
   backgroundColor: () => string,
 ): T {
+  let previousFrame: readonly string[] | null = null;
+
   const write = (
     chunk: string | Uint8Array,
     encodingOrCallback?: BufferEncoding | WriteCallback,
@@ -50,6 +121,40 @@ export function createTerminalSurfaceStream<T extends TerminalSurfaceStream>(
     const text = typeof chunk === 'string'
       ? chunk
       : Buffer.from(chunk).toString(encoding ?? 'utf8');
+    const erase = inkErasePrefix(text);
+
+    // A bare erase is `log.clear()`, used when static scrollback is about to
+    // be printed. Its cursor movement is significant, so pass it through and
+    // discard our frame coordinates until Ink paints the next live frame.
+    if (erase && erase.length === text.length) {
+      previousFrame = null;
+      if (encoding === undefined) return done ? stream.write(chunk, done) : stream.write(chunk);
+      return done ? stream.write(chunk, encoding, done) : stream.write(chunk, encoding);
+    }
+
+    if (erase && previousFrame !== null && erase.lines === previousFrame.length + 1) {
+      const next = frameRows(text.slice(erase.length));
+      if (next !== null) {
+        const before = previousFrame;
+        previousFrame = next;
+        const patch = diffInkFrame(before, next);
+        const value = patch + surfaceTailColor(backgroundColor());
+        if (encoding === undefined) return done ? stream.write(value, done) : stream.write(value);
+        return done ? stream.write(value, encoding, done) : stream.write(value, encoding);
+      }
+    }
+
+    // The first live frame, and the frame immediately after static output,
+    // have no erase prefix. Keep them intact; the next prefixed frame gives us
+    // a safe baseline for incremental updates without guessing which raw
+    // newline write was scrollback.
+    if (erase) {
+      const next = frameRows(text.slice(erase.length));
+      if (next !== null) previousFrame = next;
+    } else if (text.includes('\n')) {
+      previousFrame = null;
+    }
+
     const tail = needsTerminalSurfaceTail(text) ? surfaceTailColor(backgroundColor()) : '';
 
     if (!tail) {
