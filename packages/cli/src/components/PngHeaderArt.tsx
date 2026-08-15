@@ -43,20 +43,20 @@ function readUInt32(bytes: Uint8Array, offset: number): number {
   ) >>> 0;
 }
 
-function unfilterRows(raw: Uint8Array, width: number, height: number): Uint8Array[] {
+function unfilterRows(raw: Uint8Array, rowBytes: number, bytesPerPixel: number, height: number): Uint8Array[] {
   const rows: Uint8Array[] = [];
-  const previous = new Uint8Array(width);
+  const previous = new Uint8Array(rowBytes);
   let offset = 0;
 
   for (let rowIndex = 0; rowIndex < height; rowIndex += 1) {
     const filter = raw[offset] ?? 0;
-    const row = raw.slice(offset + 1, offset + 1 + width);
-    offset += width + 1;
+    const row = raw.slice(offset + 1, offset + 1 + rowBytes);
+    offset += rowBytes + 1;
 
     for (let index = 0; index < row.length; index += 1) {
-      const left = index > 0 ? row[index - 1]! : 0;
+      const left = index >= bytesPerPixel ? row[index - bytesPerPixel]! : 0;
       const up = previous[index] ?? 0;
-      const upLeft = index > 0 ? previous[index - 1]! : 0;
+      const upLeft = index >= bytesPerPixel ? previous[index - bytesPerPixel]! : 0;
 
       if (filter === 1) row[index] = (row[index]! + left) & 0xff;
       else if (filter === 2) row[index] = (row[index]! + up) & 0xff;
@@ -82,7 +82,7 @@ function unfilterRows(raw: Uint8Array, width: number, height: number): Uint8Arra
   return rows;
 }
 
-function decodeIndexedPng(bytes: Uint8Array): IndexedPng {
+function decodePng(bytes: Uint8Array): IndexedPng {
   const signature = [137, 80, 78, 71, 13, 10, 26, 10];
   if (!signature.every((value, index) => bytes[index] === value)) throw new Error('invalid PNG signature');
 
@@ -110,26 +110,36 @@ function decodeIndexedPng(bytes: Uint8Array): IndexedPng {
     else if (kind === 'IDAT') imageData.push(chunk);
   }
 
-  if (bitDepth !== 8 || colorType !== 3) {
-    throw new Error('header PNG must be 8-bit indexed colour');
+  if (bitDepth !== 8 || (colorType !== 3 && colorType !== 6)) {
+    throw new Error('header PNG must be 8-bit indexed or RGBA colour');
   }
-  if (!width || !height || palette.length === 0 || imageData.length === 0) {
+  if (!width || !height || imageData.length === 0 || (colorType === 3 && palette.length === 0)) {
     throw new Error('header PNG is missing image data');
   }
 
   const filtered = zlib.inflateSync(Buffer.concat(imageData.map((chunk) => Buffer.from(chunk))));
-  const rows = unfilterRows(filtered, width, height);
+  const bytesPerPixel = colorType === 6 ? 4 : 1;
+  const rows = unfilterRows(filtered, width * bytesPerPixel, bytesPerPixel, height);
   const pixels = new Uint8Array(width * height * 4);
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      const paletteIndex = rows[y]![x]!;
-      const paletteOffset = paletteIndex * 3;
       const pixelOffset = (y * width + x) * 4;
-      pixels[pixelOffset] = palette[paletteOffset] ?? 0;
-      pixels[pixelOffset + 1] = palette[paletteOffset + 1] ?? 0;
-      pixels[pixelOffset + 2] = palette[paletteOffset + 2] ?? 0;
-      pixels[pixelOffset + 3] = transparency[paletteIndex] ?? 255;
+      if (colorType === 6) {
+        const sourceOffset = x * 4;
+        const row = rows[y]!;
+        pixels[pixelOffset] = row[sourceOffset] ?? 0;
+        pixels[pixelOffset + 1] = row[sourceOffset + 1] ?? 0;
+        pixels[pixelOffset + 2] = row[sourceOffset + 2] ?? 0;
+        pixels[pixelOffset + 3] = row[sourceOffset + 3] ?? 0;
+      } else {
+        const paletteIndex = rows[y]![x]!;
+        const paletteOffset = paletteIndex * 3;
+        pixels[pixelOffset] = palette[paletteOffset] ?? 0;
+        pixels[pixelOffset + 1] = palette[paletteOffset + 1] ?? 0;
+        pixels[pixelOffset + 2] = palette[paletteOffset + 2] ?? 0;
+        pixels[pixelOffset + 3] = transparency[paletteIndex] ?? 255;
+      }
     }
   }
 
@@ -188,7 +198,7 @@ function composite(pixelValue: Rgba, background: readonly [number, number, numbe
   ]);
 }
 
-const image = decodeIndexedPng(new Uint8Array(fs.readFileSync(ASSET_URL)));
+const image = decodePng(new Uint8Array(fs.readFileSync(ASSET_URL)));
 const crop = visibleCrop(image);
 export const PNG_HEADER_ART_WIDTH = TARGET_WIDTH;
 export const PNG_HEADER_ART_HEIGHT = Math.max(1, Math.ceil(
