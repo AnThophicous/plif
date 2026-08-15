@@ -20,7 +20,7 @@ describe('user themes', () => {
     assert.equal(color('accent'), '#E0A526');
   });
 
-  it('strengthens the gold interface as effort increases', () => {
+  it('keeps effort colors distinct and reserves hottest gold for Plif', () => {
     activateTheme(MINIMAL_THEME);
     const expected = {
       low: {
@@ -44,9 +44,9 @@ describe('user themes', () => {
         info: '#D99A21', warn: '#A96A0C',
       },
       max: {
-        text: '#FFD23D', muted: '#DFA11F', faint: '#A8690D', ghost: '#633D09',
-        brand: '#A8690D', accent: '#D58C16', accentBright: '#FFD23D', accentDim: '#9B5A07',
-        info: '#D58C16', warn: '#9B5A07',
+        text: '#eadbff', muted: '#c49aff', faint: '#6337a8', ghost: '#432775',
+        brand: '#6337a8', accent: '#c49aff', accentBright: '#eadbff', accentDim: '#9568d0',
+        info: '#c49aff', warn: '#9568d0',
       },
       ultra: {
         text: '#FFCB20', muted: '#DC9513', faint: '#9E5A09', ghost: '#5F3806',
@@ -81,6 +81,10 @@ describe('user themes', () => {
       assert.notEqual(palette.accent, '#E0A526', `${effort} should not use the Plif accent`);
       assert.notEqual(palette.text, '#FFD700', `${effort} should not use the Plif text`);
     }
+    applyEffortPalette('plif');
+    assert.equal(palette.text, '#FFD700');
+    assert.equal(palette.accent, '#E0A526');
+    assert.equal(palette.accentBright, '#E8C170');
     applyEffortPalette();
   });
 
