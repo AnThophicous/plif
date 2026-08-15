@@ -291,9 +291,9 @@ export function applyTheme(theme: ThemeOverrides = {}): void {
 /** Overlay the effort accent without destroying the user's selected theme. */
 export function applyEffortPalette(effort?: string): void {
   const accents: Record<string, Partial<Record<PaletteKey, string>>> = {
-    max: { brand: '#C68E17', accent: '#E8C170', accentBright: '#FFD700', accentDim: '#E0A526' },
-    ultra: { brand: '#CC9A3A', accent: '#E0A526', accentBright: '#FFD700', accentDim: '#C68E17' },
-    ultracode: { brand: '#C68E17', accent: '#E8C170', accentBright: '#FFD700', accentDim: '#E0A526' },
+    max: { brand: '#6337a8', accent: '#c49aff', accentBright: '#eadbff', accentDim: '#9568d0' },
+    ultra: { brand: '#96711f', accent: '#f2ca68', accentBright: '#fff0b0', accentDim: '#c19a3c' },
+    ultracode: { brand: '#a64b1d', accent: '#ff9a5c', accentBright: '#ffd0ac', accentDim: '#d66d37' },
   };
   Object.assign(palette, activeThemePalette, accents[effort ?? ''] ?? {});
 }

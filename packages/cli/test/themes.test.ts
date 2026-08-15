@@ -20,6 +20,30 @@ describe('user themes', () => {
     assert.equal(color('accent'), '#E0A526');
   });
 
+  it('keeps the legacy visual palettes for Max, Ultra and UltraCode', () => {
+    activateTheme(MINIMAL_THEME);
+    const expected = {
+      max: { brand: '#6337a8', accent: '#c49aff', accentBright: '#eadbff', accentDim: '#9568d0' },
+      ultra: { brand: '#96711f', accent: '#f2ca68', accentBright: '#fff0b0', accentDim: '#c19a3c' },
+      ultracode: { brand: '#a64b1d', accent: '#ff9a5c', accentBright: '#ffd0ac', accentDim: '#d66d37' },
+    } as const;
+
+    for (const [effort, paletteValues] of Object.entries(expected)) {
+      applyEffortPalette(effort);
+      assert.deepEqual(
+        {
+          brand: palette.brand,
+          accent: palette.accent,
+          accentBright: palette.accentBright,
+          accentDim: palette.accentDim,
+        },
+        paletteValues,
+        effort,
+      );
+    }
+    applyEffortPalette();
+  });
+
   it('accepts the complete override surface and applies semantic values', () => {
     const theme = parseTheme({
       id: 'quiet', name: 'Quiet',
