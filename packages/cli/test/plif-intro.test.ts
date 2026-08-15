@@ -10,10 +10,10 @@ import {
 } from '../src/components/PlifIntro.js';
 
 describe('Plif effort entrance', () => {
-  it('keeps the rising Plif ASCII separate from the static header art', () => {
-    assert.equal(PLIF_ASCII_ART.length, 20);
-    assert.equal(PLIF_ASCII_ART[0], '       ▄▀█▄');
-    assert.equal(PLIF_ASCII_ART.at(-1), '                  ▀▄▄▄▀            ▀▄▄▄▀');
+  it('keeps the large PLIF wordmark separate from the static header art', () => {
+    assert.equal(PLIF_ASCII_ART.length, 9);
+    assert.equal(PLIF_ASCII_ART[0], '▄███████▄  ▄█        ▄█     ▄████████');
+    assert.equal(PLIF_ASCII_ART.at(-1), '            ▀');
   });
 
   it('uses a fast cubic launch and a soft landing', () => {
