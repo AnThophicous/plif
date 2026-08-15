@@ -21,6 +21,8 @@
  * layer makes between "no server" and "no problems".
  */
 
+import { webNetworkPool } from './network-pool.js';
+
 export interface SearchResult {
   readonly title: string;
   readonly url: string;
@@ -63,6 +65,13 @@ const BROWSER_HEADERS: Readonly<Record<string, string>> = {
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_RESULTS = 8;
+const MAX_SEARCH_RESPONSE_BYTES = 1_000_000;
+const MAX_RESULT_URL_CHARS = 2_048;
+const BOT_CHECK_MARKERS: readonly RegExp[] = Object.freeze([
+  /(?:class|id)\s*=\s*["'][^"']*\banomaly[-_]modal\b[^"']*["']/i,
+  /\berror-lite@duckduckgo\b/i,
+  /unfortunately,\s*bots\s+use\s+duckduckgo\s+too/i,
+]);
 
 export const SEARCH_HOSTS = Object.freeze([
   'api.duckduckgo.com',
@@ -71,18 +80,27 @@ export const SEARCH_HOSTS = Object.freeze([
 ]);
 
 export async function search(query: string, options: SearchOptions = {}): Promise<SearchResponse> {
+  throwIfAborted(options.signal);
   const max = Math.max(1, Math.min(options.maxResults ?? DEFAULT_MAX_RESULTS, 25));
 
-  // All three in parallel. They are independent services and the slowest one
-  // should not decide how long a search takes.
-  const [scraped, instant, suggestions] = await Promise.all([
-    webResults(query, options).catch((error: unknown) => ({
-      results: [] as SearchResult[],
-      blocked: describeFailure(error),
-    })),
-    instantAnswer(query, options).catch(() => null),
-    autocomplete(query, options).catch(() => [] as string[]),
+  // All three in parallel, but keep each endpoint's status independent. A
+  // malformed autocomplete response must not erase ranked results, and one
+  // failed endpoint should remain observable as blocked rather than becoming
+  // an indistinguishable empty search.
+  const settled = await Promise.allSettled([
+    webResults(query, options),
+    instantAnswer(query, options),
+    autocomplete(query, options),
   ]);
+  throwIfAborted(options.signal);
+
+  const scraped = settled[0]!.status === 'fulfilled'
+    ? settled[0]!.value
+    : { results: [] as SearchResult[], blocked: describeFailure(settled[0]!.reason) };
+  const instant = settled[1]!.status === 'fulfilled' ? settled[1]!.value : null;
+  const suggestions = settled[2]!.status === 'fulfilled' ? settled[2]!.value : [];
+
+  throwIfAborted(options.signal);
 
   return {
     query,
@@ -92,6 +110,14 @@ export async function search(query: string, options: SearchOptions = {}): Promis
     suggestions: suggestions.slice(0, 6),
     blocked: scraped.blocked,
   };
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  const reason = signal.reason;
+  if (reason instanceof Error) throw reason;
+  if (reason !== undefined) throw new Error(String(reason));
+  throw new Error('The operation was aborted.');
 }
 
 /**
@@ -113,7 +139,9 @@ async function webResults(
   const html = await get(url, options);
 
   // The challenge page is a 202 with a real body, so status alone says nothing.
-  if (/anomaly[-_]modal|challenge|error-lite@duckduckgo/i.test(html)) {
+  // Match only markers from DuckDuckGo's bot-check page; result text can
+  // legitimately contain words such as "challenge".
+  if (BOT_CHECK_MARKERS.some((marker) => marker.test(html))) {
     return {
       results: [],
       blocked:
@@ -127,30 +155,42 @@ async function webResults(
 
 /** Pull results out of the HTML without a DOM parser. */
 export function parseResults(html: string): SearchResult[] {
-  const results: SearchResult[] = [];
+  const results: Array<{ title: string; url: string; snippet: string }> = [];
+  let current: { title: string; url: string; snippet: string } | null = null;
 
-  // Anchors and snippets are matched separately and zipped by position: the
-  // markup nests them in wrappers whose classes DuckDuckGo has changed several
-  // times, and a regex spanning both breaks the moment one of them moves.
-  const anchors = [
-    ...html.matchAll(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g),
-  ];
-  const snippets = [
-    ...html.matchAll(/<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/g),
-  ];
-
-  for (const [index, anchor] of anchors.entries()) {
-    const url = resolveRedirect(anchor[1] ?? '');
-    const title = stripTags(anchor[2] ?? '');
-    if (!url || !title) continue;
-    results.push({
-      title,
-      url,
-      snippet: stripTags(snippets[index]?.[1] ?? ''),
-    });
+  // Walk anchors in document order so a missing snippet cannot borrow the next
+  // result's text. Attribute order and quote style are both variable in the
+  // HTML returned by search engines, so inspect attributes independently.
+  for (const anchor of html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    const attributes = anchor[1] ?? '';
+    const body = anchor[2] ?? '';
+    if (hasClass(attributes, 'result__a')) {
+      current = null;
+      const url = resolveRedirect(attributeValue(attributes, 'href') ?? '');
+      const title = stripTags(body);
+      if (!url || !title) continue;
+      current = { title, url, snippet: '' };
+      results.push(current);
+      continue;
+    }
+    if (current && current.snippet === '' && hasClass(attributes, 'result__snippet')) {
+      current.snippet = stripTags(body);
+    }
   }
 
   return results;
+}
+
+function attributeValue(attributes: string, name: string): string | undefined {
+  const match = new RegExp(
+    `(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`,
+    'i',
+  ).exec(attributes);
+  return match?.[1] ?? match?.[2];
+}
+
+function hasClass(attributes: string, className: string): boolean {
+  return attributeValue(attributes, 'class')?.split(/\s+/).includes(className) ?? false;
 }
 
 /**
@@ -161,7 +201,9 @@ export function parseResults(html: string): SearchResult[] {
  * one it cannot judge before opening.
  */
 export function resolveRedirect(href: string): string {
-  const raw = href.startsWith('//') ? `https:${href}` : href;
+  if (href.length > MAX_RESULT_URL_CHARS * 2) return '';
+  const decoded = stripTags(href);
+  const raw = decoded.startsWith('//') ? `https:${decoded}` : decoded;
   try {
     const parsed = new URL(raw, 'https://duckduckgo.com');
     const target = parsed.searchParams.get('uddg');
@@ -169,7 +211,7 @@ export function resolveRedirect(href: string): string {
     // Only the two schemes a result can meaningfully be. `new URL` happily
     // parses `javascript:` and `data:`, and a link the agent might hand to
     // web_fetch — or paste for a human to click — has no business being either.
-    return /^https?:\/\//i.test(resolved) ? resolved : '';
+    return /^https?:\/\//i.test(resolved) && resolved.length <= MAX_RESULT_URL_CHARS ? resolved : '';
   } catch {
     return '';
   }
@@ -243,11 +285,41 @@ async function get(url: URL, options: SearchOptions): Promise<string> {
   const timeout = AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
 
-  const response = await fetch(url, { headers: BROWSER_HEADERS, signal, redirect: 'follow' });
+  // Only SEARCH_HOSTS were authorised by the owning tool. A server-side
+  // redirect must not silently widen that grant to an arbitrary hostname.
+  const response = await webNetworkPool.run(
+    () => fetch(url, { headers: BROWSER_HEADERS, signal, redirect: 'manual' }),
+    signal,
+  );
   if (!response.ok && response.status !== 202) {
     throw new Error(`${url.hostname} returned ${response.status}`);
   }
-  return await response.text();
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > MAX_SEARCH_RESPONSE_BYTES) {
+    await response.body?.cancel();
+    throw new Error(`${url.hostname} response exceeded ${MAX_SEARCH_RESPONSE_BYTES} bytes`);
+  }
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  const chunks: string[] = [];
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      total += next.value.length;
+      if (total > MAX_SEARCH_RESPONSE_BYTES) {
+        await reader.cancel();
+        throw new Error(`${url.hostname} response exceeded ${MAX_SEARCH_RESPONSE_BYTES} bytes`);
+      }
+      chunks.push(decoder.decode(next.value, { stream: true }));
+    }
+    chunks.push(decoder.decode());
+    return chunks.join('');
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 /** Collapse duplicate destinations, keeping the first and best-ranked one. */
@@ -258,9 +330,17 @@ function dedupe(results: readonly SearchResult[]): SearchResult[] {
     let key = result.url;
     try {
       const parsed = new URL(result.url);
-      // Query strings and fragments are how the same page appears four times
-      // with different tracking parameters.
-      key = `${parsed.hostname}${parsed.pathname.replace(/\/$/, '')}`;
+      parsed.hash = '';
+      for (const parameter of [...parsed.searchParams.keys()]) {
+        if (/^(?:utm_.+|fbclid|gclid|dclid|msclkid|mc_[ce]id|ref|referrer|source)$/i.test(parameter)) {
+          parsed.searchParams.delete(parameter);
+        }
+      }
+      parsed.searchParams.sort();
+      if (parsed.pathname !== '/') parsed.pathname = parsed.pathname.replace(/\/$/, '');
+      // Scheme, port and meaningful query parameters can identify genuinely
+      // different sources. Only fragments and known tracking parameters vanish.
+      key = parsed.toString();
     } catch {
       /* keep the raw string as the key */
     }

@@ -17,6 +17,7 @@ import type { SandboxCapabilityReport } from '@plif/sandbox';
 import type { McpAuthEvent } from '../auth/mcp-oauth.js';
 import type { ConversationEvent } from '../session/events.js';
 import type { StreamTiming } from '../model/stream-timing.js';
+import type { CompactionFailure } from '../harness/compaction.js';
 
 export interface QuestionOption {
   /** Text submitted when this row is selected. */
@@ -254,6 +255,8 @@ export interface PlifEvents {
     callId: string | undefined;
     title: string;
     model: string;
+    /** Declared context window of the selected child model. */
+    contextMax: number;
     at: number;
   };
   /**
@@ -305,6 +308,8 @@ export interface PlifEvents {
     after: number;
     stages: readonly string[];
     summarised: boolean;
+    /** Present when capsule generation failed, including the safe fallback used. */
+    failure?: CompactionFailure;
   };
   'mcp.connected': {
     server: string;

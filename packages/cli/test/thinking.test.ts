@@ -13,7 +13,7 @@ import { describe, it } from 'node:test';
 
 import { entry } from '../src/session.js';
 import { LIVE_THOUGHT_LINES, estimateHeight, thoughtLines, wrappedThoughtLines } from '../src/components/Timeline.js';
-import { bloomFrameAt } from '../src/components/Spinner.js';
+import { bloomFrameAt, workingFacts } from '../src/components/Spinner.js';
 import { supportsRichGlyphs, workedSeparator } from '../src/theme.js';
 
 const WIDTH = 40;
@@ -102,5 +102,12 @@ describe('working bloom', () => {
     assert.equal(bloomFrameAt(0), supportsRichGlyphs ? '●' : 'o');
     assert.notEqual(bloomFrameAt(0), bloomFrameAt(3));
     assert.match(bloomFrameAt(5), /^[+*#]$/);
+  });
+
+  it('does not animate Plif working text from the colour clock', () => {
+    assert.deepEqual(workingFacts(0, 0, false, true), []);
+    assert.deepEqual(workingFacts(180, 0, false, true), []);
+    assert.deepEqual(workingFacts(900, 1200, true, true), workingFacts(12_000, 1200, true, true));
+    assert.notDeepEqual(workingFacts(900, 0), workingFacts(12_000, 0));
   });
 });

@@ -14,10 +14,10 @@
  * leaks into a log or a transcript is a key that has to be rotated.
  */
 
-import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 import { PlifError } from '../errors.js';
-import { loadGlobalConfig, saveGlobalConfig } from '../config/global.js';
+import { globalConfigPath, loadGlobalConfig, saveGlobalConfig } from '../config/global.js';
 import type { StorePaths } from '../store/paths.js';
 
 export interface ModelConfig {
@@ -30,6 +30,8 @@ export interface ModelConfig {
   readonly needKey?: boolean;
   readonly temperature: number;
   readonly maxTokens: number | undefined;
+  /** Declared model capacity, when the custom catalogue knows it. */
+  readonly contextWindow: number | undefined;
   /** Seconds before a request is abandoned. */
   readonly timeoutMs: number;
   readonly effort?: Effort;
@@ -188,6 +190,25 @@ export const PRESETS: Readonly<Record<string, { baseURL: string; keyEnv: string;
 
 export type PresetName = keyof typeof PRESETS;
 
+/**
+ * Stable names for the encrypted credential store. Built-ins retain their
+ * documented environment variable; custom providers get a namespaced key so
+ * two endpoints cannot accidentally share a credential.
+ */
+export function credentialVariableForProvider(provider: string, stored?: StoredConfig): string {
+  const custom = stored !== undefined && provider in customProvidersOf(stored);
+  const builtin = custom ? undefined : PRESETS[provider];
+  if (builtin) return builtin.keyEnv;
+  const identity = provider.trim();
+  if (!identity) return 'PLIF_API_KEY';
+  const normalized = identity.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '').toUpperCase() || 'CUSTOM';
+  // Windows treats environment-variable names case-insensitively, and a
+  // punctuation-only normalisation maps foo-bar, foo_bar and FOO_BAR onto the
+  // same name. Keep the readable stem, then bind it to the exact provider id.
+  const fingerprint = createHash('sha256').update(identity, 'utf8').digest('hex').slice(0, 16).toUpperCase();
+  return `PLIF_PROVIDER_${normalized}_${fingerprint}_API_KEY`;
+}
+
 export interface ModelRef {
   readonly preset: string | undefined;
   readonly model: string;
@@ -221,7 +242,7 @@ export function formatModelRef(preset: string | undefined, model: string): strin
   return preset ? `${preset}/${model}` : model;
 }
 
-/** What lives in `<root>/config.json`. Every field optional. */
+/** What lives in the canonical personal `~/.plif/config.toml`. Every field optional. */
 export interface StoredConfig {
   readonly model?: string;
   readonly small_model?: string;
@@ -299,19 +320,27 @@ export interface VisionCandidate {
  * Models an endpoint happens to list are deliberately absent here. A model is
  * safe to offer for image inspection only when its configuration declares it.
  */
-export function visionCandidates(config: StoredConfig): readonly VisionCandidate[] {
-  const providers = {
-    ...asCustomProviders(config.providers),
-    ...asCustomProviders(config.provider),
-  };
+export function visionCandidates(
+  config: StoredConfig,
+  options: Pick<ResolveOptions, 'env'> = {},
+): readonly VisionCandidate[] {
+  const providers = customProvidersOf(config);
   return Object.entries(providers).flatMap(([provider, entry]) =>
     Object.entries(entry.models ?? {}).flatMap(([model, metadata]) => {
       if (!metadata.modalities?.includes('image')) return [];
+      // Keep this display catalogue on the exact same precedence path as a
+      // request. In particular, env overrides and built-in/custom provider
+      // collisions must not make the picker promise a different endpoint from
+      // the one the model client will use.
+      const resolved = resolveConfig(config, {
+        model: formatModelRef(provider, model),
+        ...(options.env ? { env: options.env } : {}),
+      });
       return [{
         provider,
         model,
         label: metadata.name ?? model,
-        baseURL: entry.options?.baseURL ?? '',
+        baseURL: resolved.baseURL,
         cost: metadata.cost ?? 'unknown',
         recommended: metadata.cost === 'free',
       }];
@@ -329,6 +358,20 @@ export interface ResolveOptions {
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
+/** Which provider id will be used for a resolved model. */
+export function providerIdForConfig(
+  stored: StoredConfig,
+  options: Pick<ResolveOptions, 'model' | 'preset' | 'env'> = {},
+): string | undefined {
+  const env = options.env ?? process.env;
+  const customProviders = customProvidersOf(stored);
+  const ref = parseModelRef(
+    options.model ?? env['PLIF_MODEL'] ?? stored.model ?? '',
+    customProviders,
+  );
+  return ref.preset ?? options.preset ?? env['PLIF_PRESET'] ?? stored.preset;
+}
+
 /**
  * There is deliberately no default model or provider.
  *
@@ -343,18 +386,17 @@ const DEFAULTS = {
 } as const;
 
 export async function loadStoredConfig(paths: StorePaths): Promise<StoredConfig> {
-  // The engine root is ~/.plif in production and a temporary directory in
-  // tests. Reading through the root keeps both paths isolated; the previous
-  // implementation ignored `paths` and let an app test overwrite the user's
-  // real ~/.plif/config.toml.
-  return (await loadGlobalConfig(path.join(paths.root, 'config.toml'))) as StoredConfig;
+  void paths;
+  return (await loadGlobalConfig()) as StoredConfig;
 }
 
 export async function saveStoredConfig(
   paths: StorePaths,
   config: StoredConfig,
+  options: { readonly preserveProviderKeys?: boolean } = {},
 ): Promise<void> {
-  await saveGlobalConfig(config, path.join(paths.root, 'config.toml'));
+  void paths;
+  await saveGlobalConfig(config, globalConfigPath(), options);
 }
 
 /**
@@ -374,18 +416,19 @@ export function resolveConfig(
   // A ref carries its own provider, so it overrides the separate `preset` —
   // otherwise `"model": "groq/llama-3.3-70b-versatile"` next to a stale
   // `"preset": "openai"` would send a Groq model id to OpenAI and 404.
-  const customProviders = {
-    ...asCustomProviders(stored.providers),
-    ...asCustomProviders(stored.provider),
-  };
+  const customProviders = customProvidersOf(stored);
   const ref = parseModelRef(
     options.model ?? env['PLIF_MODEL'] ?? stored.model ?? '',
     customProviders,
   );
 
   const presetName = ref.preset ?? options.preset ?? env['PLIF_PRESET'] ?? stored.preset;
-  const preset = presetName ? PRESETS[presetName] : undefined;
   const custom = presetName ? customProviders[presetName] : undefined;
+  const customCollision = custom !== undefined && presetName !== undefined && presetName in PRESETS;
+  // A user-defined provider is an explicit override, even when its id is the
+  // same as a built-in preset. Never let the built-in endpoint or environment
+  // variable win merely because the ids happen to collide.
+  const preset = custom ? undefined : (presetName ? PRESETS[presetName] : undefined);
   if (presetName && !preset && !custom) {
     throw new PlifError('INVALID_ARGUMENT', `unknown preset "${presetName}"`, {
       detail: { known: Object.keys(PRESETS) },
@@ -403,17 +446,21 @@ export function resolveConfig(
    * choosing a hosted model in the picker ends up posting it to a local server
    * that has never heard of it.
    */
-  const rootFieldsApply = !presetName || !stored.preset || stored.preset === presetName;
+  const storedRef = parseModelRef(stored.model ?? '', customProviders);
+  const rootFieldOwner = storedRef.preset ?? stored.preset;
+  const rootFieldsApply = !presetName || !rootFieldOwner || rootFieldOwner === presetName;
 
   const baseURL =
     options.baseURL ??
     env['PLIF_BASE_URL'] ??
+    // A custom provider owns its colliding id, so its explicit endpoint beats
+    // the generic OpenAI compatibility override as well as the preset table.
+    custom?.options?.baseURL ??
     env['OPENAI_BASE_URL'] ??
     // A named provider knows its own endpoint, and that beats a leftover root
     // `baseURL` even when the two belong together — the preset table is the
     // more current of the two.
     preset?.baseURL ??
-    custom?.options?.baseURL ??
     (rootFieldsApply ? stored.baseURL : undefined) ??
     PRESETS['openai']!.baseURL;
 
@@ -437,16 +484,17 @@ export function resolveConfig(
   const apiKey =
     options.apiKey ??
     (preset ? env[preset.keyEnv] : undefined) ??
-    (presetName ? asStringRecord(stored.providerKeys)[presetName] : undefined) ??
+    (custom && presetName ? env[credentialVariableForProvider(presetName, stored)] : undefined) ??
     custom?.options?.apiKey ??
+    (presetName && !customCollision ? asStringRecord(stored.providerKeys)[presetName] : undefined) ??
     env['PLIF_API_KEY'] ??
     // The generic variable is the right fallback for an endpoint that needs a
     // credential, and exactly the wrong one for an endpoint that does not: an
     // OpenAI key sent to Zen's free tier is not ignored, it is *rejected*. A
     // developer who happens to have OPENAI_API_KEY exported would otherwise
     // find the free models broken for a reason nothing on screen explains.
-    (keyOptional(baseURL, model) ? undefined : env['OPENAI_API_KEY']) ??
-    (rootFieldsApply ? stored.apiKey : undefined) ??
+    (keyOptional(baseURL, model) || custom ? undefined : env['OPENAI_API_KEY']) ??
+    (rootFieldsApply && !customCollision ? stored.apiKey : undefined) ??
     // Local servers ignore the value but the SDK refuses an empty one.
     (isLocal(baseURL) && !needKey ? 'local' : '');
 
@@ -457,6 +505,7 @@ export function resolveConfig(
     needKey,
     temperature: numberFrom(env['PLIF_TEMPERATURE']) ?? stored.temperature ?? DEFAULTS.temperature,
     maxTokens: numberFrom(env['PLIF_MAX_TOKENS']) ?? stored.maxTokens,
+    contextWindow: modelMetadata?.contextWindow,
     timeoutMs: numberFrom(env['PLIF_TIMEOUT_MS']) ?? stored.timeoutMs ?? DEFAULTS.timeoutMs,
     effort: stored.effort,
   };
@@ -477,20 +526,30 @@ export function adoptProvider(
   stored: StoredConfig,
   selection: { readonly preset: string; readonly model: string },
   apiKey?: string,
+  options: { readonly persistCredential?: boolean } = {},
 ): StoredConfig {
   const next: Record<string, unknown> = { ...stored };
+  const persistCredential = options.persistCredential ?? true;
   const providerKeys = { ...asStringRecord(stored.providerKeys) };
 
   const rootKey = typeof stored.apiKey === 'string' ? stored.apiKey : '';
-  const rootKeyOwner = stored.preset;
-  if (rootKey && rootKeyOwner && !providerKeys[rootKeyOwner]) {
-    providerKeys[rootKeyOwner] = rootKey;
+  const rootKeyOwner = providerIdForConfig(stored, { env: {} });
+  if (persistCredential) {
+    if (rootKey && rootKeyOwner && !providerKeys[rootKeyOwner]) {
+      providerKeys[rootKeyOwner] = rootKey;
+    }
+    if (apiKey && selection.preset) providerKeys[selection.preset] = apiKey;
+  } else {
+    // Secure callers have already moved any legacy values into CredentialBroker.
+    // Do not let an API key sneak back into the object that is about to be
+    // written just because an older config still had root/provider fields.
+    delete next['apiKey'];
+    delete next['providerKeys'];
   }
-  if (apiKey && selection.preset) providerKeys[selection.preset] = apiKey;
 
   next['preset'] = selection.preset;
   next['model'] = selection.model;
-  if (Object.keys(providerKeys).length > 0) next['providerKeys'] = providerKeys;
+  if (persistCredential && Object.keys(providerKeys).length > 0) next['providerKeys'] = providerKeys;
 
   // Only a real change of provider invalidates the root fields. Re-picking a
   // model from the same provider must not discard a hand-written base URL.
@@ -500,8 +559,138 @@ export function adoptProvider(
     delete next['NeedKey'];
   }
   // Safe to drop only once it has an owner; an unattributable key stays put.
-  if (rootKey && rootKeyOwner) delete next['apiKey'];
+  if (persistCredential && rootKey && rootKeyOwner) delete next['apiKey'];
   return next as StoredConfig;
+}
+
+/**
+ * Collect credentials still embedded in a legacy config. The first value for
+ * a provider follows resolveConfig's precedence: providerKeys, root ownership,
+ * then custom-provider options.
+ */
+export function storedProviderCredentials(
+  stored: StoredConfig,
+  fallbackProvider?: string,
+): Readonly<Record<string, string>> {
+  const found: Record<string, string> = {};
+  const add = (provider: string | undefined, value: unknown): void => {
+    if (provider === undefined || found[provider] || typeof value !== 'string' || !value.trim()) return;
+    found[provider] = value.trim();
+  };
+
+  const customProviders = customProvidersOf(stored);
+  // A credential nested in the effective provider entry is the only value
+  // that is unambiguously tied to a custom endpoint. The `provider` alias wins
+  // over `providers`, exactly as it does during request resolution.
+  for (const [provider, entry] of Object.entries(customProviders)) {
+    add(provider, entry.options?.apiKey);
+  }
+  for (const [provider, value] of Object.entries(asStringRecord(stored.providerKeys))) {
+    if (provider in customProviders && provider in PRESETS) continue;
+    add(provider, value);
+  }
+  const rootOwner = providerIdForConfig(stored, { env: {} }) ?? fallbackProvider;
+  if (rootOwner === undefined || !(rootOwner in customProviders && rootOwner in PRESETS)) {
+    add(rootOwner, stored.apiKey);
+  }
+  return found;
+}
+
+/** Remove all credential-bearing legacy fields after they are in the broker. */
+export function stripStoredCredentials(stored: StoredConfig, fallbackProvider?: string): StoredConfig {
+  const next: Record<string, unknown> = { ...stored };
+  delete next['providerKeys'];
+  void fallbackProvider;
+  delete next['apiKey'];
+
+  for (const field of ['providers', 'provider'] as const) {
+    const providers = asCustomProviders(stored[field]);
+    if (Object.keys(providers).length === 0) continue;
+    next[field] = Object.fromEntries(Object.entries(providers).map(([provider, entry]) => {
+      const options = entry.options;
+      if (!options || typeof options.apiKey !== 'string') return [provider, entry];
+      const cleanOptions: Record<string, unknown> = { ...options };
+      delete cleanOptions['apiKey'];
+      return [provider, { ...entry, options: cleanOptions }];
+    }));
+  }
+  return next as StoredConfig;
+}
+
+export interface ProviderCredentialVault {
+  stored(variable: string): Promise<string | undefined>;
+  remember(variable: string, value: string): Promise<void>;
+}
+
+export interface ProviderCredentialMigration {
+  readonly config: StoredConfig;
+  readonly migrated: boolean;
+  readonly variables: readonly string[];
+}
+
+/**
+ * Move every attributable legacy model credential into the encrypted vault.
+ *
+ * All vault writes finish before the returned config drops plaintext. If a
+ * write fails this function throws and the caller must leave the source config
+ * untouched; a later run can safely resume because existing vault entries are
+ * never overwritten by stale plaintext.
+ */
+export async function migrateProviderCredentials(
+  stored: StoredConfig,
+  vault: ProviderCredentialVault,
+  fallbackProvider = '',
+): Promise<ProviderCredentialMigration> {
+  const credentials = storedProviderCredentials(stored, fallbackProvider);
+  const variables: string[] = [];
+  const remember = async (variable: string, value: string): Promise<void> => {
+    variables.push(variable);
+    if (value === 'local') return;
+    const existing = await vault.stored(variable);
+    if (existing && existing !== 'local') return;
+    await vault.remember(variable, value);
+  };
+  for (const [provider, value] of Object.entries(credentials)) {
+    await remember(credentialVariableForProvider(provider, stored), value);
+  }
+
+  // A legacy providerKeys/root credential named like a built-in is ambiguous
+  // when a custom provider shadows that id. Preserve it under the built-in's
+  // vault name, never the custom endpoint's namespace. The custom endpoint may
+  // use only its own nested credential or hashed provider variable.
+  const customProviders = customProvidersOf(stored);
+  for (const [provider, value] of Object.entries(asStringRecord(stored.providerKeys))) {
+    if (provider in customProviders && provider in PRESETS) {
+      await remember(PRESETS[provider]!.keyEnv, value.trim());
+    }
+  }
+  const rootOwner = providerIdForConfig(stored, { env: {} }) ?? fallbackProvider;
+  if (
+    typeof stored.apiKey === 'string' && stored.apiKey.trim() &&
+    rootOwner in customProviders && rootOwner in PRESETS
+  ) {
+    await remember(PRESETS[rootOwner]!.keyEnv, stored.apiKey.trim());
+  }
+
+  if (!hasPlaintextModelCredentials(stored)) {
+    return { config: stored, migrated: false, variables };
+  }
+  return {
+    config: stripStoredCredentials(stored, fallbackProvider),
+    migrated: true,
+    variables: [...new Set(variables)],
+  };
+}
+
+function hasPlaintextModelCredentials(stored: StoredConfig): boolean {
+  if (Object.prototype.hasOwnProperty.call(stored, 'apiKey')) return true;
+  if (Object.prototype.hasOwnProperty.call(stored, 'providerKeys')) return true;
+  for (const field of ['providers', 'provider'] as const) {
+    for (const entry of Object.values(asCustomProviders(stored[field]))) {
+      if (entry.options && Object.prototype.hasOwnProperty.call(entry.options, 'apiKey')) return true;
+    }
+  }
+  return false;
 }
 
 export function forgetProviderKey(stored: StoredConfig, preset: string): StoredConfig {
@@ -509,7 +698,18 @@ export function forgetProviderKey(stored: StoredConfig, preset: string): StoredC
   delete providerKeys[preset];
   const next: Record<string, unknown> = { ...stored, providerKeys };
   if (Object.keys(providerKeys).length === 0) delete next['providerKeys'];
-  if (stored.preset === preset && typeof stored.apiKey === 'string') delete next['apiKey'];
+  if (providerIdForConfig(stored, { env: {} }) === preset && typeof stored.apiKey === 'string') {
+    delete next['apiKey'];
+  }
+  for (const field of ['providers', 'provider'] as const) {
+    const providers = asCustomProviders(stored[field]);
+    if (!(preset in providers)) continue;
+    const entry = providers[preset]!;
+    if (!entry.options || typeof entry.options.apiKey !== 'string') continue;
+    const options: Record<string, unknown> = { ...entry.options };
+    delete options['apiKey'];
+    next[field] = { ...providers, [preset]: { ...entry, options } };
+  }
   return next as StoredConfig;
 }
 
@@ -525,6 +725,14 @@ function asCustomProviders(value: unknown): Record<string, CustomProvider> {
   return Object.fromEntries(
     Object.entries(value).filter(([, entry]) => entry && typeof entry === 'object'),
   ) as Record<string, CustomProvider>;
+}
+
+/** The canonical custom-provider map; OpenCode's singular alias wins. */
+export function customProvidersOf(stored: StoredConfig): Record<string, CustomProvider> {
+  return {
+    ...asCustomProviders(stored.providers),
+    ...asCustomProviders(stored.provider),
+  };
 }
 
 /**

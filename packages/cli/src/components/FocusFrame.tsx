@@ -1,7 +1,14 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
-import { breathingTone, toneBetween, useHighlightClock } from '../pulse.js';
+import {
+  breathingTone,
+  semanticWave,
+  semanticWaveTone,
+  toneBetween,
+  useHighlightClock,
+} from '../pulse.js';
+import { effortVisual } from '../effort-visuals.js';
 import { color, layout, supportsRichGlyphs } from '../theme.js';
 
 export interface FocusCell {
@@ -26,11 +33,18 @@ export function focusRule(
   elapsedMs: number,
   active: boolean,
   edge: Edge = 'top',
+  plif = false,
+  effort?: string,
 ): readonly FocusCell[] {
   const size = Math.max(2, Math.floor(width));
   const span = size - 2;
   const origin = span > 0 ? (elapsedMs / 220) % span : 0;
-  const endpoint = active ? toneBetween('accent', 'accentBright', 0.9) : color('faint');
+  const stops = effortVisual(effort ?? (plif ? 'plif' : undefined)).stops;
+  const endpoint = active
+    ? effort || plif
+      ? semanticWave(elapsedMs / 1_440 + (edge === 'bottom' ? 0.5 : 0), stops)
+      : toneBetween('accent', 'accentBright', 0.9)
+    : color('faint');
   const cells: FocusCell[] = [{
     text: edge === 'top' ? glyphs.topLeft : glyphs.bottomLeft,
     color: endpoint,
@@ -43,9 +57,14 @@ export function focusRule(
       Math.abs(index - origin - span),
     );
     const intensity = active ? Math.max(0.08, 1 - distance / Math.max(2, span / 5)) : 0;
+    const waveIndex = edge === 'bottom' ? span - index - 1 : index;
     cells.push({
       text: glyphs.horizontal,
-      color: active ? toneBetween('brand', 'accentBright', intensity) : color('faint'),
+      color: active
+        ? effort || plif
+          ? semanticWaveTone(elapsedMs, waveIndex, span, stops)
+          : toneBetween('brand', 'accentBright', intensity)
+        : color('faint'),
     });
   }
 
@@ -76,7 +95,11 @@ export function infinityFrame(elapsedMs: number, active: boolean): string {
   return INFINITY_CELLS.join('');
 }
 
-export function infinityCells(elapsedMs: number, active: boolean): readonly FocusCell[] {
+export function infinityCells(
+  elapsedMs: number,
+  active: boolean,
+  plif = false,
+): readonly FocusCell[] {
   if (!active) {
     return INFINITY_CELLS.map((text) => ({ text, color: color('accentDim') }));
   }
@@ -90,16 +113,18 @@ export function infinityCells(elapsedMs: number, active: boolean): readonly Focu
     );
     return {
       text,
-      color: toneBetween('accentDim', 'accentBright', Math.max(0, 1 - distance / 1.6)),
+      color: plif
+        ? semanticWaveTone(elapsedMs, index, span, effortVisual('plif').stops, 1_080)
+        : toneBetween('accentDim', 'accentBright', Math.max(0, 1 - distance / 1.6)),
     };
   });
 }
 
-export function InfinityMark({ active }: { active: boolean }): React.ReactElement {
+export function InfinityMark({ active, plif = false }: { active: boolean; plif?: boolean }): React.ReactElement {
   const elapsed = useHighlightClock(active, 80);
   return (
     <Text bold={active}>
-      {infinityCells(elapsed, active).map((cell, index) => (
+      {infinityCells(elapsed, active, plif).map((cell, index) => (
         <Text key={index} color={cell.color}>{cell.text}</Text>
       ))}
     </Text>
@@ -123,15 +148,23 @@ export function FocusFrame({
   width,
   active,
   footer,
+  plif = false,
+  effort,
 }: {
   readonly children: React.ReactNode;
   readonly width: number;
   readonly active: boolean;
   readonly footer?: React.ReactNode;
+  readonly plif?: boolean;
+  readonly effort?: string;
 }): React.ReactElement {
   const elapsed = useHighlightClock(active, 70);
   const frameWidth = Math.max(8, width);
-  const sideColor = active ? breathingTone(elapsed, 'brand', 'accent') : color('faint');
+  const sideColor = active
+    ? effort || plif
+      ? semanticWave(elapsed / 2_400, effortVisual(effort ?? (plif ? 'plif' : undefined)).stops)
+      : breathingTone(elapsed, 'brand', 'accent')
+    : color('faint');
 
   const wall = (body: React.ReactNode): React.ReactElement => (
     <Box width={frameWidth}>
@@ -145,7 +178,7 @@ export function FocusFrame({
 
   return (
     <Box flexDirection="column" width={frameWidth} flexShrink={0}>
-      <FocusRule width={frameWidth} elapsed={elapsed} active={active} />
+      <FocusRule width={frameWidth} elapsed={elapsed} active={active} plif={plif} effort={effort} />
       {wall(children)}
       {footer !== undefined && (
         <>
@@ -157,7 +190,7 @@ export function FocusFrame({
           {wall(footer)}
         </>
       )}
-      <FocusRule width={frameWidth} elapsed={elapsed + 300} active={active} edge="bottom" />
+      <FocusRule width={frameWidth} elapsed={elapsed + 300} active={active} edge="bottom" plif={plif} effort={effort} />
     </Box>
   );
 }
@@ -167,15 +200,19 @@ function FocusRule({
   elapsed,
   active,
   edge = 'top',
+  plif = false,
+  effort,
 }: {
   readonly width: number;
   readonly elapsed: number;
   readonly active: boolean;
   readonly edge?: Edge;
+  readonly plif?: boolean;
+  readonly effort?: string;
 }): React.ReactElement {
   return (
     <Text>
-      {focusRule(width, elapsed, active, edge).map((cell, index) => (
+      {focusRule(width, elapsed, active, edge, plif, effort).map((cell, index) => (
         <Text key={index} color={cell.color}>{cell.text}</Text>
       ))}
     </Text>

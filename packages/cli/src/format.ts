@@ -153,13 +153,49 @@ export function sanitizePastedText(chunk: string): string {
 
 /** Compact, uniform UI representation of every clipboard payload. */
 export function pastedContentToken(index: number, text?: string): string {
-  const lines = text === undefined ? 0 : text.split('\n').length;
+  if (text === undefined) return `[Pasted Image #${index}]`;
+  const lines = text.split('\n').length;
   return `[Pasted Content #${index} - ${lines} Lines]`;
 }
 
 /** Last-resort paste detection for terminals that ignore bracketed paste: only a chunk carrying more than one line of content is a shape the keyboard cannot produce. */
 export function isTerminalPaste(chunk: string): boolean {
   return sanitizePastedText(chunk).replace(/\n+$/, '').includes('\n');
+}
+
+export const PASTE_ATTACHMENT_MIN_CHARS = 500;
+
+export function shouldAttachPastedText(text: string): boolean {
+  return text.length >= PASTE_ATTACHMENT_MIN_CHARS;
+}
+
+const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|bmp|webp|avif)$/i;
+
+function unquotePath(value: string): string {
+  const trimmed = value.trim();
+  const unwrapped = /^(["'])(.*)\1$/.exec(trimmed);
+  const bare = unwrapped ? (unwrapped[2] ?? '') : trimmed;
+  if (!/^file:\/\//i.test(bare)) return bare;
+  const withoutScheme = bare.replace(/^file:\/\/\/?/i, '');
+  try {
+    return decodeURIComponent(withoutScheme).replace(/\//g, '\\');
+  } catch {
+    return withoutScheme;
+  }
+}
+
+function looksLikeFilesystemPath(value: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith('\\\\') || value.startsWith('/')
+    || value.startsWith('./') || value.startsWith('../') || value.startsWith('~/');
+}
+
+export function imagePathsInPaste(text: string): readonly string[] {
+  const lines = text.split('\n').map(unquotePath).filter(Boolean);
+  if (lines.length === 0) return [];
+  const paths = lines.filter(
+    (line) => looksLikeFilesystemPath(line) && IMAGE_EXTENSIONS.test(line),
+  );
+  return paths.length === lines.length ? paths : [];
 }
 
 /** Legacy line-oriented consumers (pickers and questions) still submit on CR. */
@@ -198,6 +234,87 @@ export interface DescribedTool {
   readonly target?: string;
   readonly summary?: string;
   readonly planItems?: readonly PlanDisplayItem[];
+}
+
+export interface SearchHit {
+  readonly rank: number;
+  readonly title: string;
+  readonly url: string;
+  readonly snippet?: string;
+}
+
+/** Pull automatic diagnostics out of an edit result without repeating its summary. */
+export function languageServerNote(output: string): string | null {
+  const marker = 'Language server:';
+  const at = output.indexOf(marker);
+  return at >= 0 ? output.slice(at).trim() : null;
+}
+
+export function parseSearchResults(output: string): readonly SearchHit[] {
+  const lines = output.split(/\r?\n/);
+  const hits: SearchHit[] = [];
+  const hasRankedSections = lines.some((line) =>
+    /^##\s+Results\s*$/i.test(line) || /^Sources:\s*$/i.test(line),
+  );
+  let inRankedSection = !hasRankedSections;
+  let inResearchQuery = false;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    if (/^Query\s+\d+:\s+\S/i.test(line)) {
+      inResearchQuery = true;
+      inRankedSection = false;
+      continue;
+    }
+    if (/^##\s+Results\s*$/i.test(line)) {
+      inRankedSection = true;
+      continue;
+    }
+    if (/^Sources:\s*$/i.test(line)) {
+      inRankedSection = inResearchQuery;
+      continue;
+    }
+    if (
+      /^##\s+(?:Related|Web results unavailable|How this is usually phrased)\s*$/i.test(line) ||
+      /^##\s+/i.test(line) ||
+      /^(?:Coverage:|Objective:|Purpose:|Status:|Sources:\s+none|Instant answer)/i.test(line)
+    ) {
+      inRankedSection = false;
+      if (/^(?:Coverage:|Objective:)/i.test(line)) inResearchQuery = false;
+      continue;
+    }
+    if (!inRankedSection) continue;
+
+    const heading = /^(\d+)\.\s+(.+)$/.exec(line);
+    if (!heading) continue;
+    const rank = Number(heading[1]);
+    if (!Number.isInteger(rank) || rank < 1) continue;
+    const urlMatch = /^\s{2,}(https?:\/\/\S+)\s*$/i.exec(lines[index + 1] ?? '');
+    if (!urlMatch) continue;
+    const url = urlMatch[1]!;
+    const snippetMatch = /^\s{2,}(\S.*)$/.exec(lines[index + 2] ?? '');
+    const snippet = snippetMatch?.[1]?.trim() ?? '';
+    hits.push({
+      rank,
+      title: (heading[2] ?? '').trim(),
+      url,
+      ...(snippet ? { snippet } : {}),
+    });
+    // Tool-produced URLs and snippets are indented. Their indentation is the
+    // data/control boundary: "   ## Results" is snippet text, not a section.
+    index += snippet ? 2 : 1;
+  }
+  return hits;
+}
+
+export function displayUrl(url: string, width: number): string {
+  const bare = url.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/$/, '');
+  return bare.length <= width ? bare : truncateTo(bare, width);
+}
+
+function truncateTo(value: string, width: number): string {
+  if (width <= 1) return value.slice(0, Math.max(0, width));
+  return `${value.slice(0, width - 1)}…`;
 }
 
 export type ToolCategory =
@@ -240,20 +357,25 @@ const TOOL_LABELS: Readonly<Record<string, string>> = {
   skill: 'Skill',
   subagent: 'Subagent',
   web_search: 'Search',
+  research: 'Research',
   web_fetch: 'Fetch',
   curl: 'Curl',
   update_plan: 'Plan updated',
   glob: 'Glob',
   grep: 'Grep',
   apply_patch: 'Update',
+  diagnostics: 'Diagnostics',
+  find_definition: 'Definition',
+  find_references: 'References',
+  outline: 'Outline',
 };
 
 export function toolCategory(name: string): ToolCategory {
   if (name.startsWith('mcp__')) return 'external';
   if (name === 'run_command' || name === 'start_task') return 'shell';
-  if (name === 'read_file') return 'read';
+  if (name === 'read_file' || name === 'diagnostics') return 'read';
   if (name === 'list_dir' || name === 'glob') return 'list';
-  if (name === 'grep' || name === 'web_search') return 'search';
+  if (name === 'grep' || name === 'web_search' || name === 'research' || name === 'find_definition' || name === 'find_references' || name === 'outline') return 'search';
   if (name === 'web_fetch' || name === 'curl') return 'network';
   if (name === 'write_file' || name === 'edit_file' || name === 'apply_patch' || name === 'resolve_edit_conflict') return 'edit';
   if (name === 'subagent') return 'agent';
@@ -305,6 +427,9 @@ export function describeToolCall(name: string, input: unknown): DescribedTool {
   if (name === 'curl' && typeof record['url'] === 'string') {
     const method = typeof record['method'] === 'string' ? record['method'].toUpperCase() : 'GET';
     return { label, category, target: `${method} ${record['url']}` };
+  }
+  if (name === 'research' && typeof record['objective'] === 'string') {
+    return { label, category, target: record['objective'] };
   }
   if (name === 'apply_patch' && Array.isArray(record['edits'])) {
     const edits = record['edits'].filter(

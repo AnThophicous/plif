@@ -70,10 +70,13 @@ export function Approval({
         paddingX={layout.boxPadX}
         width="100%"
       >
-        <Box justifyContent="space-between">
-          <Text color={color('warn')} bold>
-            {glyph.waiting} permission required
-          </Text>
+        <Box width="100%">
+          <Box flexShrink={1}>
+            <Text color={color('warn')} bold wrap="truncate">
+              {glyph.waiting} permission required
+            </Text>
+          </Box>
+          <Box flexGrow={1} />
           <Text color={color('ghost')}>
             {approval.action}
             {queued > 0 ? `  +${queued} queued` : ''}

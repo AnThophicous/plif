@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 
 /**
- * Terminal animation is deliberately discrete. A coding session does not need
- * a 60 FPS paint loop, and a timer per spinner makes an idle TUI surprisingly
- * expensive on Windows. One provider owns the only Ink animation clock.
+ * Terminal animation is deliberately sampled, not rendered at 60 FPS. One
+ * shared 120ms clock gives gradients enough intermediate colour samples to
+ * avoid stepping while keeping the renderer quiet compared with a per-widget
+ * timer.
  */
 export const ANIMATION_INTERVAL_MS = 120;
 
@@ -13,22 +14,15 @@ interface AnimationClockSource {
   readonly tick: () => void;
 }
 
-const EMPTY_SUBSCRIBE = (): (() => void) => () => undefined;
-const ZERO_SNAPSHOT = (): number => 0;
-const AnimationClockContext = createContext<AnimationClockSource | null>(null);
-
 function createAnimationClock(): AnimationClockSource {
   let frame = 0;
   const listeners = new Set<() => void>();
-
   return {
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    getSnapshot() {
-      return frame;
-    },
+    getSnapshot: () => frame,
     tick() {
       frame += 1;
       for (const listener of listeners) listener();
@@ -36,9 +30,19 @@ function createAnimationClock(): AnimationClockSource {
   };
 }
 
+interface AnimationClockValue {
+  readonly clock: AnimationClockSource;
+  readonly plif: boolean;
+}
+
+const idleClock = createAnimationClock();
+const AnimationClockContext = createContext<AnimationClockValue>({ clock: idleClock, plif: false });
+
 export interface AnimationClockProviderProps {
   readonly active: boolean;
   readonly children: React.ReactNode;
+  /** Stable glyph variant for active Plif work. */
+  readonly plif?: boolean;
   /** Optional work that must share the same terminal paint pulse. */
   readonly onTick?: () => void;
   /** Exposed for deterministic tests; the runtime uses 120 ms. */
@@ -48,6 +52,7 @@ export interface AnimationClockProviderProps {
 export function AnimationClockProvider({
   active,
   children,
+  plif = false,
   onTick,
   intervalMs = ANIMATION_INTERVAL_MS,
 }: AnimationClockProviderProps): React.ReactElement {
@@ -67,7 +72,7 @@ export function AnimationClockProvider({
   }, [active, clock, intervalMs]);
 
   return (
-    <AnimationClockContext.Provider value={clock}>
+    <AnimationClockContext.Provider value={{ clock, plif }}>
       {children}
     </AnimationClockContext.Provider>
   );
@@ -75,10 +80,11 @@ export function AnimationClockProvider({
 
 /** Monotonic discrete frame number for all active Ink animation. */
 export function useAnimationFrame(): number {
-  const clock = useContext(AnimationClockContext);
-  return useSyncExternalStore(
-    clock?.subscribe ?? EMPTY_SUBSCRIBE,
-    clock?.getSnapshot ?? ZERO_SNAPSHOT,
-    clock?.getSnapshot ?? ZERO_SNAPSHOT,
-  );
+  const clock = useContext(AnimationClockContext).clock;
+  return useSyncExternalStore(clock.subscribe, clock.getSnapshot, clock.getSnapshot);
+}
+
+/** Whether active spinner consumers should keep their glyph stable for Plif. */
+export function usePlifAnimation(): boolean {
+  return useContext(AnimationClockContext).plif;
 }

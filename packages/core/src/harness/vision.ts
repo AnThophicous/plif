@@ -1,5 +1,5 @@
 import type { StoredConfig, VisionCandidate } from '../model/config.js';
-import { formatModelRef, parseModelRef, visionCandidates } from '../model/config.js';
+import { formatModelRef, visionCandidates } from '../model/config.js';
 import { isAutoApproveEnabled, loadGlobalConfig, saveGlobalConfig } from '../config/global.js';
 import { subagentTool } from './subagent.js';
 import type { SubagentOptions } from './subagent.js';
@@ -9,18 +9,21 @@ export type VisionRoute =
   | { readonly kind: 'select'; readonly candidates: readonly VisionCandidate[] }
   | { readonly kind: 'saved'; readonly candidate: VisionCandidate };
 
+/** Injectable seams keep the consent path testable without a model call or a config file. */
+export interface VisionToolDependencies {
+  readonly loadConfig?: () => Promise<StoredConfig>;
+  readonly saveConfig?: (config: StoredConfig) => Promise<void>;
+  readonly createChild?: (stored: StoredConfig) => Tool;
+}
+
 /**
  * Pick only an explicitly configured image model. A stale preference is never
  * silently sent to an endpoint: it falls back to the selection menu instead.
  */
 export function routeVision(config: StoredConfig): VisionRoute {
   const candidates = visionCandidates(config);
-  const saved = typeof config.visionModel === 'string' ? parseModelRef(config.visionModel, {
-    ...(config.provider as Record<string, never> ?? {}),
-    ...(config.providers as Record<string, never> ?? {}),
-  }) : undefined;
-  const preferred = saved
-    ? candidates.find((candidate) => candidate.provider === saved.preset && candidate.model === saved.model)
+  const preferred = typeof config.visionModel === 'string'
+    ? candidates.find((candidate) => visionModelRef(candidate) === config.visionModel)
     : undefined;
   return preferred ? { kind: 'saved', candidate: preferred } : { kind: 'select', candidates };
 }
@@ -29,13 +32,61 @@ export function visionModelRef(candidate: VisionCandidate): string {
   return formatModelRef(candidate.provider, candidate.model);
 }
 
+function displayEndpoint(endpoint: string): string {
+  try {
+    const url = new URL(endpoint);
+    // Endpoints are useful provenance, but userinfo and query credentials are
+    // not. Keep the host/path that identifies the recipient and redact common
+    // credential-shaped query parameters before they reach a question or tool
+    // result.
+    url.username = '';
+    url.password = '';
+    for (const key of [...url.searchParams.keys()]) {
+      if (
+        /(?:api[-_.]?key|auth|password|secret|token|credential|signature|session|authorization|aws[-_.]?access[-_.]?key[-_.]?id|code)/i.test(key) ||
+        /^(?:key|access[-_.]?key|subscription[-_.]?key)$/i.test(key)
+      ) {
+        // Removing the pair hides both the value and credential vocabulary;
+        // the remaining query still identifies non-sensitive routing choices.
+        url.searchParams.delete(key);
+      }
+    }
+    url.hash = '';
+    return url.toString();
+  } catch {
+    // resolveConfig normally supplies a URL. An invalid explicit endpoint can
+    // contain arbitrary configuration text, so fail closed instead of echoing
+    // a value whose credential boundaries cannot be parsed reliably.
+    return '[invalid endpoint redacted]';
+  }
+}
+
+function costDisclosure(cost: VisionCandidate['cost']): string {
+  if (cost === 'free') return 'Cost: free according to configuration; provider terms may differ.';
+  if (cost === 'paid') return 'Cost: paid or usage-based; charges may apply.';
+  return 'Cost: unknown; the provider may charge for this request.';
+}
+
 function describeCandidate(candidate: VisionCandidate): string {
-  return `${candidate.provider} · ${candidate.cost} · ${candidate.baseURL || 'endpoint from provider config'}`;
+  return [
+    `Model: ${candidate.model}`,
+    `Provider: ${candidate.provider}`,
+    `Endpoint: ${displayEndpoint(candidate.baseURL)}`,
+    costDisclosure(candidate.cost),
+    'Recipient: the image and question leave Plif and may be sent to this third-party provider.',
+  ].join('\n');
 }
 
 /** Vision delegation is explicit: list candidates, choose, disclose endpoint/cost, then run. */
-export function visionTools(options: SubagentOptions): readonly Tool[] {
-  const child = (stored: StoredConfig) => subagentTool({ ...options, stored });
+export function visionTools(
+  options: SubagentOptions,
+  dependencies: VisionToolDependencies = {},
+): readonly Tool[] {
+  const loadConfig = dependencies.loadConfig ?? (async () => await loadGlobalConfig() as StoredConfig);
+  const saveConfig = dependencies.saveConfig ?? (async (config: StoredConfig) => {
+    await saveGlobalConfig(config);
+  });
+  const child = (stored: StoredConfig) => dependencies.createChild?.(stored) ?? subagentTool({ ...options, stored });
 
   const list: Tool = {
     parallelSafe: true,
@@ -46,7 +97,7 @@ export function visionTools(options: SubagentOptions): readonly Tool[] {
       parameters: { type: 'object', properties: {}, additionalProperties: false },
     },
     async run() {
-      const config = await loadGlobalConfig();
+      const config = await loadConfig();
       const candidates = visionCandidates(config);
       return {
         output: candidates.length
@@ -74,7 +125,7 @@ export function visionTools(options: SubagentOptions): readonly Tool[] {
       const images = context.attachments?.filter((attachment) => attachment.kind === 'image') ?? [];
       if (images.length === 0) return { output: 'No pasted image is attached to this turn.', ok: false };
 
-      const config = await loadGlobalConfig();
+      const config = await loadConfig();
       const route = routeVision(config);
       if (route.kind === 'select' && route.candidates.length === 0) {
         return {
@@ -108,23 +159,30 @@ export function visionTools(options: SubagentOptions): readonly Tool[] {
         if (!candidate) return { output: 'The selected vision model is no longer configured.', ok: false };
       }
 
-      if (route.kind !== 'saved' && !isAutoApproveEnabled(config)) {
+      let childConfig = config;
+      if (route.kind !== 'saved') {
         const remember = await context.questions.ask({
-          text: 'Use this model whenever vision is needed?',
+          text: `Allow ${visionModelRef(candidate)} to inspect the pasted image?`,
           options: [
-            { value: 'always', label: 'Always use this model', description: 'Save it and stop asking on future vision requests.' },
-            { value: 'once', label: 'Use once', description: 'Send only this request and ask again next time.' },
-            { value: 'cancel', label: 'Cancel', description: 'Do not send the image.' },
+            { value: 'always', label: 'Allow and remember', description: 'Save this model and stop asking on future vision requests.' },
+            { value: 'once', label: 'Allow once', description: 'Send only this request and ask again next time.' },
+            { value: 'cancel', label: 'Cancel', description: 'Do not send the image to another provider.' },
           ],
-          context: `Model: ${visionModelRef(candidate)}\nEndpoint: ${candidate.baseURL}\nCost: ${candidate.cost}`,
+          context: describeCandidate(candidate),
         });
-        if (!remember || remember === 'cancel') return { output: 'Vision delegation cancelled.', ok: false };
+        // QuestionBroker permits free-form answers, but only the offered
+        // consent choices authorize sending an image to another provider.
+        // This also makes one-shot/non-interactive responders fail closed.
+        if (remember !== 'always' && remember !== 'once') {
+          return { output: 'Vision delegation cancelled.', ok: false };
+        }
         if (remember === 'always') {
-          await saveGlobalConfig({ ...config, visionModel: visionModelRef(candidate) });
+          childConfig = { ...config, visionModel: visionModelRef(candidate) };
+          await saveConfig(childConfig);
         }
       }
 
-      return await child(config).run(
+      return await child(childConfig).run(
         {
           title: `Inspect ${images.length} pasted ${images.length === 1 ? 'image' : 'images'}`,
           task: typeof input['question'] === 'string' ? input['question'] : 'Describe the pasted image accurately.',

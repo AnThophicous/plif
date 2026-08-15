@@ -287,8 +287,8 @@ Flags
   --write                       Let the agent modify the real workspace
   --yes, -y                     Auto-approve in non-interactive runs
                                 (without it, escalated actions are denied)
-  --api-key <key>               Persist a key with "model set" (written to
-                                config.json; otherwise keep it in the env)
+  --api-key <key>               Persist a key with "model set" in the encrypted
+                                credential store; otherwise keep it in the env
   --strict                      Untrusted trust tier; refuses weak isolation
   --json                        Machine-readable output
 

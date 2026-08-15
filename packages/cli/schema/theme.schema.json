@@ -28,6 +28,8 @@
       "type": "object",
       "properties": {
         "command": { "$ref": "#/$defs/tone" }, "parameter": { "$ref": "#/$defs/tone" },
+        "keyword": { "$ref": "#/$defs/tone" }, "function": { "$ref": "#/$defs/tone" },
+        "type": { "$ref": "#/$defs/tone" }, "property": { "$ref": "#/$defs/tone" },
         "string": { "$ref": "#/$defs/tone" }, "variable": { "$ref": "#/$defs/tone" },
         "operator": { "$ref": "#/$defs/tone" }, "number": { "$ref": "#/$defs/tone" },
         "comment": { "$ref": "#/$defs/tone" }, "plain": { "$ref": "#/$defs/tone" }

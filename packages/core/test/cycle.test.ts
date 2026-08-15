@@ -5,6 +5,7 @@ import {
   createHarnessCycle,
   inspectionPaths,
   isFileMutationTool,
+  isShellMutation,
   isValidationObservation,
   mutationGate,
   mutationPaths,
@@ -85,6 +86,16 @@ describe('cycle tool classification', () => {
         edits: [{ path: '/workspace/a.ts' }, { path: '/workspace/b.ts' }],
       }),
       ['/workspace/a.ts', '/workspace/b.ts'],
+    );
+  });
+
+  it('puts ordinary shell writes through the same plan and review gate', () => {
+    assert.equal(isShellMutation('shell_command', { script: "Set-Content -LiteralPath app.ts -Value 'x'" }), true);
+    assert.equal(isShellMutation('run_command', { argv: ['git', 'apply', 'change.patch'] }), true);
+    assert.equal(isShellMutation('run_command', { argv: ['rg', 'needle', 'src'] }), false);
+    assert.deepEqual(
+      mutationPaths('shell_command', { script: "Set-Content -LiteralPath app.ts -Value 'x'" }),
+      ['*'],
     );
   });
 

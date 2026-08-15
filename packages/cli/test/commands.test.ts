@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { COMMANDS, providerModelIds } from '../src/commands.js';
+import { COMMANDS, builtInPickerProviders, providerModelIds } from '../src/commands.js';
 import type { CommandContext } from '../src/commands.js';
 import { entry } from '../src/session.js';
 import type { BrowserTab, TimelineEntry } from '../src/session.js';
@@ -166,6 +166,15 @@ describe('provider model picker', () => {
     assert.deepEqual(
       providerModelIds(catalog, ['zai/glm-4.6'], true),
       ['z-ai/glm-5.2', 'zai/glm-4.6'],
+    );
+  });
+
+  it('does not duplicate a built-in provider hidden by a custom declaration', () => {
+    const custom = [{ id: 'openai' }, { id: 'company' }] as const;
+    const builtins = [{ id: 'openai' }, { id: 'anthropic' }] as const;
+    assert.deepEqual(
+      builtInPickerProviders(custom, builtins).map((provider) => provider.id),
+      ['anthropic'],
     );
   });
 });
