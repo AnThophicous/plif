@@ -39,4 +39,53 @@ describe('terminal surface output', () => {
     assert.equal(writes[0], `frame\n${terminalSurfaceTail('#171719')}`);
     assert.equal(writes[1], 'cursor');
   });
+
+  it('patches only changed Ink rows after establishing a frame baseline', () => {
+    const writes: string[] = [];
+    const target = {
+      write(chunk: string | Uint8Array): boolean {
+        writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+        return true;
+      },
+    } as unknown as NodeJS.WriteStream;
+
+    const stream = createTerminalSurfaceStream(target, () => '#171719');
+    const eraseLines = (count: number): string =>
+      `${'\u001b[2K\u001b[1A'.repeat(Math.max(0, count - 1))}\u001b[2K\u001b[G`;
+
+    // The first frame and the frame after scrollback have no erase prefix.
+    stream.write('alpha\nbeta\n');
+    stream.write(`${eraseLines(3)}alpha\nbeta\n`);
+    const before = writes.length;
+
+    stream.write(`${eraseLines(3)}alpha\nBETA\n`);
+    const patch = writes.at(-1) ?? '';
+
+    assert.equal(writes.length, before + 1);
+    assert.match(patch, /\u001b\[2A/);
+    assert.match(patch, /\u001b\[2KBETA/);
+    assert.doesNotMatch(patch, /\u001b\[1A/);
+    assert.doesNotMatch(patch, /alpha/);
+  });
+
+  it('drops the baseline when Ink clears for append-only scrollback', () => {
+    const writes: string[] = [];
+    const target = {
+      write(chunk: string | Uint8Array): boolean {
+        writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+        return true;
+      },
+    } as unknown as NodeJS.WriteStream;
+
+    const stream = createTerminalSurfaceStream(target, () => '#171719');
+    const eraseLines = (count: number): string =>
+      `${'\u001b[2K\u001b[1A'.repeat(Math.max(0, count - 1))}\u001b[2K\u001b[G`;
+
+    stream.write('live one\nlive two\n');
+    stream.write(`${eraseLines(3)}live one\nlive two\n`);
+    stream.write(eraseLines(3));
+    stream.write('history\n');
+
+    assert.equal(writes.at(-1), `history\n${terminalSurfaceTail('#171719')}`);
+  });
 });
