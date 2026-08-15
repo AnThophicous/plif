@@ -8,11 +8,10 @@
  * ## The idea
  *
  * A terminal that a developer sits in for hours has to do two things at once:
- * stay quiet, and stay legible. So the palette is almost entirely greys — four
- * of them, doing the work of hierarchy — with exactly one accent that means
- * "the agent is doing something" and three semantic colours that only appear
- * when they carry information. Nothing is coloured for decoration. If a line is
- * bright, it earned it.
+ * stay quiet, and stay legible. The gold ramp is therefore semantic: borders,
+ * important details, highlighted text, default text, and active thinking each
+ * have a clear role. Nothing is coloured for decoration. If a line is bright,
+ * it earned it.
  *
  * The greys are spaced far enough apart to survive a low-contrast terminal
  * theme, and the accent sits at a lightness that holds up on both black and
@@ -36,44 +35,47 @@ const richGlyphs = process.env['PLIF_ASCII'] !== '1';
 export const supportsRichGlyphs = richGlyphs;
 
 /**
- * The brand blue, and the ramp derived from it.
+ * The Plif gold palette, and the ramp derived from it.
  *
- * `#3b5578` is the identity colour. It belongs to the midnight-blue family and
- * stays reserved for structure: frames, the infinity mark, and active meters.
- * It is intentionally quieter than reading text, so the terminal can remain
- * grey-first even when there is a lot happening.
+ * The controlled-test palette keeps the existing semantic roles intact while
+ * replacing the default blue identity with the requested gold ramp:
  *
- * Anything that has to be **read** uses `accent`, a clearer blue from the same
- * family. The hierarchy still reads as blue; it just does not ask anyone to
- * squint.
+ * - `#CC9A3A` for borders and structural chrome;
+ * - `#C68E17` for important details;
+ * - `#E8C170` for highlighted secondary text and tables;
+ * - `#FFD700` for default readable text;
+ * - `#E0A526` for thinking and active work.
+ *
+ * The wave animation still travels through semantic stops. Only the colours
+ * changed; cell geometry, glow timing, and effort effects remain untouched.
  */
 const defaultPalette = {
   /** Primary reading colour. Used for content, never for chrome. */
-  text: '#e6e6ea',
+  text: '#FFD700',
   /** The full-bleed shell surface that holds the current Plif frame. */
   panel: '#191b20',
   /** Quiet filled surface for the developer's own message row. */
   surface: '#25282f',
-  /** Secondary: labels, metadata, anything you skim past. */
-  muted: '#8b8b95',
+  /** Secondary and highlighted text, including compact tables. */
+  muted: '#E8C170',
   /** Tertiary: borders, separators, hints. Present but never competing. */
-  faint: '#4b5360',
+  faint: '#CC9A3A',
   /** Barely there. Timestamps, inactive states. */
-  ghost: '#373e49',
+  ghost: '#6E541D',
 
-  /** The brand blue, exactly. Structure only — 2.59:1 is not a text colour. */
-  brand: '#3b5578',
-  /** Brand hue lifted to 6.2:1. This is what carries agent activity and focus. */
-  accent: '#91afd0',
-  /** A brighter blue-violet used only by the travelling active-work highlight. */
-  accentBright: '#c0d7ed',
-  /** Between the two, at 3.9:1. Secondary emphasis and de-emphasised accents. */
-  accentDim: '#6683a8',
+  /** Border and structural identity colour. */
+  brand: '#CC9A3A',
+  /** Thinking and active-work colour. */
+  accent: '#E0A526',
+  /** Bright highlight used by the travelling glow. */
+  accentBright: '#E8C170',
+  /** Important details and de-emphasised accents. */
+  accentDim: '#C68E17',
 
   success: '#6ec48a',
-  warn: '#e0a458',
+  warn: '#C68E17',
   danger: '#e8695f',
-  info: '#6fb3d9',
+  info: '#E8C170',
 } as const;
 
 export type PaletteKey = keyof typeof defaultPalette;
@@ -289,9 +291,9 @@ export function applyTheme(theme: ThemeOverrides = {}): void {
 /** Overlay the effort accent without destroying the user's selected theme. */
 export function applyEffortPalette(effort?: string): void {
   const accents: Record<string, Partial<Record<PaletteKey, string>>> = {
-    max: { brand: '#6337a8', accent: '#c49aff', accentBright: '#eadbff', accentDim: '#9568d0' },
-    ultra: { brand: '#96711f', accent: '#f2ca68', accentBright: '#fff0b0', accentDim: '#c19a3c' },
-    ultracode: { brand: '#a64b1d', accent: '#ff9a5c', accentBright: '#ffd0ac', accentDim: '#d66d37' },
+    max: { brand: '#C68E17', accent: '#E8C170', accentBright: '#FFD700', accentDim: '#E0A526' },
+    ultra: { brand: '#CC9A3A', accent: '#E0A526', accentBright: '#FFD700', accentDim: '#C68E17' },
+    ultracode: { brand: '#C68E17', accent: '#E8C170', accentBright: '#FFD700', accentDim: '#E0A526' },
   };
   Object.assign(palette, activeThemePalette, accents[effort ?? ''] ?? {});
 }

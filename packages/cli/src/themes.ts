@@ -31,40 +31,36 @@ export interface ThemeCatalogue {
 export const MINIMAL_THEME: ThemeDefinition = {
   id: 'minimal',
   name: 'Minimal',
-  description: 'Quiet greys with semantic colour only when it carries meaning.',
+  description: 'Quiet Plif gold with semantic colour only when it carries meaning.',
   source: 'builtin',
 };
 
 /**
  * MidNight.
  *
- * The blue is spent, not spread. Everything a developer reads — answers, tool
- * output, paths, metadata — is grey, so the transcript stays as quiet as the
- * default theme. The blue family survives only in `accent` and its neighbours,
- * and those are wired to exactly two things: the prompt frame and thinking.
- * That is what makes the colour mean something. A theme that paints the whole
- * screen blue has no way left to say "this is where you are" or "this is the
- * agent working", because everything is already saying it.
+ * The gold identity is spent, not spread. Everything a developer reads —
+ * answers, tool output, paths, metadata — keeps the same quiet hierarchy as
+ * the default theme, while borders and active work use the gold ramp.
  */
 export const MIDNIGHT_THEME: ThemeDefinition = {
   id: 'midnight',
   name: 'MidNight',
-  description: 'Neutral greys, with the blue kept to the prompt and to thinking.',
+  description: 'Neutral dark surface, with Plif gold kept to chrome and thinking.',
   source: 'builtin',
   palette: {
-    text: '#e9e9ef',
+    text: '#FFD700',
     panel: '#000000',
-    muted: '#8d8d98',
-    faint: '#585863',
-    ghost: '#3b3b45',
-    brand: '#4a5fc4',
-    accent: '#8aa4ff',
-    accentBright: '#cbd9ff',
-    accentDim: '#5f74d2',
+    muted: '#E8C170',
+    faint: '#CC9A3A',
+    ghost: '#6E541D',
+    brand: '#CC9A3A',
+    accent: '#E0A526',
+    accentBright: '#E8C170',
+    accentDim: '#C68E17',
     success: '#6ec48a',
-    warn: '#e0a458',
+    warn: '#C68E17',
     danger: '#e8695f',
-    info: '#6fb3d9',
+    info: '#E8C170',
   },
   syntax: {
     command: 'text',
