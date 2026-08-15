@@ -4,8 +4,6 @@ import { Box, Text } from 'ink';
 import { color, shortenPath, truncate } from '../theme.js';
 import { PNG_HEADER_ART_HEIGHT, PNG_HEADER_ART_WIDTH, PngHeaderArt } from './PngHeaderArt.js';
 
-export const HEADER_INFINITY_COMPACT = '▄▀█▄';
-
 /** Rows occupied by the live header, including its breathing margin. */
 export function headerHeight(width: number): number {
   return width < 74 ? 8 : PNG_HEADER_ART_HEIGHT + 9;
@@ -45,7 +43,7 @@ export function Header({
         paddingY={1}
       >
         <Box justifyContent="space-between" width="100%">
-          <Text color={color('text')} bold>{HEADER_INFINITY_COMPACT} PLIF Code</Text>
+          <Text color={color('text')} bold>PLIF Code</Text>
           <Text color={color('ghost')}>v{version}</Text>
         </Box>
         <Text color={color('muted')} wrap="truncate">workspace: {workspace}</Text>
