@@ -33,6 +33,8 @@ export interface StreamFrameSchedulerOptions {
   readonly onFrame: (frame: StreamFrame) => void;
   readonly clock?: StreamFrameClock;
   readonly frameMs?: number;
+  /** Let the terminal animation clock drive paints instead of another timer. */
+  readonly clockDriven?: boolean;
 }
 
 const systemClock: StreamFrameClock = {
@@ -58,6 +60,7 @@ export class StreamFrameScheduler {
   readonly #clock: StreamFrameClock;
   readonly #frameMs: number;
   readonly #onFrame: (frame: StreamFrame) => void;
+  readonly #clockDriven: boolean;
 
   #answer = '';
   #reasoning = '';
@@ -76,6 +79,7 @@ export class StreamFrameScheduler {
     this.#clock = options.clock ?? systemClock;
     this.#frameMs = options.frameMs ?? 33;
     this.#onFrame = options.onFrame;
+    this.#clockDriven = options.clockDriven ?? false;
   }
 
   append(lane: StreamLane, delta: string): void {
@@ -109,6 +113,13 @@ export class StreamFrameScheduler {
     this.#schedule();
   }
 
+  /** Flush one pending frame when the shared terminal clock ticks. */
+  tick(now = this.#clock.now()): void {
+    if (!this.#clockDriven || this.#disposed || this.#dirty.size === 0) return;
+    if (now < this.#nextFrameAt) return;
+    this.#emit('data', now);
+  }
+
   /** Flush accepted output, then open a fresh epoch for the next model cycle. */
   flushAndComplete(): void {
     if (this.#disposed || !this.#active) return;
@@ -138,6 +149,7 @@ export class StreamFrameScheduler {
   }
 
   #schedule(): void {
+    if (this.#clockDriven) return;
     if (this.#timer !== undefined) return;
     const epoch = this.#epoch;
     const delay = Math.max(0, this.#nextFrameAt - this.#clock.now());

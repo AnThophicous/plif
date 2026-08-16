@@ -8,16 +8,17 @@
  * ## The idea
  *
  * A terminal that a developer sits in for hours has to do two things at once:
- * stay quiet, and stay legible. So the palette is almost entirely greys — four
- * of them, doing the work of hierarchy — with exactly one accent that means
- * "the agent is doing something" and three semantic colours that only appear
- * when they carry information. Nothing is coloured for decoration. If a line is
- * bright, it earned it.
+ * stay quiet, and stay legible. The gold ramp is therefore semantic: borders,
+ * important details, highlighted text, default text, and active thinking each
+ * have a clear role. Nothing is coloured for decoration. If a line is bright,
+ * it earned it.
  *
  * The greys are spaced far enough apart to survive a low-contrast terminal
  * theme, and the accent sits at a lightness that holds up on both black and
  * near-black backgrounds, since we do not control the user's background.
  */
+import { clusterLength, displayWidth } from './text.js';
+
 
 /**
  * Whether the terminal should draw the real interface glyphs.
@@ -34,55 +35,72 @@ const richGlyphs = process.env['PLIF_ASCII'] !== '1';
 export const supportsRichGlyphs = richGlyphs;
 
 /**
- * The brand blue, and the ramp derived from it.
+ * The Plif gold palette, and the ramp derived from it.
  *
- * `#3b5578` is the identity colour. It belongs to the midnight-blue family and
- * stays reserved for structure: frames, the infinity mark, and active meters.
- * It is intentionally quieter than reading text, so the terminal can remain
- * grey-first even when there is a lot happening.
+ * The controlled-test palette keeps the existing semantic roles intact while
+ * replacing the default blue identity with the requested gold ramp:
  *
- * Anything that has to be **read** uses `accent`, a clearer blue from the same
- * family. The hierarchy still reads as blue; it just does not ask anyone to
- * squint.
+ * - `#CC9A3A` for borders and structural chrome;
+ * - `#C68E17` for important details;
+ * - `#E8C170` for highlighted secondary text and tables;
+ * - `#FFD700` for default readable text;
+ * - `#E0A526` for thinking and active work.
+ *
+ * The wave animation still travels through semantic stops. Only the colours
+ * changed; cell geometry, glow timing, and effort effects remain untouched.
  */
 const defaultPalette = {
   /** Primary reading colour. Used for content, never for chrome. */
-  text: '#e6e6ea',
+  text: '#FFD700',
   /** The full-bleed shell surface that holds the current Plif frame. */
   panel: '#191b20',
   /** Quiet filled surface for the developer's own message row. */
   surface: '#25282f',
-  /** Secondary: labels, metadata, anything you skim past. */
-  muted: '#8b8b95',
+  /** Secondary and highlighted text, including compact tables. */
+  muted: '#E8C170',
   /** Tertiary: borders, separators, hints. Present but never competing. */
-  faint: '#4b5360',
+  faint: '#CC9A3A',
   /** Barely there. Timestamps, inactive states. */
-  ghost: '#373e49',
+  ghost: '#6E541D',
 
-  /** The brand blue, exactly. Structure only — 2.59:1 is not a text colour. */
-  brand: '#3b5578',
-  /** Brand hue lifted to 6.2:1. This is what carries agent activity and focus. */
-  accent: '#91afd0',
-  /** A brighter blue-violet used only by the travelling active-work highlight. */
-  accentBright: '#c0d7ed',
-  /** Between the two, at 3.9:1. Secondary emphasis and de-emphasised accents. */
-  accentDim: '#6683a8',
+  /** Border and structural identity colour. */
+  brand: '#CC9A3A',
+  /** Thinking and active-work colour. */
+  accent: '#E0A526',
+  /** Bright highlight used by the travelling glow. */
+  accentBright: '#E8C170',
+  /** Important details and de-emphasised accents. */
+  accentDim: '#C68E17',
 
   success: '#6ec48a',
-  warn: '#e0a458',
+  warn: '#C68E17',
   danger: '#e8695f',
-  info: '#6fb3d9',
+  info: '#E8C170',
 } as const;
 
 export type PaletteKey = keyof typeof defaultPalette;
 export const palette: Record<PaletteKey, string> = { ...defaultPalette };
+let activeThemePalette: Record<PaletteKey, string> = { ...defaultPalette };
 
-export type SyntaxKey = 'command' | 'parameter' | 'string' | 'variable' | 'operator' | 'number' | 'comment' | 'plain';
+export type SyntaxKey =
+  | 'command'
+  | 'parameter'
+  | 'keyword'
+  | 'function'
+  | 'type'
+  | 'property'
+  | 'string'
+  | 'variable'
+  | 'operator'
+  | 'number'
+  | 'comment'
+  | 'plain';
 export type EmphasisKey = 'normal' | 'important' | 'active' | 'metadata';
 
 export const syntax: Record<SyntaxKey, PaletteKey> = {
-  command: 'text', parameter: 'muted', string: 'faint', variable: 'muted',
-  operator: 'ghost', number: 'muted', comment: 'ghost', plain: 'muted',
+  command: 'text', parameter: 'muted', keyword: 'accentDim', function: 'info',
+  type: 'accent', property: 'muted', string: 'faint', variable: 'text',
+  operator: 'ghost', number: 'warn', comment: 'ghost', plain: 'muted',
 };
 
 export const borders = { panel: 'faint' as PaletteKey, focus: 'muted' as PaletteKey, danger: 'danger' as PaletteKey };
@@ -246,9 +264,11 @@ export interface ThemeOverrides {
 
 export function applyTheme(theme: ThemeOverrides = {}): void {
   Object.assign(palette, defaultPalette, theme.palette ?? {});
+  activeThemePalette = { ...palette };
   Object.assign(syntax, {
-    command: 'text', parameter: 'muted', string: 'faint', variable: 'muted',
-    operator: 'ghost', number: 'muted', comment: 'ghost', plain: 'muted',
+    command: 'text', parameter: 'muted', keyword: 'accentDim', function: 'info',
+    type: 'accent', property: 'muted', string: 'faint', variable: 'text',
+    operator: 'ghost', number: 'warn', comment: 'ghost', plain: 'muted',
   }, theme.syntax ?? {});
   Object.assign(borders, { panel: 'faint', focus: 'muted', danger: 'danger' }, theme.borders ?? {});
   Object.assign(diffStyle, {
@@ -271,12 +291,43 @@ export function applyTheme(theme: ThemeOverrides = {}): void {
 /** Overlay the effort accent without destroying the user's selected theme. */
 export function applyEffortPalette(effort?: string): void {
   const accents: Record<string, Partial<Record<PaletteKey, string>>> = {
-    max: { brand: '#6337a8', accent: '#c49aff', accentBright: '#eadbff', accentDim: '#9568d0' },
-    ultra: { brand: '#96711f', accent: '#f2ca68', accentBright: '#fff0b0', accentDim: '#c19a3c' },
-    ultracode: { brand: '#a64b1d', accent: '#ff9a5c', accentBright: '#ffd0ac', accentDim: '#d66d37' },
-    plif: { brand: '#4a5fc4', accent: '#8aa4ff', accentBright: '#cbd9ff', accentDim: '#5f74d2' },
+    low: {
+      text: '#FFF1B2', muted: '#F5D98A', faint: '#D8B565', ghost: '#947A45',
+      brand: '#D8B565', accent: '#F0C96C', accentBright: '#FFF1B2', accentDim: '#D4A646',
+      info: '#F0C96C', warn: '#D4A646',
+    },
+    medium: {
+      text: '#FFE99A', muted: '#F0CE72', faint: '#D2A849', ghost: '#896A31',
+      brand: '#D2A849', accent: '#E9BE55', accentBright: '#FFE99A', accentDim: '#CC941F',
+      info: '#E9BE55', warn: '#CC941F',
+    },
+    high: {
+      text: '#FFDF75', muted: '#E9BB4A', faint: '#C28D23', ghost: '#79591D',
+      brand: '#C28D23', accent: '#E2AA35', accentBright: '#FFDF75', accentDim: '#B67A13',
+      info: '#E2AA35', warn: '#B67A13',
+    },
+    xhigh: {
+      text: '#FFD957', muted: '#E3AD2F', faint: '#B87916', ghost: '#6E4A13',
+      brand: '#B87916', accent: '#D99A21', accentBright: '#FFD957', accentDim: '#A96A0C',
+      info: '#D99A21', warn: '#A96A0C',
+    },
+    max: {
+      text: '#eadbff', muted: '#c49aff', faint: '#6337a8', ghost: '#432775',
+      brand: '#6337a8', accent: '#c49aff', accentBright: '#eadbff', accentDim: '#9568d0',
+      info: '#c49aff', warn: '#9568d0',
+    },
+    ultra: {
+      text: '#FFCB20', muted: '#DC9513', faint: '#9E5A09', ghost: '#5F3806',
+      brand: '#9E5A09', accent: '#D17F0A', accentBright: '#FFCB20', accentDim: '#924E04',
+      info: '#D17F0A', warn: '#924E04',
+    },
+    ultracode: {
+      text: '#FFC20A', muted: '#D58A08', faint: '#955005', ghost: '#582D04',
+      brand: '#955005', accent: '#C87304', accentBright: '#FFC20A', accentDim: '#894502',
+      info: '#C87304', warn: '#894502',
+    },
   };
-  Object.assign(palette, accents[effort ?? ''] ?? {});
+  Object.assign(palette, activeThemePalette, accents[effort ?? ''] ?? {});
 }
 
 /** Terminal width, clamped to something a layout can reason about. */
@@ -286,9 +337,22 @@ export function terminalWidth(): number {
 
 /** Truncate to `width`, with an ellipsis that respects the glyph fallback. */
 export function truncate(value: string, width: number): string {
-  if (value.length <= width) return value;
-  if (width <= 1) return value.slice(0, width);
-  return value.slice(0, width - 1) + (richGlyphs ? '…' : '~');
+  const available = Math.max(0, Math.floor(width));
+  if (displayWidth(value) <= available) return value;
+  if (available === 0) return '';
+  const marker = richGlyphs ? '…' : '~';
+  const target = Math.max(0, available - displayWidth(marker));
+  let used = 0;
+  let at = 0;
+  while (at < value.length) {
+    const length = clusterLength(value, at) || 1;
+    const cluster = value.slice(at, at + length);
+    const cells = displayWidth(cluster);
+    if (used + cells > target) break;
+    used += cells;
+    at += length;
+  }
+  return value.slice(0, at) + marker;
 }
 
 /**

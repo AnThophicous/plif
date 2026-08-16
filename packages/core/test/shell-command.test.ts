@@ -13,7 +13,7 @@ import {
   shellCommand,
   toolsForEnvironment,
 } from '../src/harness/tools.js';
-import type { ToolContext } from '../src/harness/tools.js';
+import type { Tool, ToolContext } from '../src/harness/tools.js';
 import type { CompletionEvent, ModelProvider } from '../src/model/provider.js';
 import type { ExecRequest, ExecResult } from '../src/types.js';
 
@@ -145,6 +145,41 @@ describe('shell_command', () => {
     );
     assert.equal(subagentTools(null).some((tool) => tool.spec.name === 'shell_command'), false);
     assert.equal(subagentTools(dialect).some((tool) => tool.spec.name === 'shell_command'), true);
+  });
+
+  it('does not let extra tools reintroduce nested agents, questions, or orphan tasks', () => {
+    const extra = (name: string): Tool => ({
+      spec: { name, description: name, parameters: { type: 'object', properties: {} } },
+      async run() { return { output: name, ok: true }; },
+    });
+    const tools = subagentTools([
+      extra('subagent'),
+      extra('spawn_agent'),
+      extra('ask_user'),
+      extra('request_user_input'),
+      extra('start_task'),
+      extra('list_tasks'),
+      extra('task_status'),
+      extra('cancel_task'),
+      extra('research'),
+      extra('read_file'),
+    ]);
+    const names = tools.map((tool) => tool.spec.name);
+
+    for (const forbidden of [
+      'subagent',
+      'spawn_agent',
+      'ask_user',
+      'request_user_input',
+      'start_task',
+      'list_tasks',
+      'task_status',
+      'cancel_task',
+    ]) {
+      assert.equal(names.includes(forbidden), false, forbidden);
+    }
+    assert.equal(names.filter((name) => name === 'research').length, 1);
+    assert.equal(names.filter((name) => name === 'read_file').length, 1);
   });
 
   it('uses the same resolved dialect for loop registration and tool execution', async () => {

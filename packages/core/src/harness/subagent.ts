@@ -1,12 +1,19 @@
 import type { AgentConfig } from '../config/global.js';
 import { EventBus } from '../events/bus.js';
 import type { PlifEvents } from '../events/bus.js';
-import { formatModelRef, keyOptional, parseModelRef, resolveConfig, validate } from '../model/config.js';
+import {
+  customProvidersOf,
+  formatModelRef,
+  keyOptional,
+  parseModelRef,
+  providerIdForConfig,
+  resolveConfig,
+  validate,
+} from '../model/config.js';
 import type { StoredConfig } from '../model/config.js';
-import type { CustomProvider } from '../model/config.js';
 import { createModelProvider } from '../model/factory.js';
 import type { Message, ModelProvider } from '../model/provider.js';
-import { runLoop } from './loop.js';
+import { DEFAULT_CONTEXT_TOKENS, runLoop } from './loop.js';
 import { buildSystemPrompt } from './prompt.js';
 import {
   applyPatch,
@@ -30,6 +37,10 @@ export interface SubagentOptions {
   readonly isolation: string;
   /** The resolved config file, so a named model resolves the same way the main one does. */
   readonly stored: StoredConfig;
+  /** Resolve a provider-specific credential without putting it back in config. */
+  readonly resolveCredential?: (provider: string, stored: StoredConfig) => Promise<string | undefined>;
+  /** Injectable factory for deterministic integration tests. */
+  readonly createProvider?: (config: ReturnType<typeof resolveConfig>) => ModelProvider;
   /** Named agents from `agent: {}` in the config. */
   readonly agents?: Readonly<Record<string, AgentConfig>>;
   readonly maxIterations?: number;
@@ -89,7 +100,7 @@ export function subagentTools(
   const oldSignature = Array.isArray(dialectOrExtra);
   const shellDialect = oldSignature ? null : dialectOrExtra as ShellDialect | null;
   const extra = oldSignature ? dialectOrExtra as readonly Tool[] : additional;
-  return [
+  const tools = [
     readFile,
     updatePlan,
     writeFile,
@@ -100,8 +111,24 @@ export function subagentTools(
     grepFiles,
     runCommand,
     ...(shellDialect ? [shellCommand] : []),
-    ...extra,
   ];
+  const forbidden = new Set([
+    'ask_user',
+    'request_user_input',
+    'subagent',
+    'spawn_agent',
+    'start_task',
+    'list_tasks',
+    'task_status',
+    'cancel_task',
+  ]);
+  const names = new Set(tools.map((tool) => tool.spec.name));
+  for (const tool of extra) {
+    if (forbidden.has(tool.spec.name) || names.has(tool.spec.name)) continue;
+    names.add(tool.spec.name);
+    tools.push(tool);
+  }
+  return tools;
 }
 
 /**
@@ -143,7 +170,7 @@ export function subagentTool(options: SubagentOptions): Tool {
    * config entry is the developer's own choice and should win over a model id
    * that happens to look the same.
    */
-  function resolve(requested: string | undefined): Resolved | string {
+  async function resolve(requested: string | undefined): Promise<Resolved | string> {
     if (!requested) {
       return {
         ref: options.provider.info.id,
@@ -157,18 +184,22 @@ export function subagentTool(options: SubagentOptions): Tool {
 
     const agent = agents[requested];
     const ref = agent?.model ?? requested;
-    const providerMap = (value: unknown): Record<string, CustomProvider> =>
-      value && typeof value === 'object' && !Array.isArray(value)
-        ? value as Record<string, CustomProvider>
-        : {};
-    const parsed = parseModelRef(ref, {
-      ...providerMap(options.stored.providers),
-      ...providerMap(options.stored.provider),
-    });
+    const parsed = parseModelRef(ref, customProvidersOf(options.stored));
+
+    const providerId = parsed.preset ?? providerIdForConfig(options.stored, { model: ref }) ?? '';
+    let apiKey: string | undefined;
+    try {
+      apiKey = providerId
+        ? await options.resolveCredential?.(providerId, options.stored)
+        : undefined;
+    } catch {
+      return `Error: could not read the encrypted credential for "${providerId || ref}".`;
+    }
 
     const config = resolveConfig(options.stored, {
       model: parsed.model,
       ...(parsed.preset ? { preset: parsed.preset } : {}),
+      ...(apiKey ? { apiKey } : {}),
     });
 
     const check = validate(config);
@@ -182,7 +213,7 @@ export function subagentTool(options: SubagentOptions): Tool {
 
     return {
       ref: formatModelRef(parsed.preset, parsed.model),
-      provider: createModelProvider(config),
+      provider: (options.createProvider ?? createModelProvider)(config),
       free: keyOptional(config.baseURL, config.model),
       maxIterations: agent?.maxIterations,
     };
@@ -257,7 +288,7 @@ export function subagentTool(options: SubagentOptions): Tool {
       }
 
       const requested = typeof input['model'] === 'string' ? input['model'].trim() : '';
-      const resolved = resolve(requested || undefined);
+      const resolved = await resolve(requested || undefined);
       if (typeof resolved === 'string') return { output: resolved, ok: false };
 
       // Free is free: no prompt, no ceremony, spawn it. A model that bills is
@@ -284,6 +315,7 @@ export function subagentTool(options: SubagentOptions): Tool {
         callId,
         title,
         model: resolved.ref,
+        contextMax: resolved.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
         at: startedAt,
       });
 
@@ -379,6 +411,7 @@ export function subagentTool(options: SubagentOptions): Tool {
             isolation: options.isolation,
             mode: 'subagent',
             effort: options.stored.effort,
+            contextTokens: resolved.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
             tools: tools.map((tool) => tool.spec),
             ...(options.agentInstructions ? { agentInstructions: options.agentInstructions } : {}),
           }),
@@ -400,6 +433,7 @@ export function subagentTool(options: SubagentOptions): Tool {
         tools,
         maxIterations:
           resolved.maxIterations ?? options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+        contextTokens: resolved.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
         signal: childAbort.signal,
         ...(context.workspace ? { workspace: context.workspace } : {}),
         ...(context.lsp ? { lsp: context.lsp } : {}),

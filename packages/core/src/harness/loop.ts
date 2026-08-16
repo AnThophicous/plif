@@ -52,6 +52,7 @@ import {
   createHarnessCycle,
   inspectionPaths,
   isFileMutationTool,
+  isShellMutation,
   isValidationObservation,
   mutationGate,
   mutationPaths,
@@ -115,6 +116,8 @@ const VISIBLE_TOOL_OUTPUT = new Set([
   'write_file',
   'edit_file',
   'list_dir',
+  'web_search',
+  'research',
 ]);
 
 /** Separate model context from terminal transcript without weakening either one. */
@@ -129,12 +132,9 @@ export function terminalToolOutput(
 }
 
 /**
- * Where compaction kicks in, and therefore what the context gauge measures.
- *
- * Not the model's window — endpoints rarely advertise one, and the number that
- * actually affects the developer is the point at which their conversation gets
- * summarised. A gauge counting toward 200k while compaction fires at 120k
- * would read two thirds full at the moment it happens.
+ * Fallback context window for endpoints and custom models that do not declare
+ * one. A provider-advertised window always wins so the gauge and auto-compaction
+ * threshold describe the model actually serving the turn.
  */
 export const DEFAULT_CONTEXT_TOKENS = 1_000_000;
 export const AUTO_COMPACTION_TRIGGER_RATIO = 0.9;
@@ -258,6 +258,7 @@ export async function runCompaction(
     after: result.after,
     stages: result.stages,
     summarised: result.summary !== null,
+    ...(result.failure ? { failure: result.failure } : {}),
   });
 
   return result;
@@ -276,7 +277,9 @@ export async function runLoop(
   );
   const registry = toolRegistry(tools);
   const specs = toolSpecs(tools);
-  const cycleEnabled = registry.has('update_plan') && [...registry.keys()].some(isFileMutationTool);
+  const cycleEnabled = registry.has('update_plan') && [...registry.keys()].some((name) =>
+    isFileMutationTool(name) || name === 'run_command' || name === 'shell_command'
+  );
   // A model/tool mistake is recoverable work, not a reason to kill the task.
   // Keep an explicit cap for embedders that need one, but interactive Plif
   // sessions are uncapped and end through completion, cancellation, or a
@@ -287,7 +290,8 @@ export async function runLoop(
     0,
     options.maxReviewReminders ?? DEFAULT_MAX_REVIEW_REMINDERS,
   );
-  const contextTokens = options.contextTokens ?? 0;
+  const contextTokens =
+    options.contextTokens ?? options.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS;
 
   const messages: Message[] = [...history];
   const recentCalls: string[] = [];
@@ -300,6 +304,10 @@ export async function runLoop(
   let completionTokens = 0;
   let cycle = createHarnessCycle();
   let reviewReminders = 0;
+  // A failed capsule provider is disabled for the rest of this loop. Later
+  // passes may still apply cheap mechanical trimming, but must not hammer an
+  // endpoint that just failed auth, quota, transport, or protocol validation.
+  let compactionProviderAvailable = true;
   /** Sticky: thinking mode, once entered, applies to the whole conversation. */
   let sawReasoning = false;
 
@@ -323,13 +331,14 @@ export async function runLoop(
 
     if (shouldAutoCompact(estimateTokens(messages), contextTokens)) {
       const compacted = await runCompaction(messages, {
-        provider: options.provider,
+        ...(compactionProviderAvailable ? { provider: options.provider } : {}),
         bus: options.bus,
         target: autoCompactionTarget(contextTokens),
         ...(options.signal ? { signal: options.signal } : {}),
       });
       messages.length = 0;
       messages.push(...compacted.messages);
+      if (compacted.failure) compactionProviderAvailable = false;
     }
 
     const turnStartedAt = Date.now();
@@ -519,7 +528,8 @@ export async function runLoop(
         .map((call) => prepare(call, recentCalls, registry))
         .map((item) => {
           if (!cycleEnabled || item.parseError !== null || item.refusal !== null) return item;
-          const gate = isFileMutationTool(item.call.name) ? mutationGate(cycle) : null;
+          const mutates = isFileMutationTool(item.call.name) || isShellMutation(item.call.name, item.parsed);
+          const gate = mutates ? mutationGate(cycle) : null;
           if (gate === null) return item;
           const signature = callSignature(item.call);
           const recorded = recentCalls.lastIndexOf(signature);
@@ -592,9 +602,10 @@ export async function runLoop(
             setCycle(observeHarnessCycle(cycle, { type: 'plan_ready' }), 'plan_ready');
           }
 
-          const actualMutation =
+          const actualMutation = isShellMutation(item.call.name, item.parsed) || (
             isFileMutationTool(item.call.name) &&
-            (item.call.name === 'resolve_edit_conflict' || item.diff !== undefined);
+            (item.call.name === 'resolve_edit_conflict' || item.diff !== undefined)
+          );
           if (actualMutation) {
             setCycle(
               observeHarnessCycle(cycle, {
@@ -697,7 +708,7 @@ export async function runLoop(
     return {
       stop,
       text,
-      messages,
+      messages: answerDanglingToolCalls(messages, stop),
       iterations,
       toolCalls,
       promptTokens,
@@ -705,6 +716,32 @@ export async function runLoop(
       ...(error ? { error } : {}),
     };
   }
+}
+
+export function answerDanglingToolCalls(
+  messages: readonly Message[],
+  stop: LoopStop,
+): Message[] {
+  const answered = new Set(
+    messages.flatMap((message) =>
+      message.role === 'tool' && message.toolCallId ? [message.toolCallId] : [],
+    ),
+  );
+  const reason = stop === 'cancelled'
+    ? 'Cancelled by the developer before this ran.'
+    : 'The turn ended before this ran.';
+
+  const reconciled: Message[] = [];
+  for (const message of messages) {
+    reconciled.push(message);
+    if (message.role !== 'assistant' || !message.toolCalls?.length) continue;
+    for (const call of message.toolCalls) {
+      if (answered.has(call.id)) continue;
+      answered.add(call.id);
+      reconciled.push({ role: 'tool', content: reason, toolCallId: call.id });
+    }
+  }
+  return reconciled;
 }
 
 /** How many recent calls the repetition detector remembers. */

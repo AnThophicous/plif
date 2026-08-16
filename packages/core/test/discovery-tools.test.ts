@@ -26,6 +26,10 @@ class MemoryContainer {
     this.files.set(path, content);
   }
 
+  async hostPathFor(path: string): Promise<string> {
+    return path;
+  }
+
   async listDir(root: string): Promise<{ name: string; kind: 'file' | 'directory' }[]> {
     const prefix = root === '/' ? '/' : `${root}/`;
     const entries = new Map<string, 'file' | 'directory'>();
@@ -125,5 +129,46 @@ describe('transactional apply_patch tool', () => {
 
     assert.equal(container.files.get('/project/a.ts'), 'old a');
     assert.equal(container.files.get('/project/b.ts'), 'old b');
+  });
+
+  it('runs diagnostics once per changed file after the transaction', async () => {
+    const container = new MemoryContainer({
+      '/project/a.ts': 'old a',
+      '/project/b.ts': 'old b',
+    });
+    const calls: string[] = [];
+    const snapshots: string[][] = [];
+    const contextWithLsp = {
+      ...context(container),
+      lsp: {
+        root: '/project',
+        diagnose: async (file: string) => {
+          calls.push(file);
+          snapshots.push([
+            container.files.get('/project/a.ts') ?? '',
+            container.files.get('/project/b.ts') ?? '',
+          ]);
+          return file.endsWith('/a.ts')
+            ? [{ file, line: 1, column: 1, severity: 'error' as const, message: 'broken after patch' }]
+            : [];
+        },
+      },
+    } as unknown as ToolContext;
+
+    const result = await applyPatch.run(
+      {
+        edits: [
+          { path: '/project/a.ts', old_string: 'old a', new_string: 'new a' },
+          { path: '/project/b.ts', old_string: 'old b', new_string: 'new b' },
+        ],
+      },
+      contextWithLsp,
+    );
+
+    assert.deepEqual(calls, ['/project/a.ts', '/project/b.ts']);
+    assert.deepEqual(snapshots, [['new a', 'new b'], ['new a', 'new b']]);
+    assert.equal(result.ok, false);
+    assert.match(result.output, /Language server: 1 error\(s\)/);
+    assert.match(result.output, /\/project\/a\.ts/);
   });
 });

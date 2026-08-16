@@ -22,10 +22,15 @@ export function compileAgentInstructions(
 ): string {
   const context = resolvePromptContext(source);
   if (context.mode === 'compaction') return compactionSystemPrompt();
+  const availableTools = new Set(context.tools?.map((tool) => tool.name) ?? []);
+  const contextTokens = context.contextTokens ?? Number.POSITIVE_INFINITY;
 
   const staticModules = loadMarkdownInstructions()
     .filter((module) => module.modes?.includes(context.mode) ?? true)
     .filter((module) => !module.effort || module.effort === context.effort)
+    .filter((module) => module.minContext === undefined || contextTokens >= module.minContext)
+    .filter((module) => module.maxContext === undefined || contextTokens <= module.maxContext)
+    .filter((module) => module.tools?.every((name) => availableTools.has(name)) ?? true)
     .map((module) => ({ id: module.id, order: module.order, render: () => renderInstruction(module.source) }));
 
   const selected = [
@@ -52,4 +57,3 @@ function assertUniqueIds(modules: readonly Pick<PromptModule, 'id'>[]): void {
 export function promptModeOf(context: PromptContext): ResolvedPromptContext['mode'] {
   return context.mode ?? 'primary';
 }
-

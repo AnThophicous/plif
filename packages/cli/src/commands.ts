@@ -13,20 +13,23 @@ import path from 'node:path';
 
 import {
   CredentialBroker,
+  credentialVariableForProvider,
   MODEL_CATALOG,
-  PRESETS,
   discoverProviderModels,
+  modelVisionBadge,
   rankFacts,
   rankModelIds,
   supportedEfforts,
   strategyStatus,
   userCatalog,
+  visionCandidates,
 } from '@plif/core';
 import type {
   Container,
   Effort,
   Engine,
   ModelCatalogProvider,
+  ModelCatalogModel,
   ModelProvider,
   ModelSelection,
   StoredConfig,
@@ -44,6 +47,13 @@ import {
 } from '@plif/core';
 
 import { formatCapabilities } from './format.js';
+import {
+  effortLabel,
+  effortPickerItems,
+  pickerSelectionForCurrentModel,
+} from './components/Picker.js';
+import { formatStatus } from './status.js';
+import type { StatusInput } from './status.js';
 import type { PickerGroup, PickerItem } from './components/Picker.js';
 
 import { entry } from './session.js';
@@ -94,16 +104,19 @@ export interface CommandContext {
   readonly saveSession?: () => Promise<void>;
   readonly themes: readonly ThemeDefinition[];
   readonly switchTheme: (id: string) => Promise<void>;
+  readonly sessionStatus?: () => StatusInput;
 }
 
 export interface FlatPickerRequest {
   readonly title: string;
+  readonly hint?: string;
   readonly items: readonly PickerItem[];
   readonly onPick: (value: string | ModelSelection) => void;
 }
 
 export interface CatalogPickerRequest {
   readonly title: string;
+  readonly hint?: string;
   readonly groups: readonly PickerGroup[];
   readonly expanded: readonly string[];
   readonly selected: number;
@@ -118,7 +131,12 @@ export interface Command {
   readonly name: string;
   readonly args?: string;
   readonly summary: string;
+  readonly concurrent?: boolean;
   readonly run: (argv: readonly string[], context: CommandContext) => Promise<CommandResult>;
+}
+
+export function runsWhileWorking(name: string): boolean {
+  return findCommand(name)?.concurrent === true;
 }
 
 const ok = (...entries: TimelineEntry[]): CommandResult => ({ entries });
@@ -139,6 +157,24 @@ export function providerModelIds(
   ])];
 }
 
+/** Built-ins hidden by a user provider with the same id. */
+export function builtInPickerProviders(
+  custom: readonly ModelCatalogProvider[],
+  builtins: readonly ModelCatalogProvider[] = MODEL_CATALOG,
+): readonly ModelCatalogProvider[] {
+  const customIds = new Set(custom.map((provider) => provider.id));
+  return builtins.filter((provider) => !customIds.has(provider.id));
+}
+
+function pickerBadges(
+  candidate: ModelCatalogModel | undefined,
+  hasVisionHelper: boolean,
+): readonly string[] {
+  if (!candidate) return [];
+  const vision = modelVisionBadge(candidate, hasVisionHelper);
+  return vision ? [...new Set([...candidate.badges, vision])] : candidate.badges;
+}
+
 /**
  * One provider, as a picker group.
  *
@@ -154,14 +190,19 @@ async function providerGroup(
   stored: StoredConfig,
   credentials: CredentialBroker | undefined,
 ): Promise<PickerGroup> {
-  const keyEnv = PRESETS[catalog.id as keyof typeof PRESETS]?.keyEnv;
-  const key = keyEnv && credentials ? await credentials.lookup(keyEnv) : undefined;
+  const variable = credentialVariableForProvider(catalog.id, stored);
+  const key = credentials
+    ? await credentials.lookup(variable) ?? (
+        variable === 'PLIF_API_KEY' ? undefined : await credentials.lookup('PLIF_API_KEY')
+      )
+    : undefined;
   const discovered = await discoverProviderModels(catalog.id, {
     stored,
     ...(key ? { apiKey: key } : {}),
   });
 
   const known = new Map(catalog.models.map((item) => [item.id, item]));
+  const hasVisionHelper = visionCandidates(stored).length > 0;
   const ids = rankModelIds(catalog.id, providerModelIds(catalog, discovered.ids, discovered.live));
   const items: PickerItem[] = discovered.live
     ? ids.map((id) => {
@@ -170,7 +211,7 @@ async function providerGroup(
           value: id,
           label: curated?.label ?? prettyModelId(id),
           detail: curated?.description ?? id,
-          badges: curated?.badges ?? [],
+          badges: pickerBadges(curated, hasVisionHelper),
           current: id === currentModel,
         };
       })
@@ -178,7 +219,7 @@ async function providerGroup(
         value: item.id,
         label: item.label,
         detail: item.description,
-        badges: item.badges,
+        badges: pickerBadges(item, hasVisionHelper),
         current: item.id === currentModel,
       }));
 
@@ -196,9 +237,28 @@ function prettyModelId(id: string): string {
   return id.slice(id.lastIndexOf('/') + 1).replace(/[-_]+/g, ' ');
 }
 
+/** Keep several provider catalogues moving without creating one unbounded wave. */
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  limit: number,
+  work: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const result: R[] = [];
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < values.length) {
+      const index = cursor++;
+      result[index] = await work(values[index]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, () => worker()));
+  return result;
+}
+
 export const COMMANDS: readonly Command[] = [
   {
     name: 'theme',
+    concurrent: true,
     summary: 'Choose a built-in or ~/.plif/*.theme appearance',
     run: async (_argv, context) => {
       const stored = await loadGlobalConfig();
@@ -253,6 +313,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     name: 'mcp',
+    concurrent: true,
     args: '[<server> login]',
     summary: 'Browse MCP servers, skills, and the Claude plugin marketplace',
     /**
@@ -294,6 +355,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     name: 'memory',
+    concurrent: true,
     args: '[forget]',
     summary: 'What Plif remembers about this workspace, and how to drop it',
     /**
@@ -370,6 +432,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     name: 'skills',
+    concurrent: true,
     summary: 'The same browser, opened on the skills tab',
     /**
      * Two names for one screen, on purpose.
@@ -386,6 +449,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     name: 'marketplace',
+    concurrent: true,
     summary: 'Open the browser straight on the Claude plugin catalogue',
     run: async (_argv, context) => {
       context.openBrowser('marketplace');
@@ -394,6 +458,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     name: 'paste',
+    concurrent: true,
     summary: 'Attach the image currently on the clipboard',
     /**
      * The same thing Ctrl+V does, for terminals that keep Ctrl+V to themselves.
@@ -409,7 +474,34 @@ export const COMMANDS: readonly Command[] = [
     },
   },
   {
+    name: 'status',
+    concurrent: true,
+    summary: 'Show the model, the context window and everything this session has used',
+    run: async (_argv, context) => {
+      const read = context.sessionStatus;
+      if (!read) {
+        throw new PlifError('INVALID_ARGUMENT', 'status is only available in an interactive session');
+      }
+      const snapshot = read();
+      const config = await loadGlobalConfig();
+      return ok(
+        entry('notice', 'status', {
+          tone: 'accent',
+          subtitle: snapshot.model || 'no model configured',
+          detail: formatStatus({
+            ...snapshot,
+            permission: permissionMode(config),
+            autoApprove: isAutoApproveEnabled(config),
+          }),
+          expand: true,
+        }),
+      );
+    },
+  },
+
+  {
     name: 'help',
+    concurrent: true,
     summary: 'List every command',
     run: async () => {
       // Column width comes from the longest *name*, not name+args. Including
@@ -479,6 +571,7 @@ export const COMMANDS: readonly Command[] = [
 
   {
     name: 'ps',
+    concurrent: true,
     summary: 'List containers',
     run: async (_argv, context) => {
       const containers = context.engine.list();
@@ -592,6 +685,7 @@ export const COMMANDS: readonly Command[] = [
 
   {
     name: 'images',
+    concurrent: true,
     summary: 'List images in the store',
     run: async (_argv, context) => {
       const images = await context.engine.images.list();
@@ -615,6 +709,7 @@ export const COMMANDS: readonly Command[] = [
 
   {
     name: 'store',
+    concurrent: true,
     summary: 'Show what the content store is holding',
     run: async (_argv, context) => {
       const { blobs, bytes } = await context.engine.content.size();
@@ -638,6 +733,7 @@ export const COMMANDS: readonly Command[] = [
 
   {
     name: 'model',
+    concurrent: true,
     args: '[id]',
     summary: 'Show the model, or pick a different one',
     run: async (argv, context) => {
@@ -655,14 +751,13 @@ export const COMMANDS: readonly Command[] = [
       // Somebody who wrote an endpoint into their config should find it at the
       // top, not somewhere inside a list of things Plif happens to ship.
       const mine = userCatalog(stored);
-      const groups: PickerGroup[] = await Promise.all([
-        ...mine.map((entryProvider) =>
-          providerGroup(entryProvider, 'your providers', currentModel, stored, context.credentials),
-        ),
-        ...MODEL_CATALOG.map((entryProvider) =>
-          providerGroup(entryProvider, 'built into plif', currentModel, stored, context.credentials),
-        ),
-      ]);
+      const providers = [
+        ...mine.map((entryProvider) => ({ entryProvider, section: 'your providers' })),
+        ...builtInPickerProviders(mine).map((entryProvider) => ({ entryProvider, section: 'built into PLIF' })),
+      ];
+      const groups: PickerGroup[] = await mapWithConcurrency(providers, 3, ({ entryProvider, section }) =>
+        providerGroup(entryProvider, section, currentModel, stored, context.credentials),
+      );
 
       const currentGroup = groups.find((group) =>
         group.items.some((item) => item.current),
@@ -671,9 +766,10 @@ export const COMMANDS: readonly Command[] = [
 
       context.openPicker({
         title: 'select a provider and model',
+        hint: '[vision] reads images directly · [vision helper] delegates through inspect_image',
         groups,
         expanded,
-        selected: Math.max(0, groups.findIndex((group) => group.id === currentGroup?.id)),
+        selected: pickerSelectionForCurrentModel(groups, expanded, currentGroup?.id),
         onPick: (selection) => {
           if (typeof selection !== 'string') void context.switchModel(selection);
         },
@@ -684,13 +780,27 @@ export const COMMANDS: readonly Command[] = [
 
   {
     name: 'effort',
+    concurrent: true,
     args: '[low|medium|high|xhigh|max|ultra|ultracode|plif|default]',
     summary: 'Show or change model reasoning effort',
     run: async (argv, context) => {
       const stored = await loadGlobalConfig();
       const current = stored.effort ?? 'default';
       const value = argv[0];
-      if (!value) return ok(entry('notice', `effort: ${current === 'plif' ? 'Plif' : current}`, { tone: 'accent' }));
+      if (!value) {
+        context.openPicker({
+          title: `Select effort · ${context.model?.info.id ?? 'current model'}`,
+          items: [
+            { value: 'default', label: 'Default', detail: 'let the provider choose', current: current === 'default' },
+            ...effortPickerItems(context.supportedEfforts?.() ?? [], current === 'default' ? undefined : current as Effort),
+          ],
+          selected: Math.max(0, (context.supportedEfforts?.() ?? []).indexOf(current as Effort)),
+          onPick: async (picked) => {
+            await context.setEffort(picked === 'default' ? undefined : picked as Effort);
+          },
+        });
+        return ok(entry('notice', 'select reasoning effort', { tone: 'accent', subtitle: `current: ${effortLabel(current)}` }));
+      }
       if (!['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode', 'plif', 'default'].includes(value)) {
         throw new PlifError('INVALID_ARGUMENT', 'usage: /effort [low|medium|high|xhigh|max|ultra|ultracode|plif|default]');
       }
@@ -698,7 +808,7 @@ export const COMMANDS: readonly Command[] = [
         throw new PlifError('INVALID_ARGUMENT', `${value} is not supported by the selected model`);
       }
       await context.setEffort(value === 'default' ? undefined : value as Effort);
-      return ok(entry('notice', `effort: ${value}`, {
+      return ok(entry('notice', `effort: ${effortLabel(value)}`, {
         tone: 'accent',
         subtitle: 'conversation reset for the new model settings',
       }));
@@ -767,6 +877,7 @@ export const COMMANDS: readonly Command[] = [
 
   {
     name: 'export',
+    concurrent: true,
     args: '[clipboard|file]',
     summary: 'Copy or save the complete session transcript',
     run: async (argv, context) => {
@@ -802,6 +913,7 @@ export const COMMANDS: readonly Command[] = [
 
   {
     name: 'sandbox',
+    concurrent: true,
     summary: 'Show exactly what the sandbox enforces',
     run: async (_argv, context) => {
       const report = context.engine.sandboxReport;
@@ -834,6 +946,7 @@ export const COMMANDS: readonly Command[] = [
 
   {
     name: 'policy',
+    concurrent: true,
     summary: 'Show the active policy rules',
     run: async (_argv, context) => {
       const document = context.engine.policy.document;
@@ -860,6 +973,7 @@ export const COMMANDS: readonly Command[] = [
 
   {
     name: 'config',
+    concurrent: true,
     args: 'auto-approve [on|off|show]',
     summary: 'Show or change global Plif configuration',
     run: async (argv, context) => {
@@ -885,6 +999,7 @@ export const COMMANDS: readonly Command[] = [
 
   {
     name: 'permission',
+    concurrent: true,
     args: '[ask|auto-approve|deny]',
     summary: 'Show or set the global approval mode',
     run: async (argv, context) => {
@@ -985,6 +1100,7 @@ export const COMMANDS: readonly Command[] = [
 
   {
     name: 'audit',
+    concurrent: true,
     args: '[--verify]',
     summary: 'Tail the audit log, or verify its hash chain',
     run: async (argv, context) => {

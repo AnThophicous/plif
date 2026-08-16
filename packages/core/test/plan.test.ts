@@ -41,6 +41,34 @@ describe('update_plan', () => {
       /at most one checkpoint in progress/,
     );
   });
+
+  it('persists a durable Markdown checkpoint mirror in workspace runs', async () => {
+    let writtenPath = '';
+    let written = '';
+    const result = await updatePlan.run({
+      objective: 'Ship stable rendering',
+      explanation: 'The multiline regression is reproduced.',
+      plan: [
+        { step: 'Fix the frame budget', status: 'in_progress' },
+        { step: 'Run the preview', status: 'pending' },
+      ],
+    }, {
+      workspace: 'C:/workspace',
+      container: {
+        workdir: '/workspace',
+        writeFile: async (file: string, content: string) => {
+          writtenPath = file;
+          written = content;
+        },
+      },
+    } as unknown as ToolContext);
+
+    assert.equal(writtenPath, '/workspace/.plif/plans/current.md');
+    assert.match(written, /# Plif execution checkpoint/);
+    assert.match(written, /Ship stable rendering/);
+    assert.match(written, /Fix the frame budget/);
+    assert.match(result.output, /Durable checkpoint/);
+  });
 });
 
 describe('set_goal', () => {

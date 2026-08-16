@@ -1,17 +1,17 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 
-import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import type { Key } from 'ink';
 
 import {
   adoptProvider,
+  credentialVariableForProvider,
   createModelProvider,
   forgetProviderKey,
   findCatalogProvider,
   forgetDiscoveredModels,
-  PRESETS,
   buildSystemPrompt,
   catalogSelection,
   checkForUpdate,
@@ -20,6 +20,7 @@ import {
   estimateTokens,
   eventBase,
   loadStoredConfig,
+  migrateProviderCredentials,
   mcpServersOf,
   parseServerConfigs,
   readAgentInstructions,
@@ -39,7 +40,10 @@ import {
   diffStats,
   parseDiff,
   profilesOf,
+  providerIdForConfig,
   saveStoredConfig,
+  storedProviderCredentials,
+  userCatalog,
   searchPlugins,
   loadCatalog,
   installMarketplacePlugin,
@@ -86,10 +90,11 @@ import { Queue, queueHeight } from './components/Queue.js';
 import { Question, questionHeight } from './components/Question.js';
 import { Footer } from './components/Footer.js';
 import type { Hint } from './components/Footer.js';
-import { Header } from './components/Header.js';
+import { Header, headerHeight } from './components/Header.js';
 import { Picker, filterItems, filterPickerGroups, flattenPickerGroups, pickerRows as visiblePickerRows } from './components/Picker.js';
-import { Prompt } from './components/Prompt.js';
+import { Prompt, promptBodyRows, promptHeight } from './components/Prompt.js';
 import { PlifDock, plifDockHeight } from './components/PlifDock.js';
+import { PlifIntro, PLIF_INTRO_DURATION_MS } from './components/PlifIntro.js';
 import { terminalSurfaceLayout } from './components/TerminalSurface.js';
 import { Working } from './components/Spinner.js';
 import { visibleTasks } from './components/TaskIndicator.js';
@@ -97,22 +102,33 @@ import { WorkDock, workDockHeight } from './components/WorkDock.js';
 import { Timeline, TimelineRow, estimateHeight } from './components/Timeline.js';
 import { measureTranscriptCells } from './components/Timeline.js';
 import { TranscriptOverlay } from './components/TranscriptOverlay.js';
-import { commandPrefix, findCommand, matchCommands } from './commands.js';
+import { ThinkingOverlay, thinkingBodyHeight } from './components/ThinkingOverlay.js';
+import { commandPrefix, findCommand, matchCommands, runsWhileWorking } from './commands.js';
 import type { Command, CommandContext } from './commands.js';
 import {
   formatError,
   formatExecOutput,
   formatExecTag,
   describeToolCall,
+  imagePathsInPaste,
   isTerminalPaste,
+  languageServerNote,
+  parseSearchResults,
   pastedContentToken,
   sanitizePastedText,
+  shouldAttachPastedText,
   splitPaste,
   summariseToolInput,
   toolLane,
   tokenize,
 } from './format.js';
-import { readClipboardImage, readClipboardText, writeClipboardText } from './clipboard.js';
+import {
+  MAX_ATTACHMENT_BYTES,
+  mediaTypeOf,
+  readClipboardImage,
+  readClipboardText,
+  writeClipboardText,
+} from './clipboard.js';
 import { IDLE_PASTE, hasPasteMarker, readPasteChunk } from './paste.js';
 import type { PasteState } from './paste.js';
 import { expandShortcodes, matchEmoji, openShortcode } from './emoji.js';
@@ -120,6 +136,7 @@ import { stepLeft, stepRight } from './text.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { AnimationClockProvider } from './hooks/useAnimationClock.js';
 import { useTranscriptController } from './hooks/useTranscriptController.js';
+import { withoutReasoning } from './conversation.js';
 import { entry, initialSession, sessionReducer } from './session.js';
 import type { BrowserRow, BrowserState, QueuedMessage, TimelineEntry } from './session.js';
 import { ComposerHistory } from './composer/history.js';
@@ -127,9 +144,18 @@ import { composerReducer, initialComposerState } from './composer/state.js';
 import type { PastedAttachment } from './composer/state.js';
 import { allTranscriptCells } from './transcript/reducer.js';
 import { initialViewport, viewportReducer } from './transcript/scroll.js';
+import {
+  blockJumpOffset,
+  emptyThinkingDocument,
+  thinkingDocument,
+  thoughtBlocks,
+} from './thinking-history.js';
+import { emptySessionUsage } from './status.js';
+import type { SessionUsage, StatusInput } from './status.js';
 import { StreamFrameScheduler } from './stream-frame.js';
 import type { StreamFrame } from './stream-frame.js';
 import { deriveLiveStatus } from './live-status.js';
+import { animationClockActive } from './animation-activity.js';
 import {
   appendCompletionDelta,
   classifySubmission,
@@ -163,10 +189,8 @@ export interface AppProps {
   /** Shared across profile switches so effort negotiation survives a turn. */
   readonly capabilityCache?: EffortCapabilityCache;
   readonly effort?: Effort;
-  /** Theme active at startup; Plif may temporarily override it. */
+  /** Theme active at startup. */
   readonly initialThemeId?: string;
-  /** User preference to restore after leaving Plif mode. */
-  readonly preferredThemeId?: string;
   /** Why there is no provider, when there is none. Shown verbatim. */
   readonly providerProblem: string | null;
   /** Everything the agent can reach: builtins, the skill loader, MCP tools. */
@@ -247,10 +271,102 @@ function isSettled(item: { status?: string }): boolean {
   return item.status === undefined || item.status === 'done' || item.status === 'failed';
 }
 
+export const BANNER_ROW_ID = 'plif:banner';
+
+/** A missing startup credential owns the keyboard before its question mounts. */
+export function needsCredentialPrompt(problem: string | null): boolean {
+  return problem !== null && /(?:api key|credential)/i.test(problem);
+}
+
+const BANNER_ROW: TimelineEntry = {
+  id: BANNER_ROW_ID,
+  kind: 'notice',
+  title: '',
+  at: 0,
+};
+
 /** The answer, short enough to sit in the row's right-hand tag column. */
 function truncateAnswer(answer: string): string {
   const line = answer.split('\n')[0]?.trim() ?? '';
   return line.length > 24 ? line.slice(0, 23) + '…' : line;
+}
+
+/** Resolve the provider's encrypted/environment credential without crossing providers. */
+async function providerCredential(
+  credentials: CredentialBroker | undefined,
+  provider: string,
+  stored: GlobalConfig,
+): Promise<string | undefined> {
+  if (!credentials) return undefined;
+  const variable = credentialVariableForProvider(provider, stored);
+  return await credentials.lookup(variable);
+}
+
+/** Move legacy config credentials to the encrypted broker before saving a model selection. */
+async function persistModelSelection(
+  engine: Engine,
+  stored: GlobalConfig,
+  selection: ModelSelection,
+  typedKey: string | undefined,
+  credentials: CredentialBroker | undefined,
+): Promise<{ readonly config: GlobalConfig; readonly apiKey?: string; readonly persisted: boolean }> {
+  if (!credentials) {
+    // App previews/tests can run without the production broker. Do not write a
+    // newly typed key in that mode; keep the key transient for this provider.
+    return {
+      config: typedKey
+        ? adoptProvider(stored, selection, undefined, { persistCredential: false })
+        : adoptProvider(stored, selection),
+      ...(typedKey ? { apiKey: typedKey } : {}),
+      persisted: false,
+    };
+  }
+
+  try {
+    const migration = await migrateProviderCredentials(stored, credentials, selection.preset);
+    const clean = migration.config;
+    const variable = credentialVariableForProvider(selection.preset, clean);
+    if (typedKey && typedKey !== 'local') {
+      await credentials.remember(variable, typedKey);
+    }
+    const next = adoptProvider(clean, selection, undefined, { persistCredential: false });
+    await saveStoredConfig(engine.paths, next, { preserveProviderKeys: false });
+    const apiKey = typedKey ?? await providerCredential(credentials, selection.preset, next);
+    return { config: next, ...(apiKey ? { apiKey } : {}), persisted: true };
+  } catch {
+    // A DPAPI failure must not turn into a plaintext fallback. The selected
+    // key remains usable for this process only; the next run can retry.
+    let apiKey = typedKey;
+    if (!apiKey) {
+      try {
+        apiKey = await providerCredential(credentials, selection.preset, stored);
+      } catch {
+        // The caller still receives a transient, credential-free selection and
+        // can report the failed secure persistence without leaking the cause.
+      }
+    }
+    return {
+      config: adoptProvider(stored, selection, undefined, { persistCredential: false }),
+      ...(apiKey ? { apiKey } : {}),
+      persisted: false,
+    };
+  }
+}
+
+/** Prepare an unrelated config mutation without re-emitting legacy secrets. */
+async function migrateCredentialsForWrite(
+  stored: GlobalConfig,
+  credentials: CredentialBroker,
+): Promise<GlobalConfig | undefined> {
+  try {
+    return (await migrateProviderCredentials(
+      stored,
+      credentials,
+      providerIdForConfig(stored) ?? '',
+    )).config;
+  } catch {
+    return undefined;
+  }
 }
 
 export function App({
@@ -265,7 +381,6 @@ export function App({
   providerProblem,
   effort: initialEffort,
   initialThemeId,
-  preferredThemeId,
   tools,
   skillCatalogue,
   mcpCatalogue,
@@ -279,7 +394,10 @@ export function App({
   credentials,
   themeCatalogue,
 }: AppProps): React.ReactElement {
-  const [state, dispatch] = useReducer(sessionReducer, initialSession);
+  const [state, dispatch] = useReducer(sessionReducer, {
+    ...initialSession,
+    contextMax: provider?.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+  });
   const [composer, composerDispatch] = useReducer(composerReducer, initialComposerState);
   const input = composer.draft;
   const cursor = composer.cursor;
@@ -307,6 +425,9 @@ export function App({
     composerDispatch({ type: 'queue.select', index });
   };
   const [choice, setChoice] = useState(0);
+  const [credentialPromptPending, setCredentialPromptPending] = useState(
+    needsCredentialPrompt(providerProblem),
+  );
   const [, setThemeRevision] = useState(0);
   const [emojiIndex, setEmojiIndex] = useState(0);
   /** Live MCP status and loaded skills, for the browser's first two tabs. */
@@ -316,6 +437,14 @@ export function App({
   const [agentTurnStartedAt, setAgentTurnStartedAt] = useState<number | null>(null);
   const [interruptArmed, setInterruptArmed] = useState(false);
   const [effort, setEffortState] = useState<Effort | undefined>(initialEffort);
+  const [effortTransitionId, setEffortTransitionId] = useState(() => initialEffort === 'plif' ? 1 : 0);
+  const effortTransitioning = effortTransitionId > 0;
+  useEffect(() => {
+    if (!effortTransitioning) return;
+    const timer = setTimeout(() => setEffortTransitionId(0), PLIF_INTRO_DURATION_MS);
+    timer.unref?.();
+    return () => clearTimeout(timer);
+  }, [effortTransitionId, effortTransitioning]);
   useEffect(() => {
     applyEffortPalette(effort);
   }, [effort]);
@@ -334,9 +463,17 @@ export function App({
   const { exit } = useApp();
   const { stdout } = useStdout();
   const { columns: width, rows } = useTerminalSize();
-  const surface = terminalSurfaceLayout(width, rows);
+  const surface = terminalSurfaceLayout(
+    width,
+    rows,
+    headerHeight(width - layout.gutter * 2),
+  );
   const transcript = useTranscriptController({ engine, workspace: cwd, session, replay });
   const [transcriptViewport, dispatchTranscriptViewport] = useReducer(
+    viewportReducer,
+    initialViewport,
+  );
+  const [thinkingViewport, dispatchThinkingViewport] = useReducer(
     viewportReducer,
     initialViewport,
   );
@@ -371,6 +508,10 @@ export function App({
   const lspManager = useRef<LspManager | null>(null);
   const subagents = useRef(new SubagentCoordinator());
   const interruptTimer = useRef<NodeJS.Timeout | null>(null);
+  const sessionStartedAt = useRef(Date.now());
+  const usage = useRef<SessionUsage>(emptySessionUsage);
+  const turnCompletionTokens = useRef(0);
+  const subagentTokens = useRef(new Map<string, number>());
 
   // --- live output plumbing ---
   // Chunks arrive far faster than the terminal can usefully repaint, so they
@@ -409,6 +550,7 @@ export function App({
   const paintedEpoch = useRef<number | null>(null);
   const semanticFrames = useRef<StreamFrameScheduler | null>(null);
   semanticFrames.current ??= new StreamFrameScheduler({
+    clockDriven: true,
     onFrame: (frame: StreamFrame) => {
       if (frame.kind === 'reset') {
         semanticStartedAt.current = null;
@@ -474,7 +616,6 @@ export function App({
   const planModeRef = useRef(false);
   const goalRef = useRef<GoalState | null>(null);
   const activeThemeId = useRef(initialThemeId ?? themeCatalogue.themes[0]?.id ?? 'minimal');
-  const themeBeforePlif = useRef(preferredThemeId ?? themeCatalogue.themes[0]?.id ?? 'minimal');
 
   const push = useCallback(
     (item: ReturnType<typeof entry>) => dispatch({ type: 'append', entry: item }),
@@ -812,6 +953,15 @@ export function App({
       engine.bus.on('agent.compacted', (event) => {
         compactionSince.current = null;
         dispatch({ type: 'compaction.end' });
+        if (event.failure) {
+          const preserved = event.failure.fallback === 'raw history preserved';
+          push(entry('notice', preserved
+            ? 'compaction capsule rejected; raw history preserved'
+            : 'compaction model failed; mechanical fallback applied', {
+            tone: 'warn',
+            subtitle: `${event.failure.message} (${event.failure.attempts} attempts; provider disabled for this turn)`,
+          }));
+        }
         // Only worth a row when it actually did something. A pass that ran the
         // first stage and found nothing to drop is not news.
         if (event.before === event.after) return;
@@ -833,6 +983,14 @@ export function App({
        * makes the next one drop, which is the behaviour you want to see.
        */
       engine.bus.on('agent.usage', (event) => {
+        const written = Math.max(0, event.completionTokens - turnCompletionTokens.current);
+        turnCompletionTokens.current = Math.max(turnCompletionTokens.current, event.completionTokens);
+        usage.current = {
+          ...usage.current,
+          requests: usage.current.requests + 1,
+          inputTokens: usage.current.inputTokens + Math.max(0, event.promptTokens),
+          outputTokens: usage.current.outputTokens + written,
+        };
         dispatch({
           type: 'context',
           used: event.promptTokens,
@@ -930,6 +1088,8 @@ export function App({
           return;
         }
 
+        usage.current = { ...usage.current, toolCalls: usage.current.toolCalls + 1 };
+
         if (discoveryKind) {
           dispatch({
             type: 'discovery.finish',
@@ -952,8 +1112,16 @@ export function App({
           stream.current = { rowId: null, text: '', dirty: false };
         }
 
+        const hits = (event.name === 'web_search' || event.name === 'research') && event.ok && event.output
+          ? parseSearchResults(event.output)
+          : [];
+        const diagnostics = event.diff && event.output
+          ? languageServerNote(event.output)
+          : null;
+
         const patch = {
           status: (event.ok ? 'done' : 'failed') as 'done' | 'failed',
+          ...(hits.length > 0 ? { searchResults: hits } : {}),
           // An edit describes itself with its own diff stats — "Added 9 lines,
           // removed 1 line" — rather than a byte count, because that is the
           // number a reviewer is actually looking for.
@@ -964,7 +1132,11 @@ export function App({
               })()
             : described.summary,
           ...(event.diff ? { diff: event.diff } : {}),
-          ...(event.output?.trim() ? { detail: event.output } : {}),
+          ...(diagnostics
+            ? { detail: diagnostics }
+            : !event.diff && event.output?.trim()
+              ? { detail: event.output }
+              : {}),
           ...(described.planItems ? { planItems: described.planItems } : {}),
         };
 
@@ -1010,6 +1182,7 @@ export function App({
        * show none of that, so it showed a spinner and a name.
        */
       engine.bus.on('subagent.started', (event) => {
+        usage.current = { ...usage.current, subagentRuns: usage.current.subagentRuns + 1 };
         dispatch({
           type: 'subagent.start',
           view: {
@@ -1024,7 +1197,7 @@ export function App({
             thinkingSince: null,
             toolCalls: 0,
             contextUsed: 0,
-            contextMax: DEFAULT_CONTEXT_TOKENS,
+            contextMax: event.contextMax,
             completionTokens: 0,
           },
         });
@@ -1047,6 +1220,14 @@ export function App({
       }),
 
       engine.bus.on('subagent.usage', (event) => {
+        subagentTokens.current.set(
+          event.taskId,
+          Math.max(subagentTokens.current.get(event.taskId) ?? 0, event.completionTokens),
+        );
+        usage.current = {
+          ...usage.current,
+          subagentTokens: [...subagentTokens.current.values()].reduce((total, value) => total + value, 0),
+        };
         dispatch({ type: 'subagent.usage', ...event });
       }),
 
@@ -1476,7 +1657,7 @@ export function App({
     const answer = await engine.questions.ask({
       text: `API key required for ${modelName}. Paste it below.`,
       secret: true,
-      context: hint ?? 'This model is marked NeedKey. Esc cancels; the key is stored in your personal Plif configuration.',
+      context: hint ?? 'This model is marked NeedKey. Esc cancels; the key is stored in the encrypted Plif credential store.',
     });
     const key = answer?.trim();
     if (key) return key;
@@ -1492,22 +1673,48 @@ export function App({
   const recoverModelAuth = useCallback(async (error: unknown): Promise<boolean> => {
     if (!PlifError.is(error) || error.code !== 'MODEL_AUTH') return false;
     const stored = await loadStoredConfig(engine.paths);
-    const preset = stored.preset ?? '';
-    const model = providerRef.current?.info.id ?? stored.model ?? 'the selected model';
-    const cleared = forgetProviderKey(stored, preset);
-    await saveStoredConfig(engine.paths, cleared);
+    const preset = providerIdForConfig(stored) ?? '';
+    const model = providerRef.current?.info.id ?? resolveConfig(stored).model;
+    let cleared = forgetProviderKey(stored, preset);
+    if (credentials) await credentials.forget(credentialVariableForProvider(preset, stored));
+    if (credentials) {
+      cleared = (await persistModelSelection(
+        engine,
+        cleared,
+        { preset, model },
+        undefined,
+        credentials,
+      )).config;
+    } else {
+      await saveGlobalConfig(cleared, globalConfigPath(), { preserveProviderKeys: false });
+    }
     const key = await requestModelKey(model, [
       `${preset || 'This provider'} rejected the saved API key.`,
       'The old credential was removed from this provider only.',
-      'Paste a new API key to save it, or press Esc to keep the model unconfigured.',
+      'Paste a new API key to save it in the encrypted credential store, or press Esc to keep the model unconfigured.',
     ].join('\n'));
     if (!key) return true;
-    const next = adoptProvider(cleared, { preset, model }, key);
-    await saveStoredConfig(engine.paths, next);
-    providerRef.current = createModelProvider(resolveConfig(next));
-    push(entry('notice', 'provider credential updated', {
-      tone: 'accent',
-      subtitle: 'Retry the message to use the new key.',
+    const persisted = await persistModelSelection(
+      engine,
+      cleared,
+      { preset, model },
+      key,
+      credentials,
+    );
+    providerRef.current = createModelProvider(resolveConfig(persisted.config, {
+      model,
+      preset,
+      ...(persisted.apiKey ? { apiKey: persisted.apiKey } : {}),
+    }));
+    dispatch({
+      type: 'context',
+      max: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+    });
+    push(entry('notice', persisted.persisted ? 'provider credential updated' : 'credential active for this run', {
+      tone: persisted.persisted ? 'accent' : 'warn',
+      subtitle: persisted.persisted
+        ? 'Retry the message to use the new key.'
+        : 'Secure persistence failed; retry after fixing the credential store.',
     }));
     return true;
   }, [engine, push, requestModelKey]);
@@ -1544,26 +1751,34 @@ export function App({
         typeof requested === 'string'
           // A bare `/model <id>` keeps whatever provider is already configured.
           // There is no default to fall back on when none is.
-          ? { preset: stored.preset ?? '', model: requested }
+          ? { preset: providerIdForConfig(stored) ?? '', model: requested }
           : requested;
+      const savedKey = await providerCredential(credentials, selection.preset, stored);
       let config = resolveConfig(stored, {
         model: selection.model,
         preset: selection.preset,
+        ...(savedKey ? { apiKey: savedKey } : {}),
       });
       let check = validateModelConfig(config);
+      let typedKey: string | undefined;
       if (!check.ok) {
         if (!config.apiKey && config.needKey) {
           const providerLabel =
+            userCatalog(stored).find((entryProvider) => entryProvider.id === selection.preset)?.label ??
             findCatalogProvider(selection.preset)?.label ?? (selection.preset || 'This provider');
-          const keyEnv = PRESETS[selection.preset as keyof typeof PRESETS]?.keyEnv;
+          const keyEnv = credentialVariableForProvider(selection.preset, stored);
           const key = await requestModelKey(selection.model, [
             `${providerLabel} serves this model from ${config.baseURL}.`,
-            keyEnv ? `The same value can live in ${keyEnv} instead, if you prefer.` : '',
-            'Paste its API key to save it in your personal Plif configuration, or press Esc to cancel.',
+            `The same value can live in ${keyEnv} instead, if you prefer.`,
+            'Paste its API key to save it in the encrypted credential store, or press Esc to cancel.',
           ].filter(Boolean).join('\n'));
           if (!key) return;
-          const next = adoptProvider(stored, selection, key);
-          config = resolveConfig(next, { model: selection.model, preset: selection.preset });
+          typedKey = key;
+          config = resolveConfig(stored, {
+            model: selection.model,
+            preset: selection.preset,
+            apiKey: key,
+          });
           check = validateModelConfig(config);
           if (!check.ok) {
             push(entry('notice', `cannot switch to ${selection.model}`, {
@@ -1572,7 +1787,6 @@ export function App({
             }));
             return;
           }
-          await saveStoredConfig(engine.paths, next);
           // The key is what discovery was missing. Drop the cached "this
           // provider lists nothing" answer so the next /model shows the real
           // catalogue instead of the curated stand-in.
@@ -1588,58 +1802,79 @@ export function App({
         }
       }
 
-      providerRef.current = createModelProvider(config);
-      await saveStoredConfig(
-        engine.paths,
-        adoptProvider(
-          stored,
-          selection,
-          // "local" is the SDK's placeholder, not a credential. Writing it to
-          // disk would make a local endpoint look configured.
-          config.apiKey && config.apiKey !== 'local' ? config.apiKey : undefined,
-        ),
+      const persisted = await persistModelSelection(
+        engine,
+        stored,
+        selection,
+        typedKey,
+        credentials,
       );
-      // A model swap changes what the assistant is; carrying the old exchange
-      // into it would attribute the previous model's turns to the new one.
-      conversation.current = [];
+      config = resolveConfig(persisted.config, {
+        model: selection.model,
+        preset: selection.preset,
+        ...(persisted.apiKey ? { apiKey: persisted.apiKey } : {}),
+      });
+      check = validateModelConfig(config);
+      if (!check.ok) {
+        push(entry('notice', `cannot switch to ${selection.model}`, {
+          tone: 'danger',
+          detail: [check.problem, check.hint].filter(Boolean).join('\n'),
+        }));
+        return;
+      }
+
+      const previousPreset = providerIdForConfig(stored) ?? '';
+      providerRef.current = createModelProvider(config);
+      if (selection.preset !== previousPreset) {
+        conversation.current = withoutReasoning(conversation.current);
+      }
+      dispatch({
+        type: 'context',
+        used: estimateTokens(conversation.current),
+        max: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+      });
       push(
         entry('notice', `model is now ${selection.model}`, {
-          tone: 'accent',
-          subtitle: 'conversation reset for the new model',
+          tone: persisted.persisted ? 'accent' : 'warn',
+          subtitle: persisted.persisted
+            ? conversation.current.length > 0
+              ? 'the conversation so far carries over'
+              : undefined
+            : 'active for this run; secure persistence failed',
         }),
       );
     },
     setEffort: async (effort) => {
-      const stored = await loadStoredConfig(engine.paths);
+      const loaded = await loadStoredConfig(engine.paths);
+      const migrated = credentials
+        ? await migrateCredentialsForWrite(loaded, credentials)
+        : Object.keys(storedProviderCredentials(loaded, providerIdForConfig(loaded) ?? '')).length > 0
+          ? undefined
+          : loaded;
+      if (!migrated) {
+        throw new PlifError('INTERNAL', 'effort was not saved because credential migration failed', {
+          hint: 'Fix the encrypted credential store and retry; config.toml was left untouched.',
+        });
+      }
+      const stored = migrated;
       const next = { ...stored, ...(effort ? { effort } : {}) };
       if (!effort) delete next.effort;
-      const config = resolveConfig(next);
+      const providerId = providerIdForConfig(next) ?? '';
+      const savedKey = await providerCredential(credentials, providerId, next);
+      const config = resolveConfig(next, savedKey ? { apiKey: savedKey } : {});
       if (effort && !supportedEfforts(config.baseURL, config.model).includes(effort)) {
         throw new PlifError('INVALID_ARGUMENT', `${effort} is not supported by ${config.model}`);
       }
       providerRef.current = createModelProvider(config);
       await saveStoredConfig(engine.paths, next);
-      conversation.current = [];
+      dispatch({
+        type: 'context',
+        used: estimateTokens(conversation.current),
+        max: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+      });
       const previous = effortRef.current;
       const specialEffort = (value: Effort | undefined): boolean =>
         ['plif', 'max', 'ultra', 'ultracode'].includes(value ?? '');
-      if (effort === 'plif' && previous !== 'plif') {
-        themeBeforePlif.current = activeThemeId.current === 'midnight'
-          ? preferredThemeId ?? themeCatalogue.themes[0]?.id ?? 'minimal'
-          : activeThemeId.current;
-        const midnight = themeCatalogue.themes.find((theme) => theme.id === 'midnight');
-        if (midnight) {
-          activateTheme(midnight);
-          activeThemeId.current = midnight.id;
-          setThemeRevision((value) => value + 1);
-        }
-      } else if (effort !== 'plif' && previous === 'plif') {
-        const restored = themeCatalogue.themes.find((theme) => theme.id === themeBeforePlif.current)
-          ?? themeCatalogue.themes[0]!;
-        activateTheme(restored);
-        activeThemeId.current = restored.id;
-        setThemeRevision((value) => value + 1);
-      }
       if (!specialEffort(effort) && specialEffort(previous) && previous !== 'plif') {
         const restored = themeCatalogue.themes.find((theme) => theme.id === activeThemeId.current)
           ?? themeCatalogue.themes[0]!;
@@ -1649,6 +1884,7 @@ export function App({
       applyEffortPalette(effort);
       effortRef.current = effort;
       setEffortState(effort);
+      if (previous !== effort) setEffortTransitionId((value) => value + 1);
     },
     setPlanMode: async (enabled, description) => {
       planModeRef.current = enabled;
@@ -1668,15 +1904,42 @@ export function App({
       goalRef.current = null;
     },
     switchProfile: async (name) => {
-      const stored = await loadStoredConfig(engine.paths);
+      const loaded = await loadStoredConfig(engine.paths);
+      const stored = credentials
+        ? await migrateCredentialsForWrite(loaded, credentials)
+        : Object.keys(storedProviderCredentials(loaded, providerIdForConfig(loaded) ?? '')).length > 0
+          ? undefined
+          : loaded;
+      if (!stored) throw new Error('profile was not saved because credential migration failed');
       const profile = profilesOf(stored)[name];
       if (!profile) throw new Error(`unknown profile ${name}`);
-      const config = resolveConfig(stored, profile.model ? { model: profile.model } : {});
+      const modelOptions = profile.model ? { model: profile.model } : {};
+      const providerId = providerIdForConfig(stored, modelOptions) ?? '';
+      const savedKey = await providerCredential(credentials, providerId, stored);
+      const config = resolveConfig(stored, {
+        ...modelOptions,
+        ...(savedKey ? { apiKey: savedKey } : {}),
+      });
       const check = validateModelConfig(config);
       if (!check.ok) throw new Error(check.problem ?? 'profile model is not usable');
       providerRef.current = createModelProvider(config);
       await saveStoredConfig(engine.paths, { ...stored, activeProfile: name });
-      conversation.current = [];
+      if (stored.activeProfile !== name) {
+        conversation.current = withoutReasoning(conversation.current);
+        push(
+          entry('notice', `profile ${name} is active`, {
+            tone: 'accent',
+            subtitle: conversation.current.length > 0
+              ? 'the conversation so far carries over'
+              : undefined,
+          }),
+        );
+      }
+      dispatch({
+        type: 'context',
+        used: estimateTokens(conversation.current),
+        max: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+      });
     },
     /**
      * `/compact`, over the conversation this component holds.
@@ -1691,7 +1954,8 @@ export function App({
      */
     compactNow: async (aggressive: boolean) => {
       const before = estimateTokens(conversation.current);
-      const target = Math.floor(DEFAULT_CONTEXT_TOKENS * (aggressive ? 0.33 : 0.7));
+      const contextWindow = providerRef.current?.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS;
+      const target = Math.floor(contextWindow * (aggressive ? 0.33 : 0.7));
       compactionSince.current = Date.now();
       try {
         const result = await runCompaction(conversation.current, {
@@ -1749,23 +2013,65 @@ export function App({
         push(entry('notice', title, { tone: 'danger', ...(detail ? { detail } : {}) }));
       }
     },
+    sessionStatus: (): StatusInput => ({
+      model: providerRef.current?.info.id ?? provider?.info.id ?? '',
+      provider: redactedProviderId(providerRef.current?.info.endpoint ?? provider?.info.endpoint ?? ''),
+      effort: effortRef.current,
+      contextUsed: state.contextUsed,
+      contextMax: state.contextMax,
+      elapsedMs: Date.now() - sessionStartedAt.current,
+      usage: { ...usage.current, turns: turn },
+      workspace: cwd,
+      container: current.current?.name ?? state.container,
+      containerState: state.containerState,
+      planMode: planModeRef.current,
+      goal: goalRef.current?.condition ?? null,
+      mcpConnected: mcpStatuses.filter((server) => server.connected).length,
+      mcpServers: mcpStatuses.length,
+      skills: skillList.length,
+      queued: state.queue.length,
+      sessionId: transcript.session?.id ?? null,
+    }),
     themes: themeCatalogue.themes,
     switchTheme: async (id) => {
       const theme = themeCatalogue.themes.find((entry) => entry.id === id);
       if (!theme) throw new Error(`unknown theme ${id}`);
       activateTheme(theme);
+      applyEffortPalette(effortRef.current);
       activeThemeId.current = id;
-      if (effortRef.current === 'plif' && id !== 'midnight') themeBeforePlif.current = id;
       const stored = await loadGlobalConfig();
-      await saveGlobalConfig({ ...stored, theme: id });
+      let safe = stored;
+      if (credentials) {
+        const migrated = await migrateCredentialsForWrite(stored, credentials);
+        if (!migrated) {
+          push(entry('notice', 'theme was not saved', {
+            tone: 'danger',
+            subtitle: 'Could not move the existing model credential into the encrypted store.',
+          }));
+          return;
+        }
+        safe = migrated;
+      } else if (Object.keys(storedProviderCredentials(stored, providerIdForConfig(stored) ?? '')).length > 0) {
+        push(entry('notice', 'theme was not saved', {
+          tone: 'danger',
+          subtitle: 'An encrypted credential store is required before changing this config.',
+        }));
+        return;
+      }
+      await saveGlobalConfig({ ...safe, theme: id }, globalConfigPath(), { preserveProviderKeys: false });
       setThemeRevision((value) => value + 1);
     },
   };
 
   const submit = useCallback(
     async (line: string, suppliedAttachments?: readonly PastedAttachment[]) => {
+      if (credentialPromptPending) return;
       const trimmed = line.trim();
       if (!trimmed) return;
+      if (trimmed.startsWith('/')) {
+        await runSlash(trimmed);
+        return;
+      }
 
       // Claim the pasted images for this message and clear the tray, so a
       // second message does not re-send the first one's screenshot.
@@ -1779,6 +2085,7 @@ export function App({
       if (agentSubmission) {
         setAgentTurnStartedAt(Date.now());
         setTurn((value) => value + 1);
+        turnCompletionTokens.current = 0;
         completionMeterRef.current = initialCompletionMeter;
         setCompletionMeter(initialCompletionMeter);
       }
@@ -1834,7 +2141,7 @@ export function App({
         if (agentSubmission) setAgentTurnStartedAt(null);
       }
     },
-    [pasted, push, transcript],
+    [credentialPromptPending, pasted, push, transcript],
   );
 
   /**
@@ -1995,20 +2302,29 @@ export function App({
 
     if (!taskManager.current || taskManager.current.container.id !== container.id) {
       await taskManager.current?.stopAll();
+      const previousLsp = lspManager.current;
+      if (previousLsp) {
+        // Stop the old manager before exposing a new root. `stop()` also waits
+        // for in-flight warmup starts, so a late probe cannot spawn a server in
+        // the container we just left.
+        await previousLsp.stop();
+        if (lspManager.current === previousLsp) lspManager.current = null;
+      }
       taskManager.current = new TaskManager({
         container,
         bus: engine.bus,
         approvals: engine.approvals,
       });
       setTasks(visibleTasks(taskManager.current.list()));
-      lspManager.current = new LspManager({
+      const nextLsp = new LspManager({
         root: await container.hostPathFor(container.workdir),
         bus: engine.bus,
       });
+      lspManager.current = nextLsp;
       // LSP is useful to later tool calls but is not a prerequisite for the
       // first model request. Its client manager initializes lazily if a tool
       // asks for a language server before this warmup completes.
-      void lspManager.current.warmup().catch(() => undefined);
+      void nextLsp.warmup().catch(() => undefined);
     }
     const activeProfileName = typeof profileConfig.activeProfile === 'string' ? profileConfig.activeProfile : undefined;
     const activeProfile = activeProfileName ? profilesOf(profileConfig)[activeProfileName] : undefined;
@@ -2033,6 +2349,8 @@ export function App({
       provider: providerRef.current,
       isolation: report.isolation,
       stored: storedConfig,
+      resolveCredential: async (providerId: string, childStored: GlobalConfig) =>
+        await providerCredential(credentials, providerId, childStored),
       agents: agentsOf(storedConfig),
       extraTools: [...lspForAgent, ...WEB_TOOLS],
       edits,
@@ -2051,6 +2369,12 @@ export function App({
       ? allAgentTools.filter((tool) => !PLAN_BLOCKED_TOOLS.has(tool.spec.name))
       : allAgentTools;
 
+    const carried = conversation.current;
+    const outgoing: Message[] = [
+      ...carried,
+      { role: 'user', content: text, ...(attachments.length ? { attachments } : {}) },
+    ];
+
     try {
       const result = await runLoop(
         [
@@ -2062,6 +2386,7 @@ export function App({
               workdir: container.workdir,
               capabilities: container.capabilities,
               isolation: report.isolation,
+              contextTokens: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
               tools: agentTools.map((tool) => tool.spec),
               skills: skillRegistry?.catalogue() ?? skillCatalogue,
               mcpServers: mcpRegistry ? mcpRegistry.catalogue() : mcpCatalogue,
@@ -2075,8 +2400,7 @@ export function App({
               ...(activeProfile ? { profile: { name: activeProfile.name ?? activeProfileName!, systemPrompt: activeProfile.systemPrompt } } : {}),
             }),
           },
-          ...conversation.current,
-          { role: 'user', content: text, ...(attachments.length ? { attachments } : {}) },
+          ...outgoing,
         ],
         {
           provider: providerRef.current,
@@ -2089,7 +2413,7 @@ export function App({
           memory: engine.memory,
           workspace: cwd,
           sessionId: transcript.session?.id ?? 'interactive',
-          contextTokens: DEFAULT_CONTEXT_TOKENS,
+          contextTokens: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
           ...(attachments.length ? { attachments } : {}),
           ...(taskManager.current ? { tasks: taskManager.current } : {}),
           ...(lspManager.current ? { lsp: lspManager.current } : {}),
@@ -2104,9 +2428,13 @@ export function App({
           drainQueue: async () => {
             const pendingMessages = queueRef.current;
             if (pendingMessages.length === 0) return [];
-            queueRef.current = [];
-            dispatch({ type: 'queue.clear' });
-            for (const message of pendingMessages) {
+            const isCommand = (message: QueuedMessage): boolean =>
+              message.text.trim().startsWith('/');
+            const forModel = pendingMessages.filter((message) => !isCommand(message));
+            queueRef.current = pendingMessages.filter(isCommand);
+            if (forModel.length === 0) return [];
+            dispatch({ type: 'queue.deliver', ids: forModel.map((message) => message.id) });
+            for (const message of forModel) {
               push(entry('input', message.text, { tag: '[queued]' }));
               transcript.persist({
                 ...eventBase('user.message', durableTurnId),
@@ -2114,7 +2442,7 @@ export function App({
               });
             }
             return await Promise.all(
-              pendingMessages.map(async (message) => ({
+              forModel.map(async (message) => ({
                 role: 'user' as const,
                 content: message.text,
                 attachments: await encodePasted(message.attachments),
@@ -2122,16 +2450,32 @@ export function App({
             );
           },
           activateProfile: async (name) => {
-            const stored = await loadStoredConfig(engine.paths);
+            const loaded = await loadStoredConfig(engine.paths);
+            const stored = credentials
+              ? await migrateCredentialsForWrite(loaded, credentials)
+              : Object.keys(storedProviderCredentials(loaded, providerIdForConfig(loaded) ?? '')).length > 0
+                ? undefined
+                : loaded;
+            if (!stored) throw new Error('profile was not saved because credential migration failed');
             const profile = profilesOf(stored)[name];
             if (!profile) throw new Error(`unknown profile ${name}`);
-            const config = resolveConfig(stored, profile.model ? { model: profile.model } : {});
+            const modelOptions = profile.model ? { model: profile.model } : {};
+            const providerId = providerIdForConfig(stored, modelOptions) ?? '';
+            const savedKey = await providerCredential(credentials, providerId, stored);
+            const config = resolveConfig(stored, {
+              ...modelOptions,
+              ...(savedKey ? { apiKey: savedKey } : {}),
+            });
             providerRef.current = createModelProvider(config, {
               capabilityCache,
               bus: engine.bus,
             });
             await saveStoredConfig(engine.paths, { ...stored, activeProfile: name });
-            conversation.current = [];
+            dispatch({
+              type: 'context',
+              used: estimateTokens(conversation.current),
+              max: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+            });
           },
           setGoal: async (condition) => {
             goalRef.current = { condition, status: 'active' };
@@ -2174,6 +2518,7 @@ export function App({
         }
       }
     } catch (error) {
+      if (conversation.current === carried) conversation.current = outgoing;
       const recovered = await recoverModelAuth(error);
       if (!recovered) {
         const { title, detail } = formatError(error);
@@ -2276,14 +2621,59 @@ export function App({
       pasteCount.current += 1,
       attachment.kind === 'text' ? attachment.text : undefined,
     );
-    setPasted((existing) => [...existing, { ...attachment, token } as PastedAttachment]);
-    const separator = input && !/\s$/.test(input.slice(0, cursor)) ? ' ' : '';
-    const next = input.slice(0, cursor) + separator + token + input.slice(cursor);
-    setInput(next);
-    setCursor(cursor + separator.length + token.length);
+    composerDispatch({
+      type: 'attachment.paste',
+      attachment: { ...attachment, token } as PastedAttachment,
+    });
   }
 
-  async function pasteImage(): Promise<void> {
+  async function attachImageFiles(paths: readonly string[]): Promise<number> {
+    let attached = 0;
+    for (const candidate of paths) {
+      const stat = await fs.stat(candidate).catch(() => null);
+      if (!stat?.isFile() || stat.size === 0) continue;
+      if (stat.size > MAX_ATTACHMENT_BYTES) {
+        push(
+          entry('notice', `${path.basename(candidate)} is too large to attach`, {
+            tone: 'warn',
+            subtitle: `${(stat.size / 1024 / 1024).toFixed(1)}MB, over the ${
+              MAX_ATTACHMENT_BYTES / 1024 / 1024
+            }MB limit`,
+          }),
+        );
+        continue;
+      }
+      addPasted({
+        kind: 'image',
+        path: candidate,
+        mediaType: mediaTypeOf(candidate),
+        bytes: stat.size,
+      });
+      attached += 1;
+    }
+    return attached;
+  }
+
+  function acceptPastedText(text: string): void {
+    if (!text) return;
+    if (shouldAttachPastedText(text)) {
+      addPasted({ kind: 'text', text });
+      return;
+    }
+    composerDispatch({ type: 'insert', text });
+  }
+
+  async function receivePastedContent(text: string): Promise<void> {
+    const images = imagePathsInPaste(text);
+    if (images.length > 0 && (await attachImageFiles(images)) > 0) return;
+    if (text) {
+      acceptPastedText(text);
+      return;
+    }
+    await pasteImage({ quiet: true });
+  }
+
+  async function pasteImage({ quiet = false }: { quiet?: boolean } = {}): Promise<void> {
     try {
       const image = await readClipboardImage();
       if (image) {
@@ -2293,15 +2683,19 @@ export function App({
       const raw = await readClipboardText();
       const text = raw ? sanitizePastedText(raw) : '';
       if (!text) {
-        push(
-          entry('notice', 'nothing to paste', {
-            tone: 'muted',
-            subtitle: 'the clipboard has no supported content',
-          }),
-        );
+        if (!quiet) {
+          push(
+            entry('notice', 'nothing to paste', {
+              tone: 'muted',
+              subtitle: 'the clipboard has no supported content',
+            }),
+          );
+        }
         return;
       }
-      addPasted({ kind: 'text', text });
+      const images = imagePathsInPaste(text);
+      if (images.length > 0 && (await attachImageFiles(images)) > 0) return;
+      acceptPastedText(text);
     } catch (error) {
       const { title, detail } = formatError(error);
       push(entry('notice', title, { tone: 'warn', ...(detail ? { detail } : {}) }));
@@ -2366,9 +2760,11 @@ export function App({
 
   const typedCommand = commandPrefix(input);
   const completions: Command[] =
-    typedCommand !== null && !state.busy && !state.approval
+    typedCommand !== null && !state.approval
       ? matchCommands(typedCommand)
       : [];
+  const typedCommandName = typedCommand === null ? null : tokenize(input.slice(1))[0] ?? '';
+  const typedCommandRunsNow = typedCommandName !== null && runsWhileWorking(typedCommandName);
   // Keep the selected command visible while its arguments are being typed.
   // The old space check made the menu vanish exactly when `/model ` or
   // `/mcp ` became useful, and made the prompt look like it had eaten input.
@@ -2387,7 +2783,6 @@ export function App({
 
   function receivePastedText(raw: string): void {
     const text = sanitizePastedText(raw);
-    if (!text) return;
     const firstLine = text.split('\n')[0] ?? '';
 
     if (state.browser) {
@@ -2403,13 +2798,30 @@ export function App({
       if (firstLine) dispatch({ type: 'picker.filter', filter: state.picker.filter + firstLine });
       return;
     }
-    addPasted({ kind: 'text', text });
+    void receivePastedContent(text);
   }
 
   const workDockOpen = tasksOpen || state.subagentsOpen;
   const transcriptCells = allTranscriptCells(transcript.state);
   const transcriptBodyHeight = Math.max(1, terminalFrameRows(rows) - 2);
   const transcriptContentLines = measureTranscriptCells(transcriptCells, width);
+  const thinkingDoc = useMemo(
+    () => thinkingViewport.open
+      ? thinkingDocument(thoughtBlocks(transcriptCells), Math.max(16, width - 6))
+      : emptyThinkingDocument,
+    [thinkingViewport.open, transcriptCells, width],
+  );
+  const thinkingRows = thinkingBodyHeight(terminalFrameRows(rows));
+  const thinkingLines = thinkingDoc.lines.length;
+
+  useEffect(() => {
+    if (!thinkingViewport.open) return;
+    dispatchThinkingViewport({
+      type: 'content',
+      contentLines: thinkingLines,
+      height: thinkingRows,
+    });
+  }, [thinkingViewport.open, thinkingLines, thinkingRows]);
 
   useEffect(() => {
     if (!transcriptViewport.open) return;
@@ -2475,9 +2887,48 @@ export function App({
       return;
     }
 
+    // Startup credential resolution is a modal gate even during the tiny
+    // interval between asking the broker and rendering its question. Without
+    // this guard, a greeting typed during that race becomes a normal turn and
+    // Escape/cancel abandons the credential before it can be remembered.
+    if (credentialPromptPending) return;
+
     if (state.picker) {
       handlePickerKey(char, key);
       return;
+    }
+
+    if (thinkingViewport.open) {
+      const metrics = { contentLines: thinkingLines, height: thinkingRows };
+      if ((key.ctrl && char === 'r') || key.escape) {
+        dispatchThinkingViewport({ type: 'close' });
+        return;
+      }
+      if (key.upArrow || key.downArrow) {
+        dispatchThinkingViewport({ type: 'line', delta: key.upArrow ? -1 : 1, ...metrics });
+        return;
+      }
+      if (key.pageUp || key.pageDown) {
+        dispatchThinkingViewport({ type: 'page', delta: key.pageUp ? -1 : 1, ...metrics });
+        return;
+      }
+      if (key.leftArrow || key.rightArrow) {
+        dispatchThinkingViewport({
+          type: 'to',
+          offset: blockJumpOffset(thinkingDoc, thinkingViewport.offset, key.rightArrow ? 1 : -1),
+          ...metrics,
+        });
+        return;
+      }
+      if (key.ctrl && (char === 'end' || char === 'e')) {
+        dispatchThinkingViewport({ type: 'end', ...metrics });
+        return;
+      }
+      if (key.ctrl && char === 'a') {
+        dispatchThinkingViewport({ type: 'home', ...metrics });
+        return;
+      }
+      if (!(key.ctrl && char === 'c')) return;
     }
 
     if (transcriptViewport.open) {
@@ -2517,7 +2968,11 @@ export function App({
       return;
     }
     if (key.ctrl && char === 'r') {
-      dispatch({ type: 'toggleLastThinking' });
+      dispatchThinkingViewport({
+        type: 'open',
+        contentLines: thinkingLines,
+        height: thinkingRows,
+      });
       return;
     }
     if (key.ctrl && char === 's' && (tasks.length > 0 || state.subagents.length > 0)) {
@@ -2630,8 +3085,33 @@ export function App({
         dropQueued();
         return;
       }
+      if (key.tab) {
+        const picked = completions[completionIndex];
+        if (showCompletions && picked) applyCompletion(picked);
+        return;
+      }
+      if ((key.upArrow || key.downArrow) && showCompletions) {
+        setCompletionIndex((value) =>
+          key.upArrow
+            ? Math.max(0, value - 1)
+            : Math.min(completions.length - 1, value + 1),
+        );
+        return;
+      }
       if (key.return) {
-        sendLine(expandShortcodes(input));
+        if (showCompletions && completions.length > 0 && completionIndex >= 0) {
+          const picked = completions[completionIndex];
+          if (picked && picked.name !== tokenize(input.slice(1))[0]) {
+            applyCompletion(picked);
+            return;
+          }
+        }
+        const line = expandShortcodes(input);
+        if (typedCommandRunsNow) {
+          runSlashNow(line);
+          return;
+        }
+        sendLine(line);
         return;
       }
       if ((key.upArrow || key.downArrow) && state.queue.length > 0) {
@@ -2659,7 +3139,12 @@ export function App({
             return;
           }
         }
-        sendLine(expandShortcodes(input));
+        const line = expandShortcodes(input);
+        if (line.trim().startsWith('/')) {
+          runSlashNow(line);
+          return;
+        }
+        sendLine(line);
         return;
       }
 
@@ -2719,8 +3204,7 @@ export function App({
     }
     if (char && !key.ctrl && !key.meta) {
       if (isTerminalPaste(char)) {
-        const pastedText = sanitizePastedText(char);
-        if (pastedText) addPasted({ kind: 'text', text: pastedText });
+        void receivePastedContent(sanitizePastedText(char));
         return;
       }
       // A paste arrives as one chunk, not as N keypresses, so this branch must
@@ -2728,6 +3212,10 @@ export function App({
       // bytes. Inserting the chunk raw would put a literal CR in the buffer and
       // silently corrupt the command.
       const text = sanitizePastedText(char);
+      if (imagePathsInPaste(text).length > 0) {
+        void receivePastedContent(text);
+        return;
+      }
       if (text.endsWith('\n')) {
         const typed = text.replace(/\n+$/, '');
         sendLine(expandShortcodes(input.slice(0, cursor) + typed + input.slice(cursor)));
@@ -2746,7 +3234,25 @@ export function App({
     }
   }
 
+  function runSlashNow(line: string): void {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    setInput('');
+    setCursor(0);
+    setCompletionIndex(0);
+    history.current.record(trimmed);
+    push(entry('input', trimmed));
+    void runSlash(trimmed).catch((error: unknown) => {
+      const { title, detail } = formatError(error);
+      push(entry('step', title, { status: 'failed', tone: 'danger', ...(detail ? { detail } : {}) }));
+    });
+  }
+
   function sendLine(line: string): void {
+    if (!state.busy && line.trim().startsWith('/')) {
+      runSlashNow(line);
+      return;
+    }
     if (state.busy) {
       const queued = line.trim();
       if (!queued && pasted.length === 0) return;
@@ -3167,7 +3673,7 @@ export function App({
   }, [providerProblem, push]);
 
   useEffect(() => {
-    if (modelKeyPrompted.current || !providerProblem || !/api key|credential/i.test(providerProblem)) return;
+    if (modelKeyPrompted.current || !needsCredentialPrompt(providerProblem)) return;
     modelKeyPrompted.current = true;
     void (async () => {
       try {
@@ -3178,23 +3684,43 @@ export function App({
           'You can also set NeedKey = true in ~/.plif/config.toml and use /models later to reconfigure it.',
         ].join('\n'));
         if (!key) return;
-        const next = adoptProvider(
+        const selection = {
+          preset: providerIdForConfig(stored) ?? '',
+          model: currentConfig.model,
+        };
+        const persisted = await persistModelSelection(
+          engine,
           stored,
-          { preset: stored.preset ?? '', model: currentConfig.model },
+          selection,
           key,
+          credentials,
         );
-        const ready = resolveConfig(next);
+        const ready = resolveConfig(persisted.config, {
+          ...(selection.preset ? { preset: selection.preset } : {}),
+          model: selection.model,
+          ...(persisted.apiKey ? { apiKey: persisted.apiKey } : {}),
+        });
         providerRef.current = createModelProvider(ready);
-        await saveStoredConfig(engine.paths, next);
-        push(entry('notice', `credential saved for ${ready.model}`, {
-          tone: 'accent',
-          subtitle: 'The model is ready. The key is redacted from the transcript.',
+        dispatch({
+          type: 'context',
+          used: 0,
+          max: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+        });
+        push(entry('notice', persisted.persisted
+          ? `credential saved for ${ready.model}`
+          : `credential active for ${ready.model} this run`, {
+          tone: persisted.persisted ? 'accent' : 'warn',
+          subtitle: persisted.persisted
+            ? 'The model is ready. The key is redacted from the transcript.'
+            : 'The model is ready, but the encrypted credential store could not be updated.',
         }));
       } catch (error) {
         push(entry('notice', 'could not save the model credential', {
           tone: 'danger',
           detail: String(error),
         }));
+      } finally {
+        setCredentialPromptPending(false);
       }
     })();
   }, [engine, providerProblem, push, requestModelKey]);
@@ -3249,11 +3775,19 @@ export function App({
           { key: 'Esc', label: 'dismiss' },
         ]
     : state.busy
-      ? [
+      ? showCompletions
+        ? [
+            { key: 'Tab', label: 'accept' },
+            { key: '↑↓', label: 'choose' },
+            { key: 'Enter', label: typedCommandRunsNow ? 'run now' : 'queue for after' },
+            { key: 'Esc', label: 'dismiss' },
+          ]
+        : [
           { key: 'Enter', label: 'queue' },
           ...(state.queue.length > 0 ? [{ key: 'Ctrl+X', label: 'drop queued' }] : []),
           ...(state.subagents.length > 1 ? [{ key: 'Tab', label: 'subagent' }] : []),
           ...(tasks.length > 0 ? [{ key: 'Ctrl+S', label: 'tasks' }] : []),
+          { key: '/', label: 'commands' },
           { key: 'Ctrl+T', label: 'transcript' },
           { key: 'Esc', label: input ? 'clear' : 'cancel' },
         ]
@@ -3284,6 +3818,7 @@ export function App({
         since={agentTurnStartedAt}
         tokens={completionMeter.tokens}
         estimated={completionMeter.estimated}
+        plif={effort === 'plif'}
       />
     ) : undefined;
   const promptStatus = planMode ? (
@@ -3306,17 +3841,19 @@ export function App({
   const compactDialogs = rows < 34;
   const suggestionRows = Math.max(1, Math.min(6, surface.contentHeight - 8));
 
-  // Everything Ink has to repaint, other than the timeline. Deliberately
-  // generous: overestimating costs one row of history, underestimating puts the
-  // frame at terminal height and duplicates the whole session.
-  const chrome =
-    12 + // header, rounded prompt frame, its separation and footer
+  const effortFrame = plifDockHeight(effort) > 0;
+  const promptFooterRows = (promptStatus ? 1 : 0) + (effortFrame ? 1 : 0);
+  const promptQueueRows = queueHeight(state.queue);
+  const inputRows = promptBodyRows(input, cursor, surface.contentWidth);
+
+  // Everything Ink has to repaint, other than the timeline. Prompt rows are
+  // budgeted from the same frame geometry that Prompt renders; a long draft is
+  // clipped to the rows that fit while its complete value remains editable.
+  const fixedChrome =
     1 + // footer
-    plifDockHeight(effort) +
     workRows +
     (showCompletions ? suggestionRows + (completions.length > suggestionRows ? 1 : 0) : 0) +
     (showEmoji ? suggestionRows + (emojiMatches.length > suggestionRows ? 1 : 0) : 0) +
-    queueHeight(state.queue) +
     (state.picker ? pickerRows + 8 : 0) +
     (state.approval ? approvalHeight(compactDialogs) : 0) +
     (state.question ? questionHeight(state.question, compactDialogs, state.questionExpanded) : 0) +
@@ -3324,22 +3861,44 @@ export function App({
     discoveryRows +
     (state.exiting ? 1 : 0) +
     // The comparison is `>=`, so a frame that exactly fills the window still
-    // repaints — and `estimateHeight` is an estimate, which means it is
-    // sometimes low. Three spare lines cost three rows of history and buy the
-    // difference between "fits" and "the session prints twice".
+    // repaints. Three spare lines buy the difference between "fits" and "the
+    // session prints twice".
     3;
+  const promptOverhead = promptHeight({
+    bodyRows: 1,
+    footerRows: promptFooterRows,
+    queueRows: promptQueueRows,
+  }) - 1;
+  const promptRows = Math.max(
+    1,
+    Math.min(inputRows, surface.contentHeight - fixedChrome - promptOverhead),
+  );
+  const chrome = fixedChrome + promptHeight({
+    bodyRows: promptRows,
+    footerRows: promptFooterRows,
+    queueRows: promptQueueRows,
+  });
   // Zero is a legitimate answer. On a short window with a dialog open there is
   // genuinely no room for history, and showing two orphaned rows at the cost of
   // duplicating the session is the wrong trade.
   const timelineBudget = Math.max(0, surface.contentHeight - chrome);
-  const animationActive =
-    ['plif', 'max', 'ultra', 'ultracode'].includes(effort ?? '') ||
-    state.busy ||
-    state.compaction !== null ||
-    state.browser?.loading === true ||
-    tasks.some((task) => task.status === 'running' || task.status === 'awaiting_approval') ||
-    state.subagents.some((view) => view.status === 'running') ||
-    state.discovery.calls.some((call) => call.ok === undefined);
+  const scrollback = useMemo(
+    (): readonly TimelineEntry[] => state.committed,
+    [state.committed],
+  );
+  const animationActive = animationClockActive({
+      effort,
+      effortTransitioning,
+    busy: state.busy,
+    compacting: state.compaction !== null,
+    browserLoading: state.browser?.loading === true,
+    runningTask: tasks.some(
+      (task) => task.status === 'running' || task.status === 'awaiting_approval',
+    ),
+    runningSubagent: state.subagents.some((view) => view.status === 'running'),
+    runningDiscovery: state.discovery.calls.some((call) => call.ok === undefined),
+      runningTimeline: state.entries.some((entry) => entry.status === 'active'),
+  });
 
   return (
     /*
@@ -3360,8 +3919,21 @@ export function App({
       The surface dimensions are derived from the current terminal size on each
       render, so the intermediate frame fits and the erase is exact.
     */
-    <AnimationClockProvider active={animationActive}>
-    <Box flexDirection="column">
+    <AnimationClockProvider
+      active={animationActive}
+      plif={effort === 'plif'}
+      onTick={() => semanticFrames.current?.tick()}
+    >
+    <Box flexDirection="column" width={width} height={surface.canvasHeight}>
+      <Box paddingX={layout.gutter} flexShrink={0}>
+        <Header
+          cwd={cwd}
+          width={width - layout.gutter * 2}
+          model={provider?.info.id ?? ''}
+          effort={effort}
+          version={version}
+        />
+      </Box>
       {/*
         Scrollback. Ink prints each item once, above the frame, and never again
         — which is both why history survives here and why the array behind it
@@ -3369,7 +3941,7 @@ export function App({
         new component with a fresh count, rather than the same one being handed
         a shorter list it will misread.
       */}
-      <Static key={state.epoch} items={state.committed as TimelineEntry[]}>
+      <Static key={state.epoch} items={scrollback as TimelineEntry[]}>
         {(item) => (
           <Box key={item.id} paddingX={layout.gutter}>
             <TimelineRow entry={item} width={width - layout.gutter * 2} />
@@ -3377,7 +3949,14 @@ export function App({
         )}
       </Static>
 
-      {transcriptViewport.open ? (
+      {thinkingViewport.open ? (
+        <ThinkingOverlay
+          document={thinkingDoc}
+          viewport={thinkingViewport}
+          width={width}
+          height={terminalFrameRows(rows)}
+        />
+      ) : transcriptViewport.open ? (
         <TranscriptOverlay
           cells={transcript.state.finalized}
           active={transcript.state.active}
@@ -3412,14 +3991,6 @@ export function App({
           paddingY={surface.panelPaddingY}
         >
           <Box flexDirection="column" width={surface.contentWidth} flexGrow={1}>
-            <Header
-              cwd={cwd}
-              width={surface.contentWidth}
-              model={provider?.info.id ?? ''}
-              effort={effort}
-              version={version}
-            />
-
             <WorkDock
               tasks={tasks}
               subagents={state.subagents}
@@ -3441,6 +4012,7 @@ export function App({
               <Box paddingX={1}>
                 <Picker
                   title={state.picker.title}
+                  hint={state.picker.hint}
                   {...(state.picker.groups
                     ? { groups: state.picker.groups, expanded: state.picker.expanded }
                     : { items: filterItems(state.picker.items ?? [], state.picker.filter) })}
@@ -3513,17 +4085,23 @@ export function App({
                 busy={state.busy}
                 busyLabel={state.busyLabel}
                 width={surface.contentWidth}
+                maxRows={promptRows}
+                effort={effort}
                 {...(promptStatus ? { status: promptStatus } : {})}
-                frameActive={['plif', 'max', 'ultra', 'ultracode'].includes(effort ?? '') || state.busy}
-                {...(['plif', 'max', 'ultra', 'ultracode'].includes(effort ?? '')
+                frameActive={animationActive}
+                plif={effort === 'plif'}
+                {...(effortFrame
                   ? {
                       frameFooter: (
                         <PlifDock
                           cwd={cwd}
+                          model={providerRef.current?.info.id ?? provider?.info.id ?? ''}
                           effort={effort}
                           contextUsed={state.contextUsed}
                           contextMax={state.contextMax}
                           working={state.busy}
+                          transitioning={effortTransitioning}
+                          animated={animationActive}
                           width={Math.max(18, surface.contentWidth - 4)}
                         />
                       ),
@@ -3553,6 +4131,12 @@ export function App({
           </Box>
         </Box>
       )}
+
+      <PlifIntro
+        active={effort === 'plif' && effortTransitioning}
+        width={width}
+        height={surface.canvasHeight}
+      />
     </Box>
     </AnimationClockProvider>
   );

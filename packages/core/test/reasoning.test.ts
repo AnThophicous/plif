@@ -145,11 +145,15 @@ describe('ReasoningDeltaNormalizer', () => {
     assert.equal(normalizer.value, 'the the ');
   });
 
-  it('treats equal unknown observations as deltas', () => {
+  it('drops unchanged unknown observations instead of repeating one token forever', () => {
     const normalizer = new ReasoningDeltaNormalizer();
-    assert.equal(normalizer.push({ text: 'a', source: 'reasoning', semantics: 'unknown' }), 'a');
-    assert.equal(normalizer.push({ text: 'a', source: 'reasoning', semantics: 'unknown' }), 'a');
-    assert.equal(normalizer.value, 'aa');
+    const emitted = Array.from({ length: 12 }, () => normalizer.push({
+      text: 'Asp',
+      source: 'reasoning_content',
+      semantics: 'unknown',
+    }));
+    assert.deepEqual(emitted, ['Asp', ...Array<string>(11).fill('')]);
+    assert.equal(normalizer.value, 'Asp');
   });
 
   it('drops an unchanged explicit snapshot', () => {

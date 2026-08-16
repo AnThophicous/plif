@@ -160,6 +160,49 @@ const columnsArg = Number(process.argv[2] ?? 96);
 const rows = Number(process.argv[4] ?? 40);
 
 const SCENARIOS: Record<string, Step[]> = {
+  /** A Plif-styled prompt at rest must settle instead of repainting forever. */
+  'idle-plif': [{ wait: 900 }],
+
+  /** A live tool row with the Chromatic Reactor working treatment. */
+  'working-plif': [
+    { wait: 200 },
+    {
+      emit: [
+        'agent.tool',
+        {
+          id: 'preview-working',
+          name: 'run_command',
+          input: { command: 'npm test' },
+          phase: 'start',
+        },
+      ],
+    },
+    { wait: 600 },
+    { capture: 'working-plif' },
+  ],
+
+  /** An active reasoning row, without a model call. */
+  'thinking-plif': [
+    { wait: 200 },
+    { emit: ['agent.thinking', { phase: 'start' }] },
+    { emit: ['agent.reasoning', { delta: 'Tracing the active theme and the shared animation clock.' }] },
+    { wait: 600 },
+    { capture: 'thinking-plif' },
+  ],
+
+  /** A compaction stage, without invoking a provider. */
+  'compact-plif': [
+    { wait: 200 },
+    {
+      emit: [
+        'agent.compacting',
+        { stage: 'summarising older turns', step: 2, steps: 4, before: 142_000, target: 84_000 },
+      ],
+    },
+    { wait: 600 },
+    { capture: 'compact-plif' },
+  ],
+
   /** Start a container, run something, approve it. The everyday screen. */
   default: [
     { wait: 150 },
@@ -721,12 +764,17 @@ const app = render(React.createElement(App, {
     // exactly the configuration most people run.
     provider: previewProvider,
     capabilityCache,
-    providerProblem: previewProblem,
+    // Plif visual scenarios are event-only; the model picker would obscure
+    // the surface being previewed when this machine has no provider config.
+    providerProblem: scenarioName.endsWith('-plif') ? null : previewProblem,
     tools: (await import('@plif/core')).DEFAULT_TOOLS,
     skillCatalogue: '',
     mcpCatalogue: '',
     skills: [],
     mcpStatuses: [],
+    ...(['idle-plif', 'working-plif', 'thinking-plif', 'compact-plif'].includes(scenarioName)
+      ? { effort: 'plif' as const }
+      : {}),
     initialThemeId: themeCatalogue.themes[0]?.id,
     themeCatalogue,
   }), {

@@ -5,7 +5,13 @@ import { describe, it } from 'node:test';
 import { render } from 'ink';
 import React from 'react';
 
-import { HEADER_INFINITY, Header } from '../src/components/Header.js';
+import { Header, headerHeight } from '../src/components/Header.js';
+import {
+  PNG_HEADER_ART_HEIGHT,
+  PNG_HEADER_ART_PIXEL_HEIGHT,
+  PNG_HEADER_ART_WIDTH,
+  pngHeaderCells,
+} from '../src/components/PngHeaderArt.js';
 
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
@@ -22,6 +28,24 @@ class CaptureStdout extends EventEmitter {
 }
 
 describe('CLI header', () => {
+  it('rasterizes the supplied transparent PNG into stable terminal cells', () => {
+    const cells = pngHeaderCells('#191b20');
+    assert.equal(PNG_HEADER_ART_WIDTH, 22);
+    assert.equal(PNG_HEADER_ART_PIXEL_HEIGHT, 19);
+    assert.equal(PNG_HEADER_ART_HEIGHT, 10);
+    assert.equal(cells.length, PNG_HEADER_ART_HEIGHT);
+    assert.ok(cells.every((row) => row.length === PNG_HEADER_ART_WIDTH));
+    assert.ok(cells.some((row) => row.some((cell) => cell.foreground !== '#191b20')));
+    assert.ok(cells.some((row) => row.some((cell) => cell.glyph === '▀')));
+    assert.ok(cells.some((row) => row.some((cell) => cell.glyph === ' ' && cell.background === undefined)));
+    assert.ok(cells.some((row) => row.some((cell) => cell.glyph === '▄')));
+  });
+
+  it('reports its real footprint so the input frame stays in the viewport', () => {
+    assert.equal(headerHeight(96), 19);
+    assert.equal(headerHeight(60), 8);
+  });
+
   it('keeps the Plif mark, workspace, model, and operating cues in a stable order', async () => {
     const stdout = new CaptureStdout();
     const app = render(
@@ -39,9 +63,7 @@ describe('CLI header', () => {
 
     const lines = stdout.output.replace(ANSI, '').replace(/\r/g, '').split('\n').filter(Boolean);
     const output = lines.join('\n');
-    for (const line of HEADER_INFINITY.split('\n')) assert.match(output, new RegExp(line.trim().replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')));
     assert.match(output, /PLIF/);
-    assert.ok(output.indexOf(HEADER_INFINITY.split('\n')[0]!.trim()) < output.indexOf('PLIF'));
     assert.match(output, /Code workspace/);
     assert.match(output, /claude-opus-5/);
     assert.match(output, /Ready to work/);

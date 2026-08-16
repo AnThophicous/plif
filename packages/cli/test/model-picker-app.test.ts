@@ -6,11 +6,15 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
 
-import { DEFAULT_TOOLS, Engine, saveStoredConfig } from '@plif/core';
+import {
+  DEFAULT_TOOLS,
+  Engine,
+  saveStoredConfig,
+} from '@plif/core';
 import { render } from 'ink';
 import React from 'react';
 
-import { App } from '../src/app.js';
+import { App, needsCredentialPrompt } from '../src/app.js';
 import { MINIMAL_THEME } from '../src/themes.js';
 
 class CaptureOutput extends EventEmitter {
@@ -50,8 +54,18 @@ class TypedInput extends Readable {
   }
 }
 
+async function waitFor(check: () => boolean | Promise<boolean>, message: string, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await check())) {
+    if (Date.now() >= deadline) throw new Error(message);
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 test('/model can request a missing provider key from the mounted app', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-model-picker-'));
+  const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
+  process.env['PLIF_CONFIG_PATH'] = path.join(root, 'config.toml');
   const engine = new Engine({ root });
   const report = await engine.start();
   await saveStoredConfig(engine.paths, {
@@ -95,16 +109,30 @@ test('/model can request a missing provider key from the mounted app', async () 
   );
 
   try {
-    await new Promise<void>((resolve) => setTimeout(resolve, 30));
+    // Ink can take longer than one scheduler tick to attach input while the
+    // full suite is starting hundreds of tests. Wait for the mounted prompt
+    // instead of sending keystrokes into a stream nobody is reading yet.
+    await waitFor(
+      () => stdout.output.includes('describe a task, or / for commands'),
+      `app prompt did not mount\n${stdout.output}`,
+    );
     await stdin.type('/model z-ai/glm-5.2\r');
     await Promise.race([
       askedPromise,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`model key prompt timed out\n${stdout.output}`)), 2_000)),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`model key prompt timed out\n${stdout.output}`)), 10_000)),
     ]);
     assert.match(asked, /API key required for z-ai\/glm-5\.2/);
   } finally {
     app.unmount();
     await engine.shutdown();
+    if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
+    else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
     await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
+});
+
+test('startup credential failures are treated as a modal gate', () => {
+  assert.equal(needsCredentialPrompt('API key required for z-ai/glm-5.2'), true);
+  assert.equal(needsCredentialPrompt('no model configured yet'), false);
+  assert.equal(needsCredentialPrompt(null), false);
 });

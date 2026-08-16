@@ -3,7 +3,7 @@ import { Box, Text } from 'ink';
 
 import { describeStats, diffStats, hunksOf, parseDiff } from '@plif/core';
 import type { DiffLine } from '@plif/core';
-import { color, diffStyle, glyph, truncate } from '../theme.js';
+import { color, diffStyle, glyph, syntaxColor, truncate } from '../theme.js';
 import { highlight, languageOf } from '../highlight.js';
 
 interface DiffProps {
@@ -78,7 +78,7 @@ export function Diff({ diff, width, path, expand = false }: DiffProps): React.Re
         <Box>
           <Text color={color('ghost')}>{'  ' + glyph.rail + ' '}</Text>
           <Text color={color('ghost')} italic>
-            … {hidden} more diff {hidden === 1 ? 'line' : 'lines'} — Ctrl+T to expand
+            … {hidden} more diff {hidden === 1 ? 'line' : 'lines'} — Ctrl+E to expand
           </Text>
         </Box>
       )}
@@ -129,7 +129,7 @@ function DiffRow({
       </Text>
       <Text {...(background ? { backgroundColor: background } : {})}>
         {highlight(text, language).map((token, index) => (
-          <Text key={index} color={color(token.tone)} {...(background ? { backgroundColor: background } : {})}>
+          <Text key={index} color={syntaxColor(token.kind)} {...(background ? { backgroundColor: background } : {})}>
             {token.text}
           </Text>
         ))}

@@ -237,13 +237,17 @@ export class ReasoningDeltaNormalizer {
     } else if (
       observation.semantics === 'unknown' &&
       previousRaw &&
-      incoming.length > previousRaw.length &&
-      incoming.startsWith(previousRaw)
+      (incoming === previousRaw || (
+        incoming.length > previousRaw.length &&
+        incoming.startsWith(previousRaw)
+      ))
     ) {
-      // Equality remains a delta. It is a common token-stream shape and there
-      // is no information on the wire that can distinguish it from a repeated
-      // snapshot. Only a strict extension is safe to infer as cumulative.
-      emitted = incoming.slice(previousRaw.length);
+      // An unchanged side-channel value is a replayed snapshot/no-op, not new
+      // reasoning. Treating it as a delta turns one token such as "Asp" into
+      // an unbounded `AspAspAsp...` stream when a gateway repeats a snapshot
+      // while waiting for the next token. A strict extension is still reduced
+      // to its new suffix for cumulative snapshots.
+      emitted = incoming === previousRaw ? '' : incoming.slice(previousRaw.length);
     }
 
     this.#value += emitted;

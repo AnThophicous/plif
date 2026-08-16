@@ -18,6 +18,7 @@ export type TranscriptViewportAction =
   | ({ readonly type: 'page'; readonly delta: -1 | 1 } & ViewportMetrics)
   | ({ readonly type: 'home' } & ViewportMetrics)
   | ({ readonly type: 'end' } & ViewportMetrics)
+  | ({ readonly type: 'to'; readonly offset: number } & ViewportMetrics)
   | ({ readonly type: 'content' } & ViewportMetrics)
   | ({ readonly type: 'resize' } & ViewportMetrics);
 
@@ -52,6 +53,10 @@ export function viewportReducer(
     case 'page': {
       const page = Math.max(1, action.height - 2);
       const offset = clamp(state.offset + action.delta * page, action);
+      return { ...state, open: true, offset, follow: offset === end };
+    }
+    case 'to': {
+      const offset = clamp(action.offset, action);
       return { ...state, open: true, offset, follow: offset === end };
     }
     case 'home':

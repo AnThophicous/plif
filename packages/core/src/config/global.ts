@@ -63,6 +63,8 @@ export interface GlobalConfig {
   readonly baseURL?: string;
   readonly preset?: string;
   readonly apiKey?: string;
+  /** Legacy per-provider credentials; new CLI writes use CredentialBroker. */
+  readonly providerKeys?: Readonly<Record<string, string>>;
   readonly needKey?: boolean;
   readonly NeedKey?: boolean;
   readonly temperature?: number;
@@ -87,9 +89,9 @@ export function profilesOf(config: GlobalConfig): Record<string, ProfileConfig> 
 }
 
 export const CONFIG_SCHEMA_URL =
-  'https://raw.githubusercontent.com/AnThophicous/plif/main/packages/core/schema/config.schema.json';
+  'https://raw.githubusercontent.com/AnThophicous/plif/main/packages/core/schema/config.schema.toml';
 
-const CONFIG_SCHEMA_FILE = new URL('../../schema/config.schema.json', import.meta.url);
+const CONFIG_SCHEMA_FILE = new URL('../../schema/config.schema.toml', import.meta.url);
 
 /**
  * MCP servers, from whichever key the file uses.
@@ -117,8 +119,12 @@ export function agentsOf(config: GlobalConfig): Record<string, AgentConfig> {
   return agents;
 }
 
-export function globalConfigPath(home = os.homedir()): string {
-  return path.join(home, '.plif', 'config.toml');
+export function globalConfigPath(home?: string): string {
+  if (home === undefined) {
+    const override = process.env['PLIF_CONFIG_PATH']?.trim();
+    if (override) return path.resolve(override);
+  }
+  return path.join(home ?? os.homedir(), '.plif', 'config.toml');
 }
 
 export function legacyGlobalConfigPath(home = os.homedir()): string {
@@ -128,6 +134,18 @@ export function legacyGlobalConfigPath(home = os.homedir()): string {
 /** JSON used by early Plif builds before personal configuration became TOML. */
 export function legacyPlifConfigPath(home = os.homedir()): string {
   return path.join(home, '.plif', 'config.json');
+}
+
+/** A legacy source parked until its credentials are durably in DPAPI. */
+export function pendingLegacyGlobalConfigPath(legacy: string): string {
+  return `${legacy}.pending-dpapi`;
+}
+
+/** Delete only legacy files that were already copied to canonical TOML. */
+export async function removePendingLegacyGlobalConfigs(home = os.homedir()): Promise<void> {
+  for (const legacy of [legacyGlobalConfigPath(home), legacyPlifConfigPath(home)]) {
+    await fs.rm(pendingLegacyGlobalConfigPath(legacy), { force: true });
+  }
 }
 
 export async function loadGlobalConfig(file = globalConfigPath()): Promise<GlobalConfig> {
@@ -141,6 +159,9 @@ export async function loadGlobalConfig(file = globalConfigPath()): Promise<Globa
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       if (path.resolve(file) !== path.resolve(globalConfigPath())) return {};
+      // An explicit path is normally used to isolate tests or automation. Do
+      // not pull a legacy file out of the real home directory into it.
+      if (process.env['PLIF_CONFIG_PATH']?.trim()) return {};
       return await migrateFirstLegacyGlobalConfig();
     }
     if (PlifError.is(error)) throw error;
@@ -155,19 +176,120 @@ export async function loadGlobalConfig(file = globalConfigPath()): Promise<Globa
 export async function saveGlobalConfig(
   config: GlobalConfig,
   file = globalConfigPath(),
+  options: { readonly preserveProviderKeys?: boolean } = {},
 ): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });
+  // Canonical writes never put model credentials back into config.toml. The
+  // only exception is the one-time JSON/JSONC import below: it must preserve
+  // the source long enough for startup to move every value into the encrypted
+  // credential store. Ordinary callers cannot accidentally re-emit a secret
+  // merely because they loaded a stale snapshot before changing another field.
+  let nextConfig = withoutPlaintextModelCredentials(config);
+  if (options.preserveProviderKeys === true) {
+    let current: GlobalConfig = {};
+    try {
+      await fs.access(file);
+      current = await loadGlobalConfig(file);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    nextConfig = mergeLegacyModelCredentials(current, config);
+  }
   const temporary = `${file}.${process.pid}.tmp`;
-  const withSchema = config.$schema ? config : { $schema: CONFIG_SCHEMA_URL, ...config };
+  const withSchema = { ...nextConfig, $schema: CONFIG_SCHEMA_URL };
   // The canonical personal file is TOML. Keep an explicitly supplied legacy
   // .jsonc path round-trippable for marketplace imports and older callers;
   // production calls use ~/.plif/config.toml and never write JSON again.
   const serialized = path.extname(file).toLowerCase() === '.jsonc'
     ? JSON.stringify(withSchema, null, 2)
-    : stringifyToml(withSchema as Record<string, unknown>) + '\n';
+    : formatConfigToml(withSchema);
   await fs.writeFile(temporary, serialized, 'utf8');
   await fs.rename(temporary, file);
   await fs.chmod(file, 0o600).catch(() => undefined);
+}
+
+/** Remove every legacy location that can carry a model API key. */
+function withoutPlaintextModelCredentials(config: GlobalConfig): GlobalConfig {
+  const next: Record<string, unknown> = { ...config };
+  delete next['apiKey'];
+  delete next['providerKeys'];
+
+  for (const field of ['providers', 'provider'] as const) {
+    const providers = config[field];
+    if (!providers || typeof providers !== 'object' || Array.isArray(providers)) continue;
+    next[field] = Object.fromEntries(Object.entries(providers).map(([id, value]) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return [id, value];
+      const entry = value as Record<string, unknown>;
+      const options = entry['options'];
+      if (!options || typeof options !== 'object' || Array.isArray(options)) return [id, value];
+      const cleanOptions: Record<string, unknown> = { ...options as Record<string, unknown> };
+      delete cleanOptions['apiKey'];
+      return [id, { ...entry, options: cleanOptions }];
+    }));
+  }
+  return next as GlobalConfig;
+}
+
+/**
+ * Preserve legacy credentials only for an explicit import operation.
+ *
+ * Merging protects a credential already present in the destination when a
+ * legacy caller writes a stale snapshot. This path is intentionally opt-in;
+ * production mutations use the encrypted broker and the sanitizer above.
+ */
+function mergeLegacyModelCredentials(current: GlobalConfig, incoming: GlobalConfig): GlobalConfig {
+  const next: Record<string, unknown> = { ...incoming };
+  const currentKeys = asCredentialRecord(current.providerKeys);
+  const incomingKeys = asCredentialRecord(incoming.providerKeys);
+  const providerKeys = { ...currentKeys, ...incomingKeys };
+  if (Object.keys(providerKeys).length > 0) next['providerKeys'] = providerKeys;
+  if (typeof incoming.apiKey !== 'string' && typeof current.apiKey === 'string') {
+    next['apiKey'] = current.apiKey;
+  }
+
+  for (const field of ['providers', 'provider'] as const) {
+    const currentProviders = asObjectRecord(current[field]);
+    const incomingProviders = asObjectRecord(incoming[field]);
+    if (Object.keys(currentProviders).length === 0 && Object.keys(incomingProviders).length === 0) continue;
+    const providers: Record<string, unknown> = { ...incomingProviders };
+    for (const [id, currentValue] of Object.entries(currentProviders)) {
+      const incomingValue = incomingProviders[id];
+      if (!incomingValue || typeof incomingValue !== 'object' || Array.isArray(incomingValue)) {
+        if (!(id in providers)) providers[id] = currentValue;
+        continue;
+      }
+      if (!currentValue || typeof currentValue !== 'object' || Array.isArray(currentValue)) continue;
+      const currentEntry = currentValue as Record<string, unknown>;
+      const incomingEntry = incomingValue as Record<string, unknown>;
+      const currentOptions = asObjectRecord(currentEntry['options']);
+      const incomingOptions = asObjectRecord(incomingEntry['options']);
+      if (typeof incomingOptions['apiKey'] !== 'string' && typeof currentOptions['apiKey'] === 'string') {
+        providers[id] = {
+          ...incomingEntry,
+          options: { ...incomingOptions, apiKey: currentOptions['apiKey'] },
+        };
+      }
+    }
+    next[field] = providers;
+  }
+  return next as GlobalConfig;
+}
+
+function asCredentialRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(([, credential]) => typeof credential === 'string' && credential.trim()),
+  ) as Record<string, string>;
+}
+
+function asObjectRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+/** Render configuration in the same format as the canonical config.toml. */
+export function formatConfigToml(config: GlobalConfig): string {
+  return stringifyToml(config as Record<string, unknown>) + '\n';
 }
 
 export async function configSchemaText(): Promise<string> {
@@ -185,7 +307,13 @@ export async function migrateLegacyGlobalConfig(
       throw new Error('root must be an object');
     }
     const config = parsed as GlobalConfig;
-    await saveGlobalConfig(config, target);
+    const pending = legacy.endsWith('.pending-dpapi')
+      ? legacy
+      : pendingLegacyGlobalConfigPath(legacy);
+    if (pending !== legacy) await fs.rename(legacy, pending);
+    // Keep credentials only during the format migration. Interactive startup
+    // immediately moves them into the encrypted broker and rewrites clean TOML.
+    await saveGlobalConfig(config, target, { preserveProviderKeys: true });
     return config;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
@@ -199,7 +327,9 @@ export async function migrateLegacyGlobalConfig(
 
 async function migrateFirstLegacyGlobalConfig(): Promise<GlobalConfig> {
   const target = globalConfigPath();
-  for (const legacy of [legacyGlobalConfigPath(), legacyPlifConfigPath()]) {
+  const legacySources = [legacyGlobalConfigPath(), legacyPlifConfigPath()]
+    .flatMap((legacy) => [legacy, pendingLegacyGlobalConfigPath(legacy)]);
+  for (const legacy of legacySources) {
     try {
       await fs.access(legacy);
       return await migrateLegacyGlobalConfig(target, legacy);

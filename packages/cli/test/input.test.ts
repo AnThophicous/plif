@@ -11,16 +11,28 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { isTerminalPaste, pastedContentToken, sanitizePastedText, splitPaste, tokenize } from '../src/format.js';
+import {
+  PASTE_ATTACHMENT_MIN_CHARS,
+  imagePathsInPaste,
+  isTerminalPaste,
+  pastedContentToken,
+  sanitizePastedText,
+  shouldAttachPastedText,
+  splitPaste,
+  tokenize,
+} from '../src/format.js';
 import { IDLE_PASTE, hasPasteMarker, readPasteChunk } from '../src/paste.js';
 import { commandPrefix, matchCommands, findCommand, COMMANDS } from '../src/commands.js';
 import type { CatalogPickerRequest, CommandContext } from '../src/commands.js';
 import {
   ALL_SUFFIX,
   PICKER_GROUP_PAGE,
+  effortLabel,
+  effortPickerItems,
   filterPickerGroups,
   flattenPickerGroups,
   pickerRows,
+  pickerSelectionForCurrentModel,
   preservePickerSelection,
 } from '../src/components/Picker.js';
 import type { PickerGroup } from '../src/components/Picker.js';
@@ -87,7 +99,73 @@ describe('splitPaste', () => {
   it('keeps complete pasted text available for an attachment', () => {
     assert.equal(sanitizePastedText('one\r\ntwo\u001b[31m'), 'one\ntwo[31m');
     assert.equal(pastedContentToken(1, 'one\ntwo'), '[Pasted Content #1 - 2 Lines]');
-    assert.equal(pastedContentToken(2), '[Pasted Content #2 - 0 Lines]');
+    assert.equal(pastedContentToken(2), '[Pasted Image #2]');
+  });
+});
+
+describe('when a paste becomes an attachment', () => {
+  it('leaves anything shorter than the threshold as ordinary typing', () => {
+    assert.equal(shouldAttachPastedText(''), false);
+    assert.equal(shouldAttachPastedText('a stack trace line'), false);
+    assert.equal(shouldAttachPastedText('x'.repeat(PASTE_ATTACHMENT_MIN_CHARS - 1)), false);
+  });
+
+  it('attaches once the paste reaches the threshold', () => {
+    assert.equal(shouldAttachPastedText('x'.repeat(PASTE_ATTACHMENT_MIN_CHARS)), true);
+    assert.equal(shouldAttachPastedText('x'.repeat(PASTE_ATTACHMENT_MIN_CHARS + 1)), true);
+  });
+
+  it('measures characters, not lines, so a short multi-line paste stays inline', () => {
+    assert.equal(PASTE_ATTACHMENT_MIN_CHARS, 500);
+    assert.equal(shouldAttachPastedText('one\ntwo\nthree\nfour'), false);
+    assert.equal(shouldAttachPastedText(Array.from({ length: 60 }, () => 'line').join('\n')), false);
+  });
+});
+
+describe('image files arriving as pasted text', () => {
+  it('recognises a Windows path to an image', () => {
+    assert.deepEqual(
+      imagePathsInPaste('C:\\Users\\dev\\Pictures\\erro.png'),
+      ['C:\\Users\\dev\\Pictures\\erro.png'],
+    );
+  });
+
+  it('unwraps the quotes Explorer puts around a copied path', () => {
+    assert.deepEqual(
+      imagePathsInPaste('"C:\\Users\\dev\\Pictures\\meu print.PNG"'),
+      ['C:\\Users\\dev\\Pictures\\meu print.PNG'],
+    );
+  });
+
+  it('takes several images pasted as one block', () => {
+    assert.deepEqual(
+      imagePathsInPaste('C:\\a\\one.png\nC:\\a\\two.jpeg'),
+      ['C:\\a\\one.png', 'C:\\a\\two.jpeg'],
+    );
+  });
+
+  it('decodes a file:// URI back into a path', () => {
+    assert.deepEqual(
+      imagePathsInPaste('file:///C:/Users/dev/Pictures/erro%20novo.png'),
+      ['C:\\Users\\dev\\Pictures\\erro novo.png'],
+    );
+  });
+
+  it('accepts posix paths too', () => {
+    assert.deepEqual(imagePathsInPaste('/home/dev/shot.webp'), ['/home/dev/shot.webp']);
+    assert.deepEqual(imagePathsInPaste('./docs/diagram.gif'), ['./docs/diagram.gif']);
+  });
+
+  it('refuses anything that is not entirely image paths', () => {
+    assert.deepEqual(imagePathsInPaste('olha esse erro aqui'), []);
+    assert.deepEqual(imagePathsInPaste('C:\\Users\\dev\\notes.txt'), []);
+    assert.deepEqual(imagePathsInPaste('C:\\a\\one.png\nand also this text'), []);
+    assert.deepEqual(imagePathsInPaste('png'), []);
+    assert.deepEqual(imagePathsInPaste(''), []);
+  });
+
+  it('does not mistake a sentence mentioning a png for a path', () => {
+    assert.deepEqual(imagePathsInPaste('salvei em erro.png'), []);
   });
 });
 
@@ -290,6 +368,42 @@ describe('model catalog picker', () => {
     assert.equal(after[preservePickerSelection(before, selected, after)]?.id, 'openai:gpt-4o-mini');
   });
 
+  it('starts on the active model row instead of its provider header', () => {
+    const activeGroups: readonly PickerGroup[] = [
+      groups[0]!,
+      {
+        ...groups[1]!,
+        items: [{ ...groups[1]!.items[0]!, current: true }, ...groups[1]!.items.slice(1)],
+      },
+    ];
+    const expanded = ['openai'];
+    const rows = pickerRows(activeGroups, expanded);
+    const selected = pickerSelectionForCurrentModel(activeGroups, expanded, 'openai');
+
+    assert.equal(rows[selected]?.id, 'openai:gpt-4o-mini');
+    assert.equal(selected, 2);
+  });
+
+  it('keeps a crowded catalog bounded when the active model is outside its first page', () => {
+    const crowded: readonly PickerGroup[] = [
+      {
+        id: 'openrouter',
+        label: 'OpenRouter',
+        items: Array.from({ length: 25 }, (_, index) => ({
+          value: `model-${index}`,
+          label: `Model ${index}`,
+          current: index === 24,
+        })),
+      },
+    ];
+    const expanded = ['openrouter'];
+    const rows = pickerRows(crowded, expanded);
+    const selected = pickerSelectionForCurrentModel(crowded, expanded, 'openrouter');
+
+    assert.equal(rows[selected]?.id, 'openrouter');
+    assert.equal(rows.filter((row) => row.kind === 'item').length, PICKER_GROUP_PAGE);
+  });
+
   it('forgets the long tail when a provider is collapsed', () => {
     const opened = sessionReducer(initialSession, {
       type: 'picker.open',
@@ -349,17 +463,70 @@ describe('model catalog picker', () => {
     // suggest one.
     assert.deepEqual(picker?.expanded, []);
     assert.equal(picker?.selected, 0);
+    assert.match(picker?.hint ?? '', /\[vision\].*\[vision helper\]/);
 
     // The developer's own providers, if they have any, sort ahead of the
     // built-in ones and carry a different heading. This machine may have none,
     // so the assertion is on the ordering rule rather than on a count.
     const sections = picker!.groups.map((group) => group.section);
-    const firstBuiltin = sections.indexOf('built into plif');
+    const firstBuiltin = sections.indexOf('built into PLIF');
     assert.ok(firstBuiltin >= 0);
     assert.ok(sections.slice(0, firstBuiltin).every((s) => s === 'your providers'));
-    assert.ok(sections.slice(firstBuiltin).every((s) => s === 'built into plif'));
+    assert.ok(sections.slice(firstBuiltin).every((s) => s === 'built into PLIF'));
 
     const anthropic = picker!.groups.find((group) => group.id === 'anthropic');
     assert.equal(anthropic?.items[0]?.value, 'claude-opus-5');
+  });
+
+  it('labels the internal adaptive effort as PLIF and marks the active effort', () => {
+    assert.equal(effortLabel('plif'), 'PLIF');
+    assert.equal(effortLabel(undefined), 'Default');
+    assert.deepEqual(
+      effortPickerItems(['low', 'plif'], 'plif').map((item) => ({
+        value: item.value,
+        label: item.label,
+        current: item.current,
+      })),
+      [
+        { value: 'low', label: 'Low', current: false },
+        { value: 'plif', label: 'PLIF', current: true },
+      ],
+    );
+  });
+
+  it('clamps picker navigation instead of wrapping to the opposite edge', () => {
+    const opened = sessionReducer(initialSession, {
+      type: 'picker.open',
+      picker: {
+        title: 'select an effort',
+        items: [
+          { value: 'low', label: 'Low' },
+          { value: 'high', label: 'High' },
+        ],
+        onPick: () => undefined,
+      },
+    });
+    const top = sessionReducer(opened, { type: 'picker.move', delta: -1 });
+    assert.equal(top.picker?.selected, 0);
+    const bottom = sessionReducer(top, { type: 'picker.move', delta: 9 });
+    assert.equal(bottom.picker?.selected, 1);
+    const stillBottom = sessionReducer(bottom, { type: 'picker.move', delta: 1 });
+    assert.equal(stillBottom.picker?.selected, 1);
+  });
+
+  it('applies an effort and closes its picker in one state transition', () => {
+    const opened = sessionReducer(initialSession, {
+      type: 'picker.open',
+      picker: {
+        title: 'select an effort',
+        items: [{ value: 'max', label: 'Max' }, { value: 'plif', label: 'PLIF' }],
+        onPick: () => undefined,
+      },
+    });
+    const applied = sessionReducer(opened, { type: 'effort.apply', effort: 'plif' });
+
+    assert.equal(applied.effort, 'plif');
+    assert.equal(applied.picker, null);
+    assert.equal(sessionReducer(applied, { type: 'picker.close' }), applied);
   });
 });

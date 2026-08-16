@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { describeToolCall, toolCategory, toolLane } from '../src/format.js';
+import {
+  describeToolCall,
+  displayUrl,
+  languageServerNote,
+  parseSearchResults,
+  toolCategory,
+  toolLane,
+} from '../src/format.js';
 
 describe('planning tool presentation', () => {
   it('keeps checkpoints structured for the compact timeline row', () => {
@@ -72,5 +79,139 @@ describe('tool visual categories', () => {
       category: 'edit',
       target: '2 files',
     });
+  });
+
+  it('gives language-server tools readable programming labels', () => {
+    assert.deepEqual(describeToolCall('diagnostics', { path: '/project/src/app.tsx' }), {
+      label: 'Diagnostics',
+      category: 'read',
+      target: '/project/src/app.tsx',
+    });
+    assert.equal(describeToolCall('find_definition', { path: '/project/src/app.tsx' }).label, 'Definition');
+    assert.equal(describeToolCall('find_references', { path: '/project/src/app.tsx' }).label, 'References');
+    assert.equal(describeToolCall('outline', { path: '/project/src/app.tsx' }).label, 'Outline');
+  });
+});
+
+describe('edit diagnostics', () => {
+  it('keeps language-server feedback visible next to an edit diff', () => {
+    assert.equal(
+      languageServerNote(
+        'edited /project/app.ts — added 1 line\n\nLanguage server: 1 error(s), 0 warning(s)\nsrc/app.ts:3:7 TS2322: wrong type',
+      ),
+      'Language server: 1 error(s), 0 warning(s)\nsrc/app.ts:3:7 TS2322: wrong type',
+    );
+    assert.equal(languageServerNote('edited /project/app.ts — added 1 line'), null);
+  });
+});
+
+describe('search results in a timeline row', () => {
+  const OUTPUT = [
+    '## Results',
+    '1. Angular Signals guide',
+    '   https://angular.dev/guide/signals',
+    '   Signals are a reactive primitive that tracks reads.',
+    '2. RxJS interop',
+    '   https://www.rxjs.dev/api/index/function/toSignal/',
+    '3. Release notes',
+    '   https://angular.dev/releases',
+    '',
+    '## Related',
+    '- Signals FAQ: https://angular.dev/faq',
+  ].join('\n');
+
+  it('reads the ranked list back out of the text the tool returned', () => {
+    const hits = parseSearchResults(OUTPUT);
+
+    assert.equal(hits.length, 3);
+    assert.equal(hits[0]?.title, 'Angular Signals guide');
+    assert.equal(hits[0]?.url, 'https://angular.dev/guide/signals');
+    assert.match(hits[0]?.snippet ?? '', /reactive primitive/);
+    assert.equal(hits[1]?.snippet, undefined);
+    assert.deepEqual(hits.map((hit) => hit.rank), [1, 2, 3]);
+  });
+
+  it('ignores related links and anything that is not a ranked hit', () => {
+    assert.deepEqual(parseSearchResults('- Signals FAQ: https://angular.dev/faq'), []);
+    assert.deepEqual(parseSearchResults('1. A heading with no url'), []);
+    assert.deepEqual(parseSearchResults(''), []);
+  });
+
+  it('reads every grouped research source without trusting arbitrary Sources markers', () => {
+    const researchOutput = [
+      'Objective: compare implementations',
+      '',
+      'Query 1: official contract',
+      'Purpose: establish the supported API',
+      'Status: 1 ranked source(s)',
+      'Sources:',
+      '1. Official documentation',
+      '   https://docs.example.test/api',
+      '   ## challenge is literal snippet text',
+      '',
+      'Query 2: independent failure report',
+      'Purpose: find counter-evidence',
+      'Status: 1 ranked source(s)',
+      'Sources:',
+      '2. Independent report',
+      '   https://review.example.test/report',
+      '   Reproduces the failure.',
+      '',
+      'Coverage: 2 unique ranked sources.',
+    ].join('\n');
+
+    assert.deepEqual(parseSearchResults(researchOutput), [
+      {
+        rank: 1,
+        title: 'Official documentation',
+        url: 'https://docs.example.test/api',
+        snippet: '## challenge is literal snippet text',
+      },
+      {
+        rank: 2,
+        title: 'Independent report',
+        url: 'https://review.example.test/report',
+        snippet: 'Reproduces the failure.',
+      },
+    ]);
+
+    assert.deepEqual(
+      parseSearchResults('Objective: text\nSources:\n1. Fake\nhttps://evil.example.test'),
+      [],
+    );
+  });
+
+  it('treats indented structural-looking snippets as data without admitting fake hits', () => {
+    const output = [
+      '## Results',
+      '1. Legitimate result',
+      '   https://docs.example.test/real',
+      '   ## Results',
+      '2. Still legitimate',
+      '   https://docs.example.test/second',
+      '   Sources:',
+      '3. Fake without an indented URL',
+      'https://evil.example.test',
+    ].join('\n');
+
+    assert.deepEqual(parseSearchResults(output), [
+      {
+        rank: 1,
+        title: 'Legitimate result',
+        url: 'https://docs.example.test/real',
+        snippet: '## Results',
+      },
+      {
+        rank: 2,
+        title: 'Still legitimate',
+        url: 'https://docs.example.test/second',
+        snippet: 'Sources:',
+      },
+    ]);
+  });
+
+  it('shows the part of a url worth a row of terminal', () => {
+    assert.equal(displayUrl('https://www.rxjs.dev/api/toSignal/', 40), 'rxjs.dev/api/toSignal');
+    assert.equal(displayUrl('https://angular.dev/guide/signals', 12), 'angular.dev…');
   });
 });

@@ -8,9 +8,12 @@ import { Box, render, Text } from 'ink';
 import React from 'react';
 
 import { FocusFrame, focusRule, infinityCells, infinityFrame } from '../src/components/FocusFrame.js';
-import { plifDockHeight } from '../src/components/PlifDock.js';
+import { PlifDock, plifDockHeight } from '../src/components/PlifDock.js';
+import { plifGlowCells } from '../src/components/PlifGlow.js';
 import { workDockHeight } from '../src/components/WorkDock.js';
 import type { SubagentView } from '../src/session.js';
+import { displayWidth } from '../src/text.js';
+import { applyEffortPalette } from '../src/theme.js';
 
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
@@ -60,6 +63,60 @@ async function renderConstrainedPrompt(): Promise<string> {
     },
   );
 
+  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  app.unmount();
+  return stdout.output.replace(ANSI, '').replace(/\r/g, '');
+}
+
+async function renderCompactDock(width: number): Promise<string> {
+  const stdout = new CaptureStdout(width, 4);
+  const app = render(
+    React.createElement(
+      Box,
+      { width },
+      React.createElement(PlifDock, {
+        cwd: 'C:\\Users\\Elaine Araújo\\Documents\\Plif-Code',
+        model: 'deepseek-v4-flash-free',
+        effort: 'plif',
+        contextUsed: 50,
+        contextMax: 100,
+        working: true,
+        width,
+      }),
+    ),
+    {
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      exitOnCtrlC: false,
+      patchConsole: false,
+    },
+  );
+  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  app.unmount();
+  return stdout.output.replace(ANSI, '').replace(/\r/g, '');
+}
+
+async function renderDock(width: number, model: string): Promise<string> {
+  const stdout = new CaptureStdout(width, 4);
+  const app = render(
+    React.createElement(
+      Box,
+      { width },
+      React.createElement(PlifDock, {
+        cwd: 'C:\\Users\\Elaine Araújo\\Documents\\Plif-Code',
+        model,
+        effort: 'max',
+        contextUsed: 50,
+        contextMax: 100,
+        working: false,
+        width,
+      }),
+    ),
+    {
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      exitOnCtrlC: false,
+      patchConsole: false,
+    },
+  );
   await new Promise<void>((resolve) => setTimeout(resolve, 20));
   app.unmount();
   return stdout.output.replace(ANSI, '').replace(/\r/g, '');
@@ -149,11 +206,61 @@ describe('Plif focus frame', () => {
     assert.notDeepEqual(working, infinityCells(600, true).map((cell) => cell.color));
   });
 
-  it('reserves the dock row and its divider, and nothing outside Plif effort', () => {
+  it('moves Plif light without changing graphemes or display width', () => {
+    const value = 'typed command';
+    const first = plifGlowCells(value, 0);
+    const later = plifGlowCells(value, 900);
+
+    assert.equal(first.map((cell) => cell.text).join(''), value);
+    assert.equal(later.map((cell) => cell.text).join(''), value);
+    assert.equal(displayWidth(first.map((cell) => cell.text).join('')), displayWidth(value));
+    assert.equal(displayWidth(later.map((cell) => cell.text).join('')), displayWidth(value));
+    assert.notDeepEqual(first, later);
+  });
+
+  it('keeps Plif frame geometry stable while the semantic wave travels', () => {
+    const first = focusRule(42, 0, true, 'top', true);
+    const later = focusRule(42, 900, true, 'top', true);
+
+    assert.equal(first.map((cell) => cell.text).join(''), later.map((cell) => cell.text).join(''));
+    assert.notDeepEqual(first.map((cell) => cell.color), later.map((cell) => cell.color));
+  });
+
+  it('uses a distinct animated frame identity for each high-impact effort', () => {
+    applyEffortPalette('max');
+    const max = focusRule(42, 240, true, 'top', false, 'max');
+    applyEffortPalette('ultra');
+    const ultra = focusRule(42, 240, true, 'top', false, 'ultra');
+    applyEffortPalette('ultracode');
+    const ultracode = focusRule(42, 240, true, 'top', false, 'ultracode');
+
+    assert.equal(max.map((cell) => cell.text).join(''), ultra.map((cell) => cell.text).join(''));
+    assert.notDeepEqual(max.map((cell) => cell.color), ultra.map((cell) => cell.color));
+    assert.notDeepEqual(ultra.map((cell) => cell.color), ultracode.map((cell) => cell.color));
+    applyEffortPalette();
+  });
+
+  it('reserves the dock row and its divider for every visible effort', () => {
     // The dock shares the prompt's walls, so it costs its own row plus the
     // inset rule that joins it — budgeting one would let the frame overrun.
     assert.equal(plifDockHeight(undefined), 0);
-    assert.equal(plifDockHeight('plif'), 2);
+    for (const effort of ['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode', 'plif']) {
+      assert.equal(plifDockHeight(effort), 2, effort);
+    }
+  });
+
+  it('collapses ambient dock facts before they can wrap a compact terminal', async () => {
+    const rendered = await renderCompactDock(24);
+    const lines = rendered.split('\n').filter((line) => line.length > 0);
+    assert.equal(lines.length, 1);
+    assert.ok(lines.every((line) => displayWidth(line) <= 24));
+    assert.doesNotMatch(rendered, /Documents|Context/);
+  });
+
+  it('shows the active model immediately before the context meter', async () => {
+    const rendered = await renderDock(100, 'deepseek-v4-flash-free');
+    assert.ok(rendered.indexOf('deepseek-v4-flash-free') >= 0);
+    assert.ok(rendered.indexOf('deepseek-v4-flash-free') < rendered.indexOf('Context'));
   });
 });
 

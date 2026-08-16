@@ -1,8 +1,8 @@
 <div align="center">
 
-**Plif 0.3.1 — the stable, adaptive coding agent for your terminal.**
+**Plif 0.3.0 — the stable, adaptive coding agent for your terminal.**
 
-Bring your own model. Configure the provider yourself. Plif 0.3.1 is built for
+Bring your own model. Configure the provider yourself. Plif 0.3.0 is built for
 long coding sessions with durable memory, better adaptation to the user, a
 calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 
@@ -309,6 +309,139 @@ symlink resolution**, because a junction inside the jail can point outside it.
 A regression there is a sandbox escape, not a bug.
 
 ---
+
+## Models and vision
+
+The active model and its capabilities live in `~/.plif/config.toml`. Plif does
+not guess image support from a model name: a model is marked `[vision]` only
+when its provider entry explicitly includes `"image"` in `modalities`.
+
+An image-capable primary model receives pasted images directly. A text-only
+primary can still work with screenshots and diagrams through `inspect_image`:
+Plif sends the image and a focused question to a configured vision helper, then
+returns that helper's textual observations to the primary model. The picker
+marks that path as `[vision helper]`; the image endpoint and cost are disclosed
+before first use.
+
+```toml
+model = "custom/text-primary"
+visionModel = "custom/vision-helper"
+
+[provider.custom]
+name = "My OpenAI-compatible endpoint"
+sdk = "openai"
+
+[provider.custom.options]
+baseURL = "https://models.example.com/v1"
+needKey = true
+
+[provider.custom.models.text-primary]
+name = "Text primary"
+modalities = ["text"]
+
+[provider.custom.models.vision-helper]
+name = "Vision helper"
+modalities = ["text", "image"]
+cost = "paid"
+```
+
+Set `model` to `custom/vision-helper` when you want direct vision instead. Keep
+the text model as primary when it is better for coding or cheaper; `visionModel`
+then gives it eyes only for the turns that need them. Plif still reads legacy
+JSONC during migration, but saves current configuration and exposes its
+configuration reference as TOML at `packages/core/schema/config.schema.toml`;
+the former JSON schema is no longer shipped.
+
+API keys do not belong in canonical `config.toml`. On Windows, Plif migrates
+legacy `apiKey`, `providerKeys`, and provider-option keys into its DPAPI-backed
+credential store before removing the plaintext fields. A provider-specific
+environment variable remains the non-persistent override; the model picker can
+collect and save a missing key without putting it in the transcript.
+
+For isolated automation, `PLIF_CONFIG_PATH` can point at a different TOML file;
+ordinary sessions continue to use `~/.plif/config.toml`.
+
+## Research and Plif effort
+
+The web tools have separate contracts:
+
+| Tool | Use it for | Result |
+| --- | --- | --- |
+| `web_search` | One narrow query | Ranked discovery leads and snippets |
+| `research` | A decision with several claims or search angles | A parallel, grouped, deduplicated discovery map with coverage status |
+| `web_fetch` | Reading one selected source | Markdown with the source URL and an exact character range |
+
+`research` accepts one objective and one to six `{ query, purpose }` entries.
+The queries run concurrently but remain in the requested order. Blocked search
+groups stay distinct from queries that genuinely returned no ranked results.
+Snippets are leads, not evidence; the agent opens selected sources with
+`web_fetch` before using them in a factual answer.
+
+`web_fetch` accepts `focus`, `offset`, and `max_chars`. `focus` centres the
+returned window on a term when present; `offset` pages through the reader text.
+The result identifies the requested URL and character range, and the reader
+stops after a bounded response instead of loading an unlimited page. The Jina
+reader sees the requested URL, so Plif rejects credentials embedded in a URL
+or credential-shaped query parameters. It also refuses local, private, reserved,
+and metadata targets, strips fragments, and does not follow reader redirects.
+The research prompt forbids sending private content through the reader.
+
+Tool arguments are structured JSON objects on the model protocol. User
+configuration is TOML. To enable the engineering workflow persistently:
+
+```toml
+effort = "plif"
+```
+
+You can also select it for the current setup with `/effort plif`. For an
+OpenAI-compatible endpoint, Plif starts at the strongest wire effort and
+negotiates downward only when the endpoint explicitly rejects that level;
+Anthropic receives `max`. For an authorized code change, this effort requires
+repository reconnaissance, a design and risk review, and a durable plan at
+`.plif/plans/YYYY-MM-DD-<objective>.md` before implementation files change. It
+also persists the visible checkpoint mirror at `.plif/plans/current.md`, assigns
+independent work to bounded subagents, tests each checkpoint, reviews the
+integrated diff, and runs an evaluator-correction loop before handoff.
+
+## Language intelligence and code colour
+
+Plif bundles language servers for TypeScript/JavaScript, JSON/JSONC, HTML, CSS,
+SCSS, and Less. It also discovers project or `PATH` installations for Python,
+TOML, Rust, Go, C/C++, Bash, and PowerShell. File edits request fresh diagnostics
+from the responsible server; diagnostics from an older document version are
+discarded, and changing workspaces shuts the previous manager down before a new
+one starts. Windows `.cmd` and `.bat` server shims are launched through a quoted
+`cmd.exe` invocation instead of relying on Node's unstable direct shim spawning.
+
+Diffs and code shown while the agent works are syntax-coloured with semantic
+roles from the active theme. The highlighter preserves the exact source text and
+display width, so colour feedback cannot alter code or destabilize the terminal
+layout.
+
+The prompt modules that define tool calls, research, subagent coordination, and
+the Plif workflow live under
+`packages/core/src/agenting/instructions/20-runtime/`. They load only in the
+modes and tool environments that can execute them. Contexts below 32k select
+compact safety/workflow layers so the instructions do not consume the model's
+entire working window; larger models receive the complete tutorials.
+
+During active Plif work, the frame, input, thinking marker, dock, and context
+meter use colour waves derived from the selected theme. Text, glyphs, wrapping,
+and geometry stay fixed between animation frames. An idle prompt does not run
+the animation clock; this keeps the Windows terminal stable instead of
+repainting a black frame at rest.
+
+Auto-compaction carries older chunks into one rolling continuity capsule. The
+capsule retains the durable plan path, current checkpoint, opened-source ledger,
+subagent status, failures, validation, and exact next action. A capsule that
+drops a detected plan path is rejected without deleting the raw history, and
+credential-shaped values are redacted before and after summarization. Plif also
+generates concrete continuity anchors for each chunk; a generic capsule that
+drops them is rejected without deleting the corresponding raw history.
+Text attachments are carried in redacted, bounded form and image attachments
+retain safe metadata while binary payloads stay out of the summarizer. If the
+capsule provider fails, Plif reports it, disables that provider for the rest of
+the turn, and falls back to protocol-safe mechanical trimming.
 
 ## Credentials
 

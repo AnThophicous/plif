@@ -36,11 +36,15 @@ export interface TerminalSurfaceLayout {
   readonly contentHeight: number;
 }
 
-export function terminalSurfaceLayout(columns: number, rows: number): TerminalSurfaceLayout {
+export function terminalSurfaceLayout(
+  columns: number,
+  rows: number,
+  reservedTopRows = 0,
+): TerminalSurfaceLayout {
   const canvasWidth = Math.max(1, Math.floor(columns));
   const canvasHeight = terminalFrameRows(Math.max(1, Math.floor(rows)));
   const panelWidth = canvasWidth;
-  const panelHeight = canvasHeight;
+  const panelHeight = Math.max(1, canvasHeight - Math.max(0, Math.floor(reservedTopRows)));
   const panelPaddingX = Math.min(layout.surfacePadX, Math.max(0, Math.floor(panelWidth / 2)));
   const panelPaddingY = Math.min(layout.surfacePadY, Math.max(0, Math.floor(panelHeight / 2)));
 
