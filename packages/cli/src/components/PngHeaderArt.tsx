@@ -29,9 +29,10 @@ export interface PngHeaderCell {
   readonly glyph: '▀' | '▄' | ' ';
 }
 
-const ASSET_URL = new URL('../../assets/piroquinha.png', import.meta.url);
+const ASSET_URL = new URL('../../assets/negrocomcachecol.png', import.meta.url);
 const PANEL_FALLBACK = '#191b20';
-const TARGET_WIDTH = 22;
+// Keep the mascot legible without letting the raster dominate the header card.
+const TARGET_WIDTH = 16;
 const HALF_ROWS_PER_CELL = 2;
 // A terminal half-block is physically taller than one character column on
 // the Windows terminal fonts Plif targets. Compensate before sampling so a
@@ -249,12 +250,12 @@ export function pngHeaderCells(backgroundColor = color('panel')): readonly (read
       row.push({
         // A transparent half must not receive an explicit background colour:
         // doing so paints the PNG's crop rectangle instead of preserving the
-        // header surface behind it. Use the lower-half glyph when only the
-        // bottom pixel is visible so both transparent directions stay clean.
+        // header surface behind it. Only paint the lower half when both halves
+        // are visible; a lone lower pixel uses `▄` with no background.
         foreground: topVisible
           ? composite(topPixel, background)
           : bottomVisible ? composite(bottomPixel, background) : undefined,
-        background: bottomVisible ? composite(bottomPixel, background) : undefined,
+        background: topVisible && bottomVisible ? composite(bottomPixel, background) : undefined,
         glyph: topVisible ? '▀' : bottomVisible ? '▄' : ' ',
       });
     }
