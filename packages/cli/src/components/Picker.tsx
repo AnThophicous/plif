@@ -22,7 +22,37 @@ export interface PickerGroup {
    * arrive already sorted by section; this does not regroup them.
    */
   readonly section?: string;
+  /** True when one of this provider's models is the current model. */
+  readonly current?: boolean;
   readonly items: readonly PickerItem[];
+}
+
+const EFFORT_LABELS: Readonly<Record<string, string>> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+  max: 'Max',
+  ultra: 'Ultra',
+  ultracode: 'UltraCode',
+  plif: 'PLIF',
+};
+
+/** Keep the internal compatibility value `plif` out of the user-facing UI. */
+export function effortLabel(value: string | undefined): string {
+  return value ? EFFORT_LABELS[value] ?? value : 'Default';
+}
+
+export function effortPickerItems(
+  efforts: readonly string[],
+  current: string | undefined,
+): PickerItem[] {
+  return efforts.map((value) => ({
+    value,
+    label: effortLabel(value),
+    detail: value === 'plif' ? 'adaptive reasoning for coding' : `${value} reasoning effort`,
+    current: value === current,
+  }));
 }
 
 /**
@@ -116,6 +146,29 @@ export function pickerRows(
   return flattenPickerGroups(filterPickerGroups(groups, filter), expanded, filter);
 }
 
+/**
+ * Select the active model when a grouped catalog opens.
+ *
+ * `selected` addresses the flattened rows rendered by the picker, not the
+ * provider array. The active provider's header is therefore not the active
+ * model's row. If the current model is outside the first page, keep the
+ * bounded catalog behavior and land on that provider's header instead.
+ */
+export function pickerSelectionForCurrentModel(
+  groups: readonly PickerGroup[],
+  expanded: readonly string[],
+  currentGroupId: string | undefined,
+): number {
+  const rows = pickerRows(groups, expanded);
+  const currentModel = rows.findIndex((row) => row.kind === 'item' && row.item.current);
+  if (currentModel >= 0) return currentModel;
+
+  const currentGroup = rows.findIndex(
+    (row) => row.kind === 'group' && row.group.id === currentGroupId,
+  );
+  return Math.max(0, currentGroup);
+}
+
 export function preservePickerSelection(
   previous: readonly PickerRow[],
   selected: number,
@@ -129,6 +182,7 @@ export function preservePickerSelection(
 
 interface PickerProps {
   readonly title: string;
+  readonly hint?: string;
   readonly items?: readonly PickerItem[];
   readonly groups?: readonly PickerGroup[];
   readonly expanded?: readonly string[];
@@ -149,6 +203,7 @@ export function filterItems(items: readonly PickerItem[], filter: string): Picke
 
 export function Picker({
   title,
+  hint,
   items,
   groups,
   expanded,
@@ -158,6 +213,7 @@ export function Picker({
   rows = 8,
 }: PickerProps): React.ReactElement {
   const inner = width - 4;
+  const compact = inner < 88;
   const grouped = groups !== undefined;
   const visibleGroups = grouped ? filterPickerGroups(groups, filter) : [];
   const visibleRows = grouped ? pickerRows(groups, expanded ?? [], filter) : [];
@@ -196,6 +252,10 @@ export function Picker({
           </Text>
         </Box>
 
+        {hint && (
+          <Text color={color('ghost')}>{truncate(hint, inner)}</Text>
+        )}
+
         <Box marginTop={1}>
           <Text color={color('muted')}>{glyph.prompt} </Text>
           {filter ? (
@@ -226,6 +286,22 @@ export function Picker({
               if (row.kind === 'group') {
                 const isExpanded = Boolean(filter.trim()) || (expanded ?? []).includes(row.group.id);
                 const section = sectionOf.get(row.group.id);
+                const summary = [
+                  section?.toUpperCase(),
+                  `${isExpanded ? '⌄' : glyph.caret} ${row.group.label}`,
+                  row.group.current ? `${glyph.done} active provider` : undefined,
+                  `${row.group.items.length} models`,
+                  row.group.detail,
+                ].filter(Boolean).join(' · ');
+                if (compact) {
+                  return (
+                    <Box key={row.id} width="100%">
+                      <Text color={color(active ? 'text' : 'muted')} bold={active}>
+                        {truncate(`${active ? glyph.caret : ' '} ${summary}`, Math.max(12, inner))}
+                      </Text>
+                    </Box>
+                  );
+                }
                 return (
                   <React.Fragment key={row.id}>
                     <Box>
@@ -239,12 +315,24 @@ export function Picker({
                       <Text color={color('ghost')}>
                         {'  '}{row.group.detail ?? ''} · {row.group.items.length} models
                       </Text>
+                      {row.group.current && (
+                        <Text color={color('success')}> {glyph.done} active provider</Text>
+                      )}
                     </Box>
                   </React.Fragment>
                 );
               }
 
               if (row.kind === 'more') {
+                if (compact) {
+                  return (
+                    <Box key={row.id} width="100%">
+                      <Text color={color(active ? 'text' : 'faint')} bold={active}>
+                        {truncate(`${active ? glyph.caret : ' '} show ${row.hidden} more`, Math.max(12, inner))}
+                      </Text>
+                    </Box>
+                  );
+                }
                 return (
                   <Box key={row.id}>
                     <Text color={color(active ? 'accent' : 'ghost')}>
@@ -258,6 +346,21 @@ export function Picker({
               }
 
               const pickerItem = row.item;
+              const itemSummary = [
+                pickerItem.label,
+                pickerItem.current ? `${glyph.done} active model` : undefined,
+                ...(pickerItem.badges ?? []).map((badge) => `[${badge}]`),
+                !pickerItem.current && !pickerItem.badges?.length ? pickerItem.detail : undefined,
+              ].filter(Boolean).join(' · ');
+              if (compact) {
+                return (
+                  <Box key={row.id} width="100%">
+                    <Text color={color(active ? 'text' : 'faint')} bold={active}>
+                      {truncate(`${active ? glyph.caret : ' '} ${itemSummary}`, Math.max(12, inner))}
+                    </Text>
+                  </Box>
+                );
+              }
               return (
                 <Box key={row.id}>
                   <Text color={color(active ? 'accent' : 'ghost')}>
@@ -266,7 +369,7 @@ export function Picker({
                   <Text color={color(active ? 'text' : 'faint')} bold={active}>
                     {truncate(pickerItem.label, Math.max(10, inner - 18))}
                   </Text>
-                  {pickerItem.current && <Text color={color('success')}> {glyph.done} in use</Text>}
+                  {pickerItem.current && <Text color={color('success')}> {glyph.done} active model</Text>}
                   {pickerItem.badges?.map((badge) => (
                     <Text key={badge} color={color(badge === 'default' ? 'accent' : 'info')}>
                       {' '}[{badge}]
@@ -280,6 +383,21 @@ export function Picker({
             }
 
             const pickerItem = item as PickerItem;
+            const itemSummary = [
+              pickerItem.label,
+              pickerItem.current ? `${glyph.done} active` : undefined,
+              ...(pickerItem.badges ?? []).map((badge) => `[${badge}]`),
+              !pickerItem.current && !pickerItem.badges?.length ? pickerItem.detail : undefined,
+            ].filter(Boolean).join(' · ');
+            if (compact) {
+              return (
+                <Box key={pickerItem.value} width="100%">
+                  <Text color={color(active ? 'text' : 'muted')} bold={active}>
+                    {truncate(`${active ? glyph.caret : ' '} ${itemSummary}`, Math.max(12, inner))}
+                  </Text>
+                </Box>
+              );
+            }
             return (
               <Box key={pickerItem.value}>
                 <Text color={color(active ? 'accent' : 'ghost')}>
@@ -288,7 +406,7 @@ export function Picker({
                 <Text color={color(active ? 'text' : 'muted')} bold={active}>
                   {truncate(pickerItem.label, Math.max(10, inner - 14))}
                 </Text>
-                {pickerItem.current && <Text color={color('success')}> {glyph.done} in use</Text>}
+                {pickerItem.current && <Text color={color('success')}> {glyph.done} active</Text>}
                 {pickerItem.badges?.map((badge) => (
                   <Text key={badge} color={color(badge === 'default' ? 'accent' : 'info')}>
                     {' '}[{badge}]
@@ -307,6 +425,13 @@ export function Picker({
               {glyph.pending} {rowCount - start - rows} more
             </Text>
           )}
+        </Box>
+
+        <Box marginTop={1} justifyContent="space-between">
+          <Text color={color('muted')}>↑↓ move · ←→ expand · type search</Text>
+          <Text color={color('ghost')}>
+            <Text inverse bold> Enter </Text> choose · <Text inverse bold> Esc </Text> close
+          </Text>
         </Box>
       </Box>
     </Box>

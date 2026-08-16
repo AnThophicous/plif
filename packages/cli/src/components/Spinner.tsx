@@ -2,7 +2,9 @@ import React from 'react';
 import { Text } from 'ink';
 
 import { color, formatCount, formatDuration, formatWorkedDuration, glyph, supportsRichGlyphs } from '../theme.js';
-import { ANIMATION_INTERVAL_MS, useAnimationFrame } from '../hooks/useAnimationClock.js';
+import { PlifGlow } from './PlifGlow.js';
+import { useHighlightClock } from '../pulse.js';
+import { ANIMATION_INTERVAL_MS, useAnimationFrame, usePlifAnimation } from '../hooks/useAnimationClock.js';
 
 /**
  * Braille dots. Eight frames, one cell wide, and — unlike a spinning slash —
@@ -84,6 +86,8 @@ export function spinnerFrameAt(frame: number, intervalMs = 220): string {
 
 export function useSpinnerFrame(intervalMs = 220, active = true): string {
   const frame = useAnimationFrame();
+  const plif = usePlifAnimation();
+  if (plif && active) return frames[0] as string;
   return active ? spinnerFrameAt(frame, intervalMs) : frames[0] as string;
 }
 
@@ -108,6 +112,7 @@ interface SpinnerProps {
   /** When set, an elapsed counter is drawn after the label. */
   readonly since?: number;
   readonly tone?: Parameters<typeof color>[0];
+  readonly plif?: boolean;
 }
 
 export interface WorkingProps {
@@ -117,6 +122,19 @@ export interface WorkingProps {
   readonly tokens: number;
   /** True while the count is a running estimate rather than provider usage. */
   readonly estimated?: boolean;
+  readonly plif?: boolean;
+}
+
+export function workingFacts(
+  elapsed: number,
+  tokens: number,
+  estimated = false,
+  plif = false,
+): readonly string[] {
+  return [
+    ...(!plif ? [formatWorkedDuration(elapsed)] : []),
+    ...(tokens > 0 ? [`${glyph.tokens} ${estimated ? '~' : ''}${formatCount(tokens)} tokens`] : []),
+  ];
 }
 
 /**
@@ -127,32 +145,35 @@ export interface WorkingProps {
  * and the token count says it is still producing rather than stuck. Anything
  * else belongs in the transcript.
  */
-export function Working({ seed, since, tokens, estimated }: WorkingProps): React.ReactElement {
+export function Working({ seed, since, tokens, estimated, plif = false }: WorkingProps): React.ReactElement {
   const frame = useAnimationFrame();
-  const elapsed = useElapsed(since);
-  const facts = [
-    formatWorkedDuration(elapsed),
-    ...(tokens > 0 ? [`${glyph.tokens} ${estimated ? '~' : ''}${formatCount(tokens)} tokens`] : []),
-  ];
+  const glowElapsed = useHighlightClock(plif);
+  const elapsed = useElapsed(since, !plif);
+  const facts = workingFacts(elapsed, tokens, estimated, plif);
 
   return (
     <Text>
-      <Text color={color('accent')}>{bloomFrameAt(frame)}</Text>
+      {plif ? (
+        <PlifGlow value={BLOOM_MARK} elapsedMs={glowElapsed} />
+      ) : (
+        <Text color={color('accent')}>{bloomFrameAt(frame)}</Text>
+      )}
       <Text color={color('muted')}> {workingWord(seed)}…</Text>
-      <Text color={color('ghost')}> ({facts.join(` ${glyph.divider} `)})</Text>
+      {facts.length > 0 && <Text color={color('ghost')}> ({facts.join(` ${glyph.divider} `)})</Text>}
     </Text>
   );
 }
 
-export function Spinner({ label, since, tone = 'accent' }: SpinnerProps): React.ReactElement {
+export function Spinner({ label, since, tone = 'accent', plif = false }: SpinnerProps): React.ReactElement {
   const frame = useSpinnerFrame();
-  const elapsed = useElapsed(since ?? Date.now(), since !== undefined);
+  const glowElapsed = useHighlightClock(plif);
+  const elapsed = useElapsed(since ?? Date.now(), since !== undefined && !plif);
 
   return (
     <Text>
-      <Text color={color(tone)}>{frame}</Text>
+      {plif ? <PlifGlow value={frames[0] as string} elapsedMs={glowElapsed} /> : <Text color={color(tone)}>{frame}</Text>}
       {label && <Text color={color('muted')}> {label}</Text>}
-      {since !== undefined && elapsed >= 1000 && (
+      {!plif && since !== undefined && elapsed >= 1000 && (
         <Text color={color('ghost')}> {formatDuration(elapsed)}</Text>
       )}
     </Text>

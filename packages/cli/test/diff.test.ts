@@ -48,22 +48,41 @@ describe('highlight', () => {
     }
   });
 
-  it('keeps keywords in the primary text tone instead of adding accent noise', () => {
-    const tokens = highlight('const total = sum;', 'ts');
-    const keyword = tokens.find((token) => token.text.includes('const'));
-    assert.equal(keyword?.tone, 'text');
+  it('classifies code by semantic theme roles', () => {
+    const tokens = highlight('const total = sum("4") + 2;', 'ts');
+    const roleOf = (text: string): string | undefined =>
+      tokens.find((token) => token.text.includes(text))?.kind;
+
+    assert.equal(roleOf('const'), 'keyword');
+    assert.equal(roleOf('total'), 'variable');
+    assert.equal(roleOf('sum'), 'function');
+    assert.equal(roleOf('"4"'), 'string');
+    assert.equal(roleOf('+'), 'operator');
+    assert.equal(roleOf('2'), 'number');
   });
 
   it('treats a whole-line comment as one dim run', () => {
     const tokens = highlight('  // explain the invariant', 'ts');
     assert.equal(tokens.length, 1);
-    assert.equal(tokens[0]?.tone, 'faint');
+    assert.equal(tokens[0]?.kind, 'comment');
+  });
+
+  it('does not mistake C++ dereferences or CSS universal selectors for comments', () => {
+    for (const [language, source] of [
+      ['cpp', '*ptr = value;'],
+      ['css', '* { box-sizing: border-box; }'],
+    ] as const) {
+      const tokens = highlight(source, language);
+      assert.equal(tokens.map((token) => token.text).join(''), source);
+      assert.notEqual(tokens[0]?.kind, 'comment');
+      assert.ok(tokens.some((token) => token.kind === 'operator' && token.text.includes('*')));
+    }
   });
 
   it('does not try to colour an unknown file type', () => {
     assert.equal(languageOf('notes.txt'), 'plain');
     assert.deepEqual(highlight('anything at all', 'plain'), [
-      { text: 'anything at all', tone: 'text' },
+      { text: 'anything at all', kind: 'plain' },
     ]);
   });
 
@@ -72,6 +91,10 @@ describe('highlight', () => {
     assert.equal(languageOf('build.mjs'), 'ts');
     assert.equal(languageOf('main.py'), 'py');
     assert.equal(languageOf('config.jsonc'), 'json');
+    assert.equal(languageOf('config.toml'), 'toml');
+    assert.equal(languageOf('index.html'), 'html');
+    assert.equal(languageOf('styles.css'), 'css');
+    assert.equal(languageOf('main.cpp'), 'cpp');
   });
 });
 
@@ -96,5 +119,15 @@ describe('diff row height', () => {
       ),
     );
     assert.ok(diffHeight(long, true) > diffHeight(long, false));
+  });
+
+  it('reserves room for automatic language-server feedback under an edit', () => {
+    const plain = entry('tool', 'Update', { status: 'done', diff });
+    const diagnosed = entry('tool', 'Update', {
+      status: 'failed',
+      diff,
+      detail: 'Language server: 1 error(s), 0 warning(s)\na.ts:2:1 TS2322: wrong type',
+    });
+    assert.equal(estimateHeight(diagnosed, 80) - estimateHeight(plain, 80), 2);
   });
 });

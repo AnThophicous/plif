@@ -118,6 +118,8 @@ if ($null -eq $text) { exit 0 }
  */
 const MAX_BYTES = 8 * 1024 * 1024;
 
+export const MAX_ATTACHMENT_BYTES = MAX_BYTES;
+
 /** Where pasted images go. Per-user temp, as the developer asked. */
 export function pasteDirectory(): string {
   return path.join(os.tmpdir(), 'plif-pasted');
@@ -173,7 +175,7 @@ Add-Type -AssemblyName System.Drawing
 $files = [System.Windows.Forms.Clipboard]::GetFileDropList()
 foreach ($file in $files) {
   if ($file -match '\\.(png|jpe?g|gif|bmp|webp)$') {
-    Write-Output "FILE:$file"
+    [Console]::Out.Write('FILE:' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$file)))
     exit 0
   }
 }
@@ -195,7 +197,11 @@ Write-Output "NONE"
   ).catch(() => ({ stdout: 'NONE' }));
 
   const answer = stdout.trim();
-  if (answer.startsWith('FILE:')) return answer.slice(5).trim();
+  if (answer.startsWith('FILE:')) {
+    const encoded = answer.slice(5).replace(/\s+/g, '');
+    const decoded = Buffer.from(encoded, 'base64').toString('utf8').trim();
+    return decoded || null;
+  }
   return answer.includes('SAVED') ? target : null;
 }
 
@@ -247,7 +253,7 @@ async function fromLinux(target: string): Promise<string | null> {
   return null;
 }
 
-function mediaTypeOf(file: string): string {
+export function mediaTypeOf(file: string): string {
   switch (path.extname(file).toLowerCase()) {
     case '.jpg':
     case '.jpeg':

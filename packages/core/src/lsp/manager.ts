@@ -4,7 +4,7 @@ import type { EventBus } from '../events/bus.js';
 import { LspClient } from './client.js';
 import type { Diagnostic } from './client.js';
 import { detectLanguages, resolveServer, serverFor } from './servers.js';
-import type { ServerSpec } from './servers.js';
+import type { ResolvedServer, ServerSpec } from './servers.js';
 
 export interface LspStatus {
   readonly id: string;
@@ -18,6 +18,8 @@ export interface LspManagerOptions {
   readonly root: string;
   readonly bus?: EventBus;
   readonly enabled?: boolean;
+  readonly resolveServer?: (spec: ServerSpec, root: string) => Promise<ResolvedServer | null>;
+  readonly createClient?: (resolved: ResolvedServer, root: string) => LspClient;
 }
 
 export class LspManager {
@@ -28,11 +30,16 @@ export class LspManager {
   #clients = new Map<string, LspClient>();
   #starting = new Map<string, Promise<LspClient | null>>();
   #missing = new Map<string, ServerSpec>();
+  #resolveServer: (spec: ServerSpec, root: string) => Promise<ResolvedServer | null>;
+  #createClient: (resolved: ResolvedServer, root: string) => LspClient;
+  #stopping = false;
 
   constructor(options: LspManagerOptions) {
     this.root = path.resolve(options.root);
     this.#bus = options.bus;
     this.#enabled = options.enabled !== false;
+    this.#resolveServer = options.resolveServer ?? resolveServer;
+    this.#createClient = options.createClient ?? ((resolved, root) => new LspClient(resolved, root));
   }
 
   get enabled(): boolean {
@@ -52,7 +59,7 @@ export class LspManager {
     const missing: ServerSpec[] = [];
 
     for (const spec of detected) {
-      const resolved = await resolveServer(spec, this.root);
+      const resolved = await this.#resolveServer(spec, this.root);
       if (resolved) available.push(spec);
       else {
         missing.push(spec);
@@ -65,7 +72,7 @@ export class LspManager {
   async warmup(): Promise<void> {
     if (!this.#enabled) return;
     const survey = await this.survey();
-    await Promise.allSettled(survey.available.map((spec) => this.#start(spec)));
+    await Promise.allSettled(survey.available.map((spec) => this.#ensureStarted(spec)));
   }
 
   async clientFor(file: string): Promise<LspClient | null> {
@@ -74,23 +81,36 @@ export class LspManager {
     const spec = serverFor(file);
     if (!spec) return null;
 
-    const existing = this.#clients.get(spec.id);
-    if (existing) return existing.ready ? existing : null;
+    return await this.#ensureStarted(spec);
+  }
 
+  async #ensureStarted(spec: ServerSpec): Promise<LspClient | null> {
+    if (this.#stopping) return null;
     const inFlight = this.#starting.get(spec.id);
     if (inFlight) return await inFlight;
 
-    const attempt = this.#start(spec);
+    const existing = this.#clients.get(spec.id);
+    if (existing?.ready) return existing;
+
+    const attempt = this.#restart(spec, existing);
     this.#starting.set(spec.id, attempt);
     try {
       return await attempt;
     } finally {
-      this.#starting.delete(spec.id);
+      if (this.#starting.get(spec.id) === attempt) this.#starting.delete(spec.id);
     }
   }
 
+  async #restart(spec: ServerSpec, existing: LspClient | undefined): Promise<LspClient | null> {
+    if (existing) {
+      this.#clients.delete(spec.id);
+      await existing.stop();
+    }
+    return await this.#start(spec);
+  }
+
   async #start(spec: ServerSpec): Promise<LspClient | null> {
-    const resolved = await resolveServer(spec, this.root);
+    const resolved = await this.#resolveServer(spec, this.root);
     if (!resolved) {
       this.#missing.set(spec.id, spec);
       this.#bus?.emit('log', {
@@ -101,10 +121,15 @@ export class LspManager {
       return null;
     }
 
-    const client = new LspClient(resolved, this.root);
+    const client = this.#createClient(resolved, this.root);
     try {
       await client.start();
+      if (this.#stopping) {
+        await client.stop();
+        return null;
+      }
       this.#clients.set(spec.id, client);
+      this.#missing.delete(spec.id);
       this.#bus?.emit('lsp.ready', {
         server: spec.id,
         label: spec.label,
@@ -165,8 +190,11 @@ export class LspManager {
   }
 
   async stop(): Promise<void> {
-    const clients = [...this.#clients.values()];
+    this.#stopping = true;
+    await Promise.allSettled([...this.#starting.values()]);
+    const clients = [...new Set(this.#clients.values())];
     this.#clients.clear();
+    this.#starting.clear();
     await Promise.allSettled(clients.map((client) => client.stop()));
   }
 }

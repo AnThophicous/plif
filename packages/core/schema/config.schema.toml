@@ -1,0 +1,177 @@
+# Plif's machine-readable configuration reference.
+#
+# The canonical user file is ~/.plif/config.toml. This document is TOML too so
+# agents and people can inspect the supported shape without translating from a
+# JSON-only vocabulary. It is a reference catalogue, not a JSON Schema dialect.
+
+title = "Plif configuration"
+format = "TOML"
+schemaVersion = 1
+configFile = "~/.plif/config.toml"
+additionalFields = true
+
+[fields."$schema"]
+type = "string"
+description = "URL of this TOML configuration reference; Plif adds it when saving."
+
+[fields.model]
+type = "string"
+format = "provider/model"
+description = "Primary model. An image-capable primary model can inspect images directly."
+
+[fields.visionModel]
+type = "string"
+format = "provider/model"
+description = "Image-capable helper used by text-only models through inspect_image."
+
+[fields.theme]
+type = "string"
+description = "Built-in theme id or an id from ~/.plif/*.theme."
+
+[fields.small_model]
+type = "string"
+format = "provider/model"
+description = "Optional smaller model used for lightweight work."
+
+[fields.permissionMode]
+type = "string"
+values = ["ask", "auto-approve", "deny"]
+
+[fields.autoApprove]
+type = "boolean"
+deprecatedBy = "permissionMode"
+
+[fields.effort]
+type = "string"
+values = ["low", "medium", "high", "xhigh", "max", "ultra", "ultracode", "plif"]
+
+[fields.temperature]
+type = "number"
+
+[fields.maxTokens]
+type = "integer"
+minimum = 1
+
+[fields.timeoutMs]
+type = "integer"
+minimum = 1
+
+[fields.provider]
+type = "table"
+values = "Map of provider ids to provider definitions."
+
+[fields.providers]
+type = "table"
+aliasOf = "provider"
+
+[fields.agent]
+type = "table"
+values = "Map of agent names to agent definitions."
+
+[fields.profiles]
+type = "table"
+
+[fields.mcp]
+type = "table-or-array"
+description = "MCP servers. Command servers use command/args; remote servers use url/headers."
+
+[fields.mcpServers]
+type = "table-or-array"
+aliasOf = "mcp"
+
+[fields.baseURL]
+type = "string"
+format = "uri"
+description = "Legacy single-provider API endpoint."
+
+[fields.preset]
+type = "string"
+description = "Legacy provider preset."
+
+[fields.apiKey]
+type = "string"
+sensitive = true
+readOnlyLegacy = true
+description = "Legacy import-only API credential. Canonical writes remove it after encrypted-store migration."
+
+[fields.needKey]
+type = "boolean"
+
+[fields.NeedKey]
+type = "boolean"
+aliasOf = "needKey"
+
+[definitions.provider]
+type = "table"
+additionalFields = true
+
+[definitions.provider.fields.name]
+type = "string"
+
+[definitions.provider.fields.sdk]
+type = "string"
+values = ["openai"]
+
+[definitions.provider.fields.npm]
+type = "string"
+
+[definitions.provider.fields.options]
+type = "table"
+description = "Provider options such as baseURL and whether a credential is required."
+
+[definitions.provider.fields.models]
+type = "table"
+values = "Map of model ids to model definitions."
+
+[definitions.model]
+type = "table"
+additionalFields = true
+
+[definitions.model.fields.name]
+type = "string"
+
+[definitions.model.fields.contextWindow]
+type = "integer"
+minimum = 1
+
+[definitions.model.fields.modalities]
+type = "array"
+values = ["text", "image"]
+description = "Declare image only when the model accepts image input directly."
+
+[definitions.model.fields.cost]
+type = "string"
+values = ["free", "paid", "unknown"]
+
+[definitions.model.fields.needKey]
+type = "boolean"
+
+[definitions.agent]
+type = "table"
+additionalFields = true
+
+[definitions.agent.fields.model]
+type = "string"
+format = "provider/model"
+
+[definitions.agent.fields.description]
+type = "string"
+
+[definitions.agent.fields.maxIterations]
+type = "integer"
+minimum = 1
+
+[definitions.agent.fields.disable]
+type = "boolean"
+
+[examples.directVision]
+description = "The primary model receives text and image inputs itself."
+model = "custom/vision-primary"
+modalities = ["text", "image"]
+
+[examples.delegatedVision]
+description = "A text-only primary calls inspect_image, which delegates to visionModel."
+model = "custom/text-primary"
+visionModel = "custom/vision-helper"
+primaryModalities = ["text"]
+helperModalities = ["text", "image"]

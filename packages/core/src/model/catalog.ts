@@ -1,4 +1,9 @@
-import { PRESETS, type CustomProvider, type StoredConfig } from './config.js';
+import {
+  PRESETS,
+  type CustomProvider,
+  type ModelCapability,
+  type StoredConfig,
+} from './config.js';
 
 /** A model exposed by the provider catalog. */
 export interface ModelCatalogModel {
@@ -6,6 +11,8 @@ export interface ModelCatalogModel {
   readonly label: string;
   readonly description: string;
   readonly badges: readonly string[];
+  /** Present only when the developer explicitly declared the capability. */
+  readonly modalities?: readonly ModelCapability[];
 }
 
 /**
@@ -44,7 +51,24 @@ const model = (
   label: string,
   description: string,
   badges: readonly string[] = [],
-): ModelCatalogModel => Object.freeze({ id, label, description, badges: Object.freeze([...badges]) });
+  modalities?: readonly ModelCapability[],
+): ModelCatalogModel => Object.freeze({
+  id,
+  label,
+  description,
+  badges: Object.freeze([...badges]),
+  ...(modalities ? { modalities: Object.freeze([...modalities]) } : {}),
+});
+
+/** A picker badge based on declarations, never guesses made from a model id. */
+export function modelVisionBadge(
+  candidate: ModelCatalogModel,
+  hasVisionHelper: boolean,
+): 'vision' | 'vision helper' | 'text only' | null {
+  if (candidate.modalities?.includes('image')) return 'vision';
+  if (!candidate.modalities?.includes('text')) return null;
+  return hasVisionHelper ? 'vision helper' : 'text only';
+}
 
 const provider = (
   id: string,
@@ -230,7 +254,7 @@ export function userCatalog(config: StoredConfig): readonly ModelCatalogProvider
     preset: id,
     endpoint: entry.options?.baseURL ?? '',
     models: Object.entries(entry.models ?? {}).map(([modelId, metadata]) =>
-      model(modelId, metadata.name ?? modelId, entry.name ?? id, ['yours']),
+      model(modelId, metadata.name ?? modelId, entry.name ?? id, ['yours'], metadata.modalities),
     ),
   }));
 }

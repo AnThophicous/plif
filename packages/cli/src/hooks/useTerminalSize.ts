@@ -65,8 +65,13 @@ export function useTerminalSize(): TerminalSize {
     };
 
     stdout.on('resize', onResize);
+    // Windows Terminal and classic console hosts do not consistently emit a
+    // resize event when switching in or out of fullscreen. A cheap dimension
+    // poll closes that gap while keeping the event path instantaneous.
+    const poll = setInterval(onResize, 100);
     return () => {
       clearPending();
+      clearInterval(poll);
       stdout.off('resize', onResize);
     };
   }, [stdout]);

@@ -56,6 +56,10 @@ function reasoningSnapshot(text: string): unknown {
   return { choices: [{ delta: { reasoning_details: [{ text }] }, finish_reason: null }] };
 }
 
+function reasoningDelta(text: string): unknown {
+  return { choices: [{ delta: { reasoning_content: text }, finish_reason: null }] };
+}
+
 const FINISH = {
   choices: [{ delta: {}, finish_reason: 'stop' }],
   usage: { prompt_tokens: 10, completion_tokens: 2 },
@@ -218,6 +222,18 @@ describe('retry schedule', () => {
     assert.deepEqual(
       all.filter((event) => event.kind === 'reasoning').map((event) => event.delta),
       ['a', 'b', 'c'],
+    );
+  });
+
+  it('does not turn an unchanged reasoning chunk into an infinite repeated stream', async () => {
+    const provider = new ScriptedProvider([
+      [...Array.from({ length: 12 }, () => reasoningDelta('Asp')), FINISH],
+    ]);
+
+    const all = await events(provider.stream(ask));
+    assert.deepEqual(
+      all.filter((event) => event.kind === 'reasoning').map((event) => event.delta),
+      ['Asp'],
     );
   });
 

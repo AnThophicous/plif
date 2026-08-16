@@ -21,26 +21,38 @@ import { after, before, describe, it } from 'node:test';
 import {
   PRESETS,
   adoptProvider,
+  credentialVariableForProvider,
   describe as describeConfig,
   isFreeModel,
   keyOptional,
+  migrateProviderCredentials,
   redact,
   resolveConfig,
+  storedProviderCredentials,
+  stripStoredCredentials,
   validate,
 } from '../src/model/config.js';
 import {
   MODEL_CATALOG,
   catalogSelection,
   findCatalogModel,
+  modelVisionBadge,
   rankModelIds,
   userCatalog,
 } from '../src/model/catalog.js';
 import { forgetProviderKey, supportedEfforts } from '../src/model/config.js';
+import { anthropicWireEffort } from '../src/model/anthropic.js';
 import { OpenAIProvider } from '../src/model/openai.js';
 import { collect } from '../src/model/provider.js';
 import { PlifError } from '../src/errors.js';
 
 describe('config precedence', () => {
+  it('maps Plif effort to Anthropic maximum effort', () => {
+    assert.equal(anthropicWireEffort('plif'), 'max');
+    assert.equal(anthropicWireEffort('ultracode'), 'max');
+    assert.equal(anthropicWireEffort('high'), 'high');
+  });
+
   it('limits the highest effort levels to the providers that support them', () => {
     assert.ok(supportedEfforts(PRESETS.anthropic.baseURL, 'claude-opus-5').includes('ultracode'));
     assert.ok(!supportedEfforts(PRESETS.openai.baseURL, 'gpt-4.1').includes('ultra'));
@@ -73,6 +85,182 @@ describe('config precedence', () => {
     assert.equal(config.model, 'al-thinking');
     assert.equal(config.baseURL, 'http://127.0.0.1:4000/v1');
     assert.equal(config.apiKey, 'local');
+  });
+
+  it('lets a custom provider own an id that collides with a preset', () => {
+    const stored = {
+      model: 'openai/custom-model',
+      provider: {
+        openai: {
+          name: 'Company gateway',
+          options: { baseURL: 'https://gateway.example.test/v1', apiKey: 'custom-key' },
+          models: { 'custom-model': { name: 'Custom model' } },
+        },
+      },
+    };
+    const config = resolveConfig(stored, {
+      env: {
+        OPENAI_API_KEY: 'builtin-key',
+        OPENAI_BASE_URL: 'https://api.openai.com/v1',
+      },
+    });
+    assert.equal(config.baseURL, 'https://gateway.example.test/v1');
+    assert.equal(config.apiKey, 'custom-key');
+    assert.equal(credentialVariableForProvider('openai'), 'OPENAI_API_KEY');
+    assert.match(
+      credentialVariableForProvider('openai', stored),
+      /^PLIF_PROVIDER_OPENAI_[A-F0-9]{16}_API_KEY$/,
+    );
+  });
+
+  it('does not lend a built-in provider key to a colliding custom endpoint', () => {
+    const stored = {
+      model: 'openai/private-model',
+      provider: {
+        openai: {
+          options: { baseURL: 'https://gateway.example.test/v1', needKey: true },
+          models: { 'private-model': { name: 'Private model' } },
+        },
+      },
+    };
+    const config = resolveConfig(stored, {
+      env: { OPENAI_API_KEY: 'must-not-cross-endpoints' },
+    });
+    assert.equal(config.baseURL, 'https://gateway.example.test/v1');
+    assert.equal(config.apiKey, '');
+  });
+
+  it('strips legacy credentials only after callers have collected them', () => {
+    const stored = {
+      preset: 'openai',
+      apiKey: 'root-key',
+      providerKeys: { openai: 'provider-key', groq: 'other-key' },
+      provider: {
+        openai: { options: { baseURL: 'https://gateway.example.test/v1', apiKey: 'custom-key' } },
+      },
+    };
+    assert.deepEqual(storedProviderCredentials(stored), {
+      openai: 'custom-key',
+      groq: 'other-key',
+    });
+    const clean = stripStoredCredentials(stored);
+    assert.equal(clean.apiKey, undefined);
+    assert.equal(clean.providerKeys, undefined);
+    assert.equal((clean.provider as { openai?: { options?: { apiKey?: string } } }).openai?.options?.apiKey, undefined);
+  });
+
+  it('moves legacy credentials into the vault before returning clean config', async () => {
+    const stored = {
+      preset: 'nvidia',
+      apiKey: 'stale-root-key',
+      providerKeys: { nvidia: 'nvidia-key', groq: 'groq-key' },
+      provider: {
+        private: { options: { baseURL: 'https://private.example.test/v1', apiKey: 'private-key' } },
+      },
+    };
+    const vault = new Map<string, string>([['GROQ_API_KEY', 'newer-groq-key']]);
+    const migration = await migrateProviderCredentials(stored, {
+      stored: async (variable) => vault.get(variable),
+      remember: async (variable, value) => { vault.set(variable, value); },
+    });
+
+    assert.equal(migration.migrated, true);
+    assert.equal(vault.get('NIM_API_KEY'), 'nvidia-key');
+    assert.equal(vault.get('GROQ_API_KEY'), 'newer-groq-key');
+    assert.equal(vault.get(credentialVariableForProvider('private', stored)), 'private-key');
+    assert.equal(migration.config.apiKey, undefined);
+    assert.equal(migration.config.providerKeys, undefined);
+    assert.equal(
+      (migration.config.provider as { private?: { options?: { apiKey?: string } } }).private?.options?.apiKey,
+      undefined,
+    );
+  });
+
+  it('leaves the source config intact when a vault write fails', async () => {
+    const stored = {
+      preset: 'nvidia',
+      providerKeys: { nvidia: 'nvidia-key', groq: 'groq-key' },
+    };
+    let writes = 0;
+    await assert.rejects(
+      migrateProviderCredentials(stored, {
+        stored: async () => undefined,
+        remember: async () => {
+          writes += 1;
+          if (writes === 2) throw new Error('vault unavailable');
+        },
+      }),
+      /vault unavailable/,
+    );
+    assert.deepEqual(stored.providerKeys, { nvidia: 'nvidia-key', groq: 'groq-key' });
+  });
+
+  it('keeps normalized custom-provider credential namespaces distinct', () => {
+    const stored = {
+      provider: {
+        'foo-bar': { options: { baseURL: 'https://one.example.test/v1' } },
+        foo_bar: { options: { baseURL: 'https://two.example.test/v1' } },
+        FOO_BAR: { options: { baseURL: 'https://three.example.test/v1' } },
+      },
+    };
+    const variables = ['foo-bar', 'foo_bar', 'FOO_BAR']
+      .map((provider) => credentialVariableForProvider(provider, stored));
+    assert.equal(new Set(variables).size, 3);
+  });
+
+  it('keeps ambiguous built-in legacy keys away from a colliding custom endpoint', async () => {
+    const stored = {
+      model: 'openai/private-model',
+      apiKey: 'legacy-root-key',
+      providerKeys: { openai: 'legacy-provider-key' },
+      provider: {
+        openai: {
+          options: { baseURL: 'https://private.example.test/v1', needKey: true },
+          models: { 'private-model': {} },
+        },
+      },
+    };
+    assert.equal(resolveConfig(stored, { env: {} }).apiKey, '');
+
+    const vault = new Map<string, string>();
+    const migration = await migrateProviderCredentials(stored, {
+      stored: async (variable) => vault.get(variable),
+      remember: async (variable, value) => { vault.set(variable, value); },
+    });
+
+    assert.equal(vault.get('OPENAI_API_KEY'), 'legacy-provider-key');
+    assert.equal(vault.get(credentialVariableForProvider('openai', stored)), undefined);
+    assert.equal(migration.config.apiKey, undefined);
+    assert.equal(migration.config.providerKeys, undefined);
+  });
+
+  it('migrates only the winning custom-provider alias', async () => {
+    const stored = {
+      model: 'private/model',
+      providers: {
+        private: { options: { baseURL: 'https://loser.example.test/v1', apiKey: 'loser-key' } },
+      },
+      provider: {
+        private: { options: { baseURL: 'https://winner.example.test/v1', apiKey: 'winner-key' } },
+      },
+    };
+    const vault = new Map<string, string>();
+    await migrateProviderCredentials(stored, {
+      stored: async (variable) => vault.get(variable),
+      remember: async (variable, value) => { vault.set(variable, value); },
+    });
+    assert.equal(vault.get(credentialVariableForProvider('private', stored)), 'winner-key');
+    assert.equal(resolveConfig(stored, { env: {} }).baseURL, 'https://winner.example.test/v1');
+  });
+
+  it('replaces a local vault sentinel when a real legacy key appears', async () => {
+    const stored = { preset: 'nvidia', providerKeys: { nvidia: 'real-key' } };
+    const vault = new Map<string, string>([['NIM_API_KEY', 'local']]);
+    await migrateProviderCredentials(stored, {
+      stored: async (variable) => vault.get(variable),
+      remember: async (variable, value) => { vault.set(variable, value); },
+    });
+    assert.equal(vault.get('NIM_API_KEY'), 'real-key');
   });
 
   it('lets an explicit option beat the environment', () => {
@@ -227,6 +415,18 @@ describe('config precedence', () => {
 });
 
 describe('the free tier needs no credential', () => {
+  it('constructs an anonymous OpenCode provider without asking for an API key', () => {
+    const provider = new OpenAIProvider({
+      model: 'deepseek-v4-flash-free',
+      baseURL: PRESETS.opencode.baseURL,
+      apiKey: '',
+      temperature: 0,
+      maxTokens: undefined,
+      timeoutMs: 10_000,
+    });
+    assert.equal(provider.info.id, 'deepseek-v4-flash-free');
+  });
+
   it('recognises the suffix only on a host that serves anonymously', () => {
     assert.equal(isFreeModel('deepseek-v4-flash-free'), true);
     assert.equal(isFreeModel('deepseek-v4-flash'), false);
@@ -314,7 +514,7 @@ describe('model catalog', () => {
         qwenbridge: {
           name: 'Qwen bridge',
           options: { baseURL: 'http://127.0.0.1:9000/v1' },
-          models: { 'qwen3-coder': { name: 'Qwen3 Coder' } },
+          models: { 'qwen3-coder': { name: 'Qwen3 Coder', modalities: ['text', 'image'] } },
         },
       },
     });
@@ -322,6 +522,22 @@ describe('model catalog', () => {
     assert.equal(mine[0]?.origin, 'user');
     assert.equal(mine[0]?.label, 'Qwen bridge');
     assert.equal(mine[0]?.models[0]?.id, 'qwen3-coder');
+    assert.deepEqual(mine[0]?.models[0]?.modalities, ['text', 'image']);
+  });
+
+  it('explains only explicitly declared vision capabilities', () => {
+    assert.equal(modelVisionBadge({
+      id: 'direct', label: 'Direct', description: '', badges: [], modalities: ['text', 'image'],
+    }, false), 'vision');
+    assert.equal(modelVisionBadge({
+      id: 'text', label: 'Text', description: '', badges: [], modalities: ['text'],
+    }, true), 'vision helper');
+    assert.equal(modelVisionBadge({
+      id: 'text', label: 'Text', description: '', badges: [], modalities: ['text'],
+    }, false), 'text only');
+    assert.equal(modelVisionBadge({
+      id: 'unknown', label: 'Unknown', description: '', badges: [],
+    }, true), null);
   });
 
   it('returns both preset and model for any selection the picker can show', () => {

@@ -55,7 +55,7 @@ export class AnthropicProvider implements ModelProvider {
         baseURL: config.baseURL.replace(/\/v1\/?$/, ''),
         timeout: config.timeoutMs,
       });
-    this.info = { id: config.model, endpoint: config.baseURL, contextWindow: undefined };
+    this.info = { id: config.model, endpoint: config.baseURL, contextWindow: config.contextWindow };
   }
 
   async *stream(request: CompletionRequest): AsyncGenerator<CompletionEvent> {
@@ -78,7 +78,7 @@ export class AnthropicProvider implements ModelProvider {
               }
             : {}),
           ...(this.#config.effort
-            ? { output_config: { effort: wireEffort(this.#config.effort) } }
+            ? { output_config: { effort: anthropicWireEffort(this.#config.effort) } }
             : {}),
         },
         request.signal ? { signal: request.signal } : {},
@@ -270,10 +270,11 @@ export class AnthropicProvider implements ModelProvider {
 
 type WireEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
-function wireEffort(effort: Effort): WireEffort {
-  // Plif's own tier maps onto the highest level Claude publishes below `max`,
-  // which is what Anthropic recommends for coding and agentic work.
-  if (effort === 'plif') return 'xhigh';
+export function anthropicWireEffort(effort: Effort): WireEffort {
+  // Plif asks for the strongest level this adapter knows how to send. Unlike
+  // the OpenAI-compatible path, Anthropic exposes one known effort vocabulary,
+  // so there is no endpoint-specific negotiation ladder to run here.
+  if (effort === 'plif') return 'max';
   if (effort === 'ultracode') return 'max';
   if (effort === 'ultra' || effort === 'max') return 'max';
   return effort;

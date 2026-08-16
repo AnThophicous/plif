@@ -20,7 +20,7 @@
     "plif": "dist/main.js"
   },
   "main": "./dist/main.js",
-  "files": ["dist", "README.md", "LICENSE", "NOTICE"],
+  "files": ["dist", "assets", "README.md", "LICENSE", "NOTICE"],
   "scripts": {
     "prepack": "node ../../scripts/prepack.mjs"
   },

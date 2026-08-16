@@ -39,7 +39,7 @@ export function Footer({ hints, width, status }: FooterProps): React.ReactElemen
             <Text color={color('muted')} bold>
               {hint.key}
             </Text>
-            <Text color={color('ghost')}>:{hint.label}</Text>
+            <Text color={color('muted')}>:{hint.label}</Text>
           </Box>
         ))}
       </Box>

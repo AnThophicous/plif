@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 
 import { highlightedClusters, useHighlightClock } from '../pulse.js';
 import { color, formatCount, formatDuration, glyph, supportsRichGlyphs, truncate } from '../theme.js';
+import { PlifGlow } from './PlifGlow.js';
 
 const VERBS = [
   'Parsing',
@@ -28,7 +29,7 @@ const VERBS = [
 ];
 
 const PULSE = supportsRichGlyphs ? ['•', '·', '•', '·'] : ['*', '+', '*', 'x'];
-const PLIF_PULSE = supportsRichGlyphs ? ['+', '×', '+', '×'] : ['#', '+', '*', '+'];
+const PLIF_MARK = supportsRichGlyphs ? '+' : '*';
 
 const TIPS = [
   'Esc cancels without killing the container',
@@ -63,8 +64,8 @@ export function Thinking({
   const elapsed = Date.now() - since;
   const verb =
     label ?? (VERBS[Math.floor(elapsed / VERB_EVERY_MS) % VERBS.length] as string);
-  const frames = verb === 'Plif Thinking' ? PLIF_PULSE : PULSE;
-  const pulse = frames[Math.floor(clock / PULSE_EVERY_MS) % frames.length] as string;
+  const plif = verb === 'Plif Thinking';
+  const pulse = plif ? PLIF_MARK : PULSE[Math.floor(clock / PULSE_EVERY_MS) % PULSE.length] as string;
 
   const parts = [formatDuration(elapsed)];
   if (tokens > 0) parts.push(`${glyph.tokens} ${formatCount(tokens)} tokens`);
@@ -78,14 +79,21 @@ export function Thinking({
     <Box flexDirection="column">
       <Box>
         <Text color={color('accent')}>{pulse} </Text>
-        <Text>
-          {highlightedClusters(verb, clock).map((part, index) => (
-            <Text key={index} color={part.color} bold={part.active}>
-              {part.text}
-            </Text>
-          ))}
-          <Text color={color('accent')}>…</Text>
-        </Text>
+        {plif ? (
+          <>
+            <PlifGlow value={verb} elapsedMs={clock} />
+            <Text color={color('accent')}>…</Text>
+          </>
+        ) : (
+          <Text>
+            {highlightedClusters(verb, clock).map((part, index) => (
+              <Text key={index} color={part.color} bold={part.active}>
+                {part.text}
+              </Text>
+            ))}
+            <Text color={color('accent')}>…</Text>
+          </Text>
+        )}
         <Text color={color('ghost')}> ({parts.join(' · ')})</Text>
       </Box>
       {tip && (

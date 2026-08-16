@@ -14,6 +14,15 @@ describe('terminal tool output policy', () => {
     }
   });
 
+  it('passes structured discovery results to the expressive CLI renderer', () => {
+    for (const name of ['web_search', 'research']) {
+      assert.equal(
+        terminalToolOutput(name, { output: '1. Source\nhttps://example.test', ok: true }),
+        '1. Source\nhttps://example.test',
+      );
+    }
+  });
+
   it('keeps one short error line for a hidden-output tool', () => {
     const output = terminalToolOutput('read_file', {
       output: `permission denied\n${'x'.repeat(800)}`,

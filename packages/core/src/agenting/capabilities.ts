@@ -110,7 +110,7 @@ export const toolsModule = definePromptModule({
         '  project test and build evidence appropriate to the change.',
       );
     }
-    if (hasAny(names, 'web_search', 'web_fetch', 'http_request', 'curl')) {
+    if (hasAny(names, 'research', 'web_search', 'web_fetch', 'http_request', 'curl')) {
       lines.push(
         '',
         '## Web and HTTP',
@@ -166,8 +166,11 @@ export const toolsModule = definePromptModule({
       lines.push(
         '',
         '## Images and vision',
-        '- Inspect an attached image only through a model or tool that actually supports',
-        '  vision. Do not pretend to see pixels unavailable to the active model.',
+        '- A model declared with modalities ["text", "image"] receives images directly.',
+        '- A text-only model does not see pixels. Call inspect_image instead: it sends',
+        '  the attachment and question to an explicitly configured vision helper, then',
+        '  returns that helper\'s textual observations to the active model.',
+        '- Never infer image support from a model id or pretend to see unavailable pixels.',
         '- Switching models or spending vision credits follows the configured approval',
         '  policy. Describe observations separately from interpretation.',
       );
@@ -179,4 +182,3 @@ export const toolsModule = definePromptModule({
 function hasAny(names: ReadonlySet<string>, ...candidates: string[]): boolean {
   return candidates.some((candidate) => names.has(candidate));
 }
-

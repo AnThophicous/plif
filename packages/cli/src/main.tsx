@@ -22,6 +22,7 @@ import React from 'react';
 
 import {
   CredentialBroker,
+  credentialVariableForProvider,
   DEVELOPER_POLICY,
   Engine,
   createModelProvider,
@@ -31,9 +32,12 @@ import {
   STRICT_POLICY,
   describe,
   loadStoredConfig,
+  migrateProviderCredentials,
   globalConfigPath,
   resolveConfig,
   saveStoredConfig,
+  providerIdForConfig,
+  stripStoredCredentials,
   buildSystemPrompt,
   DEFAULT_TOOLS,
   McpRegistry,
@@ -59,21 +63,23 @@ import {
   mcpServersOf,
   profilesOf,
   readAgentInstructions,
+  removePendingLegacyGlobalConfigs,
   visionTools,
   ProviderCapabilityCache,
 } from '@plif/core';
-import type { EffortCapabilityCache, GlobalConfig, ModelProvider, Session } from '@plif/core';
+import type { EffortCapabilityCache, GlobalConfig, ModelProvider, Session, StoredConfig } from '@plif/core';
 
 import { App } from './app.js';
 import { HELP_TOPICS, USAGE, parseArgv } from './argv.js';
 import type { GlobalFlags, Invocation } from './argv.js';
 import { formatDuration, formatRelative, plain } from './print.js';
-import { workedSeparator } from './theme.js';
+import { color, workedSeparator } from './theme.js';
 import { containerMount, containerWorkdir } from './container-paths.js';
 import { activateTheme, loadThemes } from './themes.js';
 import { detachImmediateInkResize } from './terminal-resize.js';
 import { disableBracketedPaste, enableBracketedPaste } from './paste.js';
 import { startInteractiveSurface } from './startup.js';
+import { createTerminalSurfaceStream } from './terminal-surface-output.js';
 import { VERSION, VERSION_LABEL } from './version.js';
 
 function buildEngine(flags: GlobalFlags): Engine {
@@ -336,6 +342,42 @@ async function runMcp(invocation: Extract<Invocation, { kind: 'mcp' }>): Promise
   if (statuses.some((status) => !status.connected)) process.exitCode = 1;
 }
 
+/** Resolve exactly one provider's encrypted/environment credential. */
+async function lookupProviderCredential(
+  credentials: CredentialBroker,
+  provider: string,
+  stored: StoredConfig,
+): Promise<string | undefined> {
+  return await credentials.lookup(credentialVariableForProvider(provider, stored));
+}
+
+/** Move legacy config credentials before a canonical config write can touch them. */
+async function migrateStoredCredentials(
+  engine: Engine,
+  stored: StoredConfig,
+  credentials: CredentialBroker,
+  fallbackProvider: string,
+): Promise<StoredConfig> {
+  try {
+    const migration = await migrateProviderCredentials(stored, credentials, fallbackProvider);
+    if (migration.migrated) {
+      await saveStoredConfig(engine.paths, migration.config, { preserveProviderKeys: false });
+    }
+    // JSON/JSONC was renamed before TOML was written. Remove that parked copy
+    // only after DPAPI migration and the clean canonical write have succeeded.
+    await removePendingLegacyGlobalConfigs();
+    return migration.config;
+  } catch (error) {
+    // The vault is written before the plaintext fields are removed and the
+    // config write is atomic. A failure therefore leaves the source config
+    // intact; fail closed instead of quietly continuing with plaintext.
+    throw new PlifError('INTERNAL', 'could not migrate the model credential securely', {
+      cause: error,
+      hint: 'The plaintext configuration was left untouched. Fix the Windows DPAPI error and retry.',
+    });
+  }
+}
+
 /** Build a provider from the resolved configuration, or explain why not. */
 async function buildProvider(
   engine: Engine,
@@ -343,15 +385,30 @@ async function buildProvider(
   capabilityCache: EffortCapabilityCache = new ProviderCapabilityCache({
     file: path.join(engine.paths.root, 'model-capabilities.json'),
   }),
+  credentials?: CredentialBroker,
 ): Promise<ModelProvider> {
-  const stored = await loadStoredConfig(engine.paths);
-  const activeName = typeof stored.activeProfile === 'string' ? stored.activeProfile : undefined;
-  const active = activeName ? profilesOf(stored)[activeName] : undefined;
+  const loaded = await loadStoredConfig(engine.paths);
+  const activeName = typeof loaded.activeProfile === 'string' ? loaded.activeProfile : undefined;
+  const active = activeName ? profilesOf(loaded)[activeName] : undefined;
+  const selectedModel = flags.model ?? active?.model;
+  const providerId = providerIdForConfig(loaded, {
+    ...(selectedModel ? { model: selectedModel } : {}),
+    ...(flags.preset ? { preset: flags.preset } : {}),
+  });
+  const stored = credentials
+    ? await migrateStoredCredentials(engine, loaded, credentials, providerId ?? '')
+    : loaded;
+  const credentialVariable = providerId === undefined
+    ? credentialVariableForProvider('', stored)
+    : credentialVariableForProvider(providerId, stored);
+  const storedKey = credentials
+    ? await credentials.lookup(credentialVariable)
+    : undefined;
   const config = resolveConfig(stored, {
-    ...(flags.model ? { model: flags.model } : active?.model ? { model: active.model } : {}),
+    ...(selectedModel ? { model: selectedModel } : {}),
     ...(flags.baseURL ? { baseURL: flags.baseURL } : {}),
     ...(flags.preset ? { preset: flags.preset } : {}),
-    ...(flags.apiKey ? { apiKey: flags.apiKey } : {}),
+    ...((flags.apiKey ?? storedKey) ? { apiKey: flags.apiKey ?? storedKey } : {}),
   });
 
   const check = validateModelConfig(config);
@@ -371,9 +428,8 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
   const themeCatalogue = await loadThemes();
   for (const problem of themeCatalogue.problems) process.stderr.write(`plif theme: ${problem}\n`);
   const appearance = await loadGlobalConfig();
-  const initialTheme = appearance.effort === 'plif'
-    ? themeCatalogue.themes.find((theme) => theme.id === 'midnight') ?? themeCatalogue.themes[0]!
-    : themeCatalogue.themes.find((theme) => theme.id === appearance.theme) ?? themeCatalogue.themes[0]!;
+  const initialTheme = themeCatalogue.themes.find((theme) => theme.id === appearance.theme)
+    ?? themeCatalogue.themes[0]!;
   activateTheme(
     initialTheme,
   );
@@ -382,7 +438,8 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
   const capabilityCache = new ProviderCapabilityCache({
     file: path.join(engine.paths.root, 'model-capabilities.json'),
   });
-  const provider = await buildProvider(engine, invocation.flags, capabilityCache);
+  const credentials = new CredentialBroker({ store: new WindowsDpapiSecretStore() });
+  const provider = await buildProvider(engine, invocation.flags, capabilityCache, credentials);
   const promptConfig = resolveConfig(await loadStoredConfig(engine.paths), {
     ...(invocation.flags.model ? { model: invocation.flags.model } : {}),
     ...(invocation.flags.baseURL ? { baseURL: invocation.flags.baseURL } : {}),
@@ -455,6 +512,17 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
     process.stderr.write(`  ~ compacting (${event.step}/${event.steps}): ${event.stage}\n`);
   });
 
+  engine.bus.on('agent.compacted', (event) => {
+    if (!event.failure) return;
+    const outcome = event.failure.fallback === 'raw history preserved'
+      ? 'raw history preserved'
+      : 'mechanical fallback applied';
+    process.stderr.write(
+      `  ! compaction: ${event.failure.message}; ${outcome} ` +
+      `(${event.failure.attempts} attempt${event.failure.attempts === 1 ? '' : 's'})\n`,
+    );
+  });
+
   // Nothing can answer a question in a one-shot run, so say so immediately
   // instead of making the agent wait out the timeout.
   engine.bus.on('question.asked', (event) => {
@@ -499,7 +567,6 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
     // an interactive session already saved, so `plif prompt` inherits the login.
     await resolveServerConfigs(
       mcpServersOf(stored as GlobalConfig),
-      new CredentialBroker({ store: platformSecretStore() }),
     ),
     engine.bus,
   );
@@ -517,6 +584,8 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
     provider,
     isolation: report.isolation,
     stored,
+    resolveCredential: async (providerId: string, childStored: StoredConfig) =>
+      await lookupProviderCredential(credentials, providerId, childStored),
     agents: agentsOf(stored),
     extraTools: [...lspForAgent, ...WEB_TOOLS],
     edits,
@@ -541,6 +610,7 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
             workdir: container.workdir,
             capabilities: container.capabilities,
             isolation: engine.sandboxReport.isolation,
+            contextTokens: provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
             tools: agentTools.map((tool) => tool.spec),
             skills: skills.catalogue(),
             mcpServers: mcp.catalogue(),
@@ -567,7 +637,7 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
         memory: engine.memory,
         workspace: invocation.flags.workspace,
         sessionId: session.id,
-        contextTokens: DEFAULT_CONTEXT_TOKENS,
+        contextTokens: provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
         tools: agentTools,
         tasks,
         lsp,
@@ -603,12 +673,22 @@ async function runModel(invocation: Extract<Invocation, { kind: 'model' }>): Pro
   const engine = buildEngine(invocation.flags);
   await engine.start();
 
-  const stored = await loadStoredConfig(engine.paths);
+  const loaded = await loadStoredConfig(engine.paths);
+  const credentials = new CredentialBroker({ store: new WindowsDpapiSecretStore() });
+  const providerId = providerIdForConfig(loaded, {
+    ...(invocation.flags.model ? { model: invocation.flags.model } : {}),
+    ...(invocation.flags.preset ? { preset: invocation.flags.preset } : {}),
+  });
+  const stored = await migrateStoredCredentials(engine, loaded, credentials, providerId ?? '');
+  const credentialVariable = providerId === undefined
+    ? credentialVariableForProvider('', stored)
+    : credentialVariableForProvider(providerId, stored);
+  const brokerKey = await credentials.lookup(credentialVariable);
   const config = resolveConfig(stored, {
     ...(invocation.flags.model ? { model: invocation.flags.model } : {}),
     ...(invocation.flags.baseURL ? { baseURL: invocation.flags.baseURL } : {}),
     ...(invocation.flags.preset ? { preset: invocation.flags.preset } : {}),
-    ...(invocation.flags.apiKey ? { apiKey: invocation.flags.apiKey } : {}),
+    ...((invocation.flags.apiKey ?? brokerKey) ? { apiKey: invocation.flags.apiKey ?? brokerKey } : {}),
   });
 
   // `set` writes the current resolution back to the store so it survives the
@@ -616,13 +696,27 @@ async function runModel(invocation: Extract<Invocation, { kind: 'model' }>): Pro
   // the environment into a file on disk is a decision the user should make
   // explicitly, not a side effect of running `plif model set`.
   if (invocation.action === 'set') {
-    await saveStoredConfig(engine.paths, {
+    const credentialProvider = providerId ?? '';
+    try {
+      if (invocation.flags.apiKey && invocation.flags.apiKey !== 'local') {
+        await credentials.remember(
+          credentialVariableForProvider(credentialProvider, stored),
+          invocation.flags.apiKey,
+        );
+      }
+    } catch (error) {
+      throw new PlifError('INTERNAL', 'could not save the model credential securely', { cause: error });
+    }
+    await saveStoredConfig(engine.paths, stripStoredCredentials({
       ...stored,
       model: config.model,
       baseURL: config.baseURL,
-      ...(invocation.flags.preset ? { preset: invocation.flags.preset } : {}),
-      ...(invocation.flags.apiKey ? { apiKey: invocation.flags.apiKey } : {}),
-    });
+      ...(invocation.flags.preset
+        ? { preset: invocation.flags.preset }
+        : providerId
+          ? { preset: providerId }
+          : {}),
+    }, credentialProvider), { preserveProviderKeys: false });
     process.stdout.write(`saved: ${config.model} at ${config.baseURL}\n`);
     return;
   }
@@ -695,11 +789,14 @@ async function runInteractive(
   const themeCatalogue = await loadThemes();
   for (const problem of themeCatalogue.problems) process.stderr.write(`plif theme: ${problem}\n`);
   const appearance = await loadGlobalConfig();
-  const initialTheme = appearance.effort === 'plif'
-    ? themeCatalogue.themes.find((theme) => theme.id === 'midnight') ?? themeCatalogue.themes[0]!
-    : themeCatalogue.themes.find((theme) => theme.id === appearance.theme) ?? themeCatalogue.themes[0]!;
+  const initialTheme = themeCatalogue.themes.find((theme) => theme.id === appearance.theme)
+    ?? themeCatalogue.themes[0]!;
   activateTheme(initialTheme);
   const done = installTeardown(engine);
+  // Ink's erase sequence can briefly expose the terminal's default (usually
+  // black) on the reserved row below the live frame. Paint that row with the
+  // active panel colour after every frame without changing Ink's line count.
+  const surfaceStdout = createTerminalSurfaceStream(process.stdout, () => color('panel'));
 
   let session: Session | null = null;
 
@@ -746,8 +843,19 @@ async function runInteractive(
   const capabilityCache = new ProviderCapabilityCache({
     file: path.join(engine.paths.root, 'model-capabilities.json'),
   });
+  // One broker is shared by startup resolution, model adoption, and MCP. A
+  // typed model key therefore has one encrypted home and survives restart.
+  const credentials = new CredentialBroker({
+    store: new WindowsDpapiSecretStore(),
+    prompt: (request) =>
+      engine.questions.ask({
+        text: `${request.variable} for ${request.purpose}`,
+        secret: true,
+        ...(request.hint ? { context: request.hint } : {}),
+      }),
+  });
   try {
-    provider = await buildProvider(engine, invocation.flags, capabilityCache);
+    provider = await buildProvider(engine, invocation.flags, capabilityCache, credentials);
   } catch (error) {
     providerProblem = PlifError.is(error)
       ? [error.message, error.hint].filter(Boolean).join('\n')
@@ -763,16 +871,6 @@ async function runInteractive(
   // The value comes back through the broker's promise and is written to the
   // encrypted store. It is never put on the bus, so no subscriber — timeline,
   // transcript, audit log — is in a position to leak it.
-  const credentials = new CredentialBroker({
-    store: platformSecretStore(),
-    prompt: (request) =>
-      engine.questions.ask({
-        text: `${request.variable} for ${request.purpose}`,
-        secret: true,
-        ...(request.hint ? { context: request.hint } : {}),
-      }),
-  });
-
   const replay = session ? await session.replay() : [];
 
   const resizeListenersBefore = new Set(
@@ -792,7 +890,6 @@ async function runInteractive(
       providerProblem={providerProblem}
       effort={appearance.effort}
       initialThemeId={initialTheme.id}
-      preferredThemeId={appearance.theme ?? themeCatalogue.themes[0]?.id}
       tools={tools}
       skillCatalogue={skills.catalogue()}
       mcpCatalogue=""
@@ -804,7 +901,7 @@ async function runInteractive(
       themeCatalogue={themeCatalogue}
     />,
     // Ink's own Ctrl+C handling would exit before containers are reaped.
-    { exitOnCtrlC: false, stdout: process.stdout },
+    { exitOnCtrlC: false, stdout: surfaceStdout },
   );
   detachImmediateInkResize(process.stdout, resizeListenersBefore);
 

@@ -22,6 +22,27 @@ interface BrowserProps {
   readonly rows: number;
 }
 
+export type McpStatusKind = 'connected' | 'disconnected' | 'error';
+
+export function mcpStatusKind(status: McpServerStatus): McpStatusKind {
+  if (status.connected) return 'connected';
+  return /^(not connected|closed|disabled|offline|connecting|authenticating)$/i.test(status.detail.trim())
+    ? 'disconnected'
+    : 'error';
+}
+
+export function sortMcpStatuses(statuses: readonly McpServerStatus[]): McpServerStatus[] {
+  const rank: Readonly<Record<McpStatusKind, number>> = {
+    connected: 0,
+    disconnected: 1,
+    error: 2,
+  };
+  return [...statuses].sort((left, right) => {
+    const byKind = rank[mcpStatusKind(left)] - rank[mcpStatusKind(right)];
+    return byKind || left.name.localeCompare(right.name);
+  });
+}
+
 /**
  * How much of the terminal the browser takes.
  *
@@ -68,6 +89,13 @@ export function Browser({
   const listWidth = stacked ? width - 2 : Math.max(28, Math.floor((width - 5) * 0.42));
   const detailWidth = width - listWidth - 5;
   const bodyRows = height - 4;
+  const mcpCounts = sortMcpStatuses(servers).reduce(
+    (counts, server) => {
+      counts[mcpStatusKind(server)] += 1;
+      return counts;
+    },
+    { connected: 0, disconnected: 0, error: 0 },
+  );
 
   return (
     <Box flexDirection="column" width="100%" paddingX={layout.gutter}>
@@ -86,6 +114,12 @@ export function Browser({
         }
         showing={state.rows.length}
       />
+
+      {state.tab === 'mcp' && (
+        <Text color={color('ghost')}>
+          {glyph.done} {mcpCounts.connected} connected · {glyph.pending} {mcpCounts.disconnected} disconnected · {glyph.failed} {mcpCounts.error} errors
+        </Text>
+      )}
 
       <Box>
         <Box flexDirection="column" width={listWidth}>
@@ -106,6 +140,12 @@ export function Browser({
           </>
         )}
       </Box>
+
+      {state.tab === 'mcp' && (
+        <Text color={color('muted')}>
+          C connect · D disconnect · A authenticate · T test connection
+        </Text>
+      )}
     </Box>
   );
 }
@@ -269,12 +309,26 @@ function Detail({
         </Text>
         <Field label="transport" value={server.transport} width={width} />
         <Field
-          label="state"
-          value={server.connected ? `connected, ${server.toolCount} tools` : 'not connected'}
+          label="status"
+          value={
+            mcpStatusKind(server) === 'connected'
+              ? `connected · ${server.toolCount} tools available`
+              : mcpStatusKind(server) === 'disconnected'
+                ? 'disconnected'
+                : `error · ${server.detail}`
+          }
           width={width}
-          tone={server.connected ? 'success' : 'danger'}
+          tone={mcpStatusKind(server) === 'connected'
+            ? 'success'
+            : mcpStatusKind(server) === 'error' ? 'danger' : 'muted'}
         />
-        <Paragraph text={server.detail} width={width} lines={rows - 5} />
+        <Paragraph
+          text={server.connected
+            ? `Provides ${server.toolCount} tools to the agent over ${server.transport}. ${server.detail}.`
+            : `This server is configured over ${server.transport}, but it is ${mcpStatusKind(server) === 'error' ? 'failing' : 'not connected'}. ${server.detail}.`}
+          width={width}
+          lines={rows - 5}
+        />
       </Box>
     );
   }

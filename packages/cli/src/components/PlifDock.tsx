@@ -1,61 +1,109 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
+import { effortPulseCells, effortTagline, effortVisual } from '../effort-visuals.js';
+import { useHighlightClock } from '../pulse.js';
+import { color, layout, shortenPath, truncate } from '../theme.js';
 import { InfinityMark } from './FocusFrame.js';
 import { Meter } from './Meter.js';
-import { color, layout, shortenPath, truncate } from '../theme.js';
+import { PlifGlow } from './PlifGlow.js';
 export { plifDockItems } from '../live-status.js';
+
+const DOCK_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode', 'plif'] as const;
 
 /** One row for the dock, one for the divider that joins it to the prompt. */
 export function plifDockHeight(effort?: string): number {
-  return ['plif', 'max', 'ultra', 'ultracode'].includes(effort ?? '') ? 2 : 0;
+  return DOCK_EFFORTS.includes(effort as (typeof DOCK_EFFORTS)[number]) ? 2 : 0;
 }
 
 export function PlifDock({
   cwd,
+  model,
   effort,
   contextUsed,
   contextMax,
   working,
+  transitioning = false,
+  animated: ambientAnimation = false,
   width,
 }: {
   readonly cwd: string;
+  /** Active provider model, shown immediately before the context meter. */
+  readonly model?: string;
   readonly effort?: string;
   readonly contextUsed: number;
   readonly contextMax: number;
   readonly working: boolean;
+  readonly transitioning?: boolean;
+  readonly animated?: boolean;
   readonly width: number;
 }): React.ReactElement | null {
-  if (!['plif', 'max', 'ultra', 'ultracode'].includes(effort ?? '')) return null;
+  const plif = effort === 'plif';
+  const visual = effortVisual(effort);
+  const animated = working || transitioning || ambientAnimation;
+  const elapsed = useHighlightClock(animated);
+  if (plifDockHeight(effort) === 0) return null;
 
+  const pulse = effortPulseCells(effort, elapsed, animated);
   const inner = Math.max(18, width - 4);
   const narrow = inner < layout.narrowWidth;
+  const compact = inner < 28;
   const percent = Math.round((contextUsed / Math.max(1, contextMax)) * 100);
-  // The path gets whatever the meter and the mark leave. It is the only thing
-  // here that varies in length, so it is the only thing that should absorb the
-  // slack rather than being given a fixed share of it.
-  const pathWidth = Math.max(10, inner - (narrow ? 16 : 32));
+  const modelWidth = compact
+    ? Math.max(3, inner - 21)
+    : Math.min(28, Math.max(12, Math.floor(inner * 0.28)));
+  const modelLabel = model?.trim() ? truncate(model.trim(), modelWidth) : '';
+  const pathWidth = Math.max(10, inner - 32 - (modelLabel ? modelWidth + 4 : 0));
 
-  // No border and no margin of its own: this is rendered inside the prompt
-  // frame, below its divider, so the walls and the padding are already there.
-  // No labels either — a "working" word beside a mark that is already moving,
-  // or a "Plif" badge under a frame that is already the Plif frame, was the
-  // same thing said twice.
   return (
     <Box width="100%" justifyContent="space-between">
       <Box flexShrink={1}>
-        <InfinityMark active={working} />
-        <Text color={color(working ? 'muted' : 'faint')}>
-          {working ? ' working' : ' ready'}
-          {'  ·  '}
-          {truncate(shortenPath(cwd, pathWidth), pathWidth)}
-          {!narrow && `  ·  ${effort === 'ultracode' ? 'UltraCode' : effort === 'plif' ? 'Plif' : effort === 'ultra' ? 'Ultra' : 'Max'}`}
-        </Text>
+        <InfinityMark active={animated} plif={plif} />
+        {compact ? (
+          <Text color={color('faint')} bold>{` ${visual.label.slice(0, 8)}`}</Text>
+        ) : (
+          <Text bold>
+            {' '}
+            <PlifGlow
+              value={visual.label}
+              elapsedMs={elapsed}
+              active={animated}
+              fallback="faint"
+              stops={visual.stops}
+            />
+          </Text>
+        )}
+        {animated && !compact && <Text color={color('muted')}>{` · ${effortTagline(effort, working)}`}</Text>}
+        {animated && (
+          <Text>
+            {' '}
+            {pulse.map((cell, index) => (
+              <Text key={index} color={cell.color}>{cell.text}</Text>
+            ))}
+          </Text>
+        )}
+        {!narrow && (
+          <Text color={color(working ? 'muted' : 'faint')}>
+            {`  ·  ${truncate(shortenPath(cwd, pathWidth), pathWidth)}${animated ? `  ·  ${visual.descriptor}` : ''}`}
+          </Text>
+        )}
       </Box>
-      <Box marginLeft={1}>
-        <Text color={color('muted')}>{narrow ? 'Context ' : '  ·  Context '}</Text>
+      <Box marginLeft={1} flexShrink={1}>
+        {modelLabel && (
+          <Text color={color('text')} bold>
+            {modelLabel}
+          </Text>
+        )}
+        {modelLabel && !compact && <Text color={color('ghost')}> {'·'} </Text>}
+        {!compact && <Text color={color('muted')}>{narrow ? 'Context ' : '  ·  Context '}</Text>}
         <Text color={color('ghost')}>[</Text>
-        <Meter value={contextUsed} max={contextMax} width={narrow ? 4 : 6} />
+        <Meter
+          value={contextUsed}
+          max={contextMax}
+          width={narrow ? 4 : 6}
+          plif={plif}
+          active={animated}
+        />
         <Text color={color('ghost')}>]</Text>
         {!narrow && <Text color={color('muted')}> {percent}%</Text>}
       </Box>

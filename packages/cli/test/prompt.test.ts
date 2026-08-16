@@ -5,7 +5,13 @@ import { describe, it } from 'node:test';
 import { render } from 'ink';
 import React from 'react';
 
-import { layoutPrompt, Prompt } from '../src/components/Prompt.js';
+import {
+  layoutPrompt,
+  promptBodyRows,
+  promptHeight,
+  Prompt,
+  visiblePromptRows,
+} from '../src/components/Prompt.js';
 
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
@@ -66,5 +72,24 @@ describe('multiline prompt layout', () => {
     assert.equal(rows.length, 2);
     assert.equal(rows[1]?.text, '');
     assert.equal(rows[1]?.cursor, 0);
+  });
+
+  it('budgets narrow multiline input while keeping the full draft and cursor row', () => {
+    const value = '0123456789\nabcdefghij\nklmnopqrst';
+    const rows = layoutPrompt(value, value.length, 6);
+    assert.equal(promptBodyRows(value, value.length, 14), rows.length);
+    assert.equal(rows.length, 6);
+
+    const visible = visiblePromptRows(rows, 2);
+    assert.equal(visible.length, 2);
+    assert.equal(visible[0]?.text, 'klmnop');
+    assert.equal(visible[1]?.text, 'qrst');
+    assert.equal(visible[1]?.cursor, 4);
+    assert.equal(rows.map((row) => row.text).join(''), value.replaceAll('\n', ''));
+  });
+
+  it('counts frame, status, and queued rows instead of assuming a fixed prompt height', () => {
+    assert.equal(promptHeight({ bodyRows: 1 }), 3);
+    assert.equal(promptHeight({ bodyRows: 2, footerRows: 2, queueRows: 3 }), 10);
   });
 });

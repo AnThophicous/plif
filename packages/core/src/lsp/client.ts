@@ -58,6 +58,13 @@ const SYMBOL_KINDS: Readonly<Record<number, string>> = {
 const INITIALIZE_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 20_000;
 const DIAGNOSTIC_SETTLE_MS = 1_500;
+const DIAGNOSTIC_QUIET_MS = 300;
+
+interface OpenDocument {
+  readonly file: string;
+  readonly text: string;
+  readonly version: number;
+}
 
 export class LspClient {
   readonly id: string;
@@ -68,10 +75,14 @@ export class LspClient {
   #child: ChildProcessWithoutNullStreams | null = null;
   #connection: MessageConnection | null = null;
   #diagnostics = new Map<string, Diagnostic[]>();
-  #open = new Map<string, number>();
+  #diagnosticRevision = new Map<string, number>();
+  #open = new Map<string, OpenDocument>();
   #waiters = new Set<(file: string) => void>();
   #ready = false;
   #detail = 'not started';
+  #stderr = '';
+  #serverLog = '';
+  #stopping = false;
 
   constructor(resolved: ResolvedServer, root: string) {
     this.#resolved = resolved;
@@ -88,23 +99,42 @@ export class LspClient {
     return this.#detail;
   }
 
+  get logTail(): string {
+    return this.#serverLog;
+  }
+
   async start(): Promise<void> {
+    if (this.#ready) return;
+    this.#stopping = false;
+    this.#stderr = '';
+    this.#serverLog = '';
     const child = spawn(this.#resolved.command, [...this.#resolved.args], {
       cwd: this.root,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...(this.#resolved.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
     }) as ChildProcessWithoutNullStreams;
 
     child.on('error', (error) => {
       this.#detail = error.message;
       this.#ready = false;
+      for (const waiter of [...this.#waiters]) waiter('');
     });
     child.on('close', (code, signal) => {
       this.#ready = false;
-      this.#detail = `process exited${code === null ? ` by ${signal ?? 'signal'}` : ` with code ${code}`}`;
+      if (!this.#stopping) {
+        const exit = `process exited${code === null ? ` by ${signal ?? 'signal'}` : ` with code ${code}`}`;
+        this.#detail = this.#stderr ? `${exit}: ${lastLine(this.#stderr)}` : exit;
+      }
+      if (this.#child === child) {
+        this.#child = null;
+        this.#connection = null;
+      }
       for (const waiter of [...this.#waiters]) waiter('');
     });
-    child.stderr.resume();
+    child.stderr.on('data', (chunk: Buffer | string) => {
+      this.#stderr = (this.#stderr + chunk.toString()).slice(-4_096);
+    });
 
     const connection = createMessageConnection(
       new StreamMessageReader(child.stdout),
@@ -112,12 +142,28 @@ export class LspClient {
     );
 
     connection.onNotification('textDocument/publishDiagnostics', (params: unknown) => {
-      this.#absorb(params as { uri: string; diagnostics: unknown[] });
+      this.#absorb(params as { uri: string; version?: unknown; diagnostics: unknown[] });
     });
-    connection.onRequest('workspace/configuration', () => [{}]);
+    connection.onRequest('workspace/configuration', (params: unknown) => {
+      const items = (params as { items?: unknown[] } | null)?.items;
+      return Array.isArray(items)
+        ? items.map((item) => {
+            const section = (item as { section?: unknown } | null)?.section;
+            return section === 'formattingOptions' ? { tabSize: 2, insertSpaces: true } : {};
+          })
+        : [];
+    });
+    connection.onRequest('workspace/workspaceFolders', () => [
+      { uri: pathToFileURL(this.root).toString(), name: path.basename(this.root) },
+    ]);
     connection.onRequest('client/registerCapability', () => null);
     connection.onRequest('window/workDoneProgress/create', () => null);
-    connection.onNotification('window/logMessage', () => undefined);
+    connection.onNotification('window/logMessage', (params: unknown) => {
+      const message = (params as { message?: unknown } | null)?.message;
+      if (typeof message === 'string' && message.trim()) {
+        this.#serverLog = (this.#serverLog + message.trim() + '\n').slice(-8_192);
+      }
+    });
     connection.onNotification('$/progress', () => undefined);
 
     connection.listen();
@@ -164,9 +210,15 @@ export class LspClient {
     }
   }
 
-  #absorb(params: { uri: string; diagnostics: unknown[] }): void {
+  #absorb(params: { uri: string; version?: unknown; diagnostics: unknown[] }): void {
     const file = safeFsPath(params.uri);
     if (!file) return;
+    const key = documentKey(file);
+    const document = this.#open.get(key);
+    const version = typeof params.version === 'number' && Number.isInteger(params.version)
+      ? params.version
+      : null;
+    if (version !== null && (!document || version !== document.version)) return;
 
     const list: Diagnostic[] = [];
     for (const raw of params.diagnostics ?? []) {
@@ -188,22 +240,37 @@ export class LspClient {
       });
     }
 
-    this.#diagnostics.set(file, list);
-    for (const waiter of [...this.#waiters]) waiter(file);
+    this.#diagnostics.set(key, list);
+    this.#diagnosticRevision.set(key, (this.#diagnosticRevision.get(key) ?? 0) + 1);
+    for (const waiter of [...this.#waiters]) waiter(key);
   }
 
-  async openFile(file: string): Promise<void> {
+  async openFile(file: string): Promise<boolean> {
     const connection = this.#connection;
-    if (!connection || !this.#ready) return;
+    if (!connection || !this.#ready) return false;
 
     const absolute = path.resolve(file);
+    const key = documentKey(absolute);
+    const previous = this.#open.get(key);
     const text = await fs.readFile(absolute, 'utf8').catch(() => null);
-    if (text === null) return;
+    if (text === null) {
+      if (previous) {
+        connection.sendNotification('textDocument/didClose', {
+          textDocument: { uri: pathToFileURL(previous.file).toString() },
+        });
+        this.#open.delete(key);
+        this.#diagnostics.delete(key);
+        this.#diagnosticRevision.delete(key);
+      }
+      return false;
+    }
+    if (previous?.text === text) return false;
 
-    const version = (this.#open.get(absolute) ?? 0) + 1;
-    this.#open.set(absolute, version);
+    const version = (previous?.version ?? 0) + 1;
+    this.#open.set(key, { file: absolute, text, version });
+    this.#diagnostics.delete(key);
 
-    if (version === 1) {
+    if (!previous) {
       connection.sendNotification('textDocument/didOpen', {
         textDocument: {
           uri: pathToFileURL(absolute).toString(),
@@ -218,6 +285,7 @@ export class LspClient {
         contentChanges: [{ text }],
       });
     }
+    return true;
   }
 
   /**
@@ -230,32 +298,62 @@ export class LspClient {
    */
   async diagnose(file: string, settleMs = DIAGNOSTIC_SETTLE_MS): Promise<Diagnostic[]> {
     const absolute = path.resolve(file);
+    const key = documentKey(absolute);
     if (!this.#ready) return [];
 
-    let resolveWait: (() => void) | null = null;
-    const arrived = new Promise<void>((resolve) => {
-      resolveWait = resolve;
-    });
-    const waiter = (changed: string): void => {
-      if (changed === absolute) resolveWait?.();
-    };
-    this.#waiters.add(waiter);
+    let revision = this.#diagnosticRevision.get(key) ?? 0;
+    const changed = await this.openFile(absolute);
+    if (!this.#ready) return [];
+    if (!changed && this.#diagnostics.has(key)) return [...(this.#diagnostics.get(key) ?? [])];
 
-    try {
-      await this.openFile(absolute);
-      await Promise.race([arrived, delay(settleMs)]);
-      // A second beat: many servers publish an empty list first and the real
-      // findings a moment later, so returning on the first notification would
-      // report a clean file that is not.
-      await delay(200);
-      return this.#diagnostics.get(absolute) ?? [];
-    } finally {
-      this.#waiters.delete(waiter);
+    const deadline = Date.now() + Math.max(0, settleMs);
+    while (this.#ready && Date.now() < deadline) {
+      const arrived = await this.#waitForDiagnosticRevision(key, revision, deadline - Date.now());
+      if (!arrived) break;
+      revision = this.#diagnosticRevision.get(key) ?? revision;
+      const quiet = await this.#waitForDiagnosticRevision(
+        key,
+        revision,
+        Math.min(DIAGNOSTIC_QUIET_MS, Math.max(0, deadline - Date.now())),
+      );
+      if (!quiet) {
+        // Several servers acknowledge a change with [] before their slower
+        // semantic pass publishes the real errors. A non-empty list may settle
+        // after the quiet window; an empty list must wait through the deadline
+        // or it recreates the false-clean race this method exists to prevent.
+        if ((this.#diagnostics.get(key)?.length ?? 0) > 0) break;
+        continue;
+      }
+      revision = this.#diagnosticRevision.get(key) ?? revision;
     }
+    return [...(this.#diagnostics.get(key) ?? [])];
+  }
+
+  async #waitForDiagnosticRevision(key: string, after: number, timeoutMs: number): Promise<boolean> {
+    if ((this.#diagnosticRevision.get(key) ?? 0) > after) return true;
+    if (timeoutMs <= 0 || !this.#ready) return false;
+
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (value: boolean): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.#waiters.delete(waiter);
+        resolve(value);
+      };
+      const waiter = (changed: string): void => {
+        if (changed === '') finish(false);
+        else if (changed === key && (this.#diagnosticRevision.get(key) ?? 0) > after) finish(true);
+      };
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      timer.unref?.();
+      this.#waiters.add(waiter);
+    });
   }
 
   diagnosticsFor(file: string): Diagnostic[] {
-    return this.#diagnostics.get(path.resolve(file)) ?? [];
+    return [...(this.#diagnostics.get(documentKey(file)) ?? [])];
   }
 
   allDiagnostics(): Diagnostic[] {
@@ -339,11 +437,10 @@ export class LspClient {
   }
 
   async stop(): Promise<void> {
+    this.#stopping = true;
     this.#ready = false;
     const connection = this.#connection;
     const child = this.#child;
-    this.#connection = null;
-    this.#child = null;
 
     if (connection) {
       await withTimeout(connection.sendRequest('shutdown', null), 3_000, 'shutdown').catch(
@@ -356,7 +453,16 @@ export class LspClient {
       }
       connection.dispose();
     }
-    if (child && !child.killed) child.kill();
+    if (child) {
+      const exited = await waitForChildExit(child, 500);
+      if (!exited && child.exitCode === null && child.signalCode === null) child.kill();
+      await waitForChildExit(child, 1_000);
+    }
+    this.#connection = null;
+    this.#child = null;
+    this.#open.clear();
+    this.#detail = 'stopped';
+    for (const waiter of [...this.#waiters]) waiter('');
   }
 }
 
@@ -420,19 +526,46 @@ function safeFsPath(uri: string): string | null {
   }
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
+function documentKey(file: string): string {
+  const absolute = path.resolve(file);
+  return process.platform === 'win32' ? absolute.toLowerCase() : absolute;
+}
+
+function lastLine(value: string): string {
+  return value.trim().split(/\r?\n/).at(-1)?.trim() ?? '';
+}
+
+async function waitForChildExit(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return true;
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (value: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.off('close', onClose);
+      resolve(value);
+    };
+    const onClose = (): void => finish(true);
+    const timer = setTimeout(() => finish(false), timeoutMs);
     timer.unref?.();
+    child.once('close', onClose);
   });
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) => {
-      const timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms}ms`)), ms);
-      timer.unref?.();
-    }),
-  ]);
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms}ms`)), ms);
+    timer.unref?.();
+    void promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }

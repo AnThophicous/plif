@@ -2,9 +2,12 @@ import React from 'react';
 import { Box, Text } from 'ink';
 
 import { color, shortenPath, truncate } from '../theme.js';
+import { PNG_HEADER_ART_HEIGHT, PNG_HEADER_ART_WIDTH, PngHeaderArt } from './PngHeaderArt.js';
 
-export const HEADER_INFINITY = '▗▛▀▜▄▛▀▜▖\n█▌ ▘█▝ ▐█\n▝▜█▛ ▜█▛▘';
-export const HEADER_INFINITY_COMPACT = '▗▛▜▖';
+/** Rows occupied by the live header, including its breathing margin. */
+export function headerHeight(width: number): number {
+  return width < 74 ? 8 : PNG_HEADER_ART_HEIGHT + 9;
+}
 
 export interface HeaderProps {
   readonly cwd: string;
@@ -40,7 +43,7 @@ export function Header({
         paddingY={1}
       >
         <Box justifyContent="space-between" width="100%">
-          <Text color={color('text')} bold>{HEADER_INFINITY_COMPACT} PLIF Code</Text>
+          <Text color={color('text')} bold>PLIF Code</Text>
           <Text color={color('ghost')}>v{version}</Text>
         </Box>
         <Text color={color('muted')} wrap="truncate">workspace: {workspace}</Text>
@@ -51,14 +54,16 @@ export function Header({
     );
   }
 
-  const leftWidth = Math.max(22, Math.min(30, Math.floor(width * 0.32)));
+  // The PNG raster is 22 cells wide. Give it its own measured column so
+  // Ink never wraps the art into a different shape while laying out the header.
+  const leftWidth = Math.max(22, Math.min(PNG_HEADER_ART_WIDTH + 2, width - 18));
   const rightWidth = Math.max(10, width - leftWidth - 3);
 
   return (
     <Box borderStyle="round" borderColor={color('faint')} width="100%" marginBottom={1}>
       <Box flexDirection="column" width={leftWidth} paddingX={1} paddingY={1}>
         <Box flexDirection="column">
-          <Text color={color('accentDim')} bold>{HEADER_INFINITY}</Text>
+          <PngHeaderArt />
           <Text color={color('text')} bold>PLIF</Text>
         </Box>
         <Box justifyContent="space-between">
@@ -70,7 +75,9 @@ export function Header({
           {truncate(modelLabel, Math.max(8, leftWidth - 4))}{effort ? ` · ${effort}` : ''}
         </Text>
       </Box>
-      <Text color={color('faint')}>{'│\n'.repeat(7)}│</Text>
+      <Text color={color('faint')}>
+        {'│\n'.repeat(Math.max(0, PNG_HEADER_ART_HEIGHT + 3))}│
+      </Text>
       <Box
         flexDirection="column"
         width={rightWidth}
