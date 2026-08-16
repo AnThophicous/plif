@@ -211,6 +211,13 @@ export interface AppProps {
 
 /** How often command output is flushed into the timeline. */
 const STREAM_FLUSH_MS = 90;
+/**
+ * Stream text gets its own bounded cadence. It must not wait for the visual
+ * animation clock: that clock is intentionally slow for spinners, while text
+ * already received from the provider should reach the terminal within one
+ * ordinary paint window.
+ */
+const SEMANTIC_STREAM_FRAME_MS = 33;
 /** Window in which a second Ctrl+C means "really quit". */
 const DOUBLE_INTERRUPT_MS = 1500;
 const PLAN_BLOCKED_TOOLS = new Set([
@@ -550,7 +557,7 @@ export function App({
   const paintedEpoch = useRef<number | null>(null);
   const semanticFrames = useRef<StreamFrameScheduler | null>(null);
   semanticFrames.current ??= new StreamFrameScheduler({
-    clockDriven: true,
+    frameMs: SEMANTIC_STREAM_FRAME_MS,
     onFrame: (frame: StreamFrame) => {
       if (frame.kind === 'reset') {
         semanticStartedAt.current = null;
@@ -3922,7 +3929,6 @@ export function App({
     <AnimationClockProvider
       active={animationActive}
       plif={effort === 'plif'}
-      onTick={() => semanticFrames.current?.tick()}
     >
     <Box flexDirection="column" width={width} height={surface.canvasHeight}>
       <Box paddingX={layout.gutter} flexShrink={0}>

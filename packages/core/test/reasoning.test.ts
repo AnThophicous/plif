@@ -94,6 +94,20 @@ describe('reasoningFromDelta', () => {
     assert.equal(reasoningFromDelta({ reasoning_content: 'a' }), 'a');
     assert.equal(reasoningFromDelta({ reasoning: 'b' }), 'b');
     assert.equal(reasoningFromDelta({ thinking: 'c' }), 'c');
+    assert.equal(reasoningFromDelta({ analysis: 'd' }), 'd');
+    assert.equal(reasoningFromDelta({ reasoning_delta: 'e' }), 'e');
+    assert.equal(reasoningFromDelta({ thinking_delta: 'f' }), 'f');
+  });
+
+  it('unwraps reasoning content blocks from compatible gateways', () => {
+    assert.equal(
+      reasoningFromDelta({ content_block: { type: 'thinking', thinking: 'g' } }),
+      'g',
+    );
+    assert.equal(
+      reasoningFromDelta({ content_block_delta: { type: 'thinking_delta', text: 'h' } }),
+      'h',
+    );
   });
 
   it('unwraps the object form some gateways send', () => {
@@ -117,6 +131,16 @@ describe('reasoningFromDelta', () => {
       text: 'abc',
       source: 'reasoning_details',
       semantics: 'snapshot',
+    });
+    assert.deepEqual(reasoningObservationFromDelta({ reasoning_delta: 'abc' }), {
+      text: 'abc',
+      source: 'reasoning_delta',
+      semantics: 'delta',
+    });
+    assert.deepEqual(reasoningObservationFromDelta({ content_block_delta: { type: 'thinking_delta', text: 'abc' } }), {
+      text: 'abc',
+      source: 'content_block_delta',
+      semantics: 'delta',
     });
   });
 

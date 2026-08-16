@@ -151,6 +151,11 @@ export type ReasoningSource =
   | 'reasoning'
   | 'thinking'
   | 'thought'
+  | 'analysis'
+  | 'reasoning_delta'
+  | 'thinking_delta'
+  | 'content_block'
+  | 'content_block_delta'
   | 'reasoning_details';
 
 export interface ReasoningObservation {
@@ -168,18 +173,47 @@ export function reasoningObservationFromDelta(delta: unknown): ReasoningObservat
   if (!delta || typeof delta !== 'object') return undefined;
   const fields = delta as Record<string, unknown>;
 
-  const stringSources = ['reasoning_content', 'reasoning', 'thinking', 'thought'] as const;
+  const stringSources = [
+    'reasoning_content',
+    'reasoning',
+    'thinking',
+    'thought',
+    'analysis',
+    'reasoning_delta',
+    'thinking_delta',
+  ] as const;
   for (const key of stringSources) {
     const value = fields[key];
+    const semantics = key.endsWith('_delta') ? 'delta' : 'unknown';
     if (typeof value === 'string' && value) {
-      return { text: value, source: key, semantics: 'unknown' };
+      return { text: value, source: key, semantics };
     }
     if (value && typeof value === 'object') {
       const text = (value as { text?: unknown; content?: unknown }).text ??
         (value as { content?: unknown }).content;
       if (typeof text === 'string' && text) {
-        return { text, source: key, semantics: 'unknown' };
+        return { text, source: key, semantics };
       }
+    }
+  }
+
+  // Some OpenAI-compatible gateways wrap Anthropic-style thinking blocks in
+  // the delta instead of exposing a top-level reasoning field. Only treat a
+  // block as reasoning when its type says so; ordinary content blocks must
+  // continue through the normal answer path.
+  for (const key of ['content_block_delta', 'content_block'] as const) {
+    const block = fields[key];
+    if (!block || typeof block !== 'object') continue;
+    const blockFields = block as Record<string, unknown>;
+    const type = typeof blockFields.type === 'string' ? blockFields.type.toLowerCase() : '';
+    if (!/(thinking|reasoning|analysis)/.test(type)) continue;
+    const text = blockFields.thinking ?? blockFields.reasoning ?? blockFields.text ?? blockFields.content;
+    if (typeof text === 'string' && text) {
+      return {
+        text,
+        source: key,
+        semantics: key === 'content_block_delta' ? 'delta' : 'unknown',
+      };
     }
   }
 
