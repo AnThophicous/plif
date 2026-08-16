@@ -180,7 +180,7 @@ export function preservePickerSelection(
   return Math.min(Math.max(0, selected), Math.max(0, next.length - 1));
 }
 
-interface PickerProps {
+export interface PickerProps {
   readonly title: string;
   readonly hint?: string;
   readonly items?: readonly PickerItem[];
@@ -201,7 +201,7 @@ export function filterItems(items: readonly PickerItem[], filter: string): Picke
   );
 }
 
-export function Picker({
+export const Picker = React.memo(function Picker({
   title,
   hint,
   items,
@@ -212,27 +212,57 @@ export function Picker({
   width,
   rows = 8,
 }: PickerProps): React.ReactElement {
-  const inner = width - 4;
+  const inner = Math.max(12, width - 4);
   const compact = inner < 88;
   const grouped = groups !== undefined;
-  const visibleGroups = grouped ? filterPickerGroups(groups, filter) : [];
-  const visibleRows = grouped ? pickerRows(groups, expanded ?? [], filter) : [];
-  const visibleItems = grouped ? [] : filterItems(items ?? [], filter);
+  const visibleGroups = React.useMemo(
+    () => grouped ? filterPickerGroups(groups ?? [], filter) : [],
+    [grouped, groups, filter],
+  );
+  const visibleRows = React.useMemo(
+    () => grouped ? pickerRows(groups ?? [], expanded ?? [], filter) : [],
+    [grouped, groups, expanded, filter],
+  );
+  const visibleItems = React.useMemo(
+    () => grouped ? [] : filterItems(items ?? [], filter),
+    [grouped, items, filter],
+  );
   const count = grouped ? visibleGroups.length : visibleItems.length;
+  const modelCount = grouped
+    ? visibleGroups.reduce((total, group) => total + group.items.length, 0)
+    : 0;
+  const countSummary = grouped
+    ? compact
+      ? `${count} provider${count === 1 ? '' : 's'}`
+      : `${count} provider${count === 1 ? '' : 's'} · ${modelCount} model${modelCount === 1 ? '' : 's'}`
+    : `${count} ${count === 1 ? 'match' : 'matches'}`;
   const rowCount = grouped ? visibleRows.length : visibleItems.length;
   const start = Math.max(0, Math.min(selected - rows + 2, rowCount - rows));
-  const visible: readonly (PickerRow | PickerItem)[] = grouped
-    ? visibleRows.slice(start, start + rows)
-    : visibleItems.slice(start, start + rows);
+  const visible = React.useMemo<readonly (PickerRow | PickerItem)[]>(
+    () => grouped
+      ? visibleRows.slice(start, start + rows)
+      : visibleItems.slice(start, start + rows),
+    [grouped, visibleRows, visibleItems, start, rows],
+  );
   // A section heading belongs to the first group that carries it. Computed over
   // the whole list, not the visible window, so scrolling past a heading does
   // not make the next provider look like it starts a new section.
-  const sectionOf = new Map<string, string>();
-  let lastSection: string | undefined;
-  for (const group of visibleGroups) {
-    if (group.section && group.section !== lastSection) sectionOf.set(group.id, group.section);
-    lastSection = group.section;
-  }
+  const sectionOf = React.useMemo(() => {
+    const sections = new Map<string, string>();
+    let lastSection: string | undefined;
+    for (const group of visibleGroups) {
+      if (group.section && group.section !== lastSection) sections.set(group.id, group.section);
+      lastSection = group.section;
+    }
+    return sections;
+  }, [visibleGroups]);
+  const activeSummary = React.useMemo(() => {
+    if (!grouped) return '';
+    const activeGroup = (groups ?? []).find((group) => group.items.some((item) => item.current));
+    const activeItem = activeGroup?.items.find((item) => item.current);
+    if (!activeGroup || !activeItem) return 'not configured yet';
+    return `${activeGroup.label} / ${activeItem.label}`;
+  }, [grouped, groups]);
 
   return (
     <Box flexDirection="column" width="100%" marginBottom={1}>
@@ -245,10 +275,10 @@ export function Picker({
       >
         <Box justifyContent="space-between">
           <Text color={color('accent')} bold>
-            {title}
+            {grouped ? `${title} · PROVIDER → MODEL` : title}
           </Text>
-          <Text color={color('ghost')}>
-            {grouped ? `${count} providers` : `${count} ${count === 1 ? 'match' : 'matches'}`}
+          <Text color={color('muted')}>
+            {countSummary}
           </Text>
         </Box>
 
@@ -256,12 +286,19 @@ export function Picker({
           <Text color={color('ghost')}>{truncate(hint, inner)}</Text>
         )}
 
+        {grouped && (
+          <Box>
+            <Text color={color('accentDim')} bold>ACTIVE </Text>
+            <Text color={color('text')} bold>{truncate(activeSummary, Math.max(12, inner - 8))}</Text>
+          </Box>
+        )}
+
         <Box marginTop={1}>
-          <Text color={color('muted')}>{glyph.prompt} </Text>
+          <Text color={color('accentDim')} bold>{glyph.search} SEARCH </Text>
           {filter ? (
             <Text color={color('text')}>{filter}</Text>
           ) : (
-            <Text color={color('ghost')}>type to filter</Text>
+            <Text color={color('ghost')}>type to filter {grouped ? 'providers or models' : ''}</Text>
           )}
         </Box>
 
@@ -286,40 +323,35 @@ export function Picker({
               if (row.kind === 'group') {
                 const isExpanded = Boolean(filter.trim()) || (expanded ?? []).includes(row.group.id);
                 const section = sectionOf.get(row.group.id);
-                const summary = [
-                  section?.toUpperCase(),
-                  `${isExpanded ? '⌄' : glyph.caret} ${row.group.label}`,
-                  row.group.current ? `${glyph.done} active provider` : undefined,
-                  `${row.group.items.length} models`,
+                const groupLabel = truncate(row.group.label, Math.max(12, inner - 38));
+                const providerSummary = truncate([
+                  `${row.group.items.length} model${row.group.items.length === 1 ? '' : 's'}`,
+                  row.group.current ? `${glyph.done} CURRENT` : undefined,
                   row.group.detail,
-                ].filter(Boolean).join(' · ');
+                ].filter(Boolean).join(' · '), Math.max(8, inner - groupLabel.length - 20));
                 if (compact) {
                   return (
                     <Box key={row.id} width="100%">
                       <Text color={color(active ? 'text' : 'muted')} bold={active}>
-                        {truncate(`${active ? glyph.caret : ' '} ${summary}`, Math.max(12, inner))}
+                        {truncate(`${active ? glyph.caret : ' '} ${isExpanded ? glyph.disclosure : glyph.caret} PROVIDER ${groupLabel} · ${providerSummary}`, inner)}
                       </Text>
                     </Box>
                   );
                 }
                 return (
-                  <React.Fragment key={row.id}>
-                    <Box>
-                      <Text color={color(active ? 'accent' : 'ghost')}>
-                        {active ? glyph.caret : ' '}{' '}
-                      </Text>
-                      {section && <Text color={color('faint')}>{section.toUpperCase()} </Text>}
-                      <Text color={color(active ? 'text' : 'muted')} bold={active}>
-                        {isExpanded ? '⌄' : glyph.caret} {row.group.label}
-                      </Text>
-                      <Text color={color('ghost')}>
-                        {'  '}{row.group.detail ?? ''} · {row.group.items.length} models
-                      </Text>
-                      {row.group.current && (
-                        <Text color={color('success')}> {glyph.done} active provider</Text>
-                      )}
-                    </Box>
-                  </React.Fragment>
+                  <Box key={row.id} width="100%">
+                    <Text color={color(active ? 'accent' : 'ghost')}>
+                      {active ? glyph.caret : ' '}{' '}
+                    </Text>
+                    {section && <Text color={color('faint')} bold>{section.toUpperCase()} · </Text>}
+                    <Text color={color('accentDim')} bold>
+                      {isExpanded ? glyph.disclosure : glyph.caret} PROVIDER{' '}
+                    </Text>
+                    <Text color={color(active ? 'text' : 'muted')} bold={active}>
+                      {groupLabel}
+                    </Text>
+                    <Text color={color('ghost')}> · {providerSummary}</Text>
+                  </Box>
                 );
               }
 
@@ -328,7 +360,7 @@ export function Picker({
                   return (
                     <Box key={row.id} width="100%">
                       <Text color={color(active ? 'text' : 'faint')} bold={active}>
-                        {truncate(`${active ? glyph.caret : ' '} show ${row.hidden} more`, Math.max(12, inner))}
+                        {truncate(`${active ? glyph.caret : ' '} MORE · show ${row.hidden} more models`, inner)}
                       </Text>
                     </Box>
                   );
@@ -339,7 +371,7 @@ export function Picker({
                       {'  '}{active ? glyph.caret : ' '}{' '}
                     </Text>
                     <Text color={color(active ? 'text' : 'faint')} bold={active}>
-                      show {row.hidden} more
+                      MORE · show {row.hidden} more models
                     </Text>
                   </Box>
                 );
@@ -347,8 +379,9 @@ export function Picker({
 
               const pickerItem = row.item;
               const itemSummary = [
+                'MODEL',
                 pickerItem.label,
-                pickerItem.current ? `${glyph.done} active model` : undefined,
+                pickerItem.current ? `${glyph.done} CURRENT` : undefined,
                 ...(pickerItem.badges ?? []).map((badge) => `[${badge}]`),
                 !pickerItem.current && !pickerItem.badges?.length ? pickerItem.detail : undefined,
               ].filter(Boolean).join(' · ');
@@ -356,7 +389,7 @@ export function Picker({
                 return (
                   <Box key={row.id} width="100%">
                     <Text color={color(active ? 'text' : 'faint')} bold={active}>
-                      {truncate(`${active ? glyph.caret : ' '} ${itemSummary}`, Math.max(12, inner))}
+                      {truncate(`${active ? glyph.caret : ' '}   ${itemSummary}`, inner)}
                     </Text>
                   </Box>
                 );
@@ -366,10 +399,11 @@ export function Picker({
                   <Text color={color(active ? 'accent' : 'ghost')}>
                     {'  '}{active ? glyph.caret : ' '}{' '}
                   </Text>
+                  <Text color={color('faint')} bold>MODEL </Text>
                   <Text color={color(active ? 'text' : 'faint')} bold={active}>
-                    {truncate(pickerItem.label, Math.max(10, inner - 18))}
+                    {truncate(pickerItem.label, Math.max(10, inner - 28))}
                   </Text>
-                  {pickerItem.current && <Text color={color('success')}> {glyph.done} active model</Text>}
+                  {pickerItem.current && <Text color={color('success')}> · {glyph.done} CURRENT</Text>}
                   {pickerItem.badges?.map((badge) => (
                     <Text key={badge} color={color(badge === 'default' ? 'accent' : 'info')}>
                       {' '}[{badge}]
@@ -428,12 +462,14 @@ export function Picker({
         </Box>
 
         <Box marginTop={1} justifyContent="space-between">
-          <Text color={color('muted')}>↑↓ move · ←→ expand · type search</Text>
+          <Text color={color('muted')}>
+            ↑↓ navigate · {grouped ? '← collapse · → expand · ' : ''}type search
+          </Text>
           <Text color={color('ghost')}>
-            <Text inverse bold> Enter </Text> choose · <Text inverse bold> Esc </Text> close
+            <Text inverse bold> Enter </Text> {grouped ? 'expand/select' : 'select'} · <Text inverse bold> Esc </Text> cancel
           </Text>
         </Box>
       </Box>
     </Box>
   );
-}
+});

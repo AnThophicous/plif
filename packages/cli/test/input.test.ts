@@ -437,6 +437,24 @@ describe('model catalog picker', () => {
     assert.equal(collapsed.picker?.selected, 1);
   });
 
+  it('collapses the provider from a nested model row and returns focus to it', () => {
+    const opened = sessionReducer(initialSession, {
+      type: 'picker.open',
+      picker: {
+        title: 'MODELS',
+        groups,
+        expanded: ['openai'],
+        selected: 2,
+        onPick: () => undefined,
+      },
+    });
+    const collapsed = sessionReducer(opened, { type: 'picker.collapse', groupId: 'openai' });
+
+    assert.deepEqual(collapsed.picker?.expanded, []);
+    assert.equal(collapsed.picker?.selected, 1);
+    assert.equal(pickerRows(groups, collapsed.picker?.expanded ?? [])[1]?.id, 'openai');
+  });
+
   it('opens the catalog when no provider is loaded', async () => {
     let picker: CatalogPickerRequest | undefined;
     const context: CommandContext = {
@@ -463,7 +481,7 @@ describe('model catalog picker', () => {
     // suggest one.
     assert.deepEqual(picker?.expanded, []);
     assert.equal(picker?.selected, 0);
-    assert.match(picker?.hint ?? '', /\[vision\].*\[vision helper\]/);
+    assert.match(picker?.hint ?? '', /Choose a provider first.*current choice/);
 
     // The developer's own providers, if they have any, sort ahead of the
     // built-in ones and carry a different heading. This machine may have none,

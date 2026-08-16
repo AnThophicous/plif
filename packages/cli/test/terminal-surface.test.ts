@@ -40,6 +40,6 @@ describe('full-bleed terminal surface', () => {
 
   it('uses a distinct panel token', () => {
     assert.notEqual(color('panel'), color('surface'));
-    assert.equal(color('panel'), '#191b20');
+    assert.equal(color('panel'), '#303030');
   });
 });

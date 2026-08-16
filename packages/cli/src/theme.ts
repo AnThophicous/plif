@@ -14,8 +14,8 @@
  * it earned it.
  *
  * The greys are spaced far enough apart to survive a low-contrast terminal
- * theme, and the accent sits at a lightness that holds up on both black and
- * near-black backgrounds, since we do not control the user's background.
+ * theme. Plif owns its running canvas, so the app surface stays at one stable
+ * #303030 while accents can still respond to themes and effort.
  */
 import { clusterLength, displayWidth } from './text.js';
 
@@ -49,11 +49,14 @@ export const supportsRichGlyphs = richGlyphs;
  * The wave animation still travels through semantic stops. Only the colours
  * changed; cell geometry, glow timing, and effort effects remain untouched.
  */
+/** The app-owned terminal canvas. Themes may change accents, never this fill. */
+export const TERMINAL_BACKGROUND = '#303030';
+
 const defaultPalette = {
   /** Primary reading colour. Used for content, never for chrome. */
   text: '#FFD700',
   /** The full-bleed shell surface that holds the current Plif frame. */
-  panel: '#191b20',
+  panel: TERMINAL_BACKGROUND,
   /** Quiet filled surface for the developer's own message row. */
   surface: '#25282f',
   /** Secondary and highlighted text, including compact tables. */
@@ -264,6 +267,9 @@ export interface ThemeOverrides {
 
 export function applyTheme(theme: ThemeOverrides = {}): void {
   Object.assign(palette, defaultPalette, theme.palette ?? {});
+  // The running terminal must not flash between theme-specific panel colours.
+  // Accent roles are user-configurable; the canvas is an app invariant.
+  palette.panel = TERMINAL_BACKGROUND;
   activeThemePalette = { ...palette };
   Object.assign(syntax, {
     command: 'text', parameter: 'muted', keyword: 'accentDim', function: 'info',
@@ -328,6 +334,7 @@ export function applyEffortPalette(effort?: string): void {
     },
   };
   Object.assign(palette, activeThemePalette, accents[effort ?? ''] ?? {});
+  palette.panel = TERMINAL_BACKGROUND;
 }
 
 /** Terminal width, clamped to something a layout can reason about. */

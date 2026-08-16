@@ -4,7 +4,7 @@ import zlib from 'node:zlib';
 import React from 'react';
 import { Box, Text } from 'ink';
 
-import { color } from '../theme.js';
+import { color, TERMINAL_BACKGROUND } from '../theme.js';
 
 type Rgba = readonly [number, number, number, number];
 
@@ -30,7 +30,7 @@ export interface PngHeaderCell {
 }
 
 const ASSET_URL = new URL('../../assets/piroquinha.png', import.meta.url);
-const PANEL_FALLBACK = '#191b20';
+const PANEL_FALLBACK = TERMINAL_BACKGROUND;
 const TARGET_WIDTH = 22;
 const HALF_ROWS_PER_CELL = 2;
 // A terminal half-block is physically taller than one character column on
