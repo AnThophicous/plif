@@ -5,7 +5,7 @@ import { describe, it } from 'node:test';
 import { render } from 'ink';
 import React from 'react';
 
-import { Header, headerHeight } from '../src/components/Header.js';
+import { Header, headerHeight, headerPanelWidth } from '../src/components/Header.js';
 import {
   PNG_HEADER_ART_HEIGHT,
   PNG_HEADER_ART_PIXEL_HEIGHT,
@@ -46,6 +46,9 @@ describe('CLI header', () => {
   it('reports its real footprint so the input frame stays in the viewport', () => {
     assert.equal(headerHeight(96), 13);
     assert.equal(headerHeight(60), 8);
+    assert.equal(headerPanelWidth(96), 84);
+    assert.equal(headerPanelWidth(180), 84);
+    assert.equal(headerPanelWidth(60), 60);
   });
 
   it('keeps the Plif mark, workspace, model, and operating cues in a stable order', async () => {
