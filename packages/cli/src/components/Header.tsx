@@ -55,7 +55,7 @@ export const Header = React.memo(function Header({
     );
   }
 
-  // The PNG raster is 22 cells wide. Give it its own measured column so
+  // The compact PNG raster has its own measured column so
   // Ink never wraps the art into a different shape while laying out the header.
   const leftWidth = Math.max(22, Math.min(PNG_HEADER_ART_WIDTH + 2, width - 18));
   const rightWidth = Math.max(10, width - leftWidth - 3);
