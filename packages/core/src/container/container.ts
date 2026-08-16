@@ -162,6 +162,17 @@ export class Container {
         },
       );
     }
+    const missing = requiredSandboxCapabilities(this.#deps.policy.trust, report, this.capabilities.network);
+    if (missing.length > 0) {
+      throw new PlifError(
+        'SANDBOX_UNAVAILABLE',
+        `policy trust tier "${this.#deps.policy.trust}" requires unavailable sandbox capabilities: ${missing.join(', ')}`,
+        {
+          detail: { missing, backend: report.backend, degradations: report.degradations },
+          hint: 'Use a host with delegated cgroup v2 controllers, or lower the policy trust tier.',
+        },
+      );
+    }
     if (report.degradations.length > 0) {
       await this.#deps.audit.append('sandbox.degraded', this.id, {
         backend: report.backend,
@@ -194,6 +205,12 @@ export class Container {
       cpuCores: this.limits.cpuCores,
       writablePaths: this.#jail.writableHostPaths(),
       allowNetwork: this.capabilities.network,
+      mounts: this.mounts.map((mount) => ({
+        source: mount.source,
+        target: normalizeVirtualPath(mount.target),
+        mode: mount.mode,
+        ...(mount.mask ? { mask: mount.mask } : {}),
+      })),
     });
 
     if (this.limits.lifetimeMs > 0) {
@@ -441,6 +458,7 @@ export class Container {
       spawned = await this.#sandbox.spawn({
         argv: request.argv,
         cwd: cwdHost,
+        virtualCwd: cwdVirtual,
         env: this.#buildEnv(request.env),
         timeoutMs,
         maxOutputBytes: this.limits.outputBytes,
@@ -733,4 +751,23 @@ function formatBytes(bytes: number): string {
     unit += 1;
   }
   return `${value.toFixed(value < 10 && unit > 0 ? 1 : 0)} ${units[unit]}`;
+}
+
+function requiredSandboxCapabilities(
+  trust: TrustTier,
+  report: Awaited<ReturnType<SandboxBackend['probe']>>,
+  networkAllowed: boolean,
+): string[] {
+  if (trust === 'trusted') return [];
+  const checks: [string, boolean][] = [
+    ['killProcessTree', report.killProcessTree],
+    ['memoryLimit', report.memoryLimit],
+    ['processLimit', report.processLimit],
+    ['cpuLimit', report.cpuLimit],
+  ];
+  if (trust === 'untrusted') {
+    checks.push(['filesystemWriteBlock', report.filesystemWriteBlock]);
+    if (!networkAllowed) checks.push(['networkBlock', report.networkBlock]);
+  }
+  return checks.filter(([, available]) => !available).map(([name]) => name);
 }

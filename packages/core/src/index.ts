@@ -61,17 +61,21 @@ export type { McpAuthEvent, McpOAuthConfig, McpOAuthCoordinatorOptions } from '.
 export {
   CredentialBroker,
   MemorySecretStore,
+  platformSecretStore,
   personalSecretStorePath,
+  SystemdCredsSecretStore,
   WindowsDpapiSecretStore,
 } from './auth/secrets.js';
 export type { CredentialRequest, CredentialBrokerOptions, SecretStore } from './auth/secrets.js';
 export {
   MemoryMcpOAuthStore,
+  platformMcpOAuthStore,
   personalOAuthStorePath,
+  SystemdCredsOAuthStore,
   WindowsDpapiOAuthStore,
   mcpOAuthKey,
 } from './auth/store.js';
-export type { McpOAuthStore, OAuthCredentialScope, StoredMcpOAuthState } from './auth/store.js';
+export type { McpOAuthStore, OAuthCredentialScope, StoredMcpOAuthState, SystemdCredsRunner } from './auth/store.js';
 export type { Question, QuestionChoice } from './harness/ask.js';
 export type { QuestionOption } from './events/bus.js';
 export { runLoop, runCompaction } from './harness/loop.js';

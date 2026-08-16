@@ -83,12 +83,21 @@ export interface JailOptions {
   readonly writablePaths: readonly string[];
   /** When false, the backend blocks outbound network for the whole jail. */
   readonly allowNetwork: boolean;
+  readonly mounts: readonly SandboxMount[];
+}
+
+export interface SandboxMount {
+  readonly source: string;
+  readonly target: string;
+  readonly mode: 'ro' | 'rw';
+  readonly mask?: readonly string[];
 }
 
 export interface SpawnOptions {
   readonly argv: readonly string[];
   /** Absolute host path. Must resolve inside the jail root or a writable path. */
   readonly cwd: string;
+  readonly virtualCwd: string;
   readonly env: Readonly<Record<string, string>>;
   readonly timeoutMs: number;
   readonly stdin?: string;

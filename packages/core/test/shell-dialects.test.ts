@@ -47,7 +47,7 @@ describe('shell dialects', () => {
     assert.match(resolved.reason ?? '', /PowerShell/i);
   });
 
-  it('keeps the future Bash adapter profile-free', () => {
+  it('keeps the Bash adapter profile-free', () => {
     const dialect = new BashDialect('bash');
     assert.deepEqual(dialect.argv('npm test | tee test.log'), [
       'bash',
@@ -56,6 +56,12 @@ describe('shell dialects', () => {
       '-c',
       'npm test | tee test.log',
     ]);
+  });
+
+  it('selects Bash on Linux without startup profiles', () => {
+    const resolved = resolveShellDialect(report('linux', ['sh', 'bash']));
+    assert.equal(resolved.dialect?.id, 'bash');
+    assert.deepEqual(resolved.dialect?.argv('pwd'), ['bash', '--noprofile', '--norc', '-c', 'pwd']);
   });
 
   it('round-trips every emitted argv through the safety analyzer', () => {

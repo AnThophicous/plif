@@ -152,8 +152,20 @@ export class Engine {
     // exact same image without writing anything new.
     const scaffold = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-base-'));
     try {
-      for (const dir of ['tmp', 'cache']) {
+      const directories = ['tmp', 'cache'];
+      if (process.platform === 'linux') {
+        directories.push('usr', 'proc', 'dev', 'etc', 'project');
+      }
+      for (const dir of directories) {
         await fs.mkdir(path.join(scaffold, dir), { recursive: true });
+      }
+      if (process.platform === 'linux') {
+        await Promise.all([
+          fs.symlink('usr/bin', path.join(scaffold, 'bin')),
+          fs.symlink('usr/lib', path.join(scaffold, 'lib')),
+          fs.symlink('usr/lib64', path.join(scaffold, 'lib64')),
+          fs.symlink('usr/sbin', path.join(scaffold, 'sbin')),
+        ]);
       }
 
       const layer = await layerFromDirectory(this.content, this.layers, {
