@@ -103,7 +103,14 @@ import { Timeline, TimelineRow, estimateHeight } from './components/Timeline.js'
 import { measureTranscriptCells } from './components/Timeline.js';
 import { TranscriptOverlay } from './components/TranscriptOverlay.js';
 import { ThinkingOverlay, thinkingBodyHeight } from './components/ThinkingOverlay.js';
-import { commandPrefix, findCommand, matchCommands, runsWhileWorking } from './commands.js';
+import {
+  commandPrefix,
+  findCommand,
+  matchArgumentCompletions,
+  matchCommands,
+  runsWhileWorking,
+  tabArgumentCompletion,
+} from './commands.js';
 import type { Command, CommandContext } from './commands.js';
 import {
   formatError,
@@ -1731,9 +1738,10 @@ export function App({
   const context: CommandContext = {
     engine,
     supportedEfforts: () => supportedEfforts(
-      providerRef.current?.info.id.toLowerCase().includes('claude') ? 'anthropic' : '',
+      providerRef.current?.info.endpoint ?? '',
       providerRef.current?.info.id ?? '',
     ),
+    modelCompletionValues: () => providerRef.current?.info.id ? [providerRef.current.info.id] : [],
     current: current.current,
     setCurrent: (container) => {
       current.current = container;
@@ -1869,8 +1877,11 @@ export function App({
       const providerId = providerIdForConfig(next) ?? '';
       const savedKey = await providerCredential(credentials, providerId, next);
       const config = resolveConfig(next, savedKey ? { apiKey: savedKey } : {});
-      if (effort && !supportedEfforts(config.baseURL, config.model).includes(effort)) {
-        throw new PlifError('INVALID_ARGUMENT', `${effort} is not supported by ${config.model}`);
+      const availableEfforts = supportedEfforts(config.baseURL, config.model);
+      if (effort && !availableEfforts.includes(effort)) {
+        throw new PlifError('INVALID_ARGUMENT', `${effort} is not supported by the current model.`, {
+          hint: `Supported: ${availableEfforts.join(', ')}`,
+        });
       }
       providerRef.current = createModelProvider(config);
       await saveStoredConfig(engine.paths, next);
@@ -2766,22 +2777,43 @@ export function App({
   }
 
   const typedCommand = commandPrefix(input);
-  const completions: Command[] =
-    typedCommand !== null && !state.approval
-      ? matchCommands(typedCommand)
-      : [];
   const typedCommandName = typedCommand === null ? null : tokenize(input.slice(1))[0] ?? '';
+  const argumentCompletion = typedCommandName && !state.approval
+    ? matchArgumentCompletions(input, cursor, context)
+    : null;
+  const argumentMatches = argumentCompletion?.matches ?? [];
+  const completions: Command[] =
+    argumentCompletion
+      ? []
+      : typedCommand !== null && !state.approval
+        ? matchCommands(typedCommand)
+        : [];
   const typedCommandRunsNow = typedCommandName !== null && runsWhileWorking(typedCommandName);
   // Keep the selected command visible while its arguments are being typed.
   // The old space check made the menu vanish exactly when `/model ` or
   // `/mcp ` became useful, and made the prompt look like it had eaten input.
-  const showCompletions = completions.length > 0;
+  const completionCount = argumentCompletion ? argumentMatches.length : completions.length;
+  const showCompletions = completionCount > 0;
 
   function applyCompletion(command: Command): void {
     const completed = `/${command.name} `;
     setInput(completed);
     setCursor(completed.length);
     setCompletionIndex(0);
+  }
+
+  function applyArgumentCompletion(value: string): void {
+    if (!argumentCompletion) return;
+    const completed = input.slice(0, argumentCompletion.tokenStart) + value + input.slice(argumentCompletion.tokenEnd);
+    setInput(completed);
+    setCursor(argumentCompletion.tokenStart + value.length);
+    setCompletionIndex(0);
+  }
+
+  function applyArgumentCompletionWithTab(): void {
+    if (!argumentCompletion) return;
+    const value = tabArgumentCompletion(argumentCompletion);
+    if (value) applyArgumentCompletion(value);
   }
 
   // ---- keyboard ----------------------------------------------------------
@@ -3093,6 +3125,10 @@ export function App({
         return;
       }
       if (key.tab) {
+        if (argumentCompletion) {
+          applyArgumentCompletionWithTab();
+          return;
+        }
         const picked = completions[completionIndex];
         if (showCompletions && picked) applyCompletion(picked);
         return;
@@ -3101,7 +3137,7 @@ export function App({
         setCompletionIndex((value) =>
           key.upArrow
             ? Math.max(0, value - 1)
-            : Math.min(completions.length - 1, value + 1),
+            : Math.min(completionCount - 1, value + 1),
         );
         return;
       }
@@ -3156,6 +3192,10 @@ export function App({
       }
 
       if (key.tab) {
+        if (argumentCompletion) {
+          applyArgumentCompletionWithTab();
+          return;
+        }
         const picked = completions[completionIndex];
         if (showCompletions && picked) applyCompletion(picked);
         return;
@@ -3167,7 +3207,7 @@ export function App({
           setCompletionIndex((value) =>
             key.upArrow
               ? Math.max(0, value - 1)
-              : Math.min(completions.length - 1, value + 1),
+              : Math.min(completionCount - 1, value + 1),
           );
           return;
         }
@@ -4068,7 +4108,13 @@ export function App({
             <Box flexGrow={1} />
 
             {showCompletions && (
-              <Completions matches={completions} selected={completionIndex} maxRows={suggestionRows} width={Math.max(1, surface.contentWidth - 2)} />
+              <Completions
+                matches={completions}
+                argumentMatches={argumentCompletion ? argumentMatches : undefined}
+                selected={completionIndex}
+                maxRows={suggestionRows}
+                width={Math.max(1, surface.contentWidth - 2)}
+              />
             )}
 
             {showEmoji && (

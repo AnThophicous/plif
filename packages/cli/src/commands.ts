@@ -14,6 +14,7 @@ import path from 'node:path';
 import {
   CredentialBroker,
   credentialVariableForProvider,
+  EFFORT_LEVELS,
   MODEL_CATALOG,
   discoverProviderModels,
   modelVisionBadge,
@@ -46,7 +47,7 @@ import {
   PlifError,
 } from '@plif/core';
 
-import { formatCapabilities } from './format.js';
+import { formatCapabilities, tokenize } from './format.js';
 import { effortDisplay } from './effort-visuals.js';
 import {
   effortPickerItems,
@@ -76,6 +77,8 @@ export interface CommandContext {
   readonly credentials?: CredentialBroker;
   readonly setEffort: (effort: Effort | undefined) => Promise<void>;
   readonly supportedEfforts?: () => readonly Effort[];
+  /** Curated/live model ids available to the generic argument completer. */
+  readonly modelCompletionValues?: () => readonly string[];
   /** Enter or leave the read-only planning mode. */
   readonly setPlanMode?: (enabled: boolean, description?: string) => Promise<void>;
   /** Start a session-scoped completion condition. */
@@ -123,6 +126,46 @@ export interface CatalogPickerRequest {
   readonly onPick: (selection: string | ModelSelection) => void;
 }
 
+export interface CommandArgumentCompletionContext {
+  readonly command: Command;
+  readonly context: CommandContext;
+  readonly input: string;
+  readonly cursor: number;
+  readonly argv: readonly string[];
+  readonly argumentIndex: number;
+  readonly token: string;
+  readonly tokenStart: number;
+  readonly tokenEnd: number;
+}
+
+export interface CommandAutocomplete {
+  /** A fixed enum, when the command's values never depend on session state. */
+  readonly values?: readonly string[];
+  /** A session-aware enum, used when provider/model capabilities can change. */
+  readonly getValues?: (context: CommandArgumentCompletionContext) => readonly string[];
+  readonly getDetail?: (
+    value: string,
+    context: CommandArgumentCompletionContext,
+  ) => string | undefined;
+}
+
+export interface ArgumentCompletion {
+  readonly value: string;
+  readonly label: string;
+  readonly detail?: string;
+}
+
+export interface ArgumentCompletionState {
+  readonly command: Command;
+  readonly input: string;
+  readonly cursor: number;
+  readonly argumentIndex: number;
+  readonly token: string;
+  readonly tokenStart: number;
+  readonly tokenEnd: number;
+  readonly matches: readonly ArgumentCompletion[];
+}
+
 export interface CommandResult {
   readonly entries: readonly TimelineEntry[];
 }
@@ -132,6 +175,8 @@ export interface Command {
   readonly args?: string;
   readonly summary: string;
   readonly concurrent?: boolean;
+  /** Optional argument metadata consumed by the generic TAB completer. */
+  readonly autocomplete?: CommandAutocomplete;
   readonly run: (argv: readonly string[], context: CommandContext) => Promise<CommandResult>;
 }
 
@@ -143,6 +188,24 @@ const ok = (...entries: TimelineEntry[]): CommandResult => ({ entries });
 
 const formatTokens = (value: number): string =>
   value < 1000 ? `${value} tokens` : `${(value / 1000).toFixed(1)}k tokens`;
+
+export function validateEffortArgument(
+  value: string,
+  available: readonly Effort[],
+): Effort | 'default' {
+  if (value === 'default') return value;
+  if (!EFFORT_LEVELS.includes(value as Effort)) {
+    throw new PlifError('INVALID_ARGUMENT', `Unknown effort "${value}".`, {
+      hint: `Available: default, ${available.join(', ')}`,
+    });
+  }
+  if (!available.includes(value as Effort)) {
+    throw new PlifError('INVALID_ARGUMENT', `${value} is not supported by the current model.`, {
+      hint: `Supported: ${available.join(', ')}`,
+    });
+  }
+  return value as Effort;
+}
 
 /** Keep verified built-ins visible while adding everything the endpoint reports. */
 export function providerModelIds(
@@ -736,6 +799,16 @@ export const COMMANDS: readonly Command[] = [
     concurrent: true,
     args: '[id]',
     summary: 'Show the model, or pick a different one',
+    autocomplete: {
+      getValues: ({ context, argumentIndex }) => {
+        if (argumentIndex !== 0) return [];
+        const curated = MODEL_CATALOG.flatMap((provider) => provider.models.map((model) => model.id));
+        return [...new Set([
+          ...(context.modelCompletionValues?.() ?? []),
+          ...curated,
+        ])];
+      },
+    },
     run: async (argv, context) => {
       if (argv[0]) {
         await context.switchModel(argv[0]);
@@ -781,12 +854,24 @@ export const COMMANDS: readonly Command[] = [
   {
     name: 'effort',
     concurrent: true,
-    args: '[low|medium|high|xhigh|max|ultra|ultracode|plif|default]',
+    args: '[effort]',
     summary: 'Show or change model reasoning effort',
+    autocomplete: {
+      getValues: ({ context, argumentIndex }) => {
+        if (argumentIndex !== 0) return [];
+        return ['default', ...(context.supportedEfforts?.() ?? EFFORT_LEVELS)];
+      },
+      getDetail: (value) => value === 'plif'
+        ? 'Plif signature mode · adaptive reasoning'
+        : value === 'default'
+          ? 'provider default'
+          : `${value} reasoning effort`,
+    },
     run: async (argv, context) => {
       const stored = await loadGlobalConfig();
       const current = stored.effort ?? 'default';
       const value = argv[0];
+      const available = [...new Set(context.supportedEfforts?.() ?? EFFORT_LEVELS)];
       if (!value) {
         context.openPicker({
           title: `Select effort · ${context.model?.info.id ?? 'current model'}`,
@@ -801,16 +886,11 @@ export const COMMANDS: readonly Command[] = [
         });
         return ok(entry('notice', 'select reasoning effort', { tone: 'accent', subtitle: `current: ${effortDisplay(current === 'default' ? undefined : current)}` }));
       }
-      if (!['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode', 'plif', 'default'].includes(value)) {
-        throw new PlifError('INVALID_ARGUMENT', 'usage: /effort [low|medium|high|xhigh|max|ultra|ultracode|plif|default]');
-      }
-      if (value !== 'default' && context.supportedEfforts && !context.supportedEfforts().includes(value as Effort)) {
-        throw new PlifError('INVALID_ARGUMENT', `${value} is not supported by the selected model`);
-      }
-      await context.setEffort(value === 'default' ? undefined : value as Effort);
+      const selected = validateEffortArgument(value, available);
+      await context.setEffort(selected === 'default' ? undefined : selected);
       return ok(entry('notice', `effort: ${effortDisplay(value)}`, {
         tone: 'accent',
-        subtitle: 'conversation reset for the new model settings',
+        subtitle: 'conversation preserved · applies to the next request',
       }));
     },
   },
@@ -1182,6 +1262,130 @@ export function matchCommands(partial: string): Command[] {
 export function commandPrefix(input: string): string | null {
   const match = /^\/([^\s]*)/.exec(input);
   return match ? match[1] ?? '' : null;
+}
+
+interface TokenSpan {
+  readonly value: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+function slashTokenSpans(input: string): TokenSpan[] {
+  const spans: TokenSpan[] = [];
+  let start = -1;
+  let quoted = false;
+
+  for (let index = 1; index <= input.length; index += 1) {
+    const char = input[index] ?? '';
+    if (char === '"' && start >= 0) quoted = !quoted;
+    const boundary = index === input.length || (!quoted && /\s/.test(char));
+    if (start < 0) {
+      if (index < input.length && !/\s/.test(char)) start = index;
+      continue;
+    }
+    if (boundary) {
+      const raw = input.slice(start, index);
+      spans.push({
+        value: raw.replace(/^"|"$/g, ''),
+        start,
+        end: index,
+      });
+      start = -1;
+      quoted = false;
+    }
+  }
+  return spans;
+}
+
+/**
+ * Find the argument token under the cursor and resolve its command metadata.
+ * The returned state deliberately includes an empty token after whitespace so
+ * `/effort ` can show every value without inventing a fake argv parser.
+ */
+export function matchArgumentCompletions(
+  input: string,
+  cursor: number,
+  context: CommandContext,
+): ArgumentCompletionState | null {
+  if (!input.startsWith('/')) return null;
+  const position = Math.max(0, Math.min(cursor, input.length));
+  const spans = slashTokenSpans(input);
+  const commandSpan = spans[0];
+  if (!commandSpan || position <= commandSpan.end) return null;
+
+  const command = findCommand(commandSpan.value);
+  if (!command?.autocomplete) return null;
+
+  const argumentSpans = spans.slice(1);
+  const activeIndex = argumentSpans.findIndex(
+    (span) => position >= span.start && position <= span.end,
+  );
+  const active = activeIndex >= 0 ? argumentSpans[activeIndex] : undefined;
+  const argumentIndex = activeIndex >= 0
+    ? activeIndex
+    : argumentSpans.filter((span) => span.end < position).length;
+  const tokenStart = active?.start ?? position;
+  const tokenEnd = active?.end ?? position;
+  const token = active?.value ?? '';
+  const completionContext: CommandArgumentCompletionContext = {
+    command,
+    context,
+    input,
+    cursor: position,
+    argv: tokenize(input.slice(commandSpan.end)),
+    argumentIndex,
+    token,
+    tokenStart,
+    tokenEnd,
+  };
+  const values = command.autocomplete.values ?? command.autocomplete.getValues?.(completionContext) ?? [];
+  const seen = new Set<string>();
+  const needle = token.toLowerCase();
+  const matches = values
+    .filter((value) => {
+      if (seen.has(value) || !value.toLowerCase().startsWith(needle)) return false;
+      seen.add(value);
+      return true;
+    })
+    .map((value): ArgumentCompletion => ({
+      value,
+      label: value,
+      ...(command.autocomplete?.getDetail
+        ? { detail: command.autocomplete.getDetail(value, completionContext) }
+        : {}),
+    }));
+
+  return {
+    command,
+    input,
+    cursor: position,
+    argumentIndex,
+    token,
+    tokenStart,
+    tokenEnd,
+    matches,
+  };
+}
+
+export function longestCommonPrefix(values: readonly string[]): string {
+  const first = values[0] ?? '';
+  let length = first.length;
+  for (const value of values.slice(1)) {
+    length = Math.min(length, value.length);
+    let index = 0;
+    while (index < length && first[index]?.toLowerCase() === value[index]?.toLowerCase()) index += 1;
+    length = index;
+  }
+  return first.slice(0, length);
+}
+
+/** Return the text a TAB press can add without choosing an ambiguous value. */
+export function tabArgumentCompletion(state: ArgumentCompletionState): string | null {
+  if (state.matches.length === 0) return null;
+  const candidate = state.matches.length === 1
+    ? state.matches[0]!.value
+    : longestCommonPrefix(state.matches.map((match) => match.value));
+  return candidate.length > state.token.length ? candidate : null;
 }
 
 // ---------------------------------------------------------------------------

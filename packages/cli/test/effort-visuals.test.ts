@@ -36,7 +36,7 @@ describe('effort visual identities', () => {
     assert.equal(effortVisual('max').descriptor, 'deep reasoning');
     assert.equal(effortVisual('ultra').descriptor, 'wide search');
     assert.equal(effortVisual('ultracode').descriptor, 'code synthesis');
-    assert.equal(effortVisual('plif').descriptor, 'evidence mode');
+    assert.equal(effortVisual('plif').descriptor, 'adaptive reasoning');
   });
 
   it('gives PLIF a distinct display signature', () => {

@@ -22,7 +22,15 @@ import {
   tokenize,
 } from '../src/format.js';
 import { IDLE_PASTE, hasPasteMarker, readPasteChunk } from '../src/paste.js';
-import { commandPrefix, matchCommands, findCommand, COMMANDS } from '../src/commands.js';
+import {
+  commandPrefix,
+  completeCommand,
+  findCommand,
+  matchArgumentCompletions,
+  matchCommands,
+  tabArgumentCompletion,
+  COMMANDS,
+} from '../src/commands.js';
 import type { CatalogPickerRequest, CommandContext } from '../src/commands.js';
 import {
   ALL_SUFFIX,
@@ -69,6 +77,56 @@ describe('command completion input', () => {
     assert.equal(commandPrefix('/model openai/gpt-4o-mini'), 'model');
     assert.deepEqual(matchCommands(commandPrefix('/model --') ?? ''), [findCommand('model')]);
     assert.equal(commandPrefix('plain text'), null);
+    assert.deepEqual(completeCommand('eff'), ['effort']);
+  });
+
+  it('completes a unique effort argument from the active model capability', () => {
+    const context = {
+      supportedEfforts: () => ['low', 'medium', 'high', 'xhigh'] as const,
+    } as unknown as CommandContext;
+
+    const low = matchArgumentCompletions('/effort l', '/effort l'.length, context);
+    const xhigh = matchArgumentCompletions('/effort x', '/effort x'.length, context);
+    const none = matchArgumentCompletions('/effort z', '/effort z'.length, context);
+
+    assert.deepEqual(low?.matches.map((match) => match.value), ['low']);
+    assert.equal(tabArgumentCompletion(low!), 'low');
+    assert.deepEqual(xhigh?.matches.map((match) => match.value), ['xhigh']);
+    assert.equal(tabArgumentCompletion(xhigh!), 'xhigh');
+    assert.deepEqual(none?.matches, []);
+    assert.equal(tabArgumentCompletion(none!), null);
+  });
+
+  it('keeps ambiguous arguments visible without choosing one', () => {
+    const context = {
+      supportedEfforts: () => ['medium', 'max'] as const,
+    } as unknown as CommandContext;
+    const state = matchArgumentCompletions('/effort m', '/effort m'.length, context);
+
+    assert.deepEqual(state?.matches.map((match) => match.value), ['medium', 'max']);
+    assert.equal(tabArgumentCompletion(state!), null);
+  });
+
+  it('supports empty arguments, repeated spaces, cursor positions, and dynamic models', () => {
+    const context = {
+      supportedEfforts: () => ['low', 'medium'] as const,
+      modelCompletionValues: () => ['my-model', 'my-more'],
+    } as unknown as CommandContext;
+    const empty = matchArgumentCompletions('/effort ', '/effort '.length, context);
+    const spaced = matchArgumentCompletions('/effort   h', '/effort   h'.length, {
+      supportedEfforts: () => ['high'] as const,
+    } as unknown as CommandContext);
+    const inTheMiddle = '/effort h other';
+    const middle = matchArgumentCompletions(inTheMiddle, inTheMiddle.indexOf('h') + 1, {
+      supportedEfforts: () => ['high'] as const,
+    } as unknown as CommandContext);
+    const models = matchArgumentCompletions('/model my-', '/model my-'.length, context);
+
+    assert.deepEqual(empty?.matches.map((match) => match.value), ['default', 'low', 'medium']);
+    assert.equal(tabArgumentCompletion(spaced!), 'high');
+    assert.equal(tabArgumentCompletion(middle!), 'high');
+    assert.deepEqual(models?.matches.map((match) => match.value), ['my-model', 'my-more']);
+    assert.equal(tabArgumentCompletion(models!), 'my-mo');
   });
 });
 

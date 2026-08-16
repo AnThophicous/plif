@@ -1,11 +1,12 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
-import type { Command } from '../commands.js';
+import type { ArgumentCompletion, Command } from '../commands.js';
 import { color, glyph, layout, truncate } from '../theme.js';
 
 interface CompletionsProps {
   readonly matches: readonly Command[];
+  readonly argumentMatches?: readonly ArgumentCompletion[];
   readonly selected: number;
   readonly width: number;
   readonly maxRows?: number;
@@ -24,23 +25,51 @@ interface CompletionsProps {
  */
 export function Completions({
   matches,
+  argumentMatches,
   selected,
   width,
   maxRows = 6,
 }: CompletionsProps): React.ReactElement | null {
-  if (matches.length === 0) return null;
+  const isArgumentMenu = argumentMatches !== undefined;
+  const argumentRows = argumentMatches ?? [];
+  if (matches.length === 0 && argumentRows.length === 0) return null;
 
   // Cap the list and slide a window over it, keeping the selection visible.
   const rows = Math.max(1, maxRows);
-  const start = Math.max(0, Math.min(selected - rows + 2, matches.length - rows));
-  const visible = matches.slice(start, start + rows);
-  const nameWidth = Math.max(...matches.map((command) => command.name.length)) + 2;
+  const sourceLength = isArgumentMenu ? argumentRows.length : matches.length;
+  const start = Math.max(0, Math.min(selected - rows + 2, sourceLength - rows));
+  const visibleCommands = matches.slice(start, start + rows);
+  const visibleArguments = argumentRows.slice(start, start + rows);
+  const nameWidth = isArgumentMenu
+    ? Math.max(...argumentRows.map((match) => match.label.length)) + 2
+    : Math.max(...matches.map((command) => command.name.length)) + 2;
 
   return (
     <Box flexDirection="column" paddingX={layout.gutter + 1} marginBottom={0}>
       {start > 0 && <Text color={color('ghost')}>  {glyph.pending} {start} above</Text>}
 
-      {visible.map((command, index) => {
+      {isArgumentMenu
+        ? visibleArguments.map((match, index) => {
+          const active = start + index === selected;
+          return (
+            <Box key={match.value}>
+              <Text color={color(active ? 'accent' : 'ghost')}>
+                {active ? glyph.caret : ' '}{' '}
+              </Text>
+              <Box width={nameWidth}>
+                <Text color={color(active ? 'text' : 'faint')} bold={active}>
+                  {match.label}
+                </Text>
+              </Box>
+              {match.detail && (
+                <Text color={color(active ? 'muted' : 'ghost')}>
+                  {truncate(match.detail, Math.max(10, width - nameWidth - 6))}
+                </Text>
+              )}
+            </Box>
+          );
+        })
+        : visibleCommands.map((command, index) => {
         const active = start + index === selected;
         return (
           <Box key={command.name}>
@@ -62,10 +91,10 @@ export function Completions({
         );
       })}
 
-      {start + rows < matches.length && (
+      {start + rows < sourceLength && (
         <Text color={color('ghost')}>
           {'  '}
-          {glyph.pending} {matches.length - start - rows} more
+          {glyph.pending} {sourceLength - start - rows} more
         </Text>
       )}
     </Box>
