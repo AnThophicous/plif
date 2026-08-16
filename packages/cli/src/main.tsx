@@ -26,7 +26,7 @@ import {
   DEVELOPER_POLICY,
   Engine,
   createModelProvider,
-  WindowsDpapiSecretStore,
+  platformSecretStore,
   resolveServerConfigs,
   PlifError,
   STRICT_POLICY,
@@ -567,7 +567,6 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
     // an interactive session already saved, so `plif prompt` inherits the login.
     await resolveServerConfigs(
       mcpServersOf(stored as GlobalConfig),
-      credentials,
     ),
     engine.bus,
   );

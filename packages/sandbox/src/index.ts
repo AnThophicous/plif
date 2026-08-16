@@ -1,10 +1,12 @@
 export * from './backend.js';
 export { Win32Backend } from './win32/backend.js';
+export { LinuxBackend } from './linux/backend.js';
 export { PortableBackend } from './portable/backend.js';
 
 import type { SandboxBackend, SandboxCapabilityReport } from './backend.js';
 import { PortableBackend } from './portable/backend.js';
 import { Win32Backend } from './win32/backend.js';
+import { LinuxBackend } from './linux/backend.js';
 
 export interface BackendSelection {
   readonly backend: SandboxBackend;
@@ -25,6 +27,7 @@ export async function selectBackend(): Promise<BackendSelection> {
   const candidates: SandboxBackend[] = [];
 
   if (process.platform === 'win32') candidates.push(new Win32Backend());
+  if (process.platform === 'linux') candidates.push(new LinuxBackend());
   // Linux namespace and microVM backends slot in here, strongest first.
 
   for (const backend of candidates) {

@@ -9,14 +9,14 @@ calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 [![npm](https://img.shields.io/npm/v/%40plif%2Fcli?color=0b7285&label=npm)](https://www.npmjs.com/package/@plif/cli)
 [![license](https://img.shields.io/badge/license-Apache--2.0-0b7285)](LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D20.11-0b7285)](https://nodejs.org)
-[![platform](https://img.shields.io/badge/platform-Windows-0b7285)](#what-the-sandbox-actually-enforces)
+[![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0b7285)](#what-the-sandbox-actually-enforces)
 [![ci](https://github.com/AnThophicous/plif/actions/workflows/ci.yml/badge.svg)](https://github.com/AnThophicous/plif/actions/workflows/ci.yml)
 
 </div>
 
 ---
 
-## Why 0.3.0
+## Why 0.3.1
 
 - **Adaptive memory.** Useful facts are ranked and reused without turning the
   conversation into noise.
@@ -32,8 +32,18 @@ calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 
 ## Install
 
+Windows:
+
 ```powershell
 irm https://raw.githubusercontent.com/AnThophicous/plif/main/install.ps1 | iex
+```
+
+Linux:
+
+```bash
+sudo apt install bubblewrap systemd
+npm install -g @plif/cli
+plif sandbox
 ```
 
 That script checks your Node version and runs `npm install -g @plif/cli`. If you
@@ -49,7 +59,9 @@ too close to `plist` and `plop`, so the package is `@plif/cli` and the binary it
 installs is `plif`.
 
 You need Node 20.11 or newer. You do not need Docker, WSL, administrator, or an
-API key to start.
+API key to start. Linux uses Bubblewrap for namespaces and a delegated systemd
+cgroup v2 hierarchy when available. `plif sandbox` reports exactly which parts
+are active.
 
 To remove it: `npm uninstall -g @plif/cli`. Your sessions and credentials live
 in `~/.plif` and are left alone unless you delete them.
@@ -162,8 +174,9 @@ TypeScript throughout, on Node 20.11+, ESM only, strict compiler settings and no
 transpiler in production — the shipped artifact is `tsc` output. The interface
 is [Ink](https://github.com/vadimdemedes/ink), which is React reconciled onto a
 terminal instead of a DOM. The Windows isolation layer reaches the Win32 API
-through [koffi](https://koffi.dev), an FFI binding, so there is no native addon
-to compile at install time and no prebuild matrix to maintain.
+through [koffi](https://koffi.dev), an FFI binding. Linux uses Bubblewrap, user
+and PID namespaces, and systemd-managed cgroup v2 limits. There is no Plif
+native addon to compile at install time and no prebuild matrix to maintain.
 
 Tests are `node:test`, no framework. There are just over four hundred of them
 and they run in about twenty seconds.
@@ -215,7 +228,23 @@ suggestion.
 
 ## What the sandbox actually enforces
 
-On Windows today:
+On Linux with Bubblewrap and delegated systemd cgroup v2:
+
+| Enforced by the kernel | Not enforced |
+|---|---|
+| PID, mount, user, IPC and UTS namespaces | Hostname-based network allowlists |
+| Filesystem visibility and read-only mounts | Disk-write quotas for shell commands |
+| Network blocking when network is disabled | Seccomp syscall filtering |
+| Process-tree kill | |
+| Memory, process-count and CPU ceilings | |
+| CPU and memory accounting | |
+
+Without delegated cgroups, namespace and filesystem/network isolation remain,
+but resource limits and accounting are reported as degraded. Strict and
+semi-trusted policies refuse to run when their required cgroup capabilities are
+missing.
+
+On Windows:
 
 | Enforced by the kernel | Not enforced |
 |---|---|
@@ -227,7 +256,7 @@ On Windows today:
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` is the flag doing the heavy lifting: if
 plif dies to a SIGKILL, the OS still reaps the agent's entire process tree.
 
-### The gap you need to know about
+### The Windows gap you need to know about
 
 Running the agent for real, it had `write_file` denied by capability and
 **worked around it** with `run_command ["node","-e","fs.writeFileSync(...)"]`.
@@ -417,8 +446,11 @@ the turn, and falls back to protocol-safe mechanical trimming.
 ## Credentials
 
 plif asks for an API key in the interface and encrypts it with your Windows
-account through DPAPI. One record per name, under a hashed filename so that
-listing the directory does not reveal which services you use.
+account through DPAPI or, when the host credential key is accessible, through
+`systemd-creds` on Linux. Linux sessions without access to that key retain the
+credential in memory for the current process instead of writing cleartext. One
+record per name lives under a hashed filename so that listing the directory
+does not reveal which services you use.
 
 The value reaches the code that needs it by resolving a promise and by no other
 route. It is deliberately left out of the event that reports the answer, so
@@ -488,11 +520,10 @@ reviewed without a terminal.
 
 Version 0.1.0. It is used daily by its author and it is early.
 
-What is honestly not done: filesystem write blocking and network blocking are
-not enforced at the OS level (see above), the sandbox is Windows-first because
-that is where the isolation primitives are implemented, and the plugin
-marketplace can install MCP servers but not the skills that many catalogue
-entries ship as directories.
+What is honestly not done: Windows still cannot enforce filesystem or network
+blocking at the OS level; Linux does not enforce hostname-based network
+allowlists or shell-command disk quotas; and the plugin marketplace can install
+MCP servers but not the skills that many catalogue entries ship as directories.
 
 Bug reports that include what you expected and what happened are welcome. So are
 disagreements about the security model, which is the part most worth arguing

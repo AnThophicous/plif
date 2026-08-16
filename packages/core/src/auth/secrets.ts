@@ -1,10 +1,16 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
 import { PlifError } from '../errors.js';
-import { runWindowsDpapi, type DpapiRunner } from './store.js';
+import {
+  runSystemdCreds,
+  runWindowsDpapi,
+  canUseSystemdCreds,
+  type DpapiRunner,
+  type SystemdCredsRunner,
+} from './store.js';
 
 export interface SecretStore {
   get(name: string): Promise<string | undefined>;
@@ -70,7 +76,7 @@ export class WindowsDpapiSecretStore implements SecretStore {
   async set(name: string, value: string): Promise<void> {
     await mkdir(this.root, { recursive: true });
     const destination = this.file(name);
-    const temporary = `${destination}.${process.pid}.tmp`;
+    const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
     try {
       const encrypted = await this.dpapi('protect', JSON.stringify({ name, value }));
       await writeFile(temporary, encrypted, { encoding: 'utf8', mode: 0o600 });
@@ -108,6 +114,84 @@ export class WindowsDpapiSecretStore implements SecretStore {
   private file(name: string): string {
     return path.join(this.root, `${createHash('sha256').update(name).digest('hex')}.dpapi`);
   }
+}
+
+export class SystemdCredsSecretStore implements SecretStore {
+  constructor(
+    private readonly root = personalSecretStorePath(),
+    private readonly crypt: SystemdCredsRunner = runSystemdCreds,
+  ) {}
+
+  async get(name: string): Promise<string | undefined> {
+    try {
+      const encrypted = await readFile(this.file(name), 'utf8');
+      const record = JSON.parse(
+        await this.crypt('unprotect', encrypted, secretCredentialName(name)),
+      ) as { name?: string; value?: string };
+      if (record.name !== name) throw new PlifError('INTERNAL', 'Linux credential binding does not match');
+      return typeof record.value === 'string' ? record.value : undefined;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw new PlifError('INTERNAL', 'could not read the Linux credential store', { cause: error });
+    }
+  }
+
+  async set(name: string, value: string): Promise<void> {
+    await mkdir(this.root, { recursive: true, mode: 0o700 });
+    const destination = this.file(name);
+    const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      const encrypted = await this.crypt(
+        'protect',
+        JSON.stringify({ name, value }),
+        secretCredentialName(name),
+      );
+      await writeFile(temporary, encrypted, { encoding: 'utf8', mode: 0o600 });
+      await rename(temporary, destination);
+    } catch (error) {
+      await rm(temporary, { force: true }).catch(() => undefined);
+      throw new PlifError('INTERNAL', 'could not write the Linux credential store', { cause: error });
+    }
+  }
+
+  async delete(name: string): Promise<void> {
+    await rm(this.file(name), { force: true });
+  }
+
+  async names(): Promise<string[]> {
+    let files: string[];
+    try {
+      files = await readdir(this.root);
+    } catch {
+      return [];
+    }
+    const names: string[] = [];
+    for (const file of files.filter((entry) => entry.endsWith('.cred'))) {
+      try {
+        const encrypted = await readFile(path.join(this.root, file), 'utf8');
+        const digest = file.slice(0, -'.cred'.length);
+        const record = JSON.parse(
+          await this.crypt('unprotect', encrypted, `plif-secret-${digest}`),
+        ) as { name?: string };
+        if (typeof record.name === 'string') names.push(record.name);
+      } catch {}
+    }
+    return names.sort();
+  }
+
+  private file(name: string): string {
+    return path.join(this.root, `${createHash('sha256').update(name).digest('hex')}.cred`);
+  }
+}
+
+export function platformSecretStore(): SecretStore {
+  if (process.platform === 'win32') return new WindowsDpapiSecretStore();
+  if (canUseSystemdCreds()) return new SystemdCredsSecretStore();
+  return new MemorySecretStore();
+}
+
+function secretCredentialName(name: string): string {
+  return `plif-secret-${createHash('sha256').update(name).digest('hex')}`;
 }
 
 export interface CredentialRequest {
