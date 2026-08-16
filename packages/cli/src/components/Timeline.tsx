@@ -28,6 +28,7 @@ interface TimelineProps {
    * at all.
    */
   readonly maxLines?: number;
+  readonly themeRevision?: number;
 }
 
 /**
@@ -43,11 +44,12 @@ interface TimelineProps {
  * and colour is used sparingly enough that a red or green line genuinely stands
  * out instead of blending into a rainbow.
  */
-export function Timeline({
+export const Timeline = React.memo(function Timeline({
   entries,
   width,
   limit,
   maxLines,
+  themeRevision,
 }: TimelineProps): React.ReactElement {
   const inner = width - layout.gutter * 2;
   const byCount = limit ? entries.slice(-limit) : entries.slice(-layout.maxTimelineRows);
@@ -66,11 +68,12 @@ export function Timeline({
           entry={item}
           width={inner}
           {...(maxLines === undefined ? {} : { maxLines })}
+          themeRevision={themeRevision}
         />
       ))}
     </Box>
   );
-}
+});
 
 /** Render canonical transcript cells through the same rows used by normal mode. */
 export function TranscriptCells({
@@ -455,7 +458,7 @@ export function estimateHeight(entry: TimelineEntry, width: number): number {
   return 1 + shown + (shown > 0 ? 1 : 0);
 }
 
-export function TimelineRow({
+export const TimelineRow = React.memo(function TimelineRow({
   entry,
   width,
   maxLines,
@@ -463,6 +466,7 @@ export function TimelineRow({
   entry: TimelineEntry;
   width: number;
   maxLines?: number;
+  themeRevision?: number;
 }): React.ReactElement {
   if (entry.kind === 'input') return <UserRow entry={entry} width={width} />;
   if (entry.kind === 'answer') {
@@ -474,7 +478,7 @@ export function TimelineRow({
   if (entry.kind === 'separator') return <CycleSeparator entry={entry} width={width} />;
   if (entry.kind === 'tool') return <ToolRow entry={entry} width={width} />;
   return <PlainRow entry={entry} width={width} />;
-}
+});
 
 /**
  * A block of model reasoning.

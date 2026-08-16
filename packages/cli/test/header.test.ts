@@ -29,20 +29,22 @@ class CaptureStdout extends EventEmitter {
 
 describe('CLI header', () => {
   it('rasterizes the supplied transparent PNG into stable terminal cells', () => {
-    const cells = pngHeaderCells('#191b20');
-    assert.equal(PNG_HEADER_ART_WIDTH, 22);
-    assert.equal(PNG_HEADER_ART_PIXEL_HEIGHT, 19);
-    assert.equal(PNG_HEADER_ART_HEIGHT, 10);
+    const cells = pngHeaderCells('#303030');
+    assert.equal(PNG_HEADER_ART_WIDTH, 14);
+    assert.equal(PNG_HEADER_ART_PIXEL_HEIGHT, 8);
+    assert.equal(PNG_HEADER_ART_HEIGHT, 4);
     assert.equal(cells.length, PNG_HEADER_ART_HEIGHT);
     assert.ok(cells.every((row) => row.length === PNG_HEADER_ART_WIDTH));
-    assert.ok(cells.some((row) => row.some((cell) => cell.foreground !== '#191b20')));
+    assert.ok(cells.some((row) => row.some((cell) => cell.foreground !== '#303030')));
     assert.ok(cells.some((row) => row.some((cell) => cell.glyph === '▀')));
     assert.ok(cells.some((row) => row.some((cell) => cell.glyph === ' ' && cell.background === undefined)));
     assert.ok(cells.some((row) => row.some((cell) => cell.glyph === '▄')));
+    const lowerOnly = cells.flat().find((cell) => cell.glyph === '▄');
+    assert.equal(lowerOnly?.background, undefined);
   });
 
   it('reports its real footprint so the input frame stays in the viewport', () => {
-    assert.equal(headerHeight(96), 19);
+    assert.equal(headerHeight(96), 13);
     assert.equal(headerHeight(60), 8);
   });
 

@@ -4,7 +4,7 @@ import { Box, Text } from 'ink';
 import { terminalFrameRows } from '../terminal-resize.js';
 import { color, layout } from '../theme.js';
 
-export function SurfaceFill({
+export const SurfaceFill = React.memo(function SurfaceFill({
   width,
   height,
   backgroundColor,
@@ -23,7 +23,7 @@ export function SurfaceFill({
       <Text backgroundColor={backgroundColor}>{fill}</Text>
     </Box>
   );
-}
+});
 
 export interface TerminalSurfaceLayout {
   readonly canvasWidth: number;

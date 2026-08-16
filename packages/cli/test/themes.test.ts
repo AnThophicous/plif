@@ -4,13 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 
-import { applyEffortPalette, color, palette, syntaxColor } from '../src/theme.js';
+import { applyEffortPalette, color, palette, syntaxColor, TERMINAL_BACKGROUND } from '../src/theme.js';
 import { semanticWave } from '../src/pulse.js';
 import { activateTheme, loadThemes, MINIMAL_THEME, parseTheme } from '../src/themes.js';
 
 describe('user themes', () => {
   it('uses the controlled-test gold roles in the default theme', () => {
     activateTheme(MINIMAL_THEME);
+    assert.equal(TERMINAL_BACKGROUND, '#303030');
+    assert.equal(color('panel'), TERMINAL_BACKGROUND);
     assert.equal(color('brand'), '#CC9A3A');
     assert.equal(color('faint'), '#CC9A3A');
     assert.equal(color('accentDim'), '#C68E17');
@@ -18,6 +20,19 @@ describe('user themes', () => {
     assert.equal(color('accentBright'), '#E8C170');
     assert.equal(color('text'), '#FFD700');
     assert.equal(color('accent'), '#E0A526');
+  });
+
+  it('keeps the terminal canvas fixed when a theme or effort changes', () => {
+    const theme = parseTheme({
+      id: 'black-panel', name: 'Black panel',
+      palette: { panel: '#000000' },
+    }, 'fallback');
+    activateTheme(theme);
+    assert.equal(color('panel'), TERMINAL_BACKGROUND);
+    applyEffortPalette('max');
+    assert.equal(color('panel'), TERMINAL_BACKGROUND);
+    activateTheme(MINIMAL_THEME);
+    applyEffortPalette();
   });
 
   it('keeps effort colors distinct and reserves hottest gold for Plif', () => {
