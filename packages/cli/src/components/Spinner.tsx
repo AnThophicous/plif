@@ -113,6 +113,7 @@ interface SpinnerProps {
   readonly since?: number;
   readonly tone?: Parameters<typeof color>[0];
   readonly plif?: boolean;
+  readonly themeRevision?: number;
 }
 
 export interface WorkingProps {
@@ -123,6 +124,7 @@ export interface WorkingProps {
   /** True while the count is a running estimate rather than provider usage. */
   readonly estimated?: boolean;
   readonly plif?: boolean;
+  readonly themeRevision?: number;
 }
 
 export function workingFacts(
