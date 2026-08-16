@@ -14,10 +14,11 @@ export interface HeaderProps {
   readonly width: number;
   readonly model: string;
   readonly effort?: string;
+  readonly themeRevision?: number;
   readonly version: string;
 }
 
-export function Header({
+export const Header = React.memo(function Header({
   cwd,
   width,
   model,
@@ -90,4 +91,4 @@ export function Header({
       </Box>
     </Box>
   );
-}
+});

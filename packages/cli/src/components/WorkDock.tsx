@@ -20,7 +20,7 @@ export function workDockHeight(
     (subagents.length > 0 ? 1 : 0);
 }
 
-export function WorkDock({
+export const WorkDock = React.memo(function WorkDock({
   tasks,
   subagents,
   subagentFocus,
@@ -34,6 +34,7 @@ export function WorkDock({
   readonly expanded: boolean;
   readonly width: number;
   readonly now: number;
+  readonly themeRevision?: number;
 }): React.ReactElement | null {
   if (tasks.length === 0 && subagents.length === 0) return null;
 
@@ -79,7 +80,7 @@ export function WorkDock({
       {subagents.length > 0 && <Text color={color('ghost')}>Tab select {glyph.divider} Ctrl+S inspect {glyph.divider} Ctrl+X stop</Text>}
     </Box>
   );
-}
+});
 
 function TaskLine({
   task,

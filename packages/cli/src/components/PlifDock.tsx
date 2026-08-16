@@ -16,7 +16,7 @@ export function plifDockHeight(effort?: string): number {
   return DOCK_EFFORTS.includes(effort as (typeof DOCK_EFFORTS)[number]) ? 2 : 0;
 }
 
-export function PlifDock({
+export const PlifDock = React.memo(function PlifDock({
   cwd,
   model,
   effort,
@@ -31,6 +31,7 @@ export function PlifDock({
   /** Active provider model, shown immediately before the context meter. */
   readonly model?: string;
   readonly effort?: string;
+  readonly themeRevision?: number;
   readonly contextUsed: number;
   readonly contextMax: number;
   readonly working: boolean;
@@ -109,4 +110,4 @@ export function PlifDock({
       </Box>
     </Box>
   );
-}
+});
