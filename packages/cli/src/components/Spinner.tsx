@@ -85,7 +85,7 @@ export function spinnerFrameAt(frame: number, intervalMs = 220): string {
 }
 
 export function useSpinnerFrame(intervalMs = 220, active = true): string {
-  const frame = useAnimationFrame();
+  const frame = useAnimationFrame(active);
   const plif = usePlifAnimation();
   if (plif && active) return frames[0] as string;
   return active ? spinnerFrameAt(frame, intervalMs) : frames[0] as string;
@@ -103,7 +103,7 @@ export function useElapsed(since: number, active = true): number {
   // Running components repaint from the shared animation clock. Reading the
   // wall clock here keeps the elapsed value accurate without adding one more
   // interval for every visible spinner.
-  useAnimationFrame();
+  useAnimationFrame(active);
   return active ? Math.max(0, Date.now() - since) : 0;
 }
 
@@ -145,7 +145,7 @@ export function workingFacts(
  * and the token count says it is still producing rather than stuck. Anything
  * else belongs in the transcript.
  */
-export function Working({ seed, since, tokens, estimated, plif = false }: WorkingProps): React.ReactElement {
+export const Working = React.memo(function Working({ seed, since, tokens, estimated, plif = false }: WorkingProps): React.ReactElement {
   const frame = useAnimationFrame();
   const glowElapsed = useHighlightClock(plif);
   const elapsed = useElapsed(since, !plif);
@@ -162,9 +162,9 @@ export function Working({ seed, since, tokens, estimated, plif = false }: Workin
       {facts.length > 0 && <Text color={color('ghost')}> ({facts.join(` ${glyph.divider} `)})</Text>}
     </Text>
   );
-}
+});
 
-export function Spinner({ label, since, tone = 'accent', plif = false }: SpinnerProps): React.ReactElement {
+export const Spinner = React.memo(function Spinner({ label, since, tone = 'accent', plif = false }: SpinnerProps): React.ReactElement {
   const frame = useSpinnerFrame();
   const glowElapsed = useHighlightClock(plif);
   const elapsed = useElapsed(since ?? Date.now(), since !== undefined && !plif);
@@ -178,4 +178,4 @@ export function Spinner({ label, since, tone = 'accent', plif = false }: Spinner
       )}
     </Text>
   );
-}
+});
