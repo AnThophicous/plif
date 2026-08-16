@@ -18,6 +18,7 @@ export interface PromptProps {
   readonly plif?: boolean;
   /** Selected effort controls the frame's visual identity. */
   readonly effort?: string;
+  readonly themeRevision?: number;
   readonly busyLabel: string;
   readonly busySince?: number;
   readonly width: number;
@@ -131,7 +132,7 @@ export function layoutPrompt(value: string, cursor: number, width: number): read
   });
 }
 
-export function Prompt({
+export const Prompt = React.memo(function Prompt({
   value,
   cursor,
   placeholder,
@@ -211,7 +212,7 @@ export function Prompt({
       </Box>
     </FocusFrame>
   );
-}
+});
 
 function CursorRow({
   row,

@@ -95,7 +95,7 @@ import { Picker, filterItems, filterPickerGroups, flattenPickerGroups, pickerRow
 import { Prompt, promptBodyRows, promptHeight } from './components/Prompt.js';
 import { PlifDock, plifDockHeight } from './components/PlifDock.js';
 import { PlifIntro, PLIF_INTRO_DURATION_MS } from './components/PlifIntro.js';
-import { terminalSurfaceLayout } from './components/TerminalSurface.js';
+import { SurfaceFill, terminalSurfaceLayout } from './components/TerminalSurface.js';
 import { Working } from './components/Spinner.js';
 import { visibleTasks } from './components/TaskIndicator.js';
 import { WorkDock, workDockHeight } from './components/WorkDock.js';
@@ -211,6 +211,13 @@ export interface AppProps {
 
 /** How often command output is flushed into the timeline. */
 const STREAM_FLUSH_MS = 90;
+/**
+ * Stream text gets its own bounded cadence. It must not wait for the visual
+ * animation clock: that clock is intentionally slow for spinners, while text
+ * already received from the provider should reach the terminal within one
+ * ordinary paint window.
+ */
+const SEMANTIC_STREAM_FRAME_MS = 33;
 /** Window in which a second Ctrl+C means "really quit". */
 const DOUBLE_INTERRUPT_MS = 1500;
 const PLAN_BLOCKED_TOOLS = new Set([
@@ -428,7 +435,7 @@ export function App({
   const [credentialPromptPending, setCredentialPromptPending] = useState(
     needsCredentialPrompt(providerProblem),
   );
-  const [, setThemeRevision] = useState(0);
+  const [themeRevision, setThemeRevision] = useState(0);
   const [emojiIndex, setEmojiIndex] = useState(0);
   /** Live MCP status and loaded skills, for the browser's first two tabs. */
   const [mcpStatuses, setMcpStatuses] = useState<readonly McpServerStatus[]>(initialMcpStatuses);
@@ -550,7 +557,7 @@ export function App({
   const paintedEpoch = useRef<number | null>(null);
   const semanticFrames = useRef<StreamFrameScheduler | null>(null);
   semanticFrames.current ??= new StreamFrameScheduler({
-    clockDriven: true,
+    frameMs: SEMANTIC_STREAM_FRAME_MS,
     onFrame: (frame: StreamFrame) => {
       if (frame.kind === 'reset') {
         semanticStartedAt.current = null;
@@ -1664,7 +1671,7 @@ export function App({
     push(
       entry('notice', 'model key was not entered', {
         tone: 'warn',
-        subtitle: 'Use /models to choose the model again and reopen this credential popup.',
+        subtitle: 'Use /model to choose the model again and reopen this credential popup.',
       }),
     );
     return null;
@@ -1879,9 +1886,9 @@ export function App({
         const restored = themeCatalogue.themes.find((theme) => theme.id === activeThemeId.current)
           ?? themeCatalogue.themes[0]!;
         activateTheme(restored);
-        setThemeRevision((value) => value + 1);
       }
       applyEffortPalette(effort);
+      setThemeRevision((value) => value + 1);
       effortRef.current = effort;
       setEffortState(effort);
       if (previous !== effort) setEffortTransitionId((value) => value + 1);
@@ -3450,6 +3457,8 @@ export function App({
       escape?: boolean;
       upArrow?: boolean;
       downArrow?: boolean;
+      leftArrow?: boolean;
+      rightArrow?: boolean;
       backspace?: boolean;
       delete?: boolean;
       ctrl?: boolean;
@@ -3469,6 +3478,24 @@ export function App({
     }
     if (key.downArrow) {
       dispatch({ type: picker.groups ? 'picker.moveVisible' : 'picker.move', delta: 1 });
+      return;
+    }
+    if (picker.groups && (key.leftArrow || key.rightArrow)) {
+      const matches = visiblePickerRows(picker.groups, picker.expanded ?? [], picker.filter);
+      const chosen = matches[picker.selected];
+      if (!chosen) return;
+
+      if (chosen.kind === 'group') {
+        const expanded = (picker.expanded ?? []).includes(chosen.group.id);
+        if ((key.rightArrow && !expanded) || (key.leftArrow && expanded)) {
+          dispatch({ type: 'picker.toggle', id: chosen.group.id });
+        }
+        return;
+      }
+
+      if (key.leftArrow) {
+        dispatch({ type: 'picker.collapse', groupId: chosen.groupId });
+      }
       return;
     }
     if (key.return) {
@@ -3681,7 +3708,7 @@ export function App({
         const currentConfig = resolveConfig(stored);
         const key = await requestModelKey(currentConfig.model, [
           'Plif could not start the configured model because its credential is missing.',
-          'You can also set NeedKey = true in ~/.plif/config.toml and use /models later to reconfigure it.',
+          'You can also set NeedKey = true in ~/.plif/config.toml and use /model later to reconfigure it.',
         ].join('\n'));
         if (!key) return;
         const selection = {
@@ -3736,7 +3763,7 @@ export function App({
     background: tasks.some((task) => task.status === 'running'),
     queued: state.queue.length,
   });
-  const hints: Hint[] = state.browser
+  const hints = useMemo<Hint[]>(() => state.browser
     ? [
         { key: 'type', label: 'filter' },
         { key: '↑↓', label: 'move' },
@@ -3805,22 +3832,38 @@ export function App({
             { key: '/', label: 'commands' },
             { key: '↑↓', label: 'history' },
             { key: 'Ctrl+C', label: 'quit' },
-          ];
+          ], [
+    state.browser,
+    state.question,
+    state.picker,
+    state.approval,
+    showEmoji,
+    showCompletions,
+    state.busy,
+    state.queue.length,
+    state.subagents.length,
+    tasks.length,
+    typedCommandRunsNow,
+    input,
+  ]);
 
   // While the agent runs, the elapsed time and the token count live on the
   // working line directly above the prompt, where the eye already is. Repeating
   // them in the footer was the same three facts twice on one screen.
   const status = interruptArmed ? 'press Ctrl+C again to quit' : undefined;
-  const working =
-    agentTurnStartedAt !== null ? (
+  const working = useMemo(
+    () => agentTurnStartedAt !== null ? (
       <Working
         seed={turn}
         since={agentTurnStartedAt}
         tokens={completionMeter.tokens}
         estimated={completionMeter.estimated}
         plif={effort === 'plif'}
+        themeRevision={themeRevision}
       />
-    ) : undefined;
+    ) : undefined,
+    [agentTurnStartedAt, turn, completionMeter.tokens, completionMeter.estimated, effort, themeRevision],
+  );
   const promptStatus = planMode ? (
     <Text color={color('accent')}>plan mode · read-only · /plan off to work</Text>
   ) : working;
@@ -3841,7 +3884,60 @@ export function App({
   const compactDialogs = rows < 34;
   const suggestionRows = Math.max(1, Math.min(6, surface.contentHeight - 8));
 
+  const animationActive = animationClockActive({
+    effort,
+    effortTransitioning,
+    busy: state.busy,
+    compacting: state.compaction !== null,
+    browserLoading: state.browser?.loading === true,
+    runningTask: tasks.some(
+      (task) => task.status === 'running' || task.status === 'awaiting_approval',
+    ),
+    runningSubagent: state.subagents.some((view) => view.status === 'running'),
+    runningDiscovery: state.discovery.calls.some((call) => call.ok === undefined),
+    runningTimeline: state.entries.some((entry) => entry.status === 'active'),
+  });
   const effortFrame = plifDockHeight(effort) > 0;
+  const activeModel = providerRef.current?.info.id ?? provider?.info.id ?? '';
+  const frameFooter = useMemo(
+    () => effortFrame ? (
+      <PlifDock
+        cwd={cwd}
+        model={activeModel}
+        effort={effort}
+        themeRevision={themeRevision}
+        contextUsed={state.contextUsed}
+        contextMax={state.contextMax}
+        working={state.busy}
+        transitioning={effortTransitioning}
+        animated={animationActive}
+        width={Math.max(18, surface.contentWidth - 4)}
+      />
+    ) : undefined,
+    [
+      effortFrame,
+      cwd,
+      activeModel,
+      effort,
+      themeRevision,
+      state.contextUsed,
+      state.contextMax,
+      state.busy,
+      effortTransitioning,
+      animationActive,
+      surface.contentWidth,
+    ],
+  );
+  const queueView = useMemo(
+    () => state.queue.length > 0 ? (
+      <Queue
+        messages={state.queue}
+        selected={queuedIndex}
+        width={Math.max(1, surface.contentWidth - 4)}
+      />
+    ) : undefined,
+    [state.queue, queuedIndex, surface.contentWidth],
+  );
   const promptFooterRows = (promptStatus ? 1 : 0) + (effortFrame ? 1 : 0);
   const promptQueueRows = queueHeight(state.queue);
   const inputRows = promptBodyRows(input, cursor, surface.contentWidth);
@@ -3854,7 +3950,7 @@ export function App({
     workRows +
     (showCompletions ? suggestionRows + (completions.length > suggestionRows ? 1 : 0) : 0) +
     (showEmoji ? suggestionRows + (emojiMatches.length > suggestionRows ? 1 : 0) : 0) +
-    (state.picker ? pickerRows + 8 : 0) +
+    (state.picker ? pickerRows + (state.picker.groups ? 9 : 8) : 0) +
     (state.approval ? approvalHeight(compactDialogs) : 0) +
     (state.question ? questionHeight(state.question, compactDialogs, state.questionExpanded) : 0) +
     (state.compaction ? COMPACTION_HEIGHT + 1 : 0) +
@@ -3886,20 +3982,6 @@ export function App({
     (): readonly TimelineEntry[] => state.committed,
     [state.committed],
   );
-  const animationActive = animationClockActive({
-      effort,
-      effortTransitioning,
-    busy: state.busy,
-    compacting: state.compaction !== null,
-    browserLoading: state.browser?.loading === true,
-    runningTask: tasks.some(
-      (task) => task.status === 'running' || task.status === 'awaiting_approval',
-    ),
-    runningSubagent: state.subagents.some((view) => view.status === 'running'),
-    runningDiscovery: state.discovery.calls.some((call) => call.ok === undefined),
-      runningTimeline: state.entries.some((entry) => entry.status === 'active'),
-  });
-
   return (
     /*
       The surface owns the physical terminal width and height. Visual children
@@ -3922,15 +4004,24 @@ export function App({
     <AnimationClockProvider
       active={animationActive}
       plif={effort === 'plif'}
-      onTick={() => semanticFrames.current?.tick()}
     >
-    <Box flexDirection="column" width={width} height={surface.canvasHeight}>
+    <Box
+      flexDirection="column"
+      width={width}
+      height={surface.canvasHeight}
+    >
+      <SurfaceFill
+        width={width}
+        height={surface.canvasHeight}
+        backgroundColor={color('panel')}
+      />
       <Box paddingX={layout.gutter} flexShrink={0}>
         <Header
           cwd={cwd}
           width={width - layout.gutter * 2}
-          model={provider?.info.id ?? ''}
+          model={activeModel}
           effort={effort}
+          themeRevision={themeRevision}
           version={version}
         />
       </Box>
@@ -3998,6 +4089,7 @@ export function App({
               expanded={workDockOpen}
               width={surface.contentWidth}
               now={now}
+              themeRevision={themeRevision}
             />
 
             <Box flexDirection="column">
@@ -4005,6 +4097,7 @@ export function App({
                 entries={state.entries}
                 width={surface.contentWidth}
                 maxLines={timelineBudget}
+                themeRevision={themeRevision}
               />
             </Box>
 
@@ -4087,40 +4180,20 @@ export function App({
                 width={surface.contentWidth}
                 maxRows={promptRows}
                 effort={effort}
+                themeRevision={themeRevision}
                 {...(promptStatus ? { status: promptStatus } : {})}
                 frameActive={animationActive}
                 plif={effort === 'plif'}
-                {...(effortFrame
-                  ? {
-                      frameFooter: (
-                        <PlifDock
-                          cwd={cwd}
-                          model={providerRef.current?.info.id ?? provider?.info.id ?? ''}
-                          effort={effort}
-                          contextUsed={state.contextUsed}
-                          contextMax={state.contextMax}
-                          working={state.busy}
-                          transitioning={effortTransitioning}
-                          animated={animationActive}
-                          width={Math.max(18, surface.contentWidth - 4)}
-                        />
-                      ),
-                    }
-                  : {})}
+                {...(frameFooter !== undefined ? { frameFooter } : {})}
                 {...(state.busySince !== null ? { busySince: state.busySince } : {})}
-                {...(state.queue.length > 0
-                  ? {
-                      queue: (
-                        <Queue
-                          messages={state.queue}
-                          selected={queuedIndex}
-                          width={Math.max(1, surface.contentWidth - 4)}
-                        />
-                      ),
-                    }
-                  : {})}
+                {...(queueView !== undefined ? { queue: queueView } : {})}
               />
-              <Footer hints={hints} width={surface.contentWidth} {...(status ? { status } : {})} />
+              <Footer
+                hints={hints}
+                width={surface.contentWidth}
+                themeRevision={themeRevision}
+                {...(status ? { status } : {})}
+              />
             </Box>
 
             {state.exiting && (

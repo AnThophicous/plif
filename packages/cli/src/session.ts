@@ -411,6 +411,7 @@ export type SessionAction =
   | { type: 'picker.move'; delta: number }
   | { type: 'picker.moveVisible'; delta: number }
   | { type: 'picker.toggle'; id: string }
+  | { type: 'picker.collapse'; groupId: string }
   | { type: 'picker.close' }
   | { type: 'exit' };
 
@@ -949,6 +950,28 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
           ...state.picker,
           expanded: nextExpanded,
           selected: preservePickerSelection(previous, state.picker.selected, matches),
+        },
+      };
+    }
+
+    case 'picker.collapse': {
+      if (!state.picker?.groups) return state;
+      const expanded = new Set(state.picker.expanded ?? []);
+      expanded.delete(action.groupId);
+      expanded.delete(`${action.groupId}:all`);
+      const nextExpanded = [...expanded];
+      const matches = pickerRows(state.picker.groups, nextExpanded, state.picker.filter);
+      const groupIndex = matches.findIndex(
+        (row) => row.kind === 'group' && row.group.id === action.groupId,
+      );
+      return {
+        ...state,
+        picker: {
+          ...state.picker,
+          expanded: nextExpanded,
+          selected: groupIndex >= 0
+            ? groupIndex
+            : Math.min(state.picker.selected, Math.max(0, matches.length - 1)),
         },
       };
     }

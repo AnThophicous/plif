@@ -11,6 +11,7 @@ export interface Hint {
 interface FooterProps {
   readonly hints: readonly Hint[];
   readonly width: number;
+  readonly themeRevision?: number;
   /** Right-aligned run summary, e.g. "turn 3 · 12.4s · 2 execs". */
   readonly status?: string;
 }
@@ -26,7 +27,7 @@ interface FooterProps {
  * The keys are the bright part and the labels are dim, so the bar compresses
  * into a scannable row of keys when you already know what they do.
  */
-export function Footer({ hints, width, status }: FooterProps): React.ReactElement {
+export const Footer = React.memo(function Footer({ hints, width, status }: FooterProps): React.ReactElement {
   const narrow = width < layout.narrowWidth;
   const shown = narrow ? hints.slice(0, 2) : hints;
 
@@ -46,4 +47,4 @@ export function Footer({ hints, width, status }: FooterProps): React.ReactElemen
       {status && !narrow && <Text color={color('ghost')}>{status}</Text>}
     </Box>
   );
-}
+});

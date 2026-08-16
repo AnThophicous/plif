@@ -4,7 +4,7 @@ import zlib from 'node:zlib';
 import React from 'react';
 import { Box, Text } from 'ink';
 
-import { color } from '../theme.js';
+import { color, TERMINAL_BACKGROUND } from '../theme.js';
 
 type Rgba = readonly [number, number, number, number];
 
@@ -29,9 +29,10 @@ export interface PngHeaderCell {
   readonly glyph: '▀' | '▄' | ' ';
 }
 
-const ASSET_URL = new URL('../../assets/piroquinha.png', import.meta.url);
-const PANEL_FALLBACK = '#191b20';
-const TARGET_WIDTH = 22;
+const ASSET_URL = new URL('../../assets/negrocomcachecol.png', import.meta.url);
+const PANEL_FALLBACK = TERMINAL_BACKGROUND;
+/** Compact mascot footprint: the header keeps its existing left column. */
+const TARGET_WIDTH = 14;
 const HALF_ROWS_PER_CELL = 2;
 // A terminal half-block is physically taller than one character column on
 // the Windows terminal fonts Plif targets. Compensate before sampling so a
@@ -180,26 +181,12 @@ function visibleCrop(image: IndexedPng): Crop {
   return { left, top, width: right - left + 1, height: bottom - top + 1 };
 }
 
-function parseHex(value: string): readonly [number, number, number] {
-  const match = /^#?([0-9a-f]{6})$/i.exec(value.trim());
-  if (!match) return [25, 27, 32];
-  const numeric = Number.parseInt(match[1]!, 16);
-  return [(numeric >> 16) & 0xff, (numeric >> 8) & 0xff, numeric & 0xff];
-}
-
 function hex(rgb: readonly [number, number, number]): string {
   return '#' + rgb.map((part) => part.toString(16).padStart(2, '0')).join('');
 }
 
-function composite(pixelValue: Rgba, background: readonly [number, number, number]): string {
-  const alpha = pixelValue[3] / 255;
-  if (alpha <= 0.03) return hex(background);
-  if (alpha >= 0.98) return hex([pixelValue[0], pixelValue[1], pixelValue[2]]);
-  return hex([
-    Math.round(background[0] * (1 - alpha) + pixelValue[0] * alpha),
-    Math.round(background[1] * (1 - alpha) + pixelValue[1] * alpha),
-    Math.round(background[2] * (1 - alpha) + pixelValue[2] * alpha),
-  ]);
+function pixelHex(pixelValue: Rgba): string {
+  return hex([pixelValue[0], pixelValue[1], pixelValue[2]]);
 }
 
 const image = decodePng(new Uint8Array(fs.readFileSync(ASSET_URL)));
@@ -215,10 +202,13 @@ export const PNG_HEADER_ART_HEIGHT = Math.max(1, Math.ceil(
 const cellsByBackground = new Map<string, readonly (readonly PngHeaderCell[])[]>();
 
 export function pngHeaderCells(backgroundColor = color('panel')): readonly (readonly PngHeaderCell[])[] {
-  const cached = cellsByBackground.get(backgroundColor);
+  // The key remains part of the public API for callers that cache by surface,
+  // but visible PNG pixels keep their own truecolor. Transparent pixels are
+  // deliberately left unpainted so the terminal canvas shows through.
+  const cacheKey = backgroundColor || PANEL_FALLBACK;
+  const cached = cellsByBackground.get(cacheKey);
   if (cached) return cached;
 
-  const background = parseHex(backgroundColor || PANEL_FALLBACK);
   const targetPixelHeight = PNG_HEADER_ART_PIXEL_HEIGHT;
   const rows: PngHeaderCell[][] = [];
 
@@ -249,12 +239,13 @@ export function pngHeaderCells(backgroundColor = color('panel')): readonly (read
       row.push({
         // A transparent half must not receive an explicit background colour:
         // doing so paints the PNG's crop rectangle instead of preserving the
-        // header surface behind it. Use the lower-half glyph when only the
-        // bottom pixel is visible so both transparent directions stay clean.
+        // header surface behind it. A lower-only pixel therefore uses `▄` with
+        // foreground only; the truecolor background is reserved for cells
+        // where both halves are visible.
         foreground: topVisible
-          ? composite(topPixel, background)
-          : bottomVisible ? composite(bottomPixel, background) : undefined,
-        background: bottomVisible ? composite(bottomPixel, background) : undefined,
+          ? pixelHex(topPixel)
+          : bottomVisible ? pixelHex(bottomPixel) : undefined,
+        background: topVisible && bottomVisible ? pixelHex(bottomPixel) : undefined,
         glyph: topVisible ? '▀' : bottomVisible ? '▄' : ' ',
       });
     }
@@ -262,7 +253,7 @@ export function pngHeaderCells(backgroundColor = color('panel')): readonly (read
   }
 
   const result = Object.freeze(rows.map((row) => Object.freeze(row.slice())));
-  cellsByBackground.set(backgroundColor, result);
+  cellsByBackground.set(cacheKey, result);
   return result;
 }
 
