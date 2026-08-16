@@ -54,7 +54,7 @@ export function effortPickerItems(
     value,
     label: effortLabel(value),
     symbol: effortSymbol(value),
-    detail: value === 'plif' ? 'adaptive reasoning for coding' : `${value} reasoning effort`,
+    detail: value === 'plif' ? 'Plif signature mode · adaptive reasoning' : `${value} reasoning effort`,
     current: value === current,
   }));
 }

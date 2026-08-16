@@ -69,9 +69,11 @@ export function formatExecTag(result: ExecResult): string {
 /**
  * Render an error for the timeline.
  *
- * A PlifError carries a code and usually a hint, and both are worth showing: the
- * code is what a user searches for, and the hint is the next thing to do. A
- * foreign error gets its message and nothing invented on top.
+ * A PlifError carries a code and usually a hint. The hint is user-facing; the
+ * generic INVALID_ARGUMENT classification is deliberately kept out of the
+ * title because it adds noise to otherwise actionable command errors. Other
+ * codes remain visible for diagnosis. A foreign error gets its message and
+ * nothing invented on top.
  */
 export function formatError(error: unknown): { title: string; detail: string | undefined } {
   if (PlifError.is(error)) {
@@ -84,7 +86,7 @@ export function formatError(error: unknown): { title: string; detail: string | u
       );
     }
     return {
-      title: `${error.message}  (${error.code})`,
+      title: error.code === 'INVALID_ARGUMENT' ? error.message : `${error.message}  (${error.code})`,
       detail: lines.length ? lines.join('\n') : undefined,
     };
   }

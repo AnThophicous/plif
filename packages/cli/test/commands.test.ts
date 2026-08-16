@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import { describe, it } from 'node:test';
+import os from 'node:os';
+import path from 'node:path';
 
-import { COMMANDS, builtInPickerProviders, providerModelIds } from '../src/commands.js';
+import {
+  COMMANDS,
+  builtInPickerProviders,
+  providerModelIds,
+  validateEffortArgument,
+} from '../src/commands.js';
 import type { CommandContext } from '../src/commands.js';
 import { entry } from '../src/session.js';
 import type { BrowserTab, TimelineEntry } from '../src/session.js';
@@ -9,6 +17,7 @@ import type { BrowserTab, TimelineEntry } from '../src/session.js';
 const mcp = COMMANDS.find((command) => command.name === 'mcp');
 const plan = COMMANDS.find((command) => command.name === 'plan');
 const goal = COMMANDS.find((command) => command.name === 'goal');
+const effort = COMMANDS.find((command) => command.name === 'effort');
 
 interface Recorder {
   readonly context: CommandContext;
@@ -129,6 +138,50 @@ describe('/goal', () => {
 
     assert.match(status.entries[0]?.title ?? '', /goal active: tests pass/);
     assert.equal(current, null);
+  });
+});
+
+describe('/effort validation', () => {
+  it('distinguishes an unknown value from a known unsupported one', () => {
+    assert.throws(
+      () => validateEffortArgument('banana', ['low', 'medium']),
+      (error: unknown) => {
+        const typed = error as { message: string; hint?: string };
+        assert.equal(typed.message, 'Unknown effort "banana".');
+        assert.equal(typed.hint, 'Available: default, low, medium');
+        return true;
+      },
+    );
+
+    assert.throws(
+      () => validateEffortArgument('xhigh', ['low', 'medium', 'high']),
+      (error: unknown) => {
+        const typed = error as { message: string; hint?: string };
+        assert.equal(typed.message, 'xhigh is not supported by the current model.');
+        assert.equal(typed.hint, 'Supported: low, medium, high');
+        return true;
+      },
+    );
+  });
+
+  it('reports that an effort change preserves the current conversation', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-effort-command-'));
+    const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
+    process.env['PLIF_CONFIG_PATH'] = path.join(root, 'config.toml');
+    await fs.writeFile(process.env['PLIF_CONFIG_PATH'], '');
+    const calls: Array<string | undefined> = [];
+    try {
+      const result = await effort!.run(['high'], {
+        supportedEfforts: () => ['low', 'medium', 'high'],
+        setEffort: async (value) => { calls.push(value); },
+      } as unknown as CommandContext);
+      assert.deepEqual(calls, ['high']);
+      assert.match(result.entries[0]?.subtitle ?? '', /conversation preserved/);
+    } finally {
+      if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
+      else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 });
 

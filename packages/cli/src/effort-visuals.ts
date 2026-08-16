@@ -133,13 +133,13 @@ const VISUALS: Record<string, EffortVisual> = {
     label: 'PLIF',
     symbol: '✦',
     asciiSymbol: '*',
-    descriptor: 'evidence mode',
+    descriptor: 'adaptive reasoning',
     stops: ['brand', 'accentDim', 'accent', 'accentBright'],
     pattern: ['·', '◦', '✧', '✦', '✧', '◦', '·'],
     asciiPattern: ['.', 'o', '*', '*', '*', 'o', '.'],
     cycleMs: 540,
-    resting: 'evidence ready',
-    working: 'evidence mode',
+    resting: 'signature ready',
+    working: 'adaptive reasoning',
   },
 };
 
