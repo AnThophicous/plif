@@ -12,6 +12,7 @@ import {
   layout,
   palette,
   syntax,
+  TERMINAL_BACKGROUND,
 } from './theme.js';
 import type { ThemeOverrides } from './theme.js';
 
@@ -49,7 +50,7 @@ export const MIDNIGHT_THEME: ThemeDefinition = {
   source: 'builtin',
   palette: {
     text: '#FFD700',
-    panel: '#000000',
+    panel: TERMINAL_BACKGROUND,
     muted: '#E8C170',
     faint: '#CC9A3A',
     ghost: '#6E541D',

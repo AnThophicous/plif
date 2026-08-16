@@ -765,8 +765,8 @@ export const COMMANDS: readonly Command[] = [
       const expanded = currentGroup ? [currentGroup.id] : [];
 
       context.openPicker({
-        title: 'select a provider and model',
-        hint: '[vision] reads images directly · [vision helper] delegates through inspect_image',
+        title: 'MODELS',
+        hint: 'Choose a provider first → then a model · ✓ marks the current choice',
         groups,
         expanded,
         selected: pickerSelectionForCurrentModel(groups, expanded, currentGroup?.id),

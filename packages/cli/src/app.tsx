@@ -95,7 +95,7 @@ import { Picker, filterItems, filterPickerGroups, flattenPickerGroups, pickerRow
 import { Prompt, promptBodyRows, promptHeight } from './components/Prompt.js';
 import { PlifDock, plifDockHeight } from './components/PlifDock.js';
 import { PlifIntro, PLIF_INTRO_DURATION_MS } from './components/PlifIntro.js';
-import { terminalSurfaceLayout } from './components/TerminalSurface.js';
+import { SurfaceFill, terminalSurfaceLayout } from './components/TerminalSurface.js';
 import { Working } from './components/Spinner.js';
 import { visibleTasks } from './components/TaskIndicator.js';
 import { WorkDock, workDockHeight } from './components/WorkDock.js';
@@ -1671,7 +1671,7 @@ export function App({
     push(
       entry('notice', 'model key was not entered', {
         tone: 'warn',
-        subtitle: 'Use /models to choose the model again and reopen this credential popup.',
+        subtitle: 'Use /model to choose the model again and reopen this credential popup.',
       }),
     );
     return null;
@@ -3457,6 +3457,8 @@ export function App({
       escape?: boolean;
       upArrow?: boolean;
       downArrow?: boolean;
+      leftArrow?: boolean;
+      rightArrow?: boolean;
       backspace?: boolean;
       delete?: boolean;
       ctrl?: boolean;
@@ -3476,6 +3478,24 @@ export function App({
     }
     if (key.downArrow) {
       dispatch({ type: picker.groups ? 'picker.moveVisible' : 'picker.move', delta: 1 });
+      return;
+    }
+    if (picker.groups && (key.leftArrow || key.rightArrow)) {
+      const matches = visiblePickerRows(picker.groups, picker.expanded ?? [], picker.filter);
+      const chosen = matches[picker.selected];
+      if (!chosen) return;
+
+      if (chosen.kind === 'group') {
+        const expanded = (picker.expanded ?? []).includes(chosen.group.id);
+        if ((key.rightArrow && !expanded) || (key.leftArrow && expanded)) {
+          dispatch({ type: 'picker.toggle', id: chosen.group.id });
+        }
+        return;
+      }
+
+      if (key.leftArrow) {
+        dispatch({ type: 'picker.collapse', groupId: chosen.groupId });
+      }
       return;
     }
     if (key.return) {
@@ -3688,7 +3708,7 @@ export function App({
         const currentConfig = resolveConfig(stored);
         const key = await requestModelKey(currentConfig.model, [
           'Plif could not start the configured model because its credential is missing.',
-          'You can also set NeedKey = true in ~/.plif/config.toml and use /models later to reconfigure it.',
+          'You can also set NeedKey = true in ~/.plif/config.toml and use /model later to reconfigure it.',
         ].join('\n'));
         if (!key) return;
         const selection = {
@@ -3930,7 +3950,7 @@ export function App({
     workRows +
     (showCompletions ? suggestionRows + (completions.length > suggestionRows ? 1 : 0) : 0) +
     (showEmoji ? suggestionRows + (emojiMatches.length > suggestionRows ? 1 : 0) : 0) +
-    (state.picker ? pickerRows + 8 : 0) +
+    (state.picker ? pickerRows + (state.picker.groups ? 9 : 8) : 0) +
     (state.approval ? approvalHeight(compactDialogs) : 0) +
     (state.question ? questionHeight(state.question, compactDialogs, state.questionExpanded) : 0) +
     (state.compaction ? COMPACTION_HEIGHT + 1 : 0) +
@@ -3985,7 +4005,16 @@ export function App({
       active={animationActive}
       plif={effort === 'plif'}
     >
-    <Box flexDirection="column" width={width} height={surface.canvasHeight}>
+    <Box
+      flexDirection="column"
+      width={width}
+      height={surface.canvasHeight}
+    >
+      <SurfaceFill
+        width={width}
+        height={surface.canvasHeight}
+        backgroundColor={color('panel')}
+      />
       <Box paddingX={layout.gutter} flexShrink={0}>
         <Header
           cwd={cwd}
