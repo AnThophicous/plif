@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { effortPulseCells, effortTagline, effortVisual } from '../src/effort-visuals.js';
+import {
+  effortDisplay,
+  effortPulseCells,
+  effortSymbol,
+  effortTagline,
+  effortVisual,
+} from '../src/effort-visuals.js';
 import { displayWidth } from '../src/text.js';
 
 describe('effort visual identities', () => {
@@ -31,6 +37,12 @@ describe('effort visual identities', () => {
     assert.equal(effortVisual('ultra').descriptor, 'wide search');
     assert.equal(effortVisual('ultracode').descriptor, 'code synthesis');
     assert.equal(effortVisual('plif').descriptor, 'evidence mode');
+  });
+
+  it('gives PLIF a distinct display signature', () => {
+    assert.equal(effortSymbol('plif'), '✦');
+    assert.equal(effortDisplay('plif'), '✦ PLIF');
+    assert.notEqual(effortSymbol('plif'), effortSymbol('max'));
   });
 
   it('falls back safely for an absent or unknown effort', () => {

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
+import { effortSymbol, effortVisual } from '../effort-visuals.js';
 import { color, shortenPath, truncate } from '../theme.js';
 import { PNG_HEADER_ART_HEIGHT, PNG_HEADER_ART_WIDTH, PngHeaderArt } from './PngHeaderArt.js';
 
@@ -34,6 +35,7 @@ export function Header({
   const frameWidth = headerWidth(width);
   const narrow = frameWidth < 74;
   const modelLabel = model || 'model not configured';
+  const effortLabel = effort ? `${effortSymbol(effort)} ${effortVisual(effort).label}` : '';
   const workspace = truncate(
     shortenPath(cwd, Math.max(16, frameWidth - 20)),
     Math.max(1, frameWidth - 20),
@@ -56,7 +58,7 @@ export function Header({
           </Box>
           <Text color={color('muted')} wrap="truncate">workspace: {workspace}</Text>
           <Text color={color('ghost')} wrap="truncate">
-            {truncate(modelLabel, Math.max(8, frameWidth - 10))} · /model
+            {truncate(`${modelLabel}${effortLabel ? ` · ${effortLabel}` : ''}`, Math.max(8, frameWidth - 10))} · /model
           </Text>
         </Box>
       </Box>
@@ -85,8 +87,13 @@ export function Header({
           <Text color={color('text')} bold>Code workspace</Text>
           <Text color={color('muted')} wrap="truncate">{workspace}</Text>
           <Text color={color('ghost')} wrap="truncate">
-            {truncate(modelLabel, Math.max(8, leftWidth - 4))}{effort ? ` · ${effort}` : ''}
+            {truncate(modelLabel, Math.max(8, leftWidth - 4))}
           </Text>
+          {effortLabel && (
+            <Text color={color('accent')} bold wrap="truncate">
+              {truncate(effortLabel, Math.max(8, leftWidth - 4))}
+            </Text>
+          )}
         </Box>
         <Text color={color('faint')}>
           {'│\n'.repeat(Math.max(0, PNG_HEADER_ART_HEIGHT + 3))}│

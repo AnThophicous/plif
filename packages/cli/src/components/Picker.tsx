@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
+import { effortSymbol } from '../effort-visuals.js';
 import { color, glyph, layout, truncate } from '../theme.js';
 
 export interface PickerItem {
@@ -9,6 +10,8 @@ export interface PickerItem {
   readonly detail?: string;
   readonly current?: boolean;
   readonly badges?: readonly string[];
+  /** Optional identity mark, distinct from the keyboard selection cursor. */
+  readonly symbol?: string;
 }
 
 export interface PickerGroup {
@@ -50,6 +53,7 @@ export function effortPickerItems(
   return efforts.map((value) => ({
     value,
     label: effortLabel(value),
+    symbol: effortSymbol(value),
     detail: value === 'plif' ? 'adaptive reasoning for coding' : `${value} reasoning effort`,
     current: value === current,
   }));
@@ -347,6 +351,7 @@ export function Picker({
 
               const pickerItem = row.item;
               const itemSummary = [
+                pickerItem.symbol,
                 pickerItem.label,
                 pickerItem.current ? `${glyph.done} active model` : undefined,
                 ...(pickerItem.badges ?? []).map((badge) => `[${badge}]`),
@@ -367,7 +372,7 @@ export function Picker({
                     {'  '}{active ? glyph.caret : ' '}{' '}
                   </Text>
                   <Text color={color(active ? 'text' : 'faint')} bold={active}>
-                    {truncate(pickerItem.label, Math.max(10, inner - 18))}
+                    {pickerItem.symbol ? `${pickerItem.symbol} ` : ''}{truncate(pickerItem.label, Math.max(10, inner - 18))}
                   </Text>
                   {pickerItem.current && <Text color={color('success')}> {glyph.done} active model</Text>}
                   {pickerItem.badges?.map((badge) => (
@@ -384,6 +389,7 @@ export function Picker({
 
             const pickerItem = item as PickerItem;
             const itemSummary = [
+              pickerItem.symbol,
               pickerItem.label,
               pickerItem.current ? `${glyph.done} active` : undefined,
               ...(pickerItem.badges ?? []).map((badge) => `[${badge}]`),
@@ -404,7 +410,7 @@ export function Picker({
                   {active ? glyph.caret : ' '}{' '}
                 </Text>
                 <Text color={color(active ? 'text' : 'muted')} bold={active}>
-                  {truncate(pickerItem.label, Math.max(10, inner - 14))}
+                  {pickerItem.symbol ? `${pickerItem.symbol} ` : ''}{truncate(pickerItem.label, Math.max(10, inner - 14))}
                 </Text>
                 {pickerItem.current && <Text color={color('success')}> {glyph.done} active</Text>}
                 {pickerItem.badges?.map((badge) => (

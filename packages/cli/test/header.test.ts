@@ -115,6 +115,7 @@ describe('CLI header', () => {
     assert.match(output, /PLIF/);
     assert.match(output, /Code workspace/);
     assert.match(output, /claude-opus-5/);
+    assert.match(output, /Medium/);
     assert.match(output, /Ready to work/);
     assert.match(output, /Plan, work, review/);
   });

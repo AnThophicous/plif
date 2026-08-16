@@ -31,36 +31,36 @@ export interface ThemeCatalogue {
 export const MINIMAL_THEME: ThemeDefinition = {
   id: 'minimal',
   name: 'Minimal',
-  description: 'Quiet Plif gold with semantic colour only when it carries meaning.',
+  description: 'Quiet Plif blue-grey with semantic colour only when it carries meaning.',
   source: 'builtin',
 };
 
 /**
  * MidNight.
  *
- * The gold identity is spent, not spread. Everything a developer reads —
- * answers, tool output, paths, metadata — keeps the same quiet hierarchy as
- * the default theme, while borders and active work use the gold ramp.
+ * The primary dark variant keeps the same cold Plif hierarchy while giving the
+ * surface more depth. Effort accents still come from the central ramp.
  */
 export const MIDNIGHT_THEME: ThemeDefinition = {
   id: 'midnight',
   name: 'MidNight',
-  description: 'Neutral dark surface, with Plif gold kept to chrome and thinking.',
+  description: 'Near-black surface, with Plif blue-grey kept to chrome and thinking.',
   source: 'builtin',
   palette: {
-    text: '#FFD700',
+    text: '#CDD6F4',
     panel: '#000000',
-    muted: '#E8C170',
-    faint: '#CC9A3A',
-    ghost: '#6E541D',
-    brand: '#CC9A3A',
-    accent: '#E0A526',
-    accentBright: '#E8C170',
-    accentDim: '#C68E17',
-    success: '#6ec48a',
-    warn: '#C68E17',
-    danger: '#e8695f',
-    info: '#E8C170',
+    surface: '#202328',
+    muted: '#A2ADB5',
+    faint: '#65717C',
+    ghost: '#4D5862',
+    brand: '#AAB8CC',
+    accent: '#B7C4D8',
+    accentBright: '#CDD6F4',
+    accentDim: '#84919D',
+    success: '#8FB3A6',
+    warn: '#BDAA82',
+    danger: '#C58F99',
+    info: '#A2ADB5',
   },
   syntax: {
     command: 'text',
@@ -77,7 +77,7 @@ export const MIDNIGHT_THEME: ThemeDefinition = {
     plain: 'muted',
   },
   borders: { panel: 'ghost', focus: 'accent', danger: 'danger' },
-  diff: { addBackground: '#12291b', removeBackground: '#33161a', addMarker: 'success', removeMarker: 'danger' },
+  diff: { addBackground: '#263832', removeBackground: '#3B2E34', addMarker: 'success', removeMarker: 'danger' },
   emphasis: {
     normal: { tone: 'muted' },
     important: { tone: 'text', bold: true },

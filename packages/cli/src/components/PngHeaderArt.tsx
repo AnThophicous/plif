@@ -30,7 +30,7 @@ export interface PngHeaderCell {
 }
 
 const ASSET_URL = new URL('../../assets/negrocomcachecol.png', import.meta.url);
-const PANEL_FALLBACK = '#191b20';
+const PANEL_FALLBACK = '#303030';
 // Keep the mascot legible without letting the raster dominate the header card.
 const TARGET_WIDTH = 16;
 const HALF_ROWS_PER_CELL = 2;

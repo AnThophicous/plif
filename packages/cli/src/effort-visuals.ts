@@ -9,6 +9,9 @@ export interface EffortPulseCell {
 export interface EffortVisual {
   readonly id: string;
   readonly label: string;
+  /** Identity mark for the level; separate from the picker cursor/current mark. */
+  readonly symbol: string;
+  readonly asciiSymbol: string;
   readonly descriptor: string;
   readonly stops: SemanticWaveStops;
   readonly pattern: readonly string[];
@@ -24,6 +27,8 @@ const VISUALS: Record<string, EffortVisual> = {
   default: {
     id: 'default',
     label: 'Default',
+    symbol: '·',
+    asciiSymbol: '.',
     descriptor: 'balanced',
     stops: STANDARD_STOPS,
     pattern: ['·', '•', '●', '•', '·'],
@@ -35,6 +40,8 @@ const VISUALS: Record<string, EffortVisual> = {
   low: {
     id: 'low',
     label: 'Low',
+    symbol: '·',
+    asciiSymbol: '.',
     descriptor: 'light touch',
     stops: ['brand', 'accentDim'],
     pattern: ['·', '•', '·'],
@@ -46,6 +53,8 @@ const VISUALS: Record<string, EffortVisual> = {
   medium: {
     id: 'medium',
     label: 'Medium',
+    symbol: '◦',
+    asciiSymbol: 'o',
     descriptor: 'balanced',
     stops: STANDARD_STOPS,
     pattern: ['·', '•', '●', '•', '·'],
@@ -57,6 +66,8 @@ const VISUALS: Record<string, EffortVisual> = {
   high: {
     id: 'high',
     label: 'High',
+    symbol: '●',
+    asciiSymbol: 'O',
     descriptor: 'deep focus',
     stops: ['accentDim', 'accent', 'accentBright'],
     pattern: ['·', '•', '●', '◉', '●', '•', '·'],
@@ -68,6 +79,8 @@ const VISUALS: Record<string, EffortVisual> = {
   xhigh: {
     id: 'xhigh',
     label: 'XHigh',
+    symbol: '◉',
+    asciiSymbol: '@',
     descriptor: 'maximum depth',
     stops: ['accentDim', 'accent', 'accentBright'],
     pattern: ['·', '•', '●', '◉', '◎', '◉', '●', '•', '·'],
@@ -79,6 +92,8 @@ const VISUALS: Record<string, EffortVisual> = {
   max: {
     id: 'max',
     label: 'Max',
+    symbol: '◈',
+    asciiSymbol: '*',
     descriptor: 'deep reasoning',
     stops: ['brand', 'accentDim', 'accent', 'accentBright'],
     pattern: ['◇', '◆', '◈', '✦', '◈', '◆', '◇'],
@@ -90,6 +105,8 @@ const VISUALS: Record<string, EffortVisual> = {
   ultra: {
     id: 'ultra',
     label: 'Ultra',
+    symbol: '◆',
+    asciiSymbol: '#',
     descriptor: 'wide search',
     stops: ['brand', 'accentDim', 'accent', 'accentBright'],
     pattern: ['·', '✧', '✦', '✹', '✦', '✧', '·'],
@@ -101,6 +118,8 @@ const VISUALS: Record<string, EffortVisual> = {
   ultracode: {
     id: 'ultracode',
     label: 'UltraCode',
+    symbol: '▣',
+    asciiSymbol: '#',
     descriptor: 'code synthesis',
     stops: ['brand', 'accentDim', 'accent', 'accentBright'],
     pattern: ['╺', '━', '╋', '━', '╸', '━', '╋', '━'],
@@ -111,11 +130,13 @@ const VISUALS: Record<string, EffortVisual> = {
   },
   plif: {
     id: 'plif',
-    label: 'Plif',
+    label: 'PLIF',
+    symbol: '✦',
+    asciiSymbol: '*',
     descriptor: 'evidence mode',
     stops: ['brand', 'accentDim', 'accent', 'accentBright'],
-    pattern: ['◌', '◍', '◎', '◉', '◎', '◍', '◌'],
-    asciiPattern: ['.', 'o', 'O', '@', 'O', 'o', '.'],
+    pattern: ['·', '◦', '✧', '✦', '✧', '◦', '·'],
+    asciiPattern: ['.', 'o', '*', '*', '*', 'o', '.'],
     cycleMs: 540,
     resting: 'evidence ready',
     working: 'evidence mode',
@@ -126,6 +147,17 @@ const FALLBACK: EffortVisual = VISUALS.default!;
 
 export function effortVisual(effort?: string): EffortVisual {
   return VISUALS[effort ?? 'default'] ?? FALLBACK;
+}
+
+export function effortSymbol(effort?: string): string {
+  const visual = effortVisual(effort);
+  return supportsRichGlyphs ? visual.symbol : visual.asciiSymbol;
+}
+
+export function effortDisplay(effort: string | undefined): string {
+  if (!effort) return 'Default';
+  const visual = effortVisual(effort);
+  return `${effortSymbol(effort)} ${visual.label}`;
 }
 
 export function effortTagline(effort: string | undefined, working: boolean): string {
