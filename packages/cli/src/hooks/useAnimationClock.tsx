@@ -2,11 +2,14 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useSyncEx
 
 /**
  * Terminal animation is deliberately sampled, not rendered at 60 FPS. One
- * shared 120ms clock gives gradients enough intermediate colour samples to
- * avoid stepping while keeping the renderer quiet compared with a per-widget
- * timer.
+ * provider owns two cadence-specific clocks: a slow one for spinners and a
+ * faster one for visual pulse consumers. This keeps each effect smooth without
+ * giving every widget its own interval.
  */
 export const ANIMATION_INTERVAL_MS = 120;
+export const FAST_ANIMATION_INTERVAL_MS = 33;
+
+export type AnimationRate = 'slow' | 'fast';
 
 interface AnimationClockSource {
   readonly subscribe: (listener: () => void) => () => void;
@@ -32,11 +35,19 @@ function createAnimationClock(): AnimationClockSource {
 
 interface AnimationClockValue {
   readonly clock: AnimationClockSource;
+  readonly fastClock: AnimationClockSource;
   readonly plif: boolean;
 }
 
 const idleClock = createAnimationClock();
-const AnimationClockContext = createContext<AnimationClockValue>({ clock: idleClock, plif: false });
+const idleFastClock = createAnimationClock();
+const AnimationClockContext = createContext<AnimationClockValue>({
+  clock: idleClock,
+  fastClock: idleFastClock,
+  plif: false,
+});
+const EMPTY_SUBSCRIBE = (): (() => void) => () => undefined;
+const ZERO_SNAPSHOT = (): number => 0;
 
 export interface AnimationClockProviderProps {
   readonly active: boolean;
@@ -45,7 +56,7 @@ export interface AnimationClockProviderProps {
   readonly plif?: boolean;
   /** Optional work that must share the same terminal paint pulse. */
   readonly onTick?: () => void;
-  /** Exposed for deterministic tests; the runtime uses 120 ms. */
+  /** Exposed for deterministic tests; the slow runtime cadence is 120 ms. */
   readonly intervalMs?: number;
 }
 
@@ -57,6 +68,7 @@ export function AnimationClockProvider({
   intervalMs = ANIMATION_INTERVAL_MS,
 }: AnimationClockProviderProps): React.ReactElement {
   const clock = useMemo(createAnimationClock, []);
+  const fastClock = useMemo(createAnimationClock, []);
   const onTickRef = useRef(onTick);
   onTickRef.current = onTick;
 
@@ -66,22 +78,31 @@ export function AnimationClockProvider({
       clock.tick();
       onTickRef.current?.();
     }, Math.max(1, intervalMs));
+    const fastTimer = setInterval(() => fastClock.tick(), FAST_ANIMATION_INTERVAL_MS);
     // An animation must never keep a CLI process alive by itself.
     timer.unref?.();
-    return () => clearInterval(timer);
-  }, [active, clock, intervalMs]);
+    fastTimer.unref?.();
+    return () => {
+      clearInterval(timer);
+      clearInterval(fastTimer);
+    };
+  }, [active, clock, fastClock, intervalMs]);
 
+  const value = useMemo(() => ({ clock, fastClock, plif }), [clock, fastClock, plif]);
   return (
-    <AnimationClockContext.Provider value={{ clock, plif }}>
+    <AnimationClockContext.Provider value={value}>
       {children}
     </AnimationClockContext.Provider>
   );
 }
 
 /** Monotonic discrete frame number for all active Ink animation. */
-export function useAnimationFrame(): number {
-  const clock = useContext(AnimationClockContext).clock;
-  return useSyncExternalStore(clock.subscribe, clock.getSnapshot, clock.getSnapshot);
+export function useAnimationFrame(active = true, rate: AnimationRate = 'slow'): number {
+  const clocks = useContext(AnimationClockContext);
+  const clock = rate === 'fast' ? clocks.fastClock : clocks.clock;
+  const subscribe = active ? clock.subscribe : EMPTY_SUBSCRIBE;
+  const snapshot = active ? clock.getSnapshot : ZERO_SNAPSHOT;
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 /** Whether active spinner consumers should keep their glyph stable for Plif. */

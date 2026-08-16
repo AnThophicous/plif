@@ -1,6 +1,6 @@
 import { clusterLength } from './text.js';
 import { palette, type PaletteKey } from './theme.js';
-import { ANIMATION_INTERVAL_MS, useAnimationFrame } from './hooks/useAnimationClock.js';
+import { FAST_ANIMATION_INTERVAL_MS, useAnimationFrame } from './hooks/useAnimationClock.js';
 
 const CELL_MS = 180;
 const BELL_CELLS = 3;
@@ -93,14 +93,14 @@ export function semanticWaveTone(
 }
 
 export function useHighlightClock(active = true, frameMs = 16): number {
-  const frame = useAnimationFrame();
+  const frame = useAnimationFrame(active, 'fast');
   if (!active) return 0;
   // Keep this helper's elapsed-millisecond contract for the pure colour
-  // functions while sourcing every tick from the one shared 180 ms clock. The
-  // argument remains for source compatibility and phase tuning at call sites;
+  // functions while sourcing every tick from the shared fast animation clock.
+  // The argument remains for source compatibility and phase tuning at call sites;
   // it must not create a second timer.
   void frameMs;
-  return frame * ANIMATION_INTERVAL_MS;
+  return frame * FAST_ANIMATION_INTERVAL_MS;
 }
 
 export function highlightedClusters(
