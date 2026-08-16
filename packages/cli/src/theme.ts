@@ -8,10 +8,10 @@
  * ## The idea
  *
  * A terminal that a developer sits in for hours has to do two things at once:
- * stay quiet, and stay legible. The gold ramp is therefore semantic: borders,
- * important details, highlighted text, default text, and active thinking each
- * have a clear role. Nothing is coloured for decoration. If a line is bright,
- * it earned it.
+ * stay quiet, and stay legible. The cold blue-grey ramp is therefore semantic:
+ * borders, important details, highlighted text, default text, and active
+ * thinking each have a clear role. Nothing is coloured for decoration. If a
+ * line is bright, it earned it.
  *
  * The greys are spaced far enough apart to survive a low-contrast terminal
  * theme, and the accent sits at a lightness that holds up on both black and
@@ -35,47 +35,37 @@ const richGlyphs = process.env['PLIF_ASCII'] !== '1';
 export const supportsRichGlyphs = richGlyphs;
 
 /**
- * The Plif gold palette, and the ramp derived from it.
- *
- * The controlled-test palette keeps the existing semantic roles intact while
- * replacing the default blue identity with the requested gold ramp:
- *
- * - `#CC9A3A` for borders and structural chrome;
- * - `#C68E17` for important details;
- * - `#E8C170` for highlighted secondary text and tables;
- * - `#FFD700` for default readable text;
- * - `#E0A526` for thinking and active work.
- *
- * The wave animation still travels through semantic stops. Only the colours
- * changed; cell geometry, glow timing, and effort effects remain untouched.
+ * The Plif cold palette. The two anchors are deliberately few:
+ * `#CDD6F4` is the primary ink and `#A2ADB5` is the secondary ink.
+ * Everything else is a quiet derived role or a genuinely semantic state.
  */
 const defaultPalette = {
   /** Primary reading colour. Used for content, never for chrome. */
-  text: '#FFD700',
+  text: '#CDD6F4',
   /** The full-bleed shell surface that holds the current Plif frame. */
-  panel: '#191b20',
+  panel: '#303030',
   /** Quiet filled surface for the developer's own message row. */
-  surface: '#25282f',
+  surface: '#383C43',
   /** Secondary and highlighted text, including compact tables. */
-  muted: '#E8C170',
+  muted: '#A2ADB5',
   /** Tertiary: borders, separators, hints. Present but never competing. */
-  faint: '#CC9A3A',
+  faint: '#6B7782',
   /** Barely there. Timestamps, inactive states. */
-  ghost: '#6E541D',
+  ghost: '#56616B',
 
   /** Border and structural identity colour. */
-  brand: '#CC9A3A',
+  brand: '#AAB8CC',
   /** Thinking and active-work colour. */
-  accent: '#E0A526',
+  accent: '#B7C4D8',
   /** Bright highlight used by the travelling glow. */
-  accentBright: '#E8C170',
+  accentBright: '#CDD6F4',
   /** Important details and de-emphasised accents. */
-  accentDim: '#C68E17',
+  accentDim: '#84919D',
 
-  success: '#6ec48a',
-  warn: '#C68E17',
-  danger: '#e8695f',
-  info: '#E8C170',
+  success: '#8FB3A6',
+  warn: '#BDAA82',
+  danger: '#C58F99',
+  info: '#A2ADB5',
 } as const;
 
 export type PaletteKey = keyof typeof defaultPalette;
@@ -105,8 +95,8 @@ export const syntax: Record<SyntaxKey, PaletteKey> = {
 
 export const borders = { panel: 'faint' as PaletteKey, focus: 'muted' as PaletteKey, danger: 'danger' as PaletteKey };
 export const diffStyle = {
-  addBackground: '#12291b',
-  removeBackground: '#33161a',
+  addBackground: '#33423D',
+  removeBackground: '#493B40',
   addMarker: 'success' as PaletteKey,
   removeMarker: 'danger' as PaletteKey,
 };
@@ -115,6 +105,38 @@ export const emphasis: Record<EmphasisKey, { tone: PaletteKey; bold: boolean }> 
   important: { tone: 'text', bold: true },
   active: { tone: 'text', bold: true },
   metadata: { tone: 'ghost', bold: false },
+};
+
+/**
+ * Effort changes the active signal, not the legibility of the whole terminal.
+ * The ramp stays inside the Plif blue-grey family; PLIF reaches the primary
+ * anchor and gets its own glyph treatment in `effort-visuals.ts`.
+ */
+export const effortPalette: Readonly<Record<string, Partial<Record<PaletteKey, string>>>> = {
+  low: {
+    brand: '#7F8B95', accentDim: '#71808A', accent: '#87949E', accentBright: '#A2ADB5', info: '#A2ADB5',
+  },
+  medium: {
+    brand: '#8E9BA6', accentDim: '#7F8C97', accent: '#98A5B1', accentBright: '#B0BCCB', info: '#A2ADB5',
+  },
+  high: {
+    brand: '#9EACBC', accentDim: '#8C9AAA', accent: '#A8B5C7', accentBright: '#BDC8DB', info: '#AEB9C8',
+  },
+  xhigh: {
+    brand: '#AAB8CC', accentDim: '#98A6B8', accent: '#B4C0D2', accentBright: '#C5CEE1', info: '#B7C3D4',
+  },
+  max: {
+    brand: '#AFBBD0', accentDim: '#9DAABE', accent: '#B9C4D7', accentBright: '#C8D1E3', info: '#BAC5D7',
+  },
+  ultra: {
+    brand: '#B5C1D6', accentDim: '#A3B0C4', accent: '#BECADE', accentBright: '#CAD3E7', info: '#C0CBDF',
+  },
+  ultracode: {
+    brand: '#B8C4D9', accentDim: '#A5B2C7', accent: '#C1CCE0', accentBright: '#CBD4E8', info: '#C3CEE1',
+  },
+  plif: {
+    brand: '#C0CBE3', accentDim: '#AAB8D0', accent: '#C6D1E9', accentBright: '#CDD6F4', info: '#CDD6F4',
+  },
 };
 
 /**
@@ -272,7 +294,7 @@ export function applyTheme(theme: ThemeOverrides = {}): void {
   }, theme.syntax ?? {});
   Object.assign(borders, { panel: 'faint', focus: 'muted', danger: 'danger' }, theme.borders ?? {});
   Object.assign(diffStyle, {
-    addBackground: '#12291b', removeBackground: '#33161a',
+    addBackground: '#33423D', removeBackground: '#493B40',
     addMarker: 'success', removeMarker: 'danger',
   }, theme.diff ?? {});
   const defaults = {
@@ -290,44 +312,15 @@ export function applyTheme(theme: ThemeOverrides = {}): void {
 
 /** Overlay the effort accent without destroying the user's selected theme. */
 export function applyEffortPalette(effort?: string): void {
-  const accents: Record<string, Partial<Record<PaletteKey, string>>> = {
-    low: {
-      text: '#FFF1B2', muted: '#F5D98A', faint: '#D8B565', ghost: '#947A45',
-      brand: '#D8B565', accent: '#F0C96C', accentBright: '#FFF1B2', accentDim: '#D4A646',
-      info: '#F0C96C', warn: '#D4A646',
-    },
-    medium: {
-      text: '#FFE99A', muted: '#F0CE72', faint: '#D2A849', ghost: '#896A31',
-      brand: '#D2A849', accent: '#E9BE55', accentBright: '#FFE99A', accentDim: '#CC941F',
-      info: '#E9BE55', warn: '#CC941F',
-    },
-    high: {
-      text: '#FFDF75', muted: '#E9BB4A', faint: '#C28D23', ghost: '#79591D',
-      brand: '#C28D23', accent: '#E2AA35', accentBright: '#FFDF75', accentDim: '#B67A13',
-      info: '#E2AA35', warn: '#B67A13',
-    },
-    xhigh: {
-      text: '#FFD957', muted: '#E3AD2F', faint: '#B87916', ghost: '#6E4A13',
-      brand: '#B87916', accent: '#D99A21', accentBright: '#FFD957', accentDim: '#A96A0C',
-      info: '#D99A21', warn: '#A96A0C',
-    },
-    max: {
-      text: '#eadbff', muted: '#c49aff', faint: '#6337a8', ghost: '#432775',
-      brand: '#6337a8', accent: '#c49aff', accentBright: '#eadbff', accentDim: '#9568d0',
-      info: '#c49aff', warn: '#9568d0',
-    },
-    ultra: {
-      text: '#FFCB20', muted: '#DC9513', faint: '#9E5A09', ghost: '#5F3806',
-      brand: '#9E5A09', accent: '#D17F0A', accentBright: '#FFCB20', accentDim: '#924E04',
-      info: '#D17F0A', warn: '#924E04',
-    },
-    ultracode: {
-      text: '#FFC20A', muted: '#D58A08', faint: '#955005', ghost: '#582D04',
-      brand: '#955005', accent: '#C87304', accentBright: '#FFC20A', accentDim: '#894502',
-      info: '#C87304', warn: '#894502',
-    },
-  };
-  Object.assign(palette, activeThemePalette, accents[effort ?? ''] ?? {});
+  Object.assign(palette, activeThemePalette);
+  for (const [key, value] of Object.entries(effortPalette[effort ?? ''] ?? {})) {
+    const paletteKey = key as PaletteKey;
+    // A user theme owns an explicit colour. Effort only fills the default
+    // role, so selecting PLIF never silently erases a user's theme.
+    if (activeThemePalette[paletteKey] === defaultPalette[paletteKey]) {
+      palette[paletteKey] = value!;
+    }
+  }
 }
 
 /** Terminal width, clamped to something a layout can reason about. */

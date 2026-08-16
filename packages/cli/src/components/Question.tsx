@@ -86,11 +86,11 @@ export function Question({
               flexDirection="column"
               paddingX={1}
             >
-              <Text color={color(active ? 'text' : 'muted')} bold={active} backgroundColor={active ? '#29292d' : undefined}>
+              <Text color={color(active ? 'text' : 'muted')} bold={active} backgroundColor={active ? color('surface') : undefined}>
                 {index + 1}   <Text color={color(active ? 'accent' : 'ghost')}>○</Text> {truncate(option.label, inner - 7)}
               </Text>
               {option.description ? (
-                <Text color={color('ghost')} backgroundColor={active ? '#29292d' : undefined}>    {truncate(option.description, inner - 4)}</Text>
+                <Text color={color('ghost')} backgroundColor={active ? color('surface') : undefined}>    {truncate(option.description, inner - 4)}</Text>
               ) : null}
             </Box>
           );
@@ -100,7 +100,7 @@ export function Question({
           flexDirection="column"
           paddingX={1}
         >
-          <Text color={color(typing ? 'text' : 'muted')} bold={typing} backgroundColor={typing ? '#29292d' : undefined}>
+          <Text color={color(typing ? 'text' : 'muted')} bold={typing} backgroundColor={typing ? color('surface') : undefined}>
             z   <Text color={color(typing ? 'accent' : 'ghost')}>○</Text>{' '}
             {draft
               ? question.secret

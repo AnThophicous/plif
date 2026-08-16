@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
-import { effortPulseCells, effortTagline, effortVisual } from '../effort-visuals.js';
+import { effortPulseCells, effortSymbol, effortTagline, effortVisual } from '../effort-visuals.js';
 import { useHighlightClock } from '../pulse.js';
 import { color, layout, shortenPath, truncate } from '../theme.js';
 import { InfinityMark } from './FocusFrame.js';
@@ -56,14 +56,14 @@ export function PlifDock({
   const pathWidth = Math.max(10, inner - 32 - (modelLabel ? modelWidth + 4 : 0));
 
   return (
-    <Box width="100%" justifyContent="space-between">
-      <Box flexShrink={1}>
+    <Box width="100%" justifyContent="space-between" flexWrap="nowrap">
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
         <InfinityMark active={animated} plif={plif} />
         {compact ? (
-          <Text color={color('faint')} bold>{` ${visual.label.slice(0, 8)}`}</Text>
+          <Text color={color(animated ? 'accentBright' : 'muted')} bold wrap="truncate">{` ${effortSymbol(effort)} ${visual.label.slice(0, 8)}`}</Text>
         ) : (
           <Text bold>
-            {' '}
+            <Text color={color(animated ? 'accentBright' : 'muted')}>{` ${effortSymbol(effort)} `}</Text>
             <PlifGlow
               value={visual.label}
               elapsedMs={elapsed}
@@ -75,10 +75,10 @@ export function PlifDock({
         )}
         {animated && !compact && <Text color={color('muted')}>{` · ${effortTagline(effort, working)}`}</Text>}
         {animated && (
-          <Text>
+          <Text wrap={compact ? 'truncate' : 'wrap'}>
             {' '}
             {pulse.map((cell, index) => (
-              <Text key={index} color={cell.color}>{cell.text}</Text>
+            <Text key={index} color={cell.color}>{cell.text}</Text>
             ))}
           </Text>
         )}

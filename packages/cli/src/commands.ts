@@ -47,8 +47,8 @@ import {
 } from '@plif/core';
 
 import { formatCapabilities } from './format.js';
+import { effortDisplay } from './effort-visuals.js';
 import {
-  effortLabel,
   effortPickerItems,
   pickerSelectionForCurrentModel,
 } from './components/Picker.js';
@@ -799,7 +799,7 @@ export const COMMANDS: readonly Command[] = [
             await context.setEffort(picked === 'default' ? undefined : picked as Effort);
           },
         });
-        return ok(entry('notice', 'select reasoning effort', { tone: 'accent', subtitle: `current: ${effortLabel(current)}` }));
+        return ok(entry('notice', 'select reasoning effort', { tone: 'accent', subtitle: `current: ${effortDisplay(current === 'default' ? undefined : current)}` }));
       }
       if (!['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode', 'plif', 'default'].includes(value)) {
         throw new PlifError('INVALID_ARGUMENT', 'usage: /effort [low|medium|high|xhigh|max|ultra|ultracode|plif|default]');
@@ -808,7 +808,7 @@ export const COMMANDS: readonly Command[] = [
         throw new PlifError('INVALID_ARGUMENT', `${value} is not supported by the selected model`);
       }
       await context.setEffort(value === 'default' ? undefined : value as Effort);
-      return ok(entry('notice', `effort: ${effortLabel(value)}`, {
+      return ok(entry('notice', `effort: ${effortDisplay(value)}`, {
         tone: 'accent',
         subtitle: 'conversation reset for the new model settings',
       }));

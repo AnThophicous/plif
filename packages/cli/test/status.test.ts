@@ -41,7 +41,7 @@ describe('the status report', () => {
 
     assert.match(text, /model {6}z-ai\/glm-5\.2/);
     assert.match(text, /integrate\.api\.nvidia\.com/);
-    assert.match(text, /effort plif/);
+    assert.match(text, /effort .*PLIF/);
     assert.match(text, /312\.5k in/);
     assert.match(text, /18\.2k out/);
     assert.match(text, /49 requests/);
