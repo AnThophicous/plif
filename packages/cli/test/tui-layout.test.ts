@@ -17,7 +17,7 @@ import { color, glyph } from '../src/theme.js';
 describe('minimal TUI hierarchy', () => {
   it('keeps the quiet shell on one surface with one disclosure marker', () => {
     assert.notEqual(color('panel'), color('surface'));
-    assert.equal(color('surface'), '#25282f');
+    assert.equal(color('surface'), '#2C2D2E');
     assert.ok(glyph.disclosure.length > 0);
     assert.ok(glyph.caret.length > 0);
   });

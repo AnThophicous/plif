@@ -22,8 +22,17 @@ import {
   tokenize,
 } from '../src/format.js';
 import { IDLE_PASTE, hasPasteMarker, readPasteChunk } from '../src/paste.js';
-import { commandPrefix, matchCommands, findCommand, COMMANDS } from '../src/commands.js';
-import type { CatalogPickerRequest, CommandContext } from '../src/commands.js';
+import {
+  commandPrefix,
+  completeCommand,
+  findCommand,
+  isExactCommandMatch,
+  matchArgumentCompletions,
+  matchCommands,
+  tabArgumentCompletion,
+  COMMANDS,
+} from '../src/commands.js';
+import type { FlatPickerRequest, CommandContext } from '../src/commands.js';
 import {
   ALL_SUFFIX,
   PICKER_GROUP_PAGE,
@@ -69,6 +78,62 @@ describe('command completion input', () => {
     assert.equal(commandPrefix('/model openai/gpt-4o-mini'), 'model');
     assert.deepEqual(matchCommands(commandPrefix('/model --') ?? ''), [findCommand('model')]);
     assert.equal(commandPrefix('plain text'), null);
+    assert.deepEqual(completeCommand('eff'), ['effort']);
+  });
+
+  it('does not treat an exact one-row command completion as arrow navigation', () => {
+    const effort = findCommand('effort')!;
+    assert.equal(isExactCommandMatch(effort, 'effort'), true);
+    assert.equal(isExactCommandMatch(effort, 'eff'), false);
+  });
+
+  it('completes a unique effort argument from the active model capability', () => {
+    const context = {
+      supportedEfforts: () => ['low', 'medium', 'high', 'xhigh'] as const,
+    } as unknown as CommandContext;
+
+    const low = matchArgumentCompletions('/effort l', '/effort l'.length, context);
+    const xhigh = matchArgumentCompletions('/effort x', '/effort x'.length, context);
+    const none = matchArgumentCompletions('/effort z', '/effort z'.length, context);
+
+    assert.deepEqual(low?.matches.map((match) => match.value), ['low']);
+    assert.equal(tabArgumentCompletion(low!), 'low');
+    assert.deepEqual(xhigh?.matches.map((match) => match.value), ['xhigh']);
+    assert.equal(tabArgumentCompletion(xhigh!), 'xhigh');
+    assert.deepEqual(none?.matches, []);
+    assert.equal(tabArgumentCompletion(none!), null);
+  });
+
+  it('keeps ambiguous arguments visible without choosing one', () => {
+    const context = {
+      supportedEfforts: () => ['medium', 'max'] as const,
+    } as unknown as CommandContext;
+    const state = matchArgumentCompletions('/effort m', '/effort m'.length, context);
+
+    assert.deepEqual(state?.matches.map((match) => match.value), ['medium', 'max']);
+    assert.equal(tabArgumentCompletion(state!), null);
+  });
+
+  it('supports empty arguments, repeated spaces, cursor positions, and dynamic models', () => {
+    const context = {
+      supportedEfforts: () => ['low', 'medium'] as const,
+      modelCompletionValues: () => ['my-model', 'my-more'],
+    } as unknown as CommandContext;
+    const empty = matchArgumentCompletions('/effort ', '/effort '.length, context);
+    const spaced = matchArgumentCompletions('/effort   h', '/effort   h'.length, {
+      supportedEfforts: () => ['high'] as const,
+    } as unknown as CommandContext);
+    const inTheMiddle = '/effort h other';
+    const middle = matchArgumentCompletions(inTheMiddle, inTheMiddle.indexOf('h') + 1, {
+      supportedEfforts: () => ['high'] as const,
+    } as unknown as CommandContext);
+    const models = matchArgumentCompletions('/model my-', '/model my-'.length, context);
+
+    assert.deepEqual(empty?.matches.map((match) => match.value), ['default', 'low', 'medium']);
+    assert.equal(tabArgumentCompletion(spaced!), 'high');
+    assert.equal(tabArgumentCompletion(middle!), 'high');
+    assert.deepEqual(models?.matches.map((match) => match.value), ['my-model', 'my-more']);
+    assert.equal(tabArgumentCompletion(models!), 'my-mo');
   });
 });
 
@@ -98,7 +163,9 @@ describe('splitPaste', () => {
 
   it('keeps complete pasted text available for an attachment', () => {
     assert.equal(sanitizePastedText('one\r\ntwo\u001b[31m'), 'one\ntwo[31m');
-    assert.equal(pastedContentToken(1, 'one\ntwo'), '[Pasted Content #1 - 2 Lines]');
+    assert.equal(pastedContentToken(1, 'one\ntwo'), '✧ Plif Pasted 2 lines');
+    assert.equal(pastedContentToken(2, 'one\r\ntwo\r\n'), '✧ Plif Pasted 2 lines');
+    assert.equal(pastedContentToken(3, 'one'), '✧ Plif Pasted 1 line');
     assert.equal(pastedContentToken(2), '[Pasted Image #2]');
   });
 });
@@ -115,10 +182,12 @@ describe('when a paste becomes an attachment', () => {
     assert.equal(shouldAttachPastedText('x'.repeat(PASTE_ATTACHMENT_MIN_CHARS + 1)), true);
   });
 
-  it('measures characters, not lines, so a short multi-line paste stays inline', () => {
-    assert.equal(PASTE_ATTACHMENT_MIN_CHARS, 500);
+  it('uses the character threshold even when a paste has multiple lines', () => {
+    assert.equal(PASTE_ATTACHMENT_MIN_CHARS, 201);
+    assert.equal(shouldAttachPastedText('x'.repeat(200)), false);
+    assert.equal(shouldAttachPastedText('x'.repeat(201)), true);
     assert.equal(shouldAttachPastedText('one\ntwo\nthree\nfour'), false);
-    assert.equal(shouldAttachPastedText(Array.from({ length: 60 }, () => 'line').join('\n')), false);
+    assert.equal(shouldAttachPastedText(Array.from({ length: 60 }, () => 'line').join('\n')), true);
   });
 });
 
@@ -437,26 +506,8 @@ describe('model catalog picker', () => {
     assert.equal(collapsed.picker?.selected, 1);
   });
 
-  it('collapses the provider from a nested model row and returns focus to it', () => {
-    const opened = sessionReducer(initialSession, {
-      type: 'picker.open',
-      picker: {
-        title: 'MODELS',
-        groups,
-        expanded: ['openai'],
-        selected: 2,
-        onPick: () => undefined,
-      },
-    });
-    const collapsed = sessionReducer(opened, { type: 'picker.collapse', groupId: 'openai' });
-
-    assert.deepEqual(collapsed.picker?.expanded, []);
-    assert.equal(collapsed.picker?.selected, 1);
-    assert.equal(pickerRows(groups, collapsed.picker?.expanded ?? [])[1]?.id, 'openai');
-  });
-
   it('opens the catalog when no provider is loaded', async () => {
-    let picker: CatalogPickerRequest | undefined;
+    let picker: FlatPickerRequest | undefined;
     const context: CommandContext = {
       engine: {} as Engine,
       current: null,
@@ -469,31 +520,21 @@ describe('model catalog picker', () => {
       switchModel: async () => undefined,
       setEffort: async () => undefined,
       openPicker: (request) => {
-        if ('groups' in request) picker = request;
+        if ('items' in request) picker = request;
       },
     };
 
     const result = await findCommand('model')!.run([], context);
 
     assert.deepEqual(result.entries, []);
-    // Nothing is expanded and nothing is pre-selected: with no model loaded
-    // there is no "current" provider to open, and Plif has no default to
-    // suggest one.
-    assert.deepEqual(picker?.expanded, []);
+    // `/models` is model-first: it is flat, searchable, and carries the
+    // provider identity on each row instead of forcing a provider expansion.
+    assert.equal(picker?.countLabel, 'models');
     assert.equal(picker?.selected, 0);
-    assert.match(picker?.hint ?? '', /Choose a provider first.*current choice/);
-
-    // The developer's own providers, if they have any, sort ahead of the
-    // built-in ones and carry a different heading. This machine may have none,
-    // so the assertion is on the ordering rule rather than on a count.
-    const sections = picker!.groups.map((group) => group.section);
-    const firstBuiltin = sections.indexOf('built into PLIF');
-    assert.ok(firstBuiltin >= 0);
-    assert.ok(sections.slice(0, firstBuiltin).every((s) => s === 'your providers'));
-    assert.ok(sections.slice(firstBuiltin).every((s) => s === 'built into PLIF'));
-
-    const anthropic = picker!.groups.find((group) => group.id === 'anthropic');
-    assert.equal(anthropic?.items[0]?.value, 'claude-opus-5');
+    assert.match(picker?.hint ?? '', /type a model, provider, capability, or alias/);
+    assert.ok(picker?.items?.every((item) => item.provider));
+    assert.ok(picker?.items?.some((item) => item.provider === 'Claude (Anthropic)'));
+    assert.ok(picker?.items?.some((item) => item.value === 'anthropic:claude-opus-5'));
   });
 
   it('labels the internal adaptive effort as PLIF and marks the active effort', () => {
@@ -503,11 +544,13 @@ describe('model catalog picker', () => {
       effortPickerItems(['low', 'plif'], 'plif').map((item) => ({
         value: item.value,
         label: item.label,
+        tone: item.tone,
+        detail: item.detail,
         current: item.current,
       })),
       [
-        { value: 'low', label: 'Low', current: false },
-        { value: 'plif', label: 'PLIF', current: true },
+        { value: 'low', label: 'Low', tone: 'faint', detail: 'light touch', current: false },
+        { value: 'plif', label: 'PLIF', tone: 'gold', detail: 'PLIF signature mode · adaptive reasoning', current: true },
       ],
     );
   });

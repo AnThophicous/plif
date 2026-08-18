@@ -132,6 +132,7 @@ export interface PlifEvents {
     toolCalls: number;
   };
   'agent.text': {
+    turnId: string;
     delta: string;
   };
   /**
@@ -141,12 +142,14 @@ export interface PlifEvents {
    * decides whether it is transient clipped prose or a compact activity line.
    */
   'agent.pre_tool_prose': {
+    turnId: string;
     iteration: number;
     text: string;
     visibility: 'transient' | 'activity';
   };
   /** Thinking from a reasoning model, as it is written. */
   'agent.reasoning': {
+    turnId: string;
     delta: string;
   };
   /**
@@ -159,6 +162,7 @@ export interface PlifEvents {
    * the stream, so it says so.
    */
   'agent.thinking': {
+    turnId: string;
     phase: 'start' | 'end';
     /** Set on `end`: how long the model spent in this block. */
     durationMs?: number;
@@ -172,18 +176,20 @@ export interface PlifEvents {
    * hang — kill it — is the wrong move here.
    */
   'agent.retry': {
+    turnId: string;
     attempt: number;
     of: number;
     waitMs: number;
     reason: string;
   };
   /** Discard the current turn's output; it is being redone from scratch. */
-  'agent.reset': { reason: string };
+  'agent.reset': { turnId: string; reason: string };
   /** Redacted request/stream paint timing for optional diagnostics. */
   'stream.timing': StreamTiming;
   /** Messages the human queued mid-turn have been handed to the model. */
   'agent.dequeued': { count: number };
   'agent.tool': {
+    turnId: string;
     /**
      * The call id from the wire.
      *
@@ -223,6 +229,7 @@ export interface PlifEvents {
    * instead, which is close but not authoritative.
    */
   'agent.usage': {
+    turnId: string;
     promptTokens: number;
     completionTokens: number;
     /** The point at which the loop compacts, or 0 when compaction is off. */

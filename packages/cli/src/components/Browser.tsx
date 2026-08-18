@@ -2,25 +2,32 @@ import React from 'react';
 import { Box, Text } from 'ink';
 
 import { categoriesOf, sourceUrl } from '@plif/core';
-import type { CatalogPlugin, McpServerStatus, Skill } from '@plif/core';
+import type { CatalogPlugin, McpServerStatus, SessionMeta, Skill } from '@plif/core';
 
 import { useSpinnerFrame } from './Spinner.js';
-import type { BrowserState, BrowserTab } from '../session.js';
+import type { BrowserRow, BrowserState, BrowserTab } from '../session.js';
 import { color, formatCount, glyph, layout, truncate } from '../theme.js';
 
 export const BROWSER_TABS: readonly { id: BrowserTab; label: string }[] = [
   { id: 'mcp', label: 'MCP servers' },
   { id: 'skills', label: 'Skills' },
   { id: 'marketplace', label: 'Marketplace' },
+  { id: 'sessions', label: 'Sessions' },
 ];
 
 interface BrowserProps {
-  readonly state: BrowserState;
+  readonly state: BrowserViewState;
   readonly servers: readonly McpServerStatus[];
   readonly skills: readonly Skill[];
+  readonly sessions: readonly SessionMeta[];
   readonly width: number;
   readonly rows: number;
 }
+
+/** Rows are derived once by App and passed to this pure presentation tree. */
+export type BrowserViewState = BrowserState & {
+  readonly rows: readonly BrowserRow[];
+};
 
 export type McpStatusKind = 'connected' | 'disconnected' | 'error';
 
@@ -43,6 +50,13 @@ export function sortMcpStatuses(statuses: readonly McpServerStatus[]): McpServer
   });
 }
 
+/** Actions are contextual to the selected server, not a permanent toolbar. */
+export function mcpActionHint(status: McpServerStatus | null): string {
+  if (!status) return 'C connect a server';
+  if (mcpStatusKind(status) === 'connected') return 'D disconnect · T test connection';
+  return 'C connect · A authenticate · T test connection';
+}
+
 /**
  * How much of the terminal the browser takes.
  *
@@ -54,13 +68,24 @@ export function browserHeight(rows: number): number {
   return Math.max(12, rows - 4);
 }
 
+export function sessionAge(updatedAt: string, now = Date.now()): string {
+  const elapsed = Math.max(0, now - Date.parse(updatedAt));
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) return 'now';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? 'yesterday' : `${days}d`;
+}
+
 /**
  * The extension browser.
  *
- * Three tabs, and the split between them is the honest one rather than the
+ * Four tabs, and the split between them is the honest one rather than the
  * tidy one. **MCP servers** and **Skills** are what this machine currently
- * has — configured, connected, loaded. **Marketplace** is the Claude
- * catalogue, three thousand plugins from Anthropic's official and community
+ * has — configured, connected, loaded. **Marketplace** is the external
+ * catalogue, three thousand plugins from its official and community
  * directories.
  *
  * The catalogue is deliberately *not* split into MCP and Skills sub-lists.
@@ -77,6 +102,7 @@ export function Browser({
   state,
   servers,
   skills,
+  sessions,
   width,
   rows,
 }: BrowserProps): React.ReactElement {
@@ -99,7 +125,7 @@ export function Browser({
 
   return (
     <Box flexDirection="column" width="100%" paddingX={layout.gutter}>
-      <Tabs active={state.tab} counts={{ mcp: servers.length, skills: skills.length, marketplace: state.catalog?.plugins.length ?? 0 }} width={width - 2} />
+      <Tabs active={state.tab} counts={{ mcp: servers.length, skills: skills.length, marketplace: state.catalog?.plugins.length ?? 0, sessions: sessions.length }} width={width - 2} />
 
       <SearchLine
         state={state}
@@ -110,7 +136,9 @@ export function Browser({
             ? servers.length
             : state.tab === 'skills'
               ? skills.length
-              : (state.catalog?.plugins.length ?? 0)
+              : state.tab === 'sessions'
+                ? sessions.length
+                : (state.catalog?.plugins.length ?? 0)
         }
         showing={state.rows.length}
       />
@@ -119,6 +147,10 @@ export function Browser({
         <Text color={color('ghost')}>
           {glyph.done} {mcpCounts.connected} connected · {glyph.pending} {mcpCounts.disconnected} disconnected · {glyph.failed} {mcpCounts.error} errors
         </Text>
+      )}
+
+      {state.tab === 'sessions' && state.deleteConfirm && (
+        <Text color={color('danger')}>Delete this session? press D again to confirm · Esc cancels</Text>
       )}
 
       <Box>
@@ -135,17 +167,21 @@ export function Browser({
               ))}
             </Box>
             <Box flexDirection="column" width={detailWidth}>
-              <Detail state={state} servers={servers} skills={skills} width={detailWidth} rows={bodyRows} />
+              <Detail state={state} servers={servers} skills={skills} sessions={sessions} width={detailWidth} rows={bodyRows} />
             </Box>
           </>
         )}
       </Box>
 
-      {state.tab === 'mcp' && (
-        <Text color={color('muted')}>
-          C connect · D disconnect · A authenticate · T test connection
-        </Text>
-      )}
+      <Text color={color(state.renameId ? 'accent' : state.deleteConfirm ? 'danger' : 'muted')}>
+        {state.renameId
+          ? 'Enter save title · Esc cancel'
+          : state.tab === 'mcp'
+            ? mcpActionHint(servers.find((server) => server.name === state.rows[state.selected]?.id) ?? null)
+            : state.tab === 'sessions'
+              ? 'Enter resume · R rename · D delete'
+              : 'Enter open · Tab switch · Esc close'}
+      </Text>
     </Box>
   );
 }
@@ -189,7 +225,7 @@ function SearchLine({
   total,
   showing,
 }: {
-  state: BrowserState;
+  state: BrowserViewState;
   spinner: string;
   width: number;
   total: number;
@@ -199,7 +235,11 @@ function SearchLine({
     <Box width={width} justifyContent="space-between" marginBottom={0}>
       <Box>
         <Text color={color('ghost')}>{glyph.search} </Text>
-        {state.filter ? (
+        {state.renameId ? (
+          <Text color={color('text')}>
+            rename: {state.renameDraft}<Text color={color('accent')}>▌</Text>
+          </Text>
+        ) : state.filter ? (
           <Text color={color('text')}>
             {state.filter}
             <Text color={color('accent')}>▌</Text>
@@ -230,7 +270,7 @@ function List({
   rows,
   spinner,
 }: {
-  state: BrowserState;
+  state: BrowserViewState;
   width: number;
   rows: number;
   spinner: string;
@@ -239,14 +279,20 @@ function List({
     return (
       <Box>
         <Text color={color('accent')}>{spinner} </Text>
-        <Text color={color('muted')}>fetching from Anthropic…</Text>
+        <Text color={color('muted')}>fetching marketplace…</Text>
       </Box>
     );
   }
   if (state.rows.length === 0) {
     return (
       <Text color={color('ghost')} italic>
-        {state.filter ? `nothing matches "${state.filter}"` : 'nothing here yet'}
+        {state.filter
+          ? `nothing matches "${state.filter}"`
+          : state.tab === 'mcp'
+            ? 'No MCP servers connected.'
+            : state.tab === 'sessions'
+              ? 'No sessions for this workspace.'
+              : 'nothing here yet'}
       </Text>
     );
   }
@@ -279,12 +325,14 @@ function Detail({
   state,
   servers,
   skills,
+  sessions,
   width,
   rows,
 }: {
-  state: BrowserState;
+  state: BrowserViewState;
   servers: readonly McpServerStatus[];
   skills: readonly Skill[];
+  sessions: readonly SessionMeta[];
   width: number;
   rows: number;
 }): React.ReactElement {
@@ -294,6 +342,8 @@ function Detail({
       <Text color={color('ghost')} italic>
         {state.tab === 'marketplace'
           ? 'Pick a plugin to see what it is and where it comes from.'
+          : state.tab === 'sessions'
+            ? 'Pick a session to resume it.'
           : 'Nothing selected.'}
       </Text>
     );
@@ -344,6 +394,25 @@ function Detail({
         <Field label="scope" value={skill.scope} width={width} />
         <Field label="file" value={skill.file} width={width} />
         <Paragraph text={skill.description} width={width} lines={rows - 5} />
+      </Box>
+    );
+  }
+
+  if (state.tab === 'sessions') {
+    const session = sessions.find((entry) => entry.id === row.id);
+    if (!session) return <Text color={color('ghost')}>gone</Text>;
+    return (
+      <Box flexDirection="column">
+        <Text color={color('text')} bold>{session.title || '(no title)'}</Text>
+        <Field label="updated" value={sessionAge(session.updatedAt)} width={width} />
+        <Field label="messages" value={`${session.turns} ${session.turns === 1 ? 'turn' : 'turns'}`} width={width} />
+        <Field label="session" value={session.id} width={width} />
+        <Field label="workspace" value={session.workspace} width={width} />
+        <Paragraph
+          text={`${session.closedAt ? 'closed cleanly' : 'interrupted or active'} · Enter resumes the stored conversation without creating a copy.`}
+          width={width}
+          lines={rows - 5}
+        />
       </Box>
     );
   }

@@ -34,12 +34,12 @@ export const WorkDock = React.memo(function WorkDock({
   readonly expanded: boolean;
   readonly width: number;
   readonly now: number;
-  readonly themeRevision?: number;
 }): React.ReactElement | null {
-  if (tasks.length === 0 && subagents.length === 0) return null;
-
   const active = tasks.filter((task) => task.status === 'running' || task.status === 'awaiting_approval').length;
-  const spinner = useSpinnerFrame(80, active > 0 || subagents.some((agent) => agent.status === 'running'));
+  const hasWork = tasks.length > 0 || subagents.length > 0;
+  const running = active > 0 || subagents.some((agent) => agent.status === 'running');
+  const spinner = useSpinnerFrame(80, hasWork && running);
+  if (!hasWork) return null;
   const label = trayLabel(tasks.length, subagents.length);
   const inner = Math.max(18, width - layout.gutter * 2);
 
@@ -81,6 +81,8 @@ export const WorkDock = React.memo(function WorkDock({
     </Box>
   );
 });
+
+WorkDock.displayName = 'WorkDock';
 
 function TaskLine({
   task,

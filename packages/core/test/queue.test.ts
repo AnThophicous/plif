@@ -108,6 +108,7 @@ describe('the answer collected across turns', () => {
       questions: new QuestionBroker(bus, 50),
       bus,
       tools: [noopTool],
+      turnId: 'turn-clipped-prose',
     });
 
     assert.equal(result.text, 'Tenho o contrato completo.');
@@ -116,6 +117,7 @@ describe('the answer collected across turns', () => {
       'Vou ler a assinatura exata para ficar fiel ao contrato da',
     );
     assert.deepEqual(prose, [{
+      turnId: 'turn-clipped-prose',
       iteration: 1,
       text: 'Vou ler a assinatura exata para ficar fiel ao contrato da',
       visibility: 'transient',
@@ -142,6 +144,7 @@ describe('the answer collected across turns', () => {
       questions: new QuestionBroker(bus, 50),
       bus,
       tools: [noopTool],
+      turnId: 'turn-complete-prose',
     });
 
     assert.equal(result.text, 'A configuração está correta.');
@@ -150,6 +153,7 @@ describe('the answer collected across turns', () => {
       'Vou confirmar a configuração primeiro.',
     );
     assert.deepEqual(prose, [{
+      turnId: 'turn-complete-prose',
       iteration: 1,
       text: 'Vou confirmar a configuração primeiro.',
       visibility: 'activity',

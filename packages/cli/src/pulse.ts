@@ -1,6 +1,6 @@
 import { clusterLength } from './text.js';
 import { palette, type PaletteKey } from './theme.js';
-import { FAST_ANIMATION_INTERVAL_MS, useAnimationFrame } from './hooks/useAnimationClock.js';
+import { ANIMATION_INTERVAL_MS, FAST_ANIMATION_INTERVAL_MS, useAnimationFrame } from './hooks/useAnimationClock.js';
 
 const CELL_MS = 180;
 const BELL_CELLS = 3;
@@ -12,6 +12,25 @@ export const PLIF_WAVE_STOPS = [
   'brand',
   'accentDim',
   'accent',
+  'accentBright',
+] as const satisfies readonly PaletteKey[];
+
+/**
+ * The signature ramp: the cold Plif greys with one champagne stop, so a PLIF
+ * glow reads as warm light travelling a cold surface rather than as a yellow
+ * interface. One warm stop in four keeps the balance — the eye registers the
+ * flash, not a theme change.
+ */
+export const PLIF_SIGNATURE_STOPS = [
+  'accentDim',
+  'accent',
+  'goldBase',
+  'gold',
+  'goldBright',
+  'warmIvory',
+  'goldBright',
+  'gold',
+  'goldBase',
   'accentBright',
 ] as const satisfies readonly PaletteKey[];
 
@@ -129,4 +148,25 @@ export function highlightedClusters(
 export function breathingTone(elapsedMs: number, from: PaletteKey, to: PaletteKey): string {
   const phase = (1 - Math.cos(((elapsedMs % BREATH_MS) / BREATH_MS) * Math.PI * 2)) / 2;
   return toneBetween(from, to, phase);
+}
+
+/** A slower, calmer period than `breathingTone`, for idle focus states. */
+export const IDLE_BREATH_MS = 3_400;
+
+/** Normalised 0..1 inhale over one long period. */
+export function breathPhase(elapsedMs: number, periodMs = IDLE_BREATH_MS): number {
+  return (1 - Math.cos(((Math.max(0, elapsedMs) % periodMs) / periodMs) * Math.PI * 2)) / 2;
+}
+
+/**
+ * Slow luminance breathing on the shared slow clock.
+ *
+ * Idle focus states must not ride the fast clock: a 33 ms repaint forever is
+ * the expensive kind of alive. This samples the 120 ms cadence and holds a
+ * phase, so the frame inhales roughly every three and a half seconds.
+ */
+export function useBreath(active: boolean, periodMs = IDLE_BREATH_MS): number {
+  const frame = useAnimationFrame(active, 'slow');
+  if (!active) return 0;
+  return breathPhase(frame * ANIMATION_INTERVAL_MS, periodMs);
 }

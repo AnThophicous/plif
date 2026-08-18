@@ -41,7 +41,7 @@ export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | 'ul
 
 /** Ordered UI levels. Higher entries are deliberately opt-in by provider. */
 export const EFFORT_LEVELS: readonly Effort[] = Object.freeze([
-  'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode', 'plif',
+  'low', 'medium', 'high', 'xhigh', 'ultra', 'ultracode', 'max', 'plif',
 ]);
 
 /**
@@ -53,16 +53,16 @@ export const EFFORT_LEVELS: readonly Effort[] = Object.freeze([
 export function supportedEfforts(baseURL: string, model: string): readonly Effort[] {
   const endpoint = baseURL.toLowerCase();
   const modelId = model.toLowerCase();
-  const base: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max', 'plif'];
+  const base: Effort[] = ['low', 'medium', 'high', 'xhigh'];
   if (endpoint.includes('anthropic.com') || endpoint.includes('claude') || modelId.includes('claude')) {
-    return [...base, 'ultracode'];
+    return [...base, 'ultracode', 'max', 'plif'];
   }
   if ((endpoint.includes('openai.com') || endpoint.includes('chatgpt')) &&
       /(?:gpt[-_ ]?sol|gpt[-_ ]?5\.6|sol[-_ ]?5\.6)/i.test(modelId) &&
       !modelId.includes('claude')) {
-    return [...base, 'ultra'];
+    return [...base, 'ultra', 'max', 'plif'];
   }
-  return base;
+  return [...base, 'max', 'plif'];
 }
 
 /**
@@ -346,6 +346,26 @@ export function visionCandidates(
       }];
     }),
   );
+}
+
+/**
+ * Return true only when the active custom model explicitly declares image
+ * input. A model id or provider name is not evidence of vision support.
+ *
+ * Text-only models keep the attachment available to `inspect_image`, but must
+ * not receive an OpenAI `image_url` part directly: OpenCode and other gateways
+ * reject that request before the model can use the configured vision helper.
+ */
+export function modelSupportsImages(
+  stored: StoredConfig,
+  options: Pick<ResolveOptions, 'model' | 'preset' | 'env'> = {},
+): boolean {
+  const providers = customProvidersOf(stored);
+  const provider = providerIdForConfig(stored, options);
+  if (!provider) return false;
+  const env = options.env ?? process.env;
+  const ref = parseModelRef(options.model ?? env['PLIF_MODEL'] ?? stored.model ?? '', providers);
+  return providers[provider]?.models?.[ref.model]?.modalities?.includes('image') === true;
 }
 
 export interface ResolveOptions {

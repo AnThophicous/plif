@@ -8,7 +8,19 @@ import {
   parseSearchResults,
   toolCategory,
   toolLane,
+  formatError,
 } from '../src/format.js';
+import { PlifError } from '@plif/core';
+
+describe('command error presentation', () => {
+  it('keeps actionable invalid-argument errors free of internal code noise', () => {
+    const error = formatError(new PlifError('INVALID_ARGUMENT', 'Unknown effort "banana".', {
+      hint: 'Available: low, medium, high',
+    }));
+    assert.equal(error.title, 'Unknown effort "banana".');
+    assert.equal(error.detail, 'Available: low, medium, high');
+  });
+});
 
 describe('planning tool presentation', () => {
   it('keeps checkpoints structured for the compact timeline row', () => {

@@ -2,13 +2,12 @@ import React from 'react';
 import { Box, Text } from 'ink';
 
 import {
-  breathingTone,
-  semanticWave,
   semanticWaveTone,
   toneBetween,
-  useHighlightClock,
+  useBreath,
 } from '../pulse.js';
-import { effortVisual } from '../effort-visuals.js';
+import { effortTone, effortVisual } from '../effort-visuals.js';
+import { ANIMATION_INTERVAL_MS, useAnimationFrame } from '../hooks/useAnimationClock.js';
 import { color, layout, supportsRichGlyphs } from '../theme.js';
 
 export interface FocusCell {
@@ -35,36 +34,32 @@ export function focusRule(
   edge: Edge = 'top',
   plif = false,
   effort?: string,
+  idleBreath = 0,
 ): readonly FocusCell[] {
   const size = Math.max(2, Math.floor(width));
   const span = size - 2;
-  const origin = span > 0 ? (elapsedMs / 220) % span : 0;
-  const stops = effortVisual(effort ?? (plif ? 'plif' : undefined)).stops;
+  void elapsedMs;
+  const borderEffort = effort ?? (plif ? 'plif' : undefined);
+  // The input frame is structural chrome, not a progress bar. Keep one solid
+  // effort colour across the rule so it cannot read as an accidental
+  // gold-to-blue/purple gradient or trigger a high-frequency repaint.
+  const activeColor = color(borderEffort ? effortTone(borderEffort) : 'accentBright');
+  // An idle frame is not a dead frame: while the prompt holds focus it inhales
+  // slowly between the two quietest structural tones. Geometry never changes,
+  // so the frame breathes without shaking the rows it holds.
+  const idle = toneBetween('faint', 'muted', Math.min(0.6, idleBreath * 0.6));
   const endpoint = active
-    ? effort || plif
-      ? semanticWave(elapsedMs / 1_440 + (edge === 'bottom' ? 0.5 : 0), stops)
-      : toneBetween('accent', 'accentBright', 0.9)
-    : color('faint');
+    ? activeColor
+    : idle;
   const cells: FocusCell[] = [{
     text: edge === 'top' ? glyphs.topLeft : glyphs.bottomLeft,
     color: endpoint,
   }];
 
   for (let index = 0; index < span; index += 1) {
-    const distance = Math.min(
-      Math.abs(index - origin),
-      Math.abs(index - origin + span),
-      Math.abs(index - origin - span),
-    );
-    const intensity = active ? Math.max(0.08, 1 - distance / Math.max(2, span / 5)) : 0;
-    const waveIndex = edge === 'bottom' ? span - index - 1 : index;
     cells.push({
       text: glyphs.horizontal,
-      color: active
-        ? effort || plif
-          ? semanticWaveTone(elapsedMs, waveIndex, span, stops)
-          : toneBetween('brand', 'accentBright', intensity)
-        : color('faint'),
+      color: active ? activeColor : idle,
     });
   }
 
@@ -121,7 +116,7 @@ export function infinityCells(
 }
 
 export function InfinityMark({ active, plif = false }: { active: boolean; plif?: boolean }): React.ReactElement {
-  const elapsed = useHighlightClock(active, 80);
+  const elapsed = useAnimationFrame(active, 'slow') * ANIMATION_INTERVAL_MS;
   return (
     <Text bold={active}>
       {infinityCells(elapsed, active, plif).map((cell, index) => (
@@ -132,16 +127,9 @@ export function InfinityMark({ active, plif = false }: { active: boolean; plif?:
 }
 
 /**
- * The prompt frame, optionally with a second compartment under it.
- *
- * The footer is inside the frame rather than a separate box below it, and that
- * is the whole point: a status row floating under a closed box is two objects,
- * and it reads as one of them having come loose. Sharing the walls makes the
- * prompt and its status one solid unit, divided rather than stacked.
- *
- * The divider does not animate. The outer edge carries the motion — that is the
- * identity — and a second moving line inside it would compete with the first
- * and make a two-line panel look busy.
+ * The prompt is the one deliberately rounded surface in the shell. Its border
+ * carries a restrained luminance pulse while the conversation stays open and
+ * unboxed around it.
  */
 export function FocusFrame({
   children,
@@ -150,6 +138,7 @@ export function FocusFrame({
   footer,
   plif = false,
   effort,
+  breathing = false,
 }: {
   readonly children: React.ReactNode;
   readonly width: number;
@@ -157,41 +146,97 @@ export function FocusFrame({
   readonly footer?: React.ReactNode;
   readonly plif?: boolean;
   readonly effort?: string;
+  /** Let an idle frame inhale slowly instead of sitting flat. */
+  readonly breathing?: boolean;
 }): React.ReactElement {
-  const elapsed = useHighlightClock(active, 70);
   const frameWidth = Math.max(8, width);
-  const sideColor = active
-    ? effort || plif
-      ? semanticWave(elapsed / 2_400, effortVisual(effort ?? (plif ? 'plif' : undefined)).stops)
-      : breathingTone(elapsed, 'brand', 'accent')
-    : color('faint');
-
-  const wall = (body: React.ReactNode): React.ReactElement => (
-    <Box width={frameWidth}>
-      <Text color={sideColor}>{glyphs.vertical}</Text>
-      <Box flexDirection="column" width={frameWidth - 2} paddingX={layout.boxPadX}>
-        {body}
-      </Box>
-      <Text color={sideColor}>{glyphs.vertical}</Text>
-    </Box>
-  );
+  const contentWidth = Math.max(1, frameWidth - 2);
 
   return (
-    <Box flexDirection="column" width={frameWidth} flexShrink={0}>
-      <FocusRule width={frameWidth} elapsed={elapsed} active={active} plif={plif} effort={effort} />
-      {wall(children)}
-      {footer !== undefined && (
-        <>
-          <Text color={color('ghost')}>
-            {glyphs.midLeft}
-            {glyphs.horizontal.repeat(Math.max(0, frameWidth - 2))}
-            {glyphs.midRight}
-          </Text>
-          {wall(footer)}
-        </>
-      )}
-      <FocusRule width={frameWidth} elapsed={elapsed + 300} active={active} edge="bottom" plif={plif} effort={effort} />
+    <Box
+      flexDirection="column"
+      width={frameWidth}
+      flexShrink={0}
+    >
+      <AnimatedFocusBorder
+        width={frameWidth}
+        active={active}
+        breathing={breathing}
+        edge="top"
+        plif={plif}
+        effort={effort}
+      />
+      <Box width={frameWidth} flexShrink={0}>
+        <Text color={color('faint')}>{glyphs.vertical}</Text>
+        <Box flexDirection="column" width={contentWidth} paddingX={layout.gutter} paddingY={0}>
+          <Box width="100%">{children}</Box>
+          {footer !== undefined && <Box width="100%">{footer}</Box>}
+        </Box>
+        <Text color={color('faint')}>{glyphs.vertical}</Text>
+      </Box>
+      <AnimatedFocusBorder
+        width={frameWidth}
+        active={active}
+        breathing={breathing}
+        edge="bottom"
+        plif={plif}
+        effort={effort}
+      />
     </Box>
+  );
+}
+
+/**
+ * Border animation is its own subscription. The body of the prompt never
+ * re-renders just because a highlight moved along the top or bottom rule.
+ */
+const AnimatedFocusBorder = React.memo(function AnimatedFocusBorder({
+  width,
+  active,
+  breathing,
+  edge,
+  plif,
+  effort,
+}: {
+  readonly width: number;
+  readonly active: boolean;
+  readonly breathing: boolean;
+  readonly edge: Edge;
+  readonly plif: boolean;
+  readonly effort?: string;
+}): React.ReactElement {
+  const breath = useBreath(breathing && !active);
+  const cells = focusRule(width, 0, active, edge, plif, effort, breath);
+  return (
+    <Text>
+      {cells.map((cell, index) => <Text key={index} color={cell.color}>{cell.text}</Text>)}
+    </Text>
+  );
+});
+
+/** Draw only the horizontal span from the existing closed-frame geometry. */
+function OpenFocusRule({
+  width,
+  elapsed,
+  active,
+  edge = 'top',
+  plif = false,
+  effort,
+  breath = 0,
+}: {
+  readonly width: number;
+  readonly elapsed: number;
+  readonly active: boolean;
+  readonly edge?: Edge;
+  readonly plif?: boolean;
+  readonly effort?: string;
+  readonly breath?: number;
+}): React.ReactElement {
+  const cells = focusRule(Math.max(2, width + 2), elapsed, active, edge, plif, effort, breath).slice(1, -1);
+  return (
+    <Text>
+      {cells.map((cell, index) => <Text key={index} color={cell.color}>{cell.text}</Text>)}
+    </Text>
   );
 }
 

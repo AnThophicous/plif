@@ -144,7 +144,7 @@ export function renderBanner(input: BannerInput): string {
     lines.push(` ${c.brand(RULE.side)}  ${text}`);
   }
 
-  // Sandbox gaps are not listed here — a wall of amber on every startup stops
+  // Sandbox gaps are not listed here — a wall of warning colour on every startup stops
   // being read by the second day, and unread warnings protect nobody. They live
   // in `/sandbox` in full. The exception is a machine that confines *nothing*,
   // which is not a detail to look up later.

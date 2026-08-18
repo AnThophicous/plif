@@ -9,6 +9,9 @@ export interface EffortPulseCell {
 export interface EffortVisual {
   readonly id: string;
   readonly label: string;
+  /** Identity mark for the level; separate from the picker cursor/current mark. */
+  readonly symbol: string;
+  readonly asciiSymbol: string;
   readonly descriptor: string;
   readonly stops: SemanticWaveStops;
   readonly pattern: readonly string[];
@@ -24,6 +27,8 @@ const VISUALS: Record<string, EffortVisual> = {
   default: {
     id: 'default',
     label: 'Default',
+    symbol: '·',
+    asciiSymbol: '.',
     descriptor: 'balanced',
     stops: STANDARD_STOPS,
     pattern: ['·', '•', '●', '•', '·'],
@@ -35,6 +40,8 @@ const VISUALS: Record<string, EffortVisual> = {
   low: {
     id: 'low',
     label: 'Low',
+    symbol: '·',
+    asciiSymbol: '.',
     descriptor: 'light touch',
     stops: ['brand', 'accentDim'],
     pattern: ['·', '•', '·'],
@@ -46,6 +53,8 @@ const VISUALS: Record<string, EffortVisual> = {
   medium: {
     id: 'medium',
     label: 'Medium',
+    symbol: '○',
+    asciiSymbol: 'o',
     descriptor: 'balanced',
     stops: STANDARD_STOPS,
     pattern: ['·', '•', '●', '•', '·'],
@@ -57,6 +66,8 @@ const VISUALS: Record<string, EffortVisual> = {
   high: {
     id: 'high',
     label: 'High',
+    symbol: '●',
+    asciiSymbol: 'O',
     descriptor: 'deep focus',
     stops: ['accentDim', 'accent', 'accentBright'],
     pattern: ['·', '•', '●', '◉', '●', '•', '·'],
@@ -68,6 +79,8 @@ const VISUALS: Record<string, EffortVisual> = {
   xhigh: {
     id: 'xhigh',
     label: 'XHigh',
+    symbol: '◉',
+    asciiSymbol: '@',
     descriptor: 'maximum depth',
     stops: ['accentDim', 'accent', 'accentBright'],
     pattern: ['·', '•', '●', '◉', '◎', '◉', '●', '•', '·'],
@@ -79,9 +92,11 @@ const VISUALS: Record<string, EffortVisual> = {
   max: {
     id: 'max',
     label: 'Max',
+    symbol: '◈',
+    asciiSymbol: '*',
     descriptor: 'deep reasoning',
     stops: ['brand', 'accentDim', 'accent', 'accentBright'],
-    pattern: ['◇', '◆', '◈', '✦', '◈', '◆', '◇'],
+    pattern: ['◇', '◆', '◈', '◆', '◈', '◆', '◇'],
     asciiPattern: ['.', 'o', 'O', '*', 'O', 'o', '.'],
     cycleMs: 680,
     resting: 'max ready',
@@ -90,9 +105,11 @@ const VISUALS: Record<string, EffortVisual> = {
   ultra: {
     id: 'ultra',
     label: 'Ultra',
+    symbol: '◆',
+    asciiSymbol: '#',
     descriptor: 'wide search',
     stops: ['brand', 'accentDim', 'accent', 'accentBright'],
-    pattern: ['·', '✧', '✦', '✹', '✦', '✧', '·'],
+    pattern: ['·', '◇', '◆', '◇', '◆', '◇', '·'],
     asciiPattern: ['.', '+', '*', '#', '*', '+', '.'],
     cycleMs: 600,
     resting: 'ultra ready',
@@ -101,24 +118,31 @@ const VISUALS: Record<string, EffortVisual> = {
   ultracode: {
     id: 'ultracode',
     label: 'UltraCode',
+    symbol: '◇',
+    asciiSymbol: '#',
     descriptor: 'code synthesis',
     stops: ['brand', 'accentDim', 'accent', 'accentBright'],
-    pattern: ['╺', '━', '╋', '━', '╸', '━', '╋', '━'],
-    asciiPattern: ['-', '=', '#', '=', '>', '=', '#', '='],
+    pattern: ['·', '◇', '◆', '◇', '◆', '◇', '·'],
+    asciiPattern: ['.', '+', '#', '+', '#', '+', '.'],
     cycleMs: 520,
     resting: 'code ready',
     working: 'synthesizing code',
   },
   plif: {
     id: 'plif',
-    label: 'Plif',
-    descriptor: 'evidence mode',
-    stops: ['brand', 'accentDim', 'accent', 'accentBright'],
-    pattern: ['◌', '◍', '◎', '◉', '◎', '◍', '◌'],
-    asciiPattern: ['.', 'o', 'O', '@', 'O', 'o', '.'],
+    label: 'PLIF',
+    // PLIF is a mode name, never an animated effort icon.
+    symbol: '',
+    asciiSymbol: '',
+    descriptor: 'adaptive reasoning',
+    // The signature ramp: cold greys with one champagne stop, so the working
+    // pulse flashes warm instead of merely brighter.
+    stops: ['accentDim', 'accent', 'goldBase', 'gold', 'goldBright', 'warmIvory', 'goldBright', 'gold', 'goldBase', 'accentBright'],
+    pattern: ['PLIF'],
+    asciiPattern: ['PLIF'],
     cycleMs: 540,
-    resting: 'evidence ready',
-    working: 'evidence mode',
+    resting: 'signature ready',
+    working: 'adaptive reasoning',
   },
 };
 
@@ -126,6 +150,39 @@ const FALLBACK: EffortVisual = VISUALS.default!;
 
 export function effortVisual(effort?: string): EffortVisual {
   return VISUALS[effort ?? 'default'] ?? FALLBACK;
+}
+
+export function effortSymbol(effort?: string): string {
+  const visual = effortVisual(effort);
+  return supportsRichGlyphs ? visual.symbol : visual.asciiSymbol;
+}
+
+/**
+ * The picker shows several efforts at once, so the active effort palette
+ * cannot be reused for every row. This quiet ramp gives each option a place
+ * in the same family without turning the list into a rainbow. PLIF breaks the
+ * ramp on purpose: the one warm row is what makes the signature read as a
+ * signature rather than as the top of a grey ladder.
+ */
+export function effortTone(effort?: string): PaletteKey {
+  switch (effort) {
+    case 'low': return 'faint';
+    case 'medium': return 'muted';
+    case 'high': return 'text';
+    case 'xhigh': return 'brand';
+    case 'ultra':
+    case 'ultracode': return 'accent';
+    case 'max': return 'accentBright';
+    case 'plif': return 'gold';
+    default: return 'muted';
+  }
+}
+
+export function effortDisplay(effort: string | undefined): string {
+  if (!effort) return 'Default';
+  const visual = effortVisual(effort);
+  const symbol = effortSymbol(effort);
+  return symbol ? `${symbol} ${visual.label}` : visual.label;
 }
 
 export function effortTagline(effort: string | undefined, working: boolean): string {
@@ -145,8 +202,10 @@ export function effortPulseCells(
     // travelling light; changing terminal glyphs mid-frame causes Windows
     // hosts to re-measure a row and makes the whole prompt appear to shake.
     text,
-    color: active
+    color: active && effort !== 'plif'
       ? semanticWaveTone(elapsedMs, index, pattern.length, visual.stops, visual.cycleMs)
-      : color('faint'),
+      : effort === 'plif'
+        ? color('gold')
+        : color('faint'),
   }));
 }

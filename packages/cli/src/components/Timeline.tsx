@@ -5,12 +5,13 @@ import { diffHeight } from './Diff.js';
 import { Markdown } from './Markdown.js';
 import { ToolCall, searchResultsHeight } from './ToolCall.js';
 import { BLOOM_MARK, useSpinnerFrame } from './Spinner.js';
+import { activityGlyphAt, activityKindForLabel, activityVisual, GradientText } from '../activity-visuals.js';
+import { ANIMATION_INTERVAL_MS, useAnimationFrame } from '../hooks/useAnimationClock.js';
 import type { EntryStatus, TimelineEntry } from '../session.js';
 import type { TranscriptCell } from '../transcript/types.js';
-import { highlightedClusters, toneBetween, useHighlightClock } from '../pulse.js';
-import { color, formatDuration, formatWorkedDuration, glyph, layout, supportsRichGlyphs, truncate } from '../theme.js';
+import { toneBetween } from '../pulse.js';
+import { color, formatDuration, formatWorkedDuration, glyph, layout, truncate } from '../theme.js';
 import { clusterLength, displayWidth } from '../text.js';
-import { PlifGlow } from './PlifGlow.js';
 
 interface TimelineProps {
   readonly entries: readonly TimelineEntry[];
@@ -28,7 +29,6 @@ interface TimelineProps {
    * at all.
    */
   readonly maxLines?: number;
-  readonly themeRevision?: number;
 }
 
 /**
@@ -49,7 +49,6 @@ export const Timeline = React.memo(function Timeline({
   width,
   limit,
   maxLines,
-  themeRevision,
 }: TimelineProps): React.ReactElement {
   const inner = width - layout.gutter * 2;
   const byCount = limit ? entries.slice(-limit) : entries.slice(-layout.maxTimelineRows);
@@ -68,12 +67,13 @@ export const Timeline = React.memo(function Timeline({
           entry={item}
           width={inner}
           {...(maxLines === undefined ? {} : { maxLines })}
-          themeRevision={themeRevision}
         />
       ))}
     </Box>
   );
 });
+
+Timeline.displayName = 'Timeline';
 
 /** Render canonical transcript cells through the same rows used by normal mode. */
 export function TranscriptCells({
@@ -412,10 +412,11 @@ export function estimateHeight(entry: TimelineEntry, width: number): number {
   // of live tail an open thinking row draws while the thought is forming.
   if (entry.kind === 'thinking') {
     if (entry.status === 'active') {
-      return 1 + thoughtLines(entry.detail ?? '', width - 4).length;
+      const liveLines = thoughtLines(entry.detail ?? '', width - 4);
+      return 3 + (liveLines.length > 0 ? liveLines.length + 1 : 0);
     }
-    if (!entry.expand) return 1;
-    return 1 + wrap(entry.detail ?? '', width - 4) + 1;
+    if (!entry.expand) return 3;
+    return 4 + wrap(entry.detail ?? '', width - 4);
   }
 
   if (entry.kind === 'separator') return 2;
@@ -458,7 +459,7 @@ export function estimateHeight(entry: TimelineEntry, width: number): number {
   return 1 + shown + (shown > 0 ? 1 : 0);
 }
 
-export const TimelineRow = React.memo(function TimelineRow({
+export function TimelineRow({
   entry,
   width,
   maxLines,
@@ -466,7 +467,6 @@ export const TimelineRow = React.memo(function TimelineRow({
   entry: TimelineEntry;
   width: number;
   maxLines?: number;
-  themeRevision?: number;
 }): React.ReactElement {
   if (entry.kind === 'input') return <UserRow entry={entry} width={width} />;
   if (entry.kind === 'answer') {
@@ -478,7 +478,7 @@ export const TimelineRow = React.memo(function TimelineRow({
   if (entry.kind === 'separator') return <CycleSeparator entry={entry} width={width} />;
   if (entry.kind === 'tool') return <ToolRow entry={entry} width={width} />;
   return <PlainRow entry={entry} width={width} />;
-});
+}
 
 /**
  * A block of model reasoning.
@@ -490,6 +490,47 @@ export const TimelineRow = React.memo(function TimelineRow({
  * answer and a timeline that keeps it open is a timeline nobody can read. The
  * text is held, not discarded: Ctrl+R brings it back.
  */
+function ThinkingIndicator({
+  thinking,
+  label,
+  plif,
+  expand,
+  durationMs,
+}: {
+  readonly thinking: boolean;
+  readonly label: string;
+  readonly plif: boolean;
+  readonly expand?: boolean;
+  readonly durationMs?: number;
+}): React.ReactElement {
+  void plif;
+  const clock = useAnimationFrame(thinking, 'slow');
+  const activityLabel = label.replace(/^plif\s+/i, '') || 'Thinking';
+  const kind = activityKindForLabel(activityLabel);
+  const visual = activityVisual(kind);
+  const pulse = activityGlyphAt(kind, clock * ANIMATION_INTERVAL_MS, thinking);
+
+  return (
+    <Box>
+      <Text color={color(thinking ? 'accent' : 'ghost')}>{thinking ? pulse : glyph.step} </Text>
+      {thinking ? (
+        <GradientText value={activityLabel} from={visual.gradient[0]} to={visual.gradient[1]} bold />
+      ) : (
+        <Text color={color('faint')}>
+          {expand ? `${label}:` : `thought ${formatDuration(durationMs ?? 0)}`}
+        </Text>
+      )}
+      <Text color={color('ghost')}>
+        {thinking
+          ? ''
+          : expand
+            ? `  ${formatDuration(durationMs ?? 0)}`
+            : `  ${glyph.divider} Ctrl+R history`}
+      </Text>
+    </Box>
+  );
+}
+
 function ThinkingRow({
   entry,
   width,
@@ -502,10 +543,6 @@ function ThinkingRow({
   const thinking = entry.status === 'active';
   const label = entry.title || 'Thinking';
   const plif = label === 'Plif Thinking';
-  // The pulse, not the braille spinner. Thinking is a different kind of waiting
-  // from a command running, and the two read as different things at a glance.
-  const pulse = usePulse(thinking, plif);
-  const clock = useHighlightClock(thinking);
   const body = entry.detail ?? '';
   const live = thinking ? thoughtLines(body, width - 4) : [];
   const clipped =
@@ -515,43 +552,34 @@ function ThinkingRow({
     : [];
 
   return (
-    <Box flexDirection="column">
-      <Box>
-        <Text color={color(thinking ? 'accent' : 'ghost')}>{thinking ? pulse : glyph.step} </Text>
-        {thinking ? (
-          plif ? (
-            <PlifGlow value={label} elapsedMs={clock} />
-          ) : (
-            <Text>
-              {highlightedClusters(label, clock).map((part, index) => (
-                <Text key={index} color={part.color} bold={part.active}>
-                  {part.text}
-                </Text>
-              ))}
-            </Text>
-          )
-        ) : (
-          <Text color={color('faint')}>
-            {entry.expand ? `${label}:` : `Thought for ${formatDuration(entry.durationMs ?? 0)}`}
-          </Text>
-        )}
-        <Text color={color('ghost')}>
-          {thinking
-            ? ''
-            : entry.expand
-              ? `  ${formatDuration(entry.durationMs ?? 0)}`
-              : `  ${glyph.divider} Ctrl+R history`}
-        </Text>
-      </Box>
+    <Box flexDirection="column" marginTop={1} marginBottom={1}>
+      <ThinkingIndicator
+        thinking={thinking}
+        label={label}
+        plif={plif}
+        {...(entry.expand === undefined ? {} : { expand: entry.expand })}
+        durationMs={entry.durationMs}
+      />
 
       {live.length > 0 && (
-        <Box flexDirection="column">
-          {live.map((line, index) => (
-            <Box key={index}>
-              <Text color={color('ghost')}>{`  ${glyph.rail} `}</Text>
-              <Text color={toneBetween('brand', 'accent', (index + 1) / live.length)}>{line}</Text>
-            </Box>
-          ))}
+        <Box flexDirection="column" marginTop={1}>
+          {live.map((line, index) => {
+            // The reference grammar: every step hangs off the branch rail,
+            // the last one closes it, and the status column — a champagne
+            // check for what has been thought through, an ellipsis for the
+            // thought still forming — sits at the right edge of the block.
+            const last = index === live.length - 1;
+            const gap = Math.max(1, width - 6 - displayWidth(line));
+            return (
+              <Box key={index}>
+                <Text color={color('ghost')}>{`  ${last ? '  ' : glyph.rail} ${glyph.branch} `}</Text>
+                <Text color={toneBetween(plif ? 'accent' : 'brand', plif ? 'gold' : 'accent', (index + 1) / live.length)}>{line}</Text>
+                {last
+                  ? <Text color={color('muted')}>{' '.repeat(gap)}…</Text>
+                  : <Text color={color('goldDim')}>{' '.repeat(gap)}✓</Text>}
+              </Box>
+            );
+          })}
         </Box>
       )}
 
@@ -583,33 +611,12 @@ function CycleSeparator({ entry, width }: { entry: TimelineEntry; width: number 
   return (
     <Box marginTop={1}>
       <Text color={color('accentDim')}>{BLOOM_MARK}</Text>
-      <Text color={color('faint')}> Worked for {formatWorkedDuration(entry.durationMs ?? 0)}</Text>
+      <Text color={color('ghost')}> worked {formatWorkedDuration(entry.durationMs ?? 0)}</Text>
     </Box>
   );
 }
 
-/**
- * The four-frame bullet pulse used for thinking.
- *
- * Slower than the spinner on purpose — a fast animation next to the word
- * "Thinking" reads as urgency, and this is the calmest thing the agent does.
- */
-const PULSE_FRAMES = supportsRichGlyphs ? ['•', '·', '•', '·'] : ['*', '+', 'x', '+'];
-function usePulse(active: boolean, plif = false): string {
-  const clock = useHighlightClock(active, 420);
-  if (plif) return supportsRichGlyphs ? '+' : '*';
-  const frames = PULSE_FRAMES;
-  const index = Math.floor(clock / 420) % frames.length;
-  return frames[index] as string;
-}
-
-/**
- * What the developer said, in a box.
- *
- * The box is the thing that separates a conversation from a log. Without it the
- * developer's own words look like just another line the agent produced, and
- * scanning back for "what did I actually ask?" means reading everything.
- */
+/** The developer's line is open on the page, matching the reference composition. */
 export const MAX_USER_ROW_LINES = 6;
 
 export function userRowLines(
@@ -645,39 +652,21 @@ export function userRowLines(
 }
 
 function UserRow({ entry, width }: { entry: TimelineEntry; width: number }): React.ReactElement {
-  const time = formatClock(entry.at);
-  const surface = color('surface');
-  const { lines, hidden } = userRowLines(entry.title, Math.max(8, width - 8 - time.length));
-  const titleWidth = Math.max(8, width - 8 - time.length);
+  const titleWidth = Math.max(8, width - 4);
+  const { lines, hidden } = userRowLines(entry.title, titleWidth);
   const rows = hidden > 0 ? [...lines, truncate(`… +${hidden} more lines`, titleWidth)] : lines;
 
   return (
     <Box flexDirection="column" marginTop={1} marginBottom={1}>
       {rows.map((line, index) => {
-        const clock = index === 0 ? time : '';
-        const fixedWidth = 1 + 2 + displayWidth(line) + (clock ? displayWidth(clock) + 1 : 0) + 1;
-        const fill = Math.max(0, width - fixedWidth);
         const elision = hidden > 0 && index === rows.length - 1;
-        return (
-          <Box key={index} width="100%">
-            <Text backgroundColor={surface}>{' '}</Text>
-            <Text backgroundColor={surface} color={color('muted')}>
-              {index === 0 ? `${glyph.prompt} ` : '  '}
-            </Text>
-            <Text backgroundColor={surface} color={color(elision ? 'ghost' : 'text')}>{line}</Text>
-            <Text backgroundColor={surface}>{' '.repeat(fill)}</Text>
-            {clock && <Text backgroundColor={surface} color={color('ghost')}>{` ${clock}`}</Text>}
-            <Text backgroundColor={surface}>{' '}</Text>
-          </Box>
-        );
+        return <Box key={index} width="100%">
+          <Text color={color(index === 0 ? 'gold' : 'muted')}>{index === 0 ? `${glyph.prompt} ` : '  '}</Text>
+          <Text color={color(elision ? 'ghost' : 'accentBright')}>{line}</Text>
+        </Box>;
       })}
     </Box>
   );
-}
-
-function formatClock(at: number): string {
-  if (!Number.isFinite(at) || at <= 0) return '';
-  return new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
 /**
@@ -856,7 +845,7 @@ function marker(
   bullet: string;
   bulletTone: Parameters<typeof color>[0];
 } {
-  if (entry.kind === 'input') return { bullet: glyph.prompt, bulletTone: 'accent' };
+  if (entry.kind === 'input') return { bullet: glyph.prompt, bulletTone: 'gold' };
   if (entry.kind === 'approval' && entry.status !== 'done' && entry.status !== 'failed') {
     return { bullet: glyph.waiting, bulletTone: 'warn' };
   }

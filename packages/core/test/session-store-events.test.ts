@@ -99,4 +99,16 @@ describe('versioned session event storage', () => {
 
     assert.equal((await session.replay()).length, 1);
   });
+
+  it('renames metadata without rewriting the append-only transcript', async () => {
+    const { session, store, workspace, transcript } = await fixture();
+    await session.append({ kind: 'user', at, text: 'original prompt' });
+    const before = await fs.readFile(transcript, 'utf8');
+
+    await session.rename('Raw input investigation');
+
+    assert.equal(session.meta.title, 'Raw input investigation');
+    assert.equal((await store.list(workspace))[0]?.title, 'Raw input investigation');
+    assert.equal(await fs.readFile(transcript, 'utf8'), before);
+  });
 });

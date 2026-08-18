@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
-import { useHighlightClock } from '../pulse.js';
+import { ANIMATION_INTERVAL_MS, useAnimationFrame } from '../hooks/useAnimationClock.js';
 import { color, glyph } from '../theme.js';
 import { PlifGlow } from './PlifGlow.js';
 
@@ -39,7 +39,7 @@ export function Meter({
 }: MeterProps): React.ReactElement {
   const ratio = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
   const filled = Math.round(ratio * width);
-  const elapsed = useHighlightClock(plif && active);
+  const elapsed = useAnimationFrame(plif && active, 'slow') * ANIMATION_INTERVAL_MS;
 
   const tone = ratio >= dangerAt ? 'danger' : ratio >= warnAt ? 'warn' : 'accentDim';
 
