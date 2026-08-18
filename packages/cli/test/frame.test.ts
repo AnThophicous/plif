@@ -13,7 +13,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { entry, initialSession, sessionReducer } from '../src/session.js';
+import { entry, initialSession, scrollbackCommitEnd, sessionReducer } from '../src/session.js';
 import type { SessionState, TimelineEntry } from '../src/session.js';
 import { estimateHeight, tail } from '../src/components/Timeline.js';
 import {
@@ -33,6 +33,42 @@ function withEntries(items: readonly TimelineEntry[]): SessionState {
 }
 
 describe('committing rows to scrollback', () => {
+  it('keeps the completed current turn in the live frame until the next turn starts', () => {
+    const entries = [
+      entry('input', 'the current request'),
+      entry('thinking', 'Plif Thinking', { detail: 'reasoning', status: 'done' }),
+      entry('tool', 'read_file', { status: 'done', detail: 'package.json' }),
+      entry('answer', 'the final answer', { status: 'done' }),
+      entry('notice', 'one more detail', { status: 'done' }),
+      entry('tool', 'test', { status: 'done' }),
+      entry('answer', 'the conclusion', { status: 'done' }),
+      entry('separator', 'Worked', { durationMs: 120_000 }),
+      entry('notice', 'another finished row', { status: 'done' }),
+      entry('tool', 'final check', { status: 'done' }),
+      entry('answer', 'still the same turn', { status: 'done' }),
+      entry('notice', 'the tail is longer than eight rows', { status: 'done' }),
+    ];
+
+    assert.equal(
+      scrollbackCommitEnd(entries),
+      0,
+      'finishing a long turn must not move its visible content above the viewport',
+    );
+  });
+
+  it('commits the previous turn only after a new input establishes the boundary', () => {
+    const entries = [
+      entry('input', 'previous request'),
+      entry('answer', 'previous answer', { status: 'done' }),
+      entry('separator', 'Worked', { durationMs: 12_000 }),
+      entry('input', 'new request'),
+      entry('thinking', 'Plif Thinking', { status: 'done' }),
+      entry('answer', 'new answer', { status: 'done' }),
+    ];
+
+    assert.equal(scrollbackCommitEnd(entries), 3);
+  });
+
   it('moves the prefix out of the live frame, in order', () => {
     const state = withEntries([
       entry('input', 'first'),

@@ -434,6 +434,37 @@ export type SessionAction =
 /** Bound on retained entries; the terminal cannot show more and memory is not free. */
 const MAX_ENTRIES = 500;
 
+/**
+ * Return the prefix that may safely leave the live frame.
+ *
+ * This is intentionally kept as a pure policy function so the Ink boundary is
+ * testable without mounting a terminal. The caller still checks that every row
+ * in the prefix is settled before dispatching `commit`.
+ */
+export function scrollbackCommitEnd(
+  entries: readonly TimelineEntry[],
+  liveTail = 8,
+): number {
+  const lastInput = entries.findLastIndex((item) => item.kind === 'input');
+  const lastSeparator = entries.findLastIndex((item) => item.kind === 'separator');
+
+  // A separator after the latest input closes the current turn. Keep that
+  // entire turn in the live frame: moving it to <Static> at the same moment the
+  // request finishes is what makes the answer appear to vanish from the
+  // viewport on terminals that keep the dynamic frame anchored at the bottom.
+  if (lastInput >= 0 && lastSeparator > lastInput) return 0;
+
+  // Once the next input arrives, everything through the previous separator is
+  // an older turn and can safely enter native scrollback in one ordered batch.
+  if (lastInput >= 0 && lastSeparator >= 0 && lastSeparator < lastInput) {
+    return lastSeparator + 1;
+  }
+
+  // Startup notices and other rows without an input have no turn boundary.
+  // Retain the old bounded fallback for those rows only.
+  return lastInput < 0 ? Math.max(0, entries.length - liveTail) : 0;
+}
+
 function mergeAdjacentEdits(entries: readonly TimelineEntry[]): TimelineEntry[] {
   const merged: TimelineEntry[] = [];
   for (const entry of entries) {
