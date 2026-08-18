@@ -1,3 +1,4 @@
+import { recoverInterruptedTurns } from '@plif/core';
 import type { ConversationEvent } from '@plif/core';
 
 import type {
@@ -315,6 +316,12 @@ export function transcriptReducer(
   state: TranscriptState,
   action: TranscriptAction,
 ): TranscriptState {
+  if (action.type === 'replace') {
+    return recoverInterruptedTurns(action.events).reduce(
+      (next, event) => transcriptReducer(next, { type: 'event', event }),
+      initialTranscriptState,
+    );
+  }
   if (action.type === 'reset') return initialTranscriptState;
   if (action.type === 'stream.reset') {
     return {

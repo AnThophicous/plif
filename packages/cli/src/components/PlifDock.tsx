@@ -1,12 +1,9 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
-import { effortPulseCells, effortTagline, effortVisual } from '../effort-visuals.js';
-import { useHighlightClock } from '../pulse.js';
+import { effortSymbol, effortTagline, effortVisual } from '../effort-visuals.js';
 import { color, layout, shortenPath, truncate } from '../theme.js';
-import { InfinityMark } from './FocusFrame.js';
 import { Meter } from './Meter.js';
-import { PlifGlow } from './PlifGlow.js';
 export { plifDockItems } from '../live-status.js';
 
 const DOCK_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode', 'plif'] as const;
@@ -16,7 +13,7 @@ export function plifDockHeight(effort?: string): number {
   return DOCK_EFFORTS.includes(effort as (typeof DOCK_EFFORTS)[number]) ? 2 : 0;
 }
 
-export const PlifDock = React.memo(function PlifDock({
+export function PlifDock({
   cwd,
   model,
   effort,
@@ -31,7 +28,6 @@ export const PlifDock = React.memo(function PlifDock({
   /** Active provider model, shown immediately before the context meter. */
   readonly model?: string;
   readonly effort?: string;
-  readonly themeRevision?: number;
   readonly contextUsed: number;
   readonly contextMax: number;
   readonly working: boolean;
@@ -42,10 +38,9 @@ export const PlifDock = React.memo(function PlifDock({
   const plif = effort === 'plif';
   const visual = effortVisual(effort);
   const animated = working || transitioning || ambientAnimation;
-  const elapsed = useHighlightClock(animated);
   if (plifDockHeight(effort) === 0) return null;
 
-  const pulse = effortPulseCells(effort, elapsed, animated);
+  const identitySymbol = effortSymbol(effort);
   const inner = Math.max(18, width - 4);
   const narrow = inner < layout.narrowWidth;
   const compact = inner < 28;
@@ -57,32 +52,17 @@ export const PlifDock = React.memo(function PlifDock({
   const pathWidth = Math.max(10, inner - 32 - (modelLabel ? modelWidth + 4 : 0));
 
   return (
-    <Box width="100%" justifyContent="space-between">
-      <Box flexShrink={1}>
-        <InfinityMark active={animated} plif={plif} />
+    <Box width="100%" justifyContent="space-between" flexWrap="nowrap">
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
         {compact ? (
-          <Text color={color('faint')} bold>{` ${visual.label.slice(0, 8)}`}</Text>
+          <Text color={color(animated ? 'accentBright' : 'muted')} bold wrap="truncate">{` ${identitySymbol} ${visual.label.slice(0, 8)}`}</Text>
         ) : (
           <Text bold>
-            {' '}
-            <PlifGlow
-              value={visual.label}
-              elapsedMs={elapsed}
-              active={animated}
-              fallback="faint"
-              stops={visual.stops}
-            />
+            {identitySymbol && <Text color={color(animated ? 'accentBright' : 'muted')}>{` ${identitySymbol} `}</Text>}
+            <Text color={color(animated ? 'accentBright' : 'muted')}>{visual.label}</Text>
           </Text>
         )}
         {animated && !compact && <Text color={color('muted')}>{` · ${effortTagline(effort, working)}`}</Text>}
-        {animated && (
-          <Text>
-            {' '}
-            {pulse.map((cell, index) => (
-              <Text key={index} color={cell.color}>{cell.text}</Text>
-            ))}
-          </Text>
-        )}
         {!narrow && (
           <Text color={color(working ? 'muted' : 'faint')}>
             {`  ·  ${truncate(shortenPath(cwd, pathWidth), pathWidth)}${animated ? `  ·  ${visual.descriptor}` : ''}`}
@@ -110,4 +90,4 @@ export const PlifDock = React.memo(function PlifDock({
       </Box>
     </Box>
   );
-});
+}

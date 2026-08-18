@@ -1,4 +1,5 @@
 import { formatCount, formatDuration, glyph, shortenPath } from './theme.js';
+import { effortDisplay } from './effort-visuals.js';
 
 export interface SessionUsage {
   readonly requests: number;
@@ -70,7 +71,7 @@ export function formatStatus(snapshot: StatusSnapshot, width = 72): string {
   lines.push(row('model', [
     snapshot.model || 'not configured',
     snapshot.provider,
-    snapshot.effort ? `effort ${snapshot.effort}` : '',
+    snapshot.effort ? `effort ${effortDisplay(snapshot.effort)}` : '',
   ].filter(Boolean).join(DOT)));
 
   lines.push(row('context', [

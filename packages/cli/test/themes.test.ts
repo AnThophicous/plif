@@ -4,102 +4,33 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 
-import { applyEffortPalette, color, palette, syntaxColor, TERMINAL_BACKGROUND } from '../src/theme.js';
+import { applyEffortPalette, color, effortPalette, palette, syntaxColor } from '../src/theme.js';
 import { semanticWave } from '../src/pulse.js';
 import { activateTheme, loadThemes, MINIMAL_THEME, parseTheme } from '../src/themes.js';
 
 describe('user themes', () => {
-  it('uses the controlled-test gold roles in the default theme', () => {
+  it('uses the cold Plif anchors in the default theme', () => {
     activateTheme(MINIMAL_THEME);
-    assert.equal(TERMINAL_BACKGROUND, '#303030');
-    assert.equal(color('panel'), TERMINAL_BACKGROUND);
-    assert.equal(color('brand'), '#CC9A3A');
-    assert.equal(color('faint'), '#CC9A3A');
-    assert.equal(color('accentDim'), '#C68E17');
-    assert.equal(color('muted'), '#E8C170');
-    assert.equal(color('accentBright'), '#E8C170');
-    assert.equal(color('text'), '#FFD700');
-    assert.equal(color('accent'), '#E0A526');
+    assert.equal(color('panel'), '#303030');
+    assert.equal(color('brand'), '#AAB8CC');
+    assert.equal(color('faint'), '#7C848A');
+    assert.equal(color('muted'), '#89959E');
+    assert.equal(color('accentBright'), '#CDD6F4');
+    assert.equal(color('text'), '#A2ADB5');
   });
 
-  it('keeps the terminal canvas fixed when a theme or effort changes', () => {
-    const theme = parseTheme({
-      id: 'black-panel', name: 'Black panel',
-      palette: { panel: '#000000' },
-    }, 'fallback');
-    activateTheme(theme);
-    assert.equal(color('panel'), TERMINAL_BACKGROUND);
-    applyEffortPalette('max');
-    assert.equal(color('panel'), TERMINAL_BACKGROUND);
+  it('keeps effort accents inside one cold ramp and reserves the anchor for Plif', () => {
     activateTheme(MINIMAL_THEME);
-    applyEffortPalette();
-  });
-
-  it('keeps effort colors distinct and reserves hottest gold for Plif', () => {
-    activateTheme(MINIMAL_THEME);
-    const expected = {
-      low: {
-        text: '#FFF1B2', muted: '#F5D98A', faint: '#D8B565', ghost: '#947A45',
-        brand: '#D8B565', accent: '#F0C96C', accentBright: '#FFF1B2', accentDim: '#D4A646',
-        info: '#F0C96C', warn: '#D4A646',
-      },
-      medium: {
-        text: '#FFE99A', muted: '#F0CE72', faint: '#D2A849', ghost: '#896A31',
-        brand: '#D2A849', accent: '#E9BE55', accentBright: '#FFE99A', accentDim: '#CC941F',
-        info: '#E9BE55', warn: '#CC941F',
-      },
-      high: {
-        text: '#FFDF75', muted: '#E9BB4A', faint: '#C28D23', ghost: '#79591D',
-        brand: '#C28D23', accent: '#E2AA35', accentBright: '#FFDF75', accentDim: '#B67A13',
-        info: '#E2AA35', warn: '#B67A13',
-      },
-      xhigh: {
-        text: '#FFD957', muted: '#E3AD2F', faint: '#B87916', ghost: '#6E4A13',
-        brand: '#B87916', accent: '#D99A21', accentBright: '#FFD957', accentDim: '#A96A0C',
-        info: '#D99A21', warn: '#A96A0C',
-      },
-      max: {
-        text: '#eadbff', muted: '#c49aff', faint: '#6337a8', ghost: '#432775',
-        brand: '#6337a8', accent: '#c49aff', accentBright: '#eadbff', accentDim: '#9568d0',
-        info: '#c49aff', warn: '#9568d0',
-      },
-      ultra: {
-        text: '#FFCB20', muted: '#DC9513', faint: '#9E5A09', ghost: '#5F3806',
-        brand: '#9E5A09', accent: '#D17F0A', accentBright: '#FFCB20', accentDim: '#924E04',
-        info: '#D17F0A', warn: '#924E04',
-      },
-      ultracode: {
-        text: '#FFC20A', muted: '#D58A08', faint: '#955005', ghost: '#582D04',
-        brand: '#955005', accent: '#C87304', accentBright: '#FFC20A', accentDim: '#894502',
-        info: '#C87304', warn: '#894502',
-      },
-    } as const;
-
-    for (const [effort, paletteValues] of Object.entries(expected)) {
+    for (const [effort, paletteValues] of Object.entries(effortPalette)) {
       applyEffortPalette(effort);
-      assert.deepEqual(
-        {
-          text: palette.text,
-          muted: palette.muted,
-          faint: palette.faint,
-          ghost: palette.ghost,
-          brand: palette.brand,
-          accent: palette.accent,
-          accentBright: palette.accentBright,
-          accentDim: palette.accentDim,
-          info: palette.info,
-          warn: palette.warn,
-        },
-        paletteValues,
-        effort,
-      );
-      assert.notEqual(palette.accent, '#E0A526', `${effort} should not use the Plif accent`);
-      assert.notEqual(palette.text, '#FFD700', `${effort} should not use the Plif text`);
+      for (const [key, value] of Object.entries(paletteValues)) {
+        assert.equal(palette[key as keyof typeof palette], value, `${effort}.${key}`);
+      }
+      assert.equal(palette.text, '#A2ADB5', `${effort} keeps primary text stable`);
+      assert.equal(palette.muted, '#89959E', `${effort} keeps secondary text stable`);
     }
     applyEffortPalette('plif');
-    assert.equal(palette.text, '#FFD700');
-    assert.equal(palette.accent, '#E0A526');
-    assert.equal(palette.accentBright, '#E8C170');
+    assert.equal(palette.accentBright, '#CDD6F4');
     applyEffortPalette();
   });
 

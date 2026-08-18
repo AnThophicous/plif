@@ -14,11 +14,13 @@ import path from 'node:path';
 import {
   CredentialBroker,
   credentialVariableForProvider,
+  EFFORT_LEVELS,
   MODEL_CATALOG,
   discoverProviderModels,
   modelVisionBadge,
   rankFacts,
   rankModelIds,
+  providerIdForConfig,
   supportedEfforts,
   strategyStatus,
   userCatalog,
@@ -46,11 +48,10 @@ import {
   PlifError,
 } from '@plif/core';
 
-import { formatCapabilities } from './format.js';
+import { formatCapabilities, tokenize } from './format.js';
+import { effortDisplay, effortVisual } from './effort-visuals.js';
 import {
-  effortLabel,
   effortPickerItems,
-  pickerSelectionForCurrentModel,
 } from './components/Picker.js';
 import { formatStatus } from './status.js';
 import type { StatusInput } from './status.js';
@@ -58,7 +59,7 @@ import type { PickerGroup, PickerItem } from './components/Picker.js';
 
 import { entry } from './session.js';
 import type { BrowserTab, TimelineEntry } from './session.js';
-import { formatBytes, formatDuration, glyph, shortenPath } from './theme.js';
+import { formatBytes, formatDuration, glyph, shortenPath, type PaletteKey } from './theme.js';
 import { containerMount, containerWorkdir } from './container-paths.js';
 import type { ThemeDefinition } from './themes.js';
 
@@ -76,6 +77,8 @@ export interface CommandContext {
   readonly credentials?: CredentialBroker;
   readonly setEffort: (effort: Effort | undefined) => Promise<void>;
   readonly supportedEfforts?: () => readonly Effort[];
+  /** Curated/live model ids available to the generic argument completer. */
+  readonly modelCompletionValues?: () => readonly string[];
   /** Enter or leave the read-only planning mode. */
   readonly setPlanMode?: (enabled: boolean, description?: string) => Promise<void>;
   /** Start a session-scoped completion condition. */
@@ -110,17 +113,66 @@ export interface CommandContext {
 export interface FlatPickerRequest {
   readonly title: string;
   readonly hint?: string;
+  readonly countLabel?: string;
   readonly items: readonly PickerItem[];
   readonly onPick: (value: string | ModelSelection) => void;
+  /** Initial keyboard position; defaults to the first visible row. */
+  readonly selected?: number;
+  readonly onBack?: () => void;
 }
 
 export interface CatalogPickerRequest {
   readonly title: string;
   readonly hint?: string;
+  readonly countLabel?: string;
   readonly groups: readonly PickerGroup[];
   readonly expanded: readonly string[];
   readonly selected: number;
   readonly onPick: (selection: string | ModelSelection) => void;
+  readonly onBack?: () => void;
+}
+
+export interface CommandArgumentCompletionContext {
+  readonly command: Command;
+  readonly context: CommandContext;
+  readonly input: string;
+  readonly cursor: number;
+  readonly argv: readonly string[];
+  readonly argumentIndex: number;
+  readonly token: string;
+  readonly tokenStart: number;
+  readonly tokenEnd: number;
+}
+
+export interface CommandAutocomplete {
+  /** A fixed enum, when the command's values never depend on session state. */
+  readonly values?: readonly string[];
+  /** A session-aware enum, used when provider/model capabilities can change. */
+  readonly getValues?: (context: CommandArgumentCompletionContext) => readonly string[];
+  readonly getDetail?: (
+    value: string,
+    context: CommandArgumentCompletionContext,
+  ) => string | undefined;
+  /** Row tone for a value that carries visual identity, e.g. the PLIF signature. */
+  readonly getTone?: (value: string) => PaletteKey | undefined;
+}
+
+export interface ArgumentCompletion {
+  readonly value: string;
+  readonly label: string;
+  readonly detail?: string;
+  readonly tone?: PaletteKey;
+}
+
+export interface ArgumentCompletionState {
+  readonly command: Command;
+  readonly input: string;
+  readonly cursor: number;
+  readonly argumentIndex: number;
+  readonly token: string;
+  readonly tokenStart: number;
+  readonly tokenEnd: number;
+  readonly matches: readonly ArgumentCompletion[];
 }
 
 export interface CommandResult {
@@ -129,9 +181,13 @@ export interface CommandResult {
 
 export interface Command {
   readonly name: string;
+  /** Older spellings remain dispatchable without creating duplicate menu rows. */
+  readonly aliases?: readonly string[];
   readonly args?: string;
   readonly summary: string;
   readonly concurrent?: boolean;
+  /** Optional argument metadata consumed by the generic TAB completer. */
+  readonly autocomplete?: CommandAutocomplete;
   readonly run: (argv: readonly string[], context: CommandContext) => Promise<CommandResult>;
 }
 
@@ -143,6 +199,24 @@ const ok = (...entries: TimelineEntry[]): CommandResult => ({ entries });
 
 const formatTokens = (value: number): string =>
   value < 1000 ? `${value} tokens` : `${(value / 1000).toFixed(1)}k tokens`;
+
+export function validateEffortArgument(
+  value: string,
+  available: readonly Effort[],
+): Effort | 'default' {
+  if (value === 'default') return value;
+  if (!EFFORT_LEVELS.includes(value as Effort)) {
+    throw new PlifError('INVALID_ARGUMENT', `Unknown effort "${value}".`, {
+      hint: `Available: default, ${available.join(', ')}`,
+    });
+  }
+  if (!available.includes(value as Effort)) {
+    throw new PlifError('INVALID_ARGUMENT', `${value} is not supported by the current model.`, {
+      hint: `Supported: ${available.join(', ')}`,
+    });
+  }
+  return value as Effort;
+}
 
 /** Keep verified built-ins visible while adding everything the endpoint reports. */
 export function providerModelIds(
@@ -237,22 +311,164 @@ function prettyModelId(id: string): string {
   return id.slice(id.lastIndexOf('/') + 1).replace(/[-_]+/g, ' ');
 }
 
-/** Keep several provider catalogues moving without creating one unbounded wave. */
-async function mapWithConcurrency<T, R>(
-  values: readonly T[],
-  limit: number,
-  work: (value: T) => Promise<R>,
-): Promise<R[]> {
-  const result: R[] = [];
-  let cursor = 0;
-  const worker = async (): Promise<void> => {
-    while (cursor < values.length) {
-      const index = cursor++;
-      result[index] = await work(values[index]!);
-    }
+interface ProviderSource {
+  readonly entryProvider: ModelCatalogProvider;
+  readonly section: string;
+}
+
+function providerSources(stored: StoredConfig): ProviderSource[] {
+  const mine = userCatalog(stored);
+  return [
+    ...mine.map((entryProvider) => ({ entryProvider, section: 'your providers' })),
+    ...builtInPickerProviders(mine).map((entryProvider) => ({ entryProvider, section: 'built into PLIF' })),
+  ];
+}
+
+interface ModelRowData {
+  readonly id: string;
+  readonly label: string;
+  readonly description: string;
+  readonly badges: readonly string[];
+}
+
+function modelRowItem(
+  source: ModelCatalogProvider,
+  model: ModelRowData,
+  currentProvider: string | undefined,
+  currentModel: string | undefined,
+  hasVisionHelper: boolean,
+): PickerItem {
+  const candidate: ModelCatalogModel = {
+    id: model.id,
+    label: model.label,
+    description: model.description,
+    badges: model.badges,
   };
-  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, () => worker()));
-  return result;
+  const badges = pickerBadges(candidate, hasVisionHelper);
+  const capabilities = badges.filter((badge) => !['no key', 'key needed'].includes(badge));
+  const auth = source.anonymous || badges.includes('no key')
+    ? 'no key'
+    : source.origin === 'user' || source.id === currentProvider
+      ? 'configured'
+      : 'key required';
+  const current = source.id === currentProvider && model.id === currentModel;
+  return {
+    value: `${source.id}:${model.id}`,
+    label: model.label,
+    detail: model.description,
+    badges,
+    current,
+    provider: source.label,
+    capabilities,
+    context: '—',
+    auth,
+    searchText: [source.id, source.label, model.id, model.description, ...badges].join(' '),
+    selection: { preset: source.id, model: model.id },
+  };
+}
+
+/**
+ * Model-first catalog. Only the active provider is discovered live; every
+ * other row comes from the registry and stays cheap to open. Enter still
+ * carries the exact provider/model pair, so duplicate model names are safe.
+ */
+async function openModelPicker(
+  context: CommandContext,
+  stored: StoredConfig,
+  sources: readonly ProviderSource[],
+  currentProvider: string | undefined,
+  currentModel: string | undefined,
+  title: string,
+  hint: string,
+  onBack?: () => void,
+): Promise<void> {
+  const activeSource = sources.find(({ entryProvider }) => entryProvider.id === currentProvider);
+  const activeGroup = activeSource
+    ? await providerGroup(activeSource.entryProvider, 'active', currentModel, stored, context.credentials)
+    : undefined;
+  const hasVisionHelper = visionCandidates(stored).length > 0;
+  const items: PickerItem[] = [];
+
+  for (const source of sources) {
+    const rows: readonly ModelRowData[] = source.entryProvider.id === currentProvider && activeGroup
+      ? activeGroup.items.map((item) => ({
+          id: item.value,
+          label: item.label,
+          description: item.detail ?? item.value,
+          badges: item.badges ?? [],
+        }))
+      : source.entryProvider.models;
+    for (const model of rows) {
+      items.push(modelRowItem(source.entryProvider, model, currentProvider, currentModel, hasVisionHelper));
+    }
+  }
+
+  context.openPicker({
+    title,
+    hint,
+    countLabel: 'models',
+    items,
+    selected: Math.max(0, items.findIndex((item) => item.current)),
+    onPick: (selection) => {
+      if (typeof selection !== 'string') void context.switchModel(selection);
+    },
+    ...(onBack ? { onBack } : {}),
+  });
+}
+
+function providerPickerItems(
+  sources: readonly ProviderSource[],
+  activeProvider: string | undefined,
+): PickerItem[] {
+  return sources.map(({ entryProvider }) => {
+    const auth = entryProvider.anonymous
+      ? 'no key'
+      : entryProvider.origin === 'user' || entryProvider.id === activeProvider
+        ? 'configured'
+        : 'key required';
+    return {
+      value: entryProvider.id,
+      label: entryProvider.label,
+      detail: entryProvider.description,
+      badges: [entryProvider.origin === 'user' ? 'custom' : 'built-in', auth],
+      current: entryProvider.id === activeProvider,
+      searchText: [entryProvider.id, entryProvider.label, entryProvider.description, auth].join(' '),
+    };
+  });
+}
+
+async function openProviderPicker(
+  context: CommandContext,
+  stored: StoredConfig,
+  sources: readonly ProviderSource[],
+  onBack?: () => void,
+): Promise<void> {
+  const activeProvider = providerIdForConfig(stored) ?? undefined;
+  const activeLabel = sources.find(({ entryProvider }) => entryProvider.id === activeProvider)?.entryProvider.label;
+  const items = providerPickerItems(sources, activeProvider);
+  context.openPicker({
+    title: 'Select provider',
+    hint: `active: ${activeLabel ?? 'none'} · Enter opens its models`,
+    countLabel: 'providers',
+    items,
+    selected: Math.max(0, items.findIndex((item) => item.current)),
+    onPick: (value) => {
+      const selected = sources.find(({ entryProvider }) => entryProvider.id === String(value))?.entryProvider;
+      if (!selected) return;
+      const sameProvider = selected.id === activeProvider;
+      void openModelPicker(
+        context,
+        stored,
+        [{ entryProvider: selected, section: 'selected provider' }],
+        selected.id,
+        sameProvider ? context.model?.info.id : undefined,
+        `Provider / ${selected.label}`,
+        `${selected.description} · select a model · Esc returns to providers`,
+        () => { void openProviderPicker(context, stored, sources, onBack); },
+      );
+    },
+    ...(onBack ? { onBack } : {}),
+  });
 }
 
 export const COMMANDS: readonly Command[] = [
@@ -315,7 +531,7 @@ export const COMMANDS: readonly Command[] = [
     name: 'mcp',
     concurrent: true,
     args: '[<server> login]',
-    summary: 'Browse MCP servers, skills, and the Claude plugin marketplace',
+    summary: 'Browse MCP servers, skills, and the plugin marketplace',
     /**
      * Both word orders are accepted. `/mcp github login` reads as a sentence
      * and `/mcp login github` is the shape every other CLI uses; guessing
@@ -431,6 +647,15 @@ export const COMMANDS: readonly Command[] = [
     },
   },
   {
+    name: 'sessions',
+    concurrent: true,
+    summary: 'Browse and resume conversations in this workspace',
+    run: async (_argv, context) => {
+      context.openBrowser('sessions');
+      return ok();
+    },
+  },
+  {
     name: 'skills',
     concurrent: true,
     summary: 'The same browser, opened on the skills tab',
@@ -450,7 +675,7 @@ export const COMMANDS: readonly Command[] = [
   {
     name: 'marketplace',
     concurrent: true,
-    summary: 'Open the browser straight on the Claude plugin catalogue',
+    summary: 'Open the browser straight on the plugin catalogue',
     run: async (_argv, context) => {
       context.openBrowser('marketplace');
       return ok();
@@ -732,85 +957,111 @@ export const COMMANDS: readonly Command[] = [
   },
 
   {
-    name: 'model',
-    concurrent: true,
+    name: 'providers',
+    aliases: ['provider'],
+    summary: 'Choose a provider, then one of its models',
+    run: async (_argv, context) => {
+      const stored = (await loadGlobalConfig().catch(() => ({}))) as StoredConfig;
+      const sources = providerSources(stored);
+      await openProviderPicker(context, stored, sources);
+      return ok();
+    },
+  },
+
+  {
+    name: 'models',
+    aliases: ['model'],
     args: '[id]',
     summary: 'Show the model, or pick a different one',
+    autocomplete: {
+      getValues: ({ context, argumentIndex }) => {
+        if (argumentIndex !== 0) return [];
+        const curated = MODEL_CATALOG.flatMap((provider) => provider.models.map((model) => model.id));
+        return [...new Set([
+          ...(context.modelCompletionValues?.() ?? []),
+          ...curated,
+        ])];
+      },
+    },
     run: async (argv, context) => {
       if (argv[0]) {
+        // A complete model id applies directly, exactly like `/effort plif`:
+        // the picker is for browsing, not for confirming a typed decision.
+        // `switchModel` reports the switch itself, so there is no second row.
         await context.switchModel(argv[0]);
-        return ok(entry('notice', `switched to ${argv[0]}`, { tone: 'accent' }));
+        return ok();
       }
 
       // Opening the catalog is deliberately independent of the global config:
       // a malformed config or missing key must not hide the model chooser.
       const currentModel = context.model?.info.id;
       const stored = (await loadGlobalConfig().catch(() => ({}))) as StoredConfig;
-
-      // The developer's own providers come first, and under their own heading.
-      // Somebody who wrote an endpoint into their config should find it at the
-      // top, not somewhere inside a list of things Plif happens to ship.
-      const mine = userCatalog(stored);
-      const providers = [
-        ...mine.map((entryProvider) => ({ entryProvider, section: 'your providers' })),
-        ...builtInPickerProviders(mine).map((entryProvider) => ({ entryProvider, section: 'built into PLIF' })),
-      ];
-      const groups: PickerGroup[] = await mapWithConcurrency(providers, 3, ({ entryProvider, section }) =>
-        providerGroup(entryProvider, section, currentModel, stored, context.credentials),
+      const currentProvider = providerIdForConfig(stored) ?? undefined;
+      const currentEffort = stored.effort ? effortDisplay(stored.effort) : 'Default';
+      await openModelPicker(
+        context,
+        stored,
+        providerSources(stored),
+        currentProvider,
+        currentModel,
+        'Select model',
+        `active: ${currentModel ?? 'none'} · effort ${currentEffort} · type a model, provider, capability, or alias`,
       );
-
-      const currentGroup = groups.find((group) =>
-        group.items.some((item) => item.current),
-      );
-      const expanded = currentGroup ? [currentGroup.id] : [];
-
-      context.openPicker({
-        title: 'MODELS',
-        hint: 'Choose a provider first → then a model · ✓ marks the current choice',
-        groups,
-        expanded,
-        selected: pickerSelectionForCurrentModel(groups, expanded, currentGroup?.id),
-        onPick: (selection) => {
-          if (typeof selection !== 'string') void context.switchModel(selection);
-        },
-      });
       return ok();
     },
   },
 
   {
     name: 'effort',
-    concurrent: true,
-    args: '[low|medium|high|xhigh|max|ultra|ultracode|plif|default]',
+    args: '[effort]',
     summary: 'Show or change model reasoning effort',
+    autocomplete: {
+      getValues: ({ context, argumentIndex }) => {
+        if (argumentIndex !== 0) return [];
+        return ['default', ...(context.supportedEfforts?.() ?? EFFORT_LEVELS)];
+      },
+      getDetail: (value) => value === 'plif'
+        ? 'Plif signature mode · adaptive reasoning'
+        : value === 'default'
+          ? 'provider default'
+          : `${value} reasoning effort`,
+      getTone: (value) => value === 'plif' ? 'gold' : undefined,
+    },
     run: async (argv, context) => {
       const stored = await loadGlobalConfig();
       const current = stored.effort ?? 'default';
       const value = argv[0];
+      const available = [...new Set(context.supportedEfforts?.() ?? EFFORT_LEVELS)];
       if (!value) {
-        context.openPicker({
-          title: `Select effort · ${context.model?.info.id ?? 'current model'}`,
+          context.openPicker({
+            title: `Select effort · ${context.model?.info.id ?? 'current model'}`,
+          hint: 'model → effort · choose the reasoning energy for this model',
+          countLabel: 'efforts',
           items: [
             { value: 'default', label: 'Default', detail: 'let the provider choose', current: current === 'default' },
             ...effortPickerItems(context.supportedEfforts?.() ?? [], current === 'default' ? undefined : current as Effort),
           ],
-          selected: Math.max(0, (context.supportedEfforts?.() ?? []).indexOf(current as Effort)),
+          selected: current === 'default'
+            ? 0
+            : Math.max(0, (context.supportedEfforts?.() ?? []).indexOf(current as Effort) + 1),
           onPick: async (picked) => {
             await context.setEffort(picked === 'default' ? undefined : picked as Effort);
           },
         });
-        return ok(entry('notice', 'select reasoning effort', { tone: 'accent', subtitle: `current: ${effortLabel(current)}` }));
+        // The picker itself carries the title and active effort. Printing a
+        // second notice above it makes the menu look like a receipt instead
+        // of one deliberate temporary surface.
+        return ok();
       }
-      if (!['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode', 'plif', 'default'].includes(value)) {
-        throw new PlifError('INVALID_ARGUMENT', 'usage: /effort [low|medium|high|xhigh|max|ultra|ultracode|plif|default]');
-      }
-      if (value !== 'default' && context.supportedEfforts && !context.supportedEfforts().includes(value as Effort)) {
-        throw new PlifError('INVALID_ARGUMENT', `${value} is not supported by the selected model`);
-      }
-      await context.setEffort(value === 'default' ? undefined : value as Effort);
-      return ok(entry('notice', `effort: ${effortLabel(value)}`, {
-        tone: 'accent',
-        subtitle: 'conversation reset for the new model settings',
+      // A complete, valid value applies directly. The picker is for browsing;
+      // making someone who already typed `/effort plif` confirm it again is
+      // the interface second-guessing a decision it was just given.
+      const selected = validateEffortArgument(value, available);
+      await context.setEffort(selected === 'default' ? undefined : selected);
+      const isPlif = selected === 'plif';
+      return ok(entry('notice', `${isPlif ? '' : `${glyph.done}  `}effort    ${effortVisual(selected === 'default' ? undefined : selected).label}`, {
+        tone: isPlif ? 'gold' : 'accent',
+        subtitle: 'conversation preserved · applies to the next request',
       }));
     },
   },
@@ -1151,7 +1402,10 @@ export const COMMANDS: readonly Command[] = [
 ];
 
 export function findCommand(name: string): Command | null {
-  return COMMANDS.find((command) => command.name === name) ?? null;
+  const needle = name.toLowerCase();
+  return COMMANDS.find((command) =>
+    command.name === needle || command.aliases?.some((alias) => alias === needle),
+  ) ?? null;
 }
 
 /** Prefix completions for the tab key. */
@@ -1171,17 +1425,155 @@ export function matchCommands(partial: string): Command[] {
   const needle = partial.toLowerCase();
   if (needle === '') return [...COMMANDS];
 
-  const prefix = COMMANDS.filter((command) => command.name.startsWith(needle));
+  const prefix = COMMANDS.filter((command) =>
+    command.name.startsWith(needle) || command.aliases?.some((alias) => alias.startsWith(needle)),
+  );
   const contains = COMMANDS.filter(
-    (command) => !command.name.startsWith(needle) && command.name.includes(needle),
+    (command) =>
+      !command.name.startsWith(needle) &&
+      !command.aliases?.some((alias) => alias.startsWith(needle)) &&
+      (command.name.includes(needle) || command.aliases?.some((alias) => alias.includes(needle))),
   );
   return [...prefix, ...contains];
+}
+
+/** Whether a completion row is already the exact command being typed. */
+export function isExactCommandMatch(command: Command, typed: string): boolean {
+  const value = typed.toLowerCase();
+  return command.name === value || command.aliases?.includes(value) === true;
 }
 
 /** Return the command word while the user is typing a slash command. */
 export function commandPrefix(input: string): string | null {
   const match = /^\/([^\s]*)/.exec(input);
   return match ? match[1] ?? '' : null;
+}
+
+interface TokenSpan {
+  readonly value: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+function slashTokenSpans(input: string): TokenSpan[] {
+  const spans: TokenSpan[] = [];
+  let start = -1;
+  let quoted = false;
+
+  for (let index = 1; index <= input.length; index += 1) {
+    const char = input[index] ?? '';
+    if (char === '"' && start >= 0) quoted = !quoted;
+    const boundary = index === input.length || (!quoted && /\s/.test(char));
+    if (start < 0) {
+      if (index < input.length && !/\s/.test(char)) start = index;
+      continue;
+    }
+    if (boundary) {
+      const raw = input.slice(start, index);
+      spans.push({
+        value: raw.replace(/^"|"$/g, ''),
+        start,
+        end: index,
+      });
+      start = -1;
+      quoted = false;
+    }
+  }
+  return spans;
+}
+
+/**
+ * Find the argument token under the cursor and resolve its command metadata.
+ * The returned state deliberately includes an empty token after whitespace so
+ * `/effort ` can show every value without inventing a fake argv parser.
+ */
+export function matchArgumentCompletions(
+  input: string,
+  cursor: number,
+  context: CommandContext,
+): ArgumentCompletionState | null {
+  if (!input.startsWith('/')) return null;
+  const position = Math.max(0, Math.min(cursor, input.length));
+  const spans = slashTokenSpans(input);
+  const commandSpan = spans[0];
+  if (!commandSpan || position <= commandSpan.end) return null;
+
+  const command = findCommand(commandSpan.value);
+  if (!command?.autocomplete) return null;
+
+  const argumentSpans = spans.slice(1);
+  const activeIndex = argumentSpans.findIndex(
+    (span) => position >= span.start && position <= span.end,
+  );
+  const active = activeIndex >= 0 ? argumentSpans[activeIndex] : undefined;
+  const argumentIndex = activeIndex >= 0
+    ? activeIndex
+    : argumentSpans.filter((span) => span.end < position).length;
+  const tokenStart = active?.start ?? position;
+  const tokenEnd = active?.end ?? position;
+  const token = active?.value ?? '';
+  const completionContext: CommandArgumentCompletionContext = {
+    command,
+    context,
+    input,
+    cursor: position,
+    argv: tokenize(input.slice(commandSpan.end)),
+    argumentIndex,
+    token,
+    tokenStart,
+    tokenEnd,
+  };
+  const values = command.autocomplete.values ?? command.autocomplete.getValues?.(completionContext) ?? [];
+  const seen = new Set<string>();
+  const needle = token.toLowerCase();
+  const matches = values
+    .filter((value) => {
+      if (seen.has(value) || !value.toLowerCase().startsWith(needle)) return false;
+      seen.add(value);
+      return true;
+    })
+    .map((value): ArgumentCompletion => ({
+      value,
+      label: value,
+      ...(command.autocomplete?.getDetail
+        ? { detail: command.autocomplete.getDetail(value, completionContext) }
+        : {}),
+      ...(command.autocomplete?.getTone
+        ? { tone: command.autocomplete.getTone(value) }
+        : {}),
+    }));
+
+  return {
+    command,
+    input,
+    cursor: position,
+    argumentIndex,
+    token,
+    tokenStart,
+    tokenEnd,
+    matches,
+  };
+}
+
+export function longestCommonPrefix(values: readonly string[]): string {
+  const first = values[0] ?? '';
+  let length = first.length;
+  for (const value of values.slice(1)) {
+    length = Math.min(length, value.length);
+    let index = 0;
+    while (index < length && first[index]?.toLowerCase() === value[index]?.toLowerCase()) index += 1;
+    length = index;
+  }
+  return first.slice(0, length);
+}
+
+/** Return the text a TAB press can add without choosing an ambiguous value. */
+export function tabArgumentCompletion(state: ArgumentCompletionState): string | null {
+  if (state.matches.length === 0) return null;
+  const candidate = state.matches.length === 1
+    ? state.matches[0]!.value
+    : longestCommonPrefix(state.matches.map((match) => match.value));
+  return candidate.length > state.token.length ? candidate : null;
 }
 
 // ---------------------------------------------------------------------------

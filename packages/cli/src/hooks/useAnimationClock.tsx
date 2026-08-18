@@ -58,6 +58,14 @@ export interface AnimationClockProviderProps {
   readonly onTick?: () => void;
   /** Exposed for deterministic tests; the slow runtime cadence is 120 ms. */
   readonly intervalMs?: number;
+  /**
+   * Whether the fast clock advances. Defaults to `active`.
+   *
+   * Ambient focus (an idle breathing prompt, an open menu) needs the slow
+   * cadence only; keeping the 33 ms clock stopped then is what makes "alive
+   * at rest" cheap enough to leave on.
+   */
+  readonly fastActive?: boolean;
 }
 
 export function AnimationClockProvider({
@@ -66,11 +74,13 @@ export function AnimationClockProvider({
   plif = false,
   onTick,
   intervalMs = ANIMATION_INTERVAL_MS,
+  fastActive,
 }: AnimationClockProviderProps): React.ReactElement {
   const clock = useMemo(createAnimationClock, []);
   const fastClock = useMemo(createAnimationClock, []);
   const onTickRef = useRef(onTick);
   onTickRef.current = onTick;
+  const fastRuns = fastActive ?? active;
 
   useEffect(() => {
     if (!active) return;
@@ -78,15 +88,17 @@ export function AnimationClockProvider({
       clock.tick();
       onTickRef.current?.();
     }, Math.max(1, intervalMs));
-    const fastTimer = setInterval(() => fastClock.tick(), FAST_ANIMATION_INTERVAL_MS);
     // An animation must never keep a CLI process alive by itself.
     timer.unref?.();
-    fastTimer.unref?.();
+    const fastTimer = fastRuns
+      ? setInterval(() => fastClock.tick(), FAST_ANIMATION_INTERVAL_MS)
+      : null;
+    fastTimer?.unref?.();
     return () => {
       clearInterval(timer);
-      clearInterval(fastTimer);
+      if (fastTimer) clearInterval(fastTimer);
     };
-  }, [active, clock, fastClock, intervalMs]);
+  }, [active, fastRuns, clock, fastClock, intervalMs]);
 
   const value = useMemo(() => ({ clock, fastClock, plif }), [clock, fastClock, plif]);
   return (

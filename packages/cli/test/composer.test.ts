@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { ComposerHistory } from '../src/composer/history.js';
+import { materializePastedLine } from '../src/composer/paste.js';
 import {
   composerReducer,
   initialComposerState,
@@ -51,6 +52,22 @@ describe('composer state', () => {
 });
 
 describe('composer history', () => {
+  it('traverses A, B, C in both directions and restores the draft at the boundary', () => {
+    const history = new ComposerHistory();
+    history.record('A');
+    history.record('B');
+    history.record('C');
+
+    assert.equal(history.previous(''), 'C');
+    assert.equal(history.previous('C'), 'B');
+    assert.equal(history.previous('B'), 'A');
+    assert.equal(history.previous('A'), 'A');
+    assert.equal(history.next('A'), 'B');
+    assert.equal(history.next('B'), 'C');
+    assert.equal(history.next('C'), '');
+    assert.equal(history.next(''), '');
+  });
+
   it('restores the draft after leaving recalled history', () => {
     const history = new ComposerHistory();
     history.record('first');
@@ -97,5 +114,28 @@ describe('composer history', () => {
     assert.equal((await history.fetchPrevious(42))?.text, 'older');
     assert.equal((await history.fetchPrevious(42))?.text, 'older');
     assert.equal(calls, 1);
+  });
+});
+
+describe('large paste materialization', () => {
+  it('replaces visual tokens with the real payload in insertion order', () => {
+    const first = { kind: 'text' as const, token: '✧ Plif Pasted 2 lines', text: 'A\nB' };
+    const second = { kind: 'text' as const, token: '✧ Plif Pasted 1 line', text: 'C' };
+    const result = materializePastedLine(`before ${first.token} middle ${second.token}`, [first, second]);
+    assert.equal(result.text, 'before A\nB middle C');
+    assert.deepEqual(result.attachments, []);
+  });
+
+  it('does not consume image attachments while expanding text pastes', () => {
+    const image = {
+      kind: 'image' as const,
+      token: '[Pasted Image #1]',
+      path: 'image.png',
+      mediaType: 'image/png',
+      bytes: 1,
+    };
+    const result = materializePastedLine(image.token, [image]);
+    assert.equal(result.text, image.token);
+    assert.deepEqual(result.attachments, [image]);
   });
 });

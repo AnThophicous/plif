@@ -1,9 +1,9 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
-import { highlightedClusters, useHighlightClock } from '../pulse.js';
-import { color, formatCount, formatDuration, glyph, supportsRichGlyphs, truncate } from '../theme.js';
-import { PlifGlow } from './PlifGlow.js';
+import { activityGlyphAt, activityKindForLabel, activityVisual, GradientText } from '../activity-visuals.js';
+import { ANIMATION_INTERVAL_MS, useAnimationFrame } from '../hooks/useAnimationClock.js';
+import { color, formatCount, formatDuration, glyph, truncate } from '../theme.js';
 
 const VERBS = [
   'Parsing',
@@ -28,9 +28,6 @@ const VERBS = [
   'Resolving',
 ];
 
-const PULSE = supportsRichGlyphs ? ['•', '·', '•', '·'] : ['*', '+', '*', 'x'];
-const PLIF_MARK = supportsRichGlyphs ? '+' : '*';
-
 const TIPS = [
   'Esc cancels without killing the container',
   'Prefix a line with ! to run a shell command yourself',
@@ -41,7 +38,6 @@ const TIPS = [
 ];
 
 const VERB_EVERY_MS = 4_000;
-const PULSE_EVERY_MS = 360;
 const TIP_AFTER_MS = 12_000;
 
 export interface ThinkingProps {
@@ -59,13 +55,14 @@ export function Thinking({
   width,
   showTips = true,
 }: ThinkingProps): React.ReactElement {
-  const clock = useHighlightClock();
+  const clock = useAnimationFrame(true, 'slow');
 
   const elapsed = Date.now() - since;
   const verb =
     label ?? (VERBS[Math.floor(elapsed / VERB_EVERY_MS) % VERBS.length] as string);
-  const plif = verb === 'Plif Thinking';
-  const pulse = plif ? PLIF_MARK : PULSE[Math.floor(clock / PULSE_EVERY_MS) % PULSE.length] as string;
+  const kind = activityKindForLabel(verb);
+  const visual = activityVisual(kind);
+  const pulse = activityGlyphAt(kind, clock * ANIMATION_INTERVAL_MS);
 
   const parts = [formatDuration(elapsed)];
   if (tokens > 0) parts.push(`${glyph.tokens} ${formatCount(tokens)} tokens`);
@@ -79,21 +76,8 @@ export function Thinking({
     <Box flexDirection="column">
       <Box>
         <Text color={color('accent')}>{pulse} </Text>
-        {plif ? (
-          <>
-            <PlifGlow value={verb} elapsedMs={clock} />
-            <Text color={color('accent')}>…</Text>
-          </>
-        ) : (
-          <Text>
-            {highlightedClusters(verb, clock).map((part, index) => (
-              <Text key={index} color={part.color} bold={part.active}>
-                {part.text}
-              </Text>
-            ))}
-            <Text color={color('accent')}>…</Text>
-          </Text>
-        )}
+        <GradientText value={verb} from={visual.gradient[0]} to={visual.gradient[1]} bold />
+        <Text color={color('accent')}>…</Text>
         <Text color={color('ghost')}> ({parts.join(' · ')})</Text>
       </Box>
       {tip && (

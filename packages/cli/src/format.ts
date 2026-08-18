@@ -69,9 +69,11 @@ export function formatExecTag(result: ExecResult): string {
 /**
  * Render an error for the timeline.
  *
- * A PlifError carries a code and usually a hint, and both are worth showing: the
- * code is what a user searches for, and the hint is the next thing to do. A
- * foreign error gets its message and nothing invented on top.
+ * A PlifError carries a code and usually a hint. The hint is user-facing; the
+ * generic INVALID_ARGUMENT classification is deliberately kept out of the
+ * title because it adds noise to otherwise actionable command errors. Other
+ * codes remain visible for diagnosis. A foreign error gets its message and
+ * nothing invented on top.
  */
 export function formatError(error: unknown): { title: string; detail: string | undefined } {
   if (PlifError.is(error)) {
@@ -84,7 +86,7 @@ export function formatError(error: unknown): { title: string; detail: string | u
       );
     }
     return {
-      title: `${error.message}  (${error.code})`,
+      title: error.code === 'INVALID_ARGUMENT' ? error.message : `${error.message}  (${error.code})`,
       detail: lines.length ? lines.join('\n') : undefined,
     };
   }
@@ -154,8 +156,14 @@ export function sanitizePastedText(chunk: string): string {
 /** Compact, uniform UI representation of every clipboard payload. */
 export function pastedContentToken(index: number, text?: string): string {
   if (text === undefined) return `[Pasted Image #${index}]`;
-  const lines = text.split('\n').length;
-  return `[Pasted Content #${index} - ${lines} Lines]`;
+  const normalized = text.replace(/\r\n?/g, '\n');
+  const lines = normalized.length === 0
+    ? 0
+    : normalized.endsWith('\n')
+      ? normalized.slice(0, -1).split('\n').length
+      : normalized.split('\n').length;
+  const label = `${lines.toLocaleString('en-US')} ${lines === 1 ? 'line' : 'lines'}`;
+  return `${glyph.subtleSparkle} Plif Pasted ${label}`;
 }
 
 /** Last-resort paste detection for terminals that ignore bracketed paste: only a chunk carrying more than one line of content is a shape the keyboard cannot produce. */
@@ -163,7 +171,8 @@ export function isTerminalPaste(chunk: string): boolean {
   return sanitizePastedText(chunk).replace(/\n+$/, '').includes('\n');
 }
 
-export const PASTE_ATTACHMENT_MIN_CHARS = 500;
+/** 200 characters remain inline; 201 is the first compacted paste. */
+export const PASTE_ATTACHMENT_MIN_CHARS = 201;
 
 export function shouldAttachPastedText(text: string): boolean {
   return text.length >= PASTE_ATTACHMENT_MIN_CHARS;

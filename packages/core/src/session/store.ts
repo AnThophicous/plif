@@ -155,6 +155,12 @@ export class Session {
     this.#meta = await this.#store.closeMeta(this.#meta);
   }
 
+  /** Give a session a human title without touching its append-only transcript. */
+  async rename(title: string): Promise<void> {
+    await this.#queue;
+    this.#meta = await this.#store.renameMeta(this.#meta, title);
+  }
+
   read(): AsyncGenerator<ConversationEvent> {
     return this.#store.read(this.#meta);
   }
@@ -236,6 +242,13 @@ export class SessionStore {
   /** Internal: use `Session.close`. */
   async closeMeta(meta: SessionMeta): Promise<SessionMeta> {
     const next = { ...meta, closedAt: new Date().toISOString() };
+    await this.#writeMeta(next);
+    return next;
+  }
+
+  /** Internal: metadata-only mutation used by the session browser. */
+  async renameMeta(meta: SessionMeta, title: string): Promise<SessionMeta> {
+    const next = { ...meta, title: title.trim().slice(0, 160) };
     await this.#writeMeta(next);
     return next;
   }

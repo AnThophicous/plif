@@ -2,7 +2,6 @@ import React from 'react';
 import { Box, Text } from 'ink';
 
 import type { PendingQuestion } from '../session.js';
-import { breathingTone, useHighlightClock } from '../pulse.js';
 import { color, formatDuration, glyph, truncate } from '../theme.js';
 
 interface QuestionProps {
@@ -18,8 +17,6 @@ interface QuestionProps {
 
 const CONTEXT_PREVIEW = 3;
 const CONTEXT_EXPANDED = 12;
-const BREATH_FRAME_MS = 80;
-
 export function questionHeight(
   question: PendingQuestion,
   compact: boolean,
@@ -43,8 +40,9 @@ export function Question({
   compact = false,
   now,
 }: QuestionProps): React.ReactElement {
-  const clock = useHighlightClock(true, BREATH_FRAME_MS);
-  const highlight = breathingTone(clock, 'brand', 'accent');
+  // A question is a keyboard surface, not an activity spinner. Its selected
+  // row changes only on input, which keeps a long authorization wait quiet.
+  const highlight = color('accentBright');
   const options = question.options ?? [];
   const typing = selected < 0;
   const total = queued + 1;
@@ -86,11 +84,11 @@ export function Question({
               flexDirection="column"
               paddingX={1}
             >
-              <Text color={color(active ? 'text' : 'muted')} bold={active} backgroundColor={active ? '#29292d' : undefined}>
+              <Text color={color(active ? 'text' : 'muted')} bold={active} backgroundColor={active ? color('surface') : undefined}>
                 {index + 1}   <Text color={color(active ? 'accent' : 'ghost')}>○</Text> {truncate(option.label, inner - 7)}
               </Text>
               {option.description ? (
-                <Text color={color('ghost')} backgroundColor={active ? '#29292d' : undefined}>    {truncate(option.description, inner - 4)}</Text>
+                <Text color={color('ghost')} backgroundColor={active ? color('surface') : undefined}>    {truncate(option.description, inner - 4)}</Text>
               ) : null}
             </Box>
           );
@@ -100,7 +98,7 @@ export function Question({
           flexDirection="column"
           paddingX={1}
         >
-          <Text color={color(typing ? 'text' : 'muted')} bold={typing} backgroundColor={typing ? '#29292d' : undefined}>
+          <Text color={color(typing ? 'text' : 'muted')} bold={typing} backgroundColor={typing ? color('surface') : undefined}>
             z   <Text color={color(typing ? 'accent' : 'ghost')}>○</Text>{' '}
             {draft
               ? question.secret

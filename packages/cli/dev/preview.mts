@@ -31,6 +31,7 @@ import React from 'react';
 import { Engine, ProviderCapabilityCache } from '@plif/core';
 
 import { App } from '../src/app.js';
+import { detachImmediateInkResize } from '../src/terminal-resize.js';
 import { activateTheme, loadThemes } from '../src/themes.js';
 import { VERSION } from '../src/version.js';
 
@@ -141,6 +142,8 @@ class FakeStdin extends Readable {
  */
 type Step =
   | { type: string }
+  | { paste: string }
+  | { click: [number, number] }
   | { wait: number }
   | { capture: string }
   | { resize: [number, number] }
@@ -188,6 +191,23 @@ const SCENARIOS: Record<string, Step[]> = {
     { emit: ['agent.reasoning', { delta: 'Tracing the active theme and the shared animation clock.' }] },
     { wait: 600 },
     { capture: 'thinking-plif' },
+  ],
+
+  /** A real SGR mouse triple-click on the visual paste token. */
+  'pasted-popup': [
+    { wait: 200 },
+    {
+      paste: 'This is a pasted message with enough content to become a Plif Pasted attachment. It keeps the original lines so the popup can show the clipboard payload clearly and gives the preview a realistic clipboard body.\nThe second line stays available to the modal, which is why the visual token is compact while the popup keeps the complete message.\nA third line makes the interaction easy to inspect in a narrow terminal without changing the session or sending the message.',
+    },
+    { wait: 300 },
+    { click: [14, Math.max(1, rows - 6)] },
+    { click: [14, Math.max(1, rows - 6)] },
+    { click: [14, Math.max(1, rows - 6)] },
+    { wait: 300 },
+    { capture: 'pasted-popup' },
+    { type: '\u001b' },
+    { wait: 200 },
+    { capture: 'pasted-popup-closed-with-esc' },
   ],
 
   /** A compaction stage, without invoking a provider. */
@@ -251,6 +271,52 @@ const SCENARIOS: Record<string, Step[]> = {
     { type: 'deep' },
     { wait: 500 },
     { capture: 'filtro por provider e modelo' },
+  ],
+
+  /** The provider → model handoff, without a mascot or an oversized card. */
+  'providers-plif': [
+    { wait: 200 },
+    { type: '/providers\r' },
+    { wait: 600 },
+    { capture: 'provider picker' },
+    { type: '\r' },
+    { wait: 900 },
+    { capture: 'models scoped to the selected provider' },
+  ],
+
+  /** The effort scale stays bounded and exposes each level's descriptor. */
+  'effort-plif': [
+    { wait: 200 },
+    { type: '/effort\r' },
+    { wait: 600 },
+    { capture: 'effort hierarchy' },
+  ],
+
+  /**
+   * A typed, valid effort applies in place.
+   *
+   * The regression this watches for: `/effort plif` reopening the picker and
+   * asking for the same decision twice. The correct frame is one gold
+   * acknowledgement row and the signature wordmark, with no picker in sight.
+   */
+  'effort-plif-direct': [
+    { wait: 200 },
+    { type: '/effort plif' + '\r' },
+    { wait: 700 },
+    { capture: 'applied directly — no picker' },
+    { wait: 1200 },
+    { capture: 'wordmark settling' },
+  ],
+
+  /** The workspace session navigator, with real persisted metadata. */
+  sessions: [
+    { wait: 200 },
+    { type: '/sessions\r' },
+    { wait: 700 },
+    { capture: 'workspace sessions — list and detail' },
+    { type: '\u001b[B' },
+    { wait: 300 },
+    { capture: 'selected session detail' },
   ],
 
   /** The agent answering with markdown, tool rows, and the thinking line. */
@@ -342,6 +408,44 @@ const SCENARIOS: Record<string, Step[]> = {
     { resize: [Math.round(columnsArg * 1.4), rows] },
     { wait: 900 },
     { capture: 'depois de redimensionar' },
+  ],
+
+  /** Resize the whole interactive surface through the requested width cycle. */
+  'resize-cycle-plif': [
+    { wait: 250 },
+    { capture: 'idle at 120 columns' },
+    { type: '/' },
+    { wait: 200 },
+    { resize: [80, 28] },
+    { wait: 150 },
+    { capture: 'command menu at 80 columns' },
+    { resize: [40, 16] },
+    { wait: 150 },
+    { capture: 'command menu at 40 columns' },
+    { type: '\u001b' },
+    { type: 'draft text that must survive repeated terminal resizing' },
+    { resize: [100, 36] },
+    { wait: 200 },
+    { capture: 'draft preserved at 100 columns' },
+    {
+      emit: [
+        'agent.tool',
+        {
+          id: 'resize-stream',
+          name: 'run_command',
+          input: { command: 'npm test' },
+          phase: 'start',
+        },
+      ],
+    },
+    { emit: ['exec.start', { command: 'npm test' }] },
+    { emit: ['exec.output', { chunk: 'streamed line one\nstreamed line two\n' }] },
+    { resize: [72, 20] },
+    { resize: [110, 42] },
+    { resize: [64, 18] },
+    { resize: [100, 36] },
+    { wait: 300 },
+    { capture: 'streaming after rapid repeated resize' },
   ],
 
   /**
@@ -599,7 +703,7 @@ const SCENARIOS: Record<string, Step[]> = {
   ],
 
   /**
-   * The extension browser, against the live Claude marketplaces.
+   * The extension browser, against the live plugin marketplaces.
    *
    * Not stubbed: the catalogue is the whole point, and a fake one would pass on
    * a machine where the real fetch fails.
@@ -734,6 +838,14 @@ if (!steps) {
 const stdout = new FakeStdout(columns, rows);
 const stdin = new FakeStdin();
 
+// Commands inside a scenario read and write the real global config unless it
+// is pointed somewhere disposable. `/effort plif` in a preview once persisted
+// into the developer's own ~/.plif/config.toml; a preview harness must never
+// reach the user's machine state.
+const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
+process.env['PLIF_CONFIG_PATH'] = path.join(os.tmpdir(), `plif-preview-config-${Date.now()}.toml`);
+await fs.writeFile(process.env['PLIF_CONFIG_PATH'], '');
+
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-preview-'));
 const engine = new Engine({ root });
 const report = await engine.start();
@@ -751,11 +863,32 @@ const previewProvider = previewCheck.ok
   : null;
 const previewProblem = previewCheck.ok ? null : (previewCheck.problem ?? 'model is not configured');
 
+const previewSession = await engine.sessions.create(process.cwd());
+if (scenarioName === 'sessions') {
+  const examples = [
+    'PLIF experience refactor',
+    'Raw input mouse bug',
+    'Model navigator',
+  ];
+  for (const [index, title] of examples.entries()) {
+    const archived = await engine.sessions.create(process.cwd());
+    await archived.append({
+      kind: 'user',
+      at: new Date(Date.now() - (index + 1) * 45 * 60_000).toISOString(),
+      text: title,
+    });
+    await archived.close();
+  }
+}
+
+const resizeListenersBefore = new Set(
+  stdout.listeners('resize') as Array<(...args: unknown[]) => void>,
+);
 const app = render(React.createElement(App, {
     engine,
     report,
     cwd: process.cwd(),
-    session: await engine.sessions.create(process.cwd()),
+    session: previewSession,
     replay: [],
     version: VERSION,
     // Resolved the same way the real CLI resolves it, rather than gated on a
@@ -766,7 +899,9 @@ const app = render(React.createElement(App, {
     capabilityCache,
     // Plif visual scenarios are event-only; the model picker would obscure
     // the surface being previewed when this machine has no provider config.
-    providerProblem: scenarioName.endsWith('-plif') ? null : previewProblem,
+    providerProblem: scenarioName.endsWith('-plif') || scenarioName === 'model-catalog' || scenarioName === 'pasted-popup' || scenarioName === 'sessions'
+      ? null
+      : previewProblem,
     tools: (await import('@plif/core')).DEFAULT_TOOLS,
     skillCatalogue: '',
     mcpCatalogue: '',
@@ -778,11 +913,12 @@ const app = render(React.createElement(App, {
     initialThemeId: themeCatalogue.themes[0]?.id,
     themeCatalogue,
   }), {
-  stdout,
+  stdout: stdout as unknown as NodeJS.WriteStream,
   stdin: stdin as never,
   exitOnCtrlC: false,
   patchConsole: false,
 });
+detachImmediateInkResize(stdout as unknown as NodeJS.WriteStream, resizeListenersBefore);
 
 const CLEAR_TERMINAL = '[2J';
 
@@ -834,10 +970,11 @@ function firstFrame(): string {
  *
  * Telling a static write from a frame is done by content, not by escapes: the
  * first frame of a run carries no erase sequence either, so the escapes alone
- * are not a reliable signal. Every frame ends in the footer's key hints, and no
- * committed row ever contains them.
+ * are not a reliable signal. Every frame ends in the footer — key hints when a
+ * dialog owns the keyboard, the identity summary otherwise — and no committed
+ * row ever contains either.
  */
-const FOOTER_HINT = /(Enter|Esc|Ctrl\+C|Tab|y\/a|type):[a-z]/;
+const FOOTER_HINT = /(Enter|Esc|Ctrl\+C|Tab|y\/a|type):[a-z]|effort: (default|plif|low|medium|high|xhigh|max|ultra|ultracode)/;
 
 function scrollback(): string {
   return stdout.frames
@@ -853,6 +990,13 @@ for (const step of steps) {
   if ('wait' in step) await sleep(step.wait);
   else if ('capture' in step) captures.push({ label: step.capture, frame: latestFrame() });
   else if ('resize' in step) stdout.resize(step.resize[0], step.resize[1]);
+  else if ('paste' in step) {
+    stdin.send(`\u001b[200~${step.paste}\u001b[201~`);
+    await sleep(80);
+  } else if ('click' in step) {
+    stdin.send(`\u001b[<0;${step.click[0]};${step.click[1]}M`);
+    await sleep(80);
+  }
   else if ('emit' in step) {
     (engine.bus as unknown as { emit: (name: string, payload: unknown) => void }).emit(
       step.emit[0],
@@ -925,4 +1069,7 @@ await engine.shutdown();
 // Windows holds a handle briefly after the last writer closes, so a teardown
 // straight after a live run hits EBUSY on a directory that is about to be free.
 await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+await fs.rm(process.env['PLIF_CONFIG_PATH'], { force: true });
+if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
+else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
 process.exit(0);

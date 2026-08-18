@@ -28,7 +28,32 @@ class CaptureStdout extends EventEmitter {
 }
 
 describe('multiline prompt layout', () => {
-  it('renders the input inside the restored rounded frame', async () => {
+  it('shows only the placeholder when empty, without a decorative caret block', async () => {
+    const stdout = new CaptureStdout();
+    const app = render(
+      React.createElement(Prompt, {
+        value: '',
+        cursor: 0,
+        placeholder: 'describe a task, or / for commands',
+        focused: true,
+        busy: false,
+        busyLabel: '',
+        width: 64,
+      }),
+      {
+        stdout: stdout as unknown as NodeJS.WriteStream,
+        exitOnCtrlC: false,
+        patchConsole: false,
+      },
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    app.unmount();
+    const output = stdout.output.replace(ANSI, '').replace(/\r/g, '');
+    assert.match(output, /› describe a task, or \/ for commands/);
+    assert.doesNotMatch(stdout.output, /\u001b\[[0-9;]*48;/);
+  });
+
+  it('renders the input inside a compact rounded frame', async () => {
     const stdout = new CaptureStdout();
     const app = render(
       React.createElement(Prompt, {
@@ -50,8 +75,10 @@ describe('multiline prompt layout', () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 20));
     app.unmount();
     const output = stdout.output.replace(ANSI, '').replace(/\r/g, '');
-    assert.match(output, /❯ \//);
-    assert.match(output, /[\u256d\u256e\u2570\u2571\u2502]/);
+    assert.match(output, /› \//);
+    assert.match(output, /╭.*╮/);
+    assert.match(output, /│.*› \/.*│/);
+    assert.match(output, /╰.*╯/);
   });
 
   it('uses the whole available width before soft-wrapping', () => {
@@ -90,6 +117,6 @@ describe('multiline prompt layout', () => {
 
   it('counts frame, status, and queued rows instead of assuming a fixed prompt height', () => {
     assert.equal(promptHeight({ bodyRows: 1 }), 3);
-    assert.equal(promptHeight({ bodyRows: 2, footerRows: 2, queueRows: 3 }), 10);
+    assert.equal(promptHeight({ bodyRows: 2, footerRows: 2, queueRows: 3 }), 9);
   });
 });
