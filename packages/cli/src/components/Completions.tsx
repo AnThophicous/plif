@@ -22,6 +22,10 @@ interface CompletionsProps {
  * It renders *above* the prompt rather than below, so the prompt stays welded
  * to the bottom of the frame. A menu that pushes the input line down means the
  * place you are typing moves while you type, which is genuinely disorienting.
+ *
+ * The highlighted row is the one thing that changes when the user moves the
+ * selection. The menu itself is static while open: keyboard navigation should
+ * not subscribe the entire completion surface to an animation clock.
  */
 export function Completions({
   matches,
@@ -33,6 +37,8 @@ export function Completions({
   const isArgumentMenu = argumentMatches !== undefined;
   const argumentRows = argumentMatches ?? [];
   if (matches.length === 0 && argumentRows.length === 0) return null;
+
+  const caretTone = color('accentBright');
 
   // Cap the list and slide a window over it, keeping the selection visible.
   const rows = Math.max(1, maxRows);
@@ -46,18 +52,25 @@ export function Completions({
 
   return (
     <Box flexDirection="column" paddingX={layout.gutter + 1} marginBottom={0}>
+      {!isArgumentMenu && (
+        <>
+          <Text color={color('accent')} bold>Commands</Text>
+          <Text>{' '}</Text>
+        </>
+      )}
       {start > 0 && <Text color={color('ghost')}>  {glyph.pending} {start} above</Text>}
 
       {isArgumentMenu
         ? visibleArguments.map((match, index) => {
           const active = start + index === selected;
+          const nameTone = match.tone ?? (active ? 'text' : 'faint');
           return (
             <Box key={match.value}>
-              <Text color={color(active ? 'accent' : 'ghost')}>
+              <Text color={active ? caretTone : color('ghost')}>
                 {active ? glyph.caret : ' '}{' '}
               </Text>
               <Box width={nameWidth}>
-                <Text color={color(active ? 'text' : 'faint')} bold={active}>
+                <Text color={color(nameTone)} bold={active}>
                   {match.label}
                 </Text>
               </Box>
@@ -73,19 +86,21 @@ export function Completions({
         const active = start + index === selected;
         return (
           <Box key={command.name}>
-            <Text color={color(active ? 'accent' : 'ghost')}>
+            <Text color={active ? caretTone : color('ghost')}>
               {active ? glyph.caret : ' '}{' '}
             </Text>
             <Box width={nameWidth}>
-              <Text color={color(active ? 'text' : 'faint')} bold={active}>
+              <Text color={color(active ? 'accentBright' : 'muted')} bold={active}>
                 /{command.name}
               </Text>
             </Box>
+            {command.args && (
+              <Text color={color(active ? 'accentDim' : 'ghost')}>
+                {truncate(command.args, Math.max(6, Math.floor((width - nameWidth) / 3)))}{'  '}
+              </Text>
+            )}
             <Text color={color(active ? 'muted' : 'ghost')}>
-              {truncate(
-                command.args ? `${command.args}  ${command.summary}` : command.summary,
-                Math.max(10, width - nameWidth - 6),
-              )}
+              {truncate(command.summary, Math.max(10, width - nameWidth - (command.args ? command.args.length + 2 : 0) - 6))}
             </Text>
           </Box>
         );
@@ -97,6 +112,12 @@ export function Completions({
           {glyph.pending} {sourceLength - start - rows} more
         </Text>
       )}
+      <Text color={color('muted')}>
+        {truncate(
+          `  Tab:accept · ↑↓:choose · Enter:${isArgumentMenu ? 'accept' : 'run'} · Esc:dismiss`,
+          Math.max(8, width),
+        )}
+      </Text>
     </Box>
   );
 }
@@ -119,9 +140,9 @@ export function EmojiMenu({
   maxRows = 6,
 }: {
   matches: readonly { name: string; emoji: string }[];
-  selected: number;
-  width: number;
-  maxRows?: number;
+  readonly selected: number;
+  readonly width: number;
+  readonly maxRows?: number;
 }): React.ReactElement | null {
   if (matches.length === 0) return null;
 
@@ -153,6 +174,9 @@ export function EmojiMenu({
           {glyph.pending} {matches.length - start - rows} more
         </Text>
       )}
+      <Text color={color('muted')}>
+        {truncate('  Tab:insert · ↑↓:choose · Esc:dismiss', Math.max(8, width))}
+      </Text>
     </Box>
   );
 }

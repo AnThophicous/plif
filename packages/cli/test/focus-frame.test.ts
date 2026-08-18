@@ -36,7 +36,7 @@ class CaptureStdout extends EventEmitter {
 }
 
 async function renderConstrainedPrompt(): Promise<string> {
-  const stdout = new CaptureStdout(40, 9);
+  const stdout = new CaptureStdout(40, 14);
   const suggestions = React.createElement(
     Box,
     { flexDirection: 'column' },
@@ -45,7 +45,7 @@ async function renderConstrainedPrompt(): Promise<string> {
   const app = render(
     React.createElement(
       Box,
-      { flexDirection: 'column', width: 40, height: 9 },
+      { flexDirection: 'column', width: 40, height: 14 },
       React.createElement(Text, null, '~/project'),
       suggestions,
       React.createElement(Box, { flexGrow: 1 }),
@@ -171,18 +171,18 @@ describe('Plif focus frame', () => {
     });
 
     assert.equal(child.status, 0, child.stderr);
-    assert.deepEqual(JSON.parse(child.stdout), { rich: true, prompt: '❯' });
+    assert.deepEqual(JSON.parse(child.stdout), { rich: true, prompt: '›' });
   });
 
   it('keeps the typed row visible when command suggestions consume the spare height', async () => {
     const frame = await renderConstrainedPrompt();
-    assert.match(frame, /│ typed command\s+│/);
+    assert.match(frame, /╭─+╮[\s\S]*│ typed command\s+│[\s\S]*╰─+╯/);
   });
 
   it('fills a focused rule to the requested terminal width', () => {
     const rule = focusRule(42, 480, true);
     assert.equal(rule.map((cell) => cell.text).join('').length, 42);
-    assert.ok(new Set(rule.map((cell) => cell.color)).size > 1);
+    assert.equal(new Set(rule.map((cell) => cell.color)).size, 1);
   });
 
   it('holds the infinity shape still and animates it with light instead', () => {
@@ -218,12 +218,12 @@ describe('Plif focus frame', () => {
     assert.notDeepEqual(first, later);
   });
 
-  it('keeps Plif frame geometry stable while the semantic wave travels', () => {
+  it('keeps the active input frame solid instead of drawing an accidental gradient', () => {
     const first = focusRule(42, 0, true, 'top', true);
     const later = focusRule(42, 900, true, 'top', true);
 
     assert.equal(first.map((cell) => cell.text).join(''), later.map((cell) => cell.text).join(''));
-    assert.notDeepEqual(first.map((cell) => cell.color), later.map((cell) => cell.color));
+    assert.deepEqual(first.map((cell) => cell.color), later.map((cell) => cell.color));
   });
 
   it('uses a distinct animated frame identity for each high-impact effort', () => {

@@ -51,6 +51,7 @@ export interface TranscriptState {
 }
 
 export type TranscriptAction =
+  | { readonly type: 'replace'; readonly events: readonly import('@plif/core').ConversationEvent[] }
   | { readonly type: 'event'; readonly event: import('@plif/core').ConversationEvent }
   | {
       readonly type: 'assistant.frame';

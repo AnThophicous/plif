@@ -116,6 +116,10 @@ test('/model can request a missing provider key from the mounted app', async () 
       () => stdout.output.includes('describe a task, or / for commands'),
       `app prompt did not mount\n${stdout.output}`,
     );
+    // The first paint and ink's stdin attachment are separate effects, and
+    // keystrokes pushed into the gap are dropped silently. Let the mount
+    // settle before typing.
+    await new Promise<void>((resolve) => setTimeout(resolve, 300));
     await stdin.type('/model z-ai/glm-5.2\r');
     await Promise.race([
       askedPromise,

@@ -20,7 +20,7 @@ describe('Ink frame hierarchy', () => {
     assert.equal(source.match(/^\s*<Static\b/gm)?.length, 1);
     assert.doesNotMatch(source, /SessionHeader/);
     assert.doesNotMatch(source, /InfinityMark/);
-    assert.match(source, /import \{ Header \} from '\.\/components\/Header\.js'/);
+    assert.match(source, /import \{ Header(?:, headerHeight)? \} from '\.\/components\/Header\.js'/);
     assert.equal(source.match(/^\s*<Header\b/gm)?.length, 1);
     assert.match(source, /paddingX=\{surface\.panelPaddingX\}/);
     assert.doesNotMatch(source, /<TerminalSurface\b/);

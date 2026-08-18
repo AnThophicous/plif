@@ -20,6 +20,7 @@ import {
   modelVisionBadge,
   rankFacts,
   rankModelIds,
+  providerIdForConfig,
   supportedEfforts,
   strategyStatus,
   userCatalog,
@@ -48,10 +49,9 @@ import {
 } from '@plif/core';
 
 import { formatCapabilities, tokenize } from './format.js';
-import { effortDisplay } from './effort-visuals.js';
+import { effortDisplay, effortVisual } from './effort-visuals.js';
 import {
   effortPickerItems,
-  pickerSelectionForCurrentModel,
 } from './components/Picker.js';
 import { formatStatus } from './status.js';
 import type { StatusInput } from './status.js';
@@ -59,7 +59,7 @@ import type { PickerGroup, PickerItem } from './components/Picker.js';
 
 import { entry } from './session.js';
 import type { BrowserTab, TimelineEntry } from './session.js';
-import { formatBytes, formatDuration, glyph, shortenPath } from './theme.js';
+import { formatBytes, formatDuration, glyph, shortenPath, type PaletteKey } from './theme.js';
 import { containerMount, containerWorkdir } from './container-paths.js';
 import type { ThemeDefinition } from './themes.js';
 
@@ -113,17 +113,23 @@ export interface CommandContext {
 export interface FlatPickerRequest {
   readonly title: string;
   readonly hint?: string;
+  readonly countLabel?: string;
   readonly items: readonly PickerItem[];
   readonly onPick: (value: string | ModelSelection) => void;
+  /** Initial keyboard position; defaults to the first visible row. */
+  readonly selected?: number;
+  readonly onBack?: () => void;
 }
 
 export interface CatalogPickerRequest {
   readonly title: string;
   readonly hint?: string;
+  readonly countLabel?: string;
   readonly groups: readonly PickerGroup[];
   readonly expanded: readonly string[];
   readonly selected: number;
   readonly onPick: (selection: string | ModelSelection) => void;
+  readonly onBack?: () => void;
 }
 
 export interface CommandArgumentCompletionContext {
@@ -147,12 +153,15 @@ export interface CommandAutocomplete {
     value: string,
     context: CommandArgumentCompletionContext,
   ) => string | undefined;
+  /** Row tone for a value that carries visual identity, e.g. the PLIF signature. */
+  readonly getTone?: (value: string) => PaletteKey | undefined;
 }
 
 export interface ArgumentCompletion {
   readonly value: string;
   readonly label: string;
   readonly detail?: string;
+  readonly tone?: PaletteKey;
 }
 
 export interface ArgumentCompletionState {
@@ -172,6 +181,8 @@ export interface CommandResult {
 
 export interface Command {
   readonly name: string;
+  /** Older spellings remain dispatchable without creating duplicate menu rows. */
+  readonly aliases?: readonly string[];
   readonly args?: string;
   readonly summary: string;
   readonly concurrent?: boolean;
@@ -300,22 +311,164 @@ function prettyModelId(id: string): string {
   return id.slice(id.lastIndexOf('/') + 1).replace(/[-_]+/g, ' ');
 }
 
-/** Keep several provider catalogues moving without creating one unbounded wave. */
-async function mapWithConcurrency<T, R>(
-  values: readonly T[],
-  limit: number,
-  work: (value: T) => Promise<R>,
-): Promise<R[]> {
-  const result: R[] = [];
-  let cursor = 0;
-  const worker = async (): Promise<void> => {
-    while (cursor < values.length) {
-      const index = cursor++;
-      result[index] = await work(values[index]!);
-    }
+interface ProviderSource {
+  readonly entryProvider: ModelCatalogProvider;
+  readonly section: string;
+}
+
+function providerSources(stored: StoredConfig): ProviderSource[] {
+  const mine = userCatalog(stored);
+  return [
+    ...mine.map((entryProvider) => ({ entryProvider, section: 'your providers' })),
+    ...builtInPickerProviders(mine).map((entryProvider) => ({ entryProvider, section: 'built into PLIF' })),
+  ];
+}
+
+interface ModelRowData {
+  readonly id: string;
+  readonly label: string;
+  readonly description: string;
+  readonly badges: readonly string[];
+}
+
+function modelRowItem(
+  source: ModelCatalogProvider,
+  model: ModelRowData,
+  currentProvider: string | undefined,
+  currentModel: string | undefined,
+  hasVisionHelper: boolean,
+): PickerItem {
+  const candidate: ModelCatalogModel = {
+    id: model.id,
+    label: model.label,
+    description: model.description,
+    badges: model.badges,
   };
-  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, () => worker()));
-  return result;
+  const badges = pickerBadges(candidate, hasVisionHelper);
+  const capabilities = badges.filter((badge) => !['no key', 'key needed'].includes(badge));
+  const auth = source.anonymous || badges.includes('no key')
+    ? 'no key'
+    : source.origin === 'user' || source.id === currentProvider
+      ? 'configured'
+      : 'key required';
+  const current = source.id === currentProvider && model.id === currentModel;
+  return {
+    value: `${source.id}:${model.id}`,
+    label: model.label,
+    detail: model.description,
+    badges,
+    current,
+    provider: source.label,
+    capabilities,
+    context: '—',
+    auth,
+    searchText: [source.id, source.label, model.id, model.description, ...badges].join(' '),
+    selection: { preset: source.id, model: model.id },
+  };
+}
+
+/**
+ * Model-first catalog. Only the active provider is discovered live; every
+ * other row comes from the registry and stays cheap to open. Enter still
+ * carries the exact provider/model pair, so duplicate model names are safe.
+ */
+async function openModelPicker(
+  context: CommandContext,
+  stored: StoredConfig,
+  sources: readonly ProviderSource[],
+  currentProvider: string | undefined,
+  currentModel: string | undefined,
+  title: string,
+  hint: string,
+  onBack?: () => void,
+): Promise<void> {
+  const activeSource = sources.find(({ entryProvider }) => entryProvider.id === currentProvider);
+  const activeGroup = activeSource
+    ? await providerGroup(activeSource.entryProvider, 'active', currentModel, stored, context.credentials)
+    : undefined;
+  const hasVisionHelper = visionCandidates(stored).length > 0;
+  const items: PickerItem[] = [];
+
+  for (const source of sources) {
+    const rows: readonly ModelRowData[] = source.entryProvider.id === currentProvider && activeGroup
+      ? activeGroup.items.map((item) => ({
+          id: item.value,
+          label: item.label,
+          description: item.detail ?? item.value,
+          badges: item.badges ?? [],
+        }))
+      : source.entryProvider.models;
+    for (const model of rows) {
+      items.push(modelRowItem(source.entryProvider, model, currentProvider, currentModel, hasVisionHelper));
+    }
+  }
+
+  context.openPicker({
+    title,
+    hint,
+    countLabel: 'models',
+    items,
+    selected: Math.max(0, items.findIndex((item) => item.current)),
+    onPick: (selection) => {
+      if (typeof selection !== 'string') void context.switchModel(selection);
+    },
+    ...(onBack ? { onBack } : {}),
+  });
+}
+
+function providerPickerItems(
+  sources: readonly ProviderSource[],
+  activeProvider: string | undefined,
+): PickerItem[] {
+  return sources.map(({ entryProvider }) => {
+    const auth = entryProvider.anonymous
+      ? 'no key'
+      : entryProvider.origin === 'user' || entryProvider.id === activeProvider
+        ? 'configured'
+        : 'key required';
+    return {
+      value: entryProvider.id,
+      label: entryProvider.label,
+      detail: entryProvider.description,
+      badges: [entryProvider.origin === 'user' ? 'custom' : 'built-in', auth],
+      current: entryProvider.id === activeProvider,
+      searchText: [entryProvider.id, entryProvider.label, entryProvider.description, auth].join(' '),
+    };
+  });
+}
+
+async function openProviderPicker(
+  context: CommandContext,
+  stored: StoredConfig,
+  sources: readonly ProviderSource[],
+  onBack?: () => void,
+): Promise<void> {
+  const activeProvider = providerIdForConfig(stored) ?? undefined;
+  const activeLabel = sources.find(({ entryProvider }) => entryProvider.id === activeProvider)?.entryProvider.label;
+  const items = providerPickerItems(sources, activeProvider);
+  context.openPicker({
+    title: 'Select provider',
+    hint: `active: ${activeLabel ?? 'none'} · Enter opens its models`,
+    countLabel: 'providers',
+    items,
+    selected: Math.max(0, items.findIndex((item) => item.current)),
+    onPick: (value) => {
+      const selected = sources.find(({ entryProvider }) => entryProvider.id === String(value))?.entryProvider;
+      if (!selected) return;
+      const sameProvider = selected.id === activeProvider;
+      void openModelPicker(
+        context,
+        stored,
+        [{ entryProvider: selected, section: 'selected provider' }],
+        selected.id,
+        sameProvider ? context.model?.info.id : undefined,
+        `Provider / ${selected.label}`,
+        `${selected.description} · select a model · Esc returns to providers`,
+        () => { void openProviderPicker(context, stored, sources, onBack); },
+      );
+    },
+    ...(onBack ? { onBack } : {}),
+  });
 }
 
 export const COMMANDS: readonly Command[] = [
@@ -378,7 +531,7 @@ export const COMMANDS: readonly Command[] = [
     name: 'mcp',
     concurrent: true,
     args: '[<server> login]',
-    summary: 'Browse MCP servers, skills, and the Claude plugin marketplace',
+    summary: 'Browse MCP servers, skills, and the plugin marketplace',
     /**
      * Both word orders are accepted. `/mcp github login` reads as a sentence
      * and `/mcp login github` is the shape every other CLI uses; guessing
@@ -494,6 +647,15 @@ export const COMMANDS: readonly Command[] = [
     },
   },
   {
+    name: 'sessions',
+    concurrent: true,
+    summary: 'Browse and resume conversations in this workspace',
+    run: async (_argv, context) => {
+      context.openBrowser('sessions');
+      return ok();
+    },
+  },
+  {
     name: 'skills',
     concurrent: true,
     summary: 'The same browser, opened on the skills tab',
@@ -513,7 +675,7 @@ export const COMMANDS: readonly Command[] = [
   {
     name: 'marketplace',
     concurrent: true,
-    summary: 'Open the browser straight on the Claude plugin catalogue',
+    summary: 'Open the browser straight on the plugin catalogue',
     run: async (_argv, context) => {
       context.openBrowser('marketplace');
       return ok();
@@ -795,8 +957,20 @@ export const COMMANDS: readonly Command[] = [
   },
 
   {
-    name: 'model',
-    concurrent: true,
+    name: 'providers',
+    aliases: ['provider'],
+    summary: 'Choose a provider, then one of its models',
+    run: async (_argv, context) => {
+      const stored = (await loadGlobalConfig().catch(() => ({}))) as StoredConfig;
+      const sources = providerSources(stored);
+      await openProviderPicker(context, stored, sources);
+      return ok();
+    },
+  },
+
+  {
+    name: 'models',
+    aliases: ['model'],
     args: '[id]',
     summary: 'Show the model, or pick a different one',
     autocomplete: {
@@ -811,49 +985,34 @@ export const COMMANDS: readonly Command[] = [
     },
     run: async (argv, context) => {
       if (argv[0]) {
+        // A complete model id applies directly, exactly like `/effort plif`:
+        // the picker is for browsing, not for confirming a typed decision.
+        // `switchModel` reports the switch itself, so there is no second row.
         await context.switchModel(argv[0]);
-        return ok(entry('notice', `switched to ${argv[0]}`, { tone: 'accent' }));
+        return ok();
       }
 
       // Opening the catalog is deliberately independent of the global config:
       // a malformed config or missing key must not hide the model chooser.
       const currentModel = context.model?.info.id;
       const stored = (await loadGlobalConfig().catch(() => ({}))) as StoredConfig;
-
-      // The developer's own providers come first, and under their own heading.
-      // Somebody who wrote an endpoint into their config should find it at the
-      // top, not somewhere inside a list of things Plif happens to ship.
-      const mine = userCatalog(stored);
-      const providers = [
-        ...mine.map((entryProvider) => ({ entryProvider, section: 'your providers' })),
-        ...builtInPickerProviders(mine).map((entryProvider) => ({ entryProvider, section: 'built into PLIF' })),
-      ];
-      const groups: PickerGroup[] = await mapWithConcurrency(providers, 3, ({ entryProvider, section }) =>
-        providerGroup(entryProvider, section, currentModel, stored, context.credentials),
+      const currentProvider = providerIdForConfig(stored) ?? undefined;
+      const currentEffort = stored.effort ? effortDisplay(stored.effort) : 'Default';
+      await openModelPicker(
+        context,
+        stored,
+        providerSources(stored),
+        currentProvider,
+        currentModel,
+        'Select model',
+        `active: ${currentModel ?? 'none'} · effort ${currentEffort} · type a model, provider, capability, or alias`,
       );
-
-      const currentGroup = groups.find((group) =>
-        group.items.some((item) => item.current),
-      );
-      const expanded = currentGroup ? [currentGroup.id] : [];
-
-      context.openPicker({
-        title: 'select a provider and model',
-        hint: '[vision] reads images directly · [vision helper] delegates through inspect_image',
-        groups,
-        expanded,
-        selected: pickerSelectionForCurrentModel(groups, expanded, currentGroup?.id),
-        onPick: (selection) => {
-          if (typeof selection !== 'string') void context.switchModel(selection);
-        },
-      });
       return ok();
     },
   },
 
   {
     name: 'effort',
-    concurrent: true,
     args: '[effort]',
     summary: 'Show or change model reasoning effort',
     autocomplete: {
@@ -866,6 +1025,7 @@ export const COMMANDS: readonly Command[] = [
         : value === 'default'
           ? 'provider default'
           : `${value} reasoning effort`,
+      getTone: (value) => value === 'plif' ? 'gold' : undefined,
     },
     run: async (argv, context) => {
       const stored = await loadGlobalConfig();
@@ -873,23 +1033,34 @@ export const COMMANDS: readonly Command[] = [
       const value = argv[0];
       const available = [...new Set(context.supportedEfforts?.() ?? EFFORT_LEVELS)];
       if (!value) {
-        context.openPicker({
-          title: `Select effort · ${context.model?.info.id ?? 'current model'}`,
+          context.openPicker({
+            title: `Select effort · ${context.model?.info.id ?? 'current model'}`,
+          hint: 'model → effort · choose the reasoning energy for this model',
+          countLabel: 'efforts',
           items: [
             { value: 'default', label: 'Default', detail: 'let the provider choose', current: current === 'default' },
             ...effortPickerItems(context.supportedEfforts?.() ?? [], current === 'default' ? undefined : current as Effort),
           ],
-          selected: Math.max(0, (context.supportedEfforts?.() ?? []).indexOf(current as Effort)),
+          selected: current === 'default'
+            ? 0
+            : Math.max(0, (context.supportedEfforts?.() ?? []).indexOf(current as Effort) + 1),
           onPick: async (picked) => {
             await context.setEffort(picked === 'default' ? undefined : picked as Effort);
           },
         });
-        return ok(entry('notice', 'select reasoning effort', { tone: 'accent', subtitle: `current: ${effortDisplay(current === 'default' ? undefined : current)}` }));
+        // The picker itself carries the title and active effort. Printing a
+        // second notice above it makes the menu look like a receipt instead
+        // of one deliberate temporary surface.
+        return ok();
       }
+      // A complete, valid value applies directly. The picker is for browsing;
+      // making someone who already typed `/effort plif` confirm it again is
+      // the interface second-guessing a decision it was just given.
       const selected = validateEffortArgument(value, available);
       await context.setEffort(selected === 'default' ? undefined : selected);
-      return ok(entry('notice', `effort: ${effortDisplay(value)}`, {
-        tone: 'accent',
+      const isPlif = selected === 'plif';
+      return ok(entry('notice', `${isPlif ? '' : `${glyph.done}  `}effort    ${effortVisual(selected === 'default' ? undefined : selected).label}`, {
+        tone: isPlif ? 'gold' : 'accent',
         subtitle: 'conversation preserved · applies to the next request',
       }));
     },
@@ -1231,7 +1402,10 @@ export const COMMANDS: readonly Command[] = [
 ];
 
 export function findCommand(name: string): Command | null {
-  return COMMANDS.find((command) => command.name === name) ?? null;
+  const needle = name.toLowerCase();
+  return COMMANDS.find((command) =>
+    command.name === needle || command.aliases?.some((alias) => alias === needle),
+  ) ?? null;
 }
 
 /** Prefix completions for the tab key. */
@@ -1251,11 +1425,22 @@ export function matchCommands(partial: string): Command[] {
   const needle = partial.toLowerCase();
   if (needle === '') return [...COMMANDS];
 
-  const prefix = COMMANDS.filter((command) => command.name.startsWith(needle));
+  const prefix = COMMANDS.filter((command) =>
+    command.name.startsWith(needle) || command.aliases?.some((alias) => alias.startsWith(needle)),
+  );
   const contains = COMMANDS.filter(
-    (command) => !command.name.startsWith(needle) && command.name.includes(needle),
+    (command) =>
+      !command.name.startsWith(needle) &&
+      !command.aliases?.some((alias) => alias.startsWith(needle)) &&
+      (command.name.includes(needle) || command.aliases?.some((alias) => alias.includes(needle))),
   );
   return [...prefix, ...contains];
+}
+
+/** Whether a completion row is already the exact command being typed. */
+export function isExactCommandMatch(command: Command, typed: string): boolean {
+  const value = typed.toLowerCase();
+  return command.name === value || command.aliases?.includes(value) === true;
 }
 
 /** Return the command word while the user is typing a slash command. */
@@ -1352,6 +1537,9 @@ export function matchArgumentCompletions(
       label: value,
       ...(command.autocomplete?.getDetail
         ? { detail: command.autocomplete.getDetail(value, completionContext) }
+        : {}),
+      ...(command.autocomplete?.getTone
+        ? { tone: command.autocomplete.getTone(value) }
         : {}),
     }));
 

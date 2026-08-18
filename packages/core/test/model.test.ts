@@ -40,7 +40,7 @@ import {
   rankModelIds,
   userCatalog,
 } from '../src/model/catalog.js';
-import { forgetProviderKey, supportedEfforts } from '../src/model/config.js';
+import { EFFORT_LEVELS, forgetProviderKey, supportedEfforts } from '../src/model/config.js';
 import { anthropicWireEffort } from '../src/model/anthropic.js';
 import { OpenAIProvider } from '../src/model/openai.js';
 import { collect } from '../src/model/provider.js';
@@ -54,10 +54,16 @@ describe('config precedence', () => {
   });
 
   it('limits the highest effort levels to the providers that support them', () => {
-    assert.ok(supportedEfforts(PRESETS.anthropic.baseURL, 'claude-opus-5').includes('ultracode'));
-    assert.ok(!supportedEfforts(PRESETS.openai.baseURL, 'gpt-4.1').includes('ultra'));
-    assert.ok(supportedEfforts(PRESETS.openai.baseURL, 'gpt-sol-5.6').includes('ultra'));
-    assert.ok(!supportedEfforts(PRESETS.openai.baseURL, 'gpt-terra').includes('ultra'));
+    assert.deepEqual(EFFORT_LEVELS, ['low', 'medium', 'high', 'xhigh', 'ultra', 'ultracode', 'max', 'plif']);
+    assert.deepEqual(supportedEfforts(PRESETS.anthropic.baseURL, 'claude-opus-5'), [
+      'low', 'medium', 'high', 'xhigh', 'ultracode', 'max', 'plif',
+    ]);
+    assert.deepEqual(supportedEfforts(PRESETS.openai.baseURL, 'gpt-sol-5.6'), [
+      'low', 'medium', 'high', 'xhigh', 'ultra', 'max', 'plif',
+    ]);
+    assert.deepEqual(supportedEfforts(PRESETS.openai.baseURL, 'gpt-4.1'), [
+      'low', 'medium', 'high', 'xhigh', 'max', 'plif',
+    ]);
   });
 
   it('removes a rejected provider credential without touching other providers', () => {

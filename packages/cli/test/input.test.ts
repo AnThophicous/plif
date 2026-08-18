@@ -26,12 +26,13 @@ import {
   commandPrefix,
   completeCommand,
   findCommand,
+  isExactCommandMatch,
   matchArgumentCompletions,
   matchCommands,
   tabArgumentCompletion,
   COMMANDS,
 } from '../src/commands.js';
-import type { CatalogPickerRequest, CommandContext } from '../src/commands.js';
+import type { FlatPickerRequest, CommandContext } from '../src/commands.js';
 import {
   ALL_SUFFIX,
   PICKER_GROUP_PAGE,
@@ -78,6 +79,12 @@ describe('command completion input', () => {
     assert.deepEqual(matchCommands(commandPrefix('/model --') ?? ''), [findCommand('model')]);
     assert.equal(commandPrefix('plain text'), null);
     assert.deepEqual(completeCommand('eff'), ['effort']);
+  });
+
+  it('does not treat an exact one-row command completion as arrow navigation', () => {
+    const effort = findCommand('effort')!;
+    assert.equal(isExactCommandMatch(effort, 'effort'), true);
+    assert.equal(isExactCommandMatch(effort, 'eff'), false);
   });
 
   it('completes a unique effort argument from the active model capability', () => {
@@ -156,7 +163,9 @@ describe('splitPaste', () => {
 
   it('keeps complete pasted text available for an attachment', () => {
     assert.equal(sanitizePastedText('one\r\ntwo\u001b[31m'), 'one\ntwo[31m');
-    assert.equal(pastedContentToken(1, 'one\ntwo'), '[Pasted Content #1 - 2 Lines]');
+    assert.equal(pastedContentToken(1, 'one\ntwo'), '✧ Plif Pasted 2 lines');
+    assert.equal(pastedContentToken(2, 'one\r\ntwo\r\n'), '✧ Plif Pasted 2 lines');
+    assert.equal(pastedContentToken(3, 'one'), '✧ Plif Pasted 1 line');
     assert.equal(pastedContentToken(2), '[Pasted Image #2]');
   });
 });
@@ -173,10 +182,12 @@ describe('when a paste becomes an attachment', () => {
     assert.equal(shouldAttachPastedText('x'.repeat(PASTE_ATTACHMENT_MIN_CHARS + 1)), true);
   });
 
-  it('measures characters, not lines, so a short multi-line paste stays inline', () => {
-    assert.equal(PASTE_ATTACHMENT_MIN_CHARS, 500);
+  it('uses the character threshold even when a paste has multiple lines', () => {
+    assert.equal(PASTE_ATTACHMENT_MIN_CHARS, 201);
+    assert.equal(shouldAttachPastedText('x'.repeat(200)), false);
+    assert.equal(shouldAttachPastedText('x'.repeat(201)), true);
     assert.equal(shouldAttachPastedText('one\ntwo\nthree\nfour'), false);
-    assert.equal(shouldAttachPastedText(Array.from({ length: 60 }, () => 'line').join('\n')), false);
+    assert.equal(shouldAttachPastedText(Array.from({ length: 60 }, () => 'line').join('\n')), true);
   });
 });
 
@@ -496,7 +507,7 @@ describe('model catalog picker', () => {
   });
 
   it('opens the catalog when no provider is loaded', async () => {
-    let picker: CatalogPickerRequest | undefined;
+    let picker: FlatPickerRequest | undefined;
     const context: CommandContext = {
       engine: {} as Engine,
       current: null,
@@ -509,31 +520,21 @@ describe('model catalog picker', () => {
       switchModel: async () => undefined,
       setEffort: async () => undefined,
       openPicker: (request) => {
-        if ('groups' in request) picker = request;
+        if ('items' in request) picker = request;
       },
     };
 
     const result = await findCommand('model')!.run([], context);
 
     assert.deepEqual(result.entries, []);
-    // Nothing is expanded and nothing is pre-selected: with no model loaded
-    // there is no "current" provider to open, and Plif has no default to
-    // suggest one.
-    assert.deepEqual(picker?.expanded, []);
+    // `/models` is model-first: it is flat, searchable, and carries the
+    // provider identity on each row instead of forcing a provider expansion.
+    assert.equal(picker?.countLabel, 'models');
     assert.equal(picker?.selected, 0);
-    assert.match(picker?.hint ?? '', /\[vision\].*\[vision helper\]/);
-
-    // The developer's own providers, if they have any, sort ahead of the
-    // built-in ones and carry a different heading. This machine may have none,
-    // so the assertion is on the ordering rule rather than on a count.
-    const sections = picker!.groups.map((group) => group.section);
-    const firstBuiltin = sections.indexOf('built into PLIF');
-    assert.ok(firstBuiltin >= 0);
-    assert.ok(sections.slice(0, firstBuiltin).every((s) => s === 'your providers'));
-    assert.ok(sections.slice(firstBuiltin).every((s) => s === 'built into PLIF'));
-
-    const anthropic = picker!.groups.find((group) => group.id === 'anthropic');
-    assert.equal(anthropic?.items[0]?.value, 'claude-opus-5');
+    assert.match(picker?.hint ?? '', /type a model, provider, capability, or alias/);
+    assert.ok(picker?.items?.every((item) => item.provider));
+    assert.ok(picker?.items?.some((item) => item.provider === 'Claude (Anthropic)'));
+    assert.ok(picker?.items?.some((item) => item.value === 'anthropic:claude-opus-5'));
   });
 
   it('labels the internal adaptive effort as PLIF and marks the active effort', () => {
@@ -543,11 +544,13 @@ describe('model catalog picker', () => {
       effortPickerItems(['low', 'plif'], 'plif').map((item) => ({
         value: item.value,
         label: item.label,
+        tone: item.tone,
+        detail: item.detail,
         current: item.current,
       })),
       [
-        { value: 'low', label: 'Low', current: false },
-        { value: 'plif', label: 'PLIF', current: true },
+        { value: 'low', label: 'Low', tone: 'faint', detail: 'light touch', current: false },
+        { value: 'plif', label: 'PLIF', tone: 'gold', detail: 'PLIF signature mode · adaptive reasoning', current: true },
       ],
     );
   });

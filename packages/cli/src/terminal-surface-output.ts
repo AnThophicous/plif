@@ -1,3 +1,5 @@
+import stringWidth from 'string-width';
+
 type WriteCallback = (error?: Error | null) => void;
 
 export interface TerminalSurfaceStream {
@@ -33,6 +35,16 @@ interface InkErasePrefix {
   readonly lines: number;
 }
 
+interface FrameDimensions {
+  readonly columns: number;
+  readonly rows: number;
+}
+
+interface MeasuredFrame {
+  readonly rows: readonly string[];
+  readonly dimensions: FrameDimensions;
+}
+
 /**
  * Ink's log-update writes `eraseLines(previousLineCount) + frame`. The
  * default implementation erases every live row before writing the next one,
@@ -57,6 +69,33 @@ function inkErasePrefix(value: string): InkErasePrefix | null {
 function frameRows(value: string): readonly string[] | null {
   if (!value.endsWith('\n')) return null;
   return value.slice(0, -1).split('\n');
+}
+
+function streamDimensions(stream: TerminalSurfaceStream): FrameDimensions {
+  const columns = Number.isFinite(stream.columns) && (stream.columns ?? 0) > 0
+    ? Math.floor(stream.columns!)
+    : 80;
+  const rows = Number.isFinite(stream.rows) && (stream.rows ?? 0) > 0
+    ? Math.floor(stream.rows!)
+    : 24;
+  return { columns: Math.max(1, columns), rows: Math.max(1, rows) };
+}
+
+function dimensionsChanged(previous: FrameDimensions, next: FrameDimensions): boolean {
+  return previous.columns !== next.columns || previous.rows !== next.rows;
+}
+
+/** Physical rows occupied by a logical Ink frame after terminal reflow. */
+function reflowedRows(frame: readonly string[], columns: number): number {
+  return frame.reduce(
+    (total, row) => total + Math.max(1, Math.ceil(stringWidth(row) / columns)),
+    0,
+  );
+}
+
+function eraseTerminalRows(rows: number): string {
+  const count = Math.max(1, Math.floor(rows));
+  return `${`${ERASE_LINE}${CURSOR_UP_ONE}`.repeat(count - 1)}${ERASE_LINE}${CURSOR_COLUMN}`;
 }
 
 function cursorDelta(delta: number): string {
@@ -119,7 +158,10 @@ export function createTerminalSurfaceStream<T extends TerminalSurfaceStream>(
   stream: T,
   backgroundColor: () => string,
 ): T {
-  let previousFrame: readonly string[] | null = null;
+  let previousFrame: MeasuredFrame | null = null;
+  // A raw newline write may be Static output or the first live frame. Keep the
+  // newest one only as a resize cleanup fallback; a normal Ink erase confirms it.
+  let unconfirmedFrame: MeasuredFrame | null = null;
   let lastSurfaceTail = '';
 
   const write = (
@@ -133,22 +175,46 @@ export function createTerminalSurfaceStream<T extends TerminalSurfaceStream>(
       ? chunk
       : Buffer.from(chunk).toString(encoding ?? 'utf8');
     const erase = inkErasePrefix(text);
+    const dimensions = streamDimensions(stream);
+    const knownFrame = previousFrame ?? unconfirmedFrame;
+    const resized = knownFrame !== null && dimensionsChanged(knownFrame.dimensions, dimensions);
 
     // A bare erase is `log.clear()`, used when static scrollback is about to
-    // be printed. Its cursor movement is significant, so pass it through and
-    // discard our frame coordinates until Ink paints the next live frame.
+    // be printed. After a resize, erase the physical rows produced by terminal
+    // reflow rather than Ink's stale logical row count.
     if (erase && erase.length === text.length) {
+      const value = resized && knownFrame
+        ? eraseTerminalRows(reflowedRows(knownFrame.rows, dimensions.columns) + 1)
+        : text;
       previousFrame = null;
+      unconfirmedFrame = null;
       lastSurfaceTail = '';
-      if (encoding === undefined) return done ? stream.write(chunk, done) : stream.write(chunk);
-      return done ? stream.write(chunk, encoding, done) : stream.write(chunk, encoding);
+      if (encoding === undefined) return done ? stream.write(value, done) : stream.write(value);
+      return done ? stream.write(value, encoding, done) : stream.write(value, encoding);
     }
 
-    if (erase && previousFrame !== null && erase.lines === previousFrame.length + 1) {
+    if (erase && resized && knownFrame && erase.lines === knownFrame.rows.length + 1) {
       const next = frameRows(text.slice(erase.length));
       if (next !== null) {
-        const before = previousFrame;
-        previousFrame = next;
+        previousFrame = { rows: next, dimensions };
+        unconfirmedFrame = null;
+        const surfaceTail = surfaceTailColor(backgroundColor());
+        const value =
+          eraseTerminalRows(reflowedRows(knownFrame.rows, dimensions.columns) + 1) +
+          text.slice(erase.length) +
+          surfaceTail;
+        lastSurfaceTail = surfaceTail;
+        if (encoding === undefined) return done ? stream.write(value, done) : stream.write(value);
+        return done ? stream.write(value, encoding, done) : stream.write(value, encoding);
+      }
+    }
+
+    if (erase && previousFrame !== null && erase.lines === previousFrame.rows.length + 1) {
+      const next = frameRows(text.slice(erase.length));
+      if (next !== null) {
+        const before = previousFrame.rows;
+        previousFrame = { rows: next, dimensions };
+        unconfirmedFrame = null;
         const patch = diffInkFrame(before, next);
         const surfaceTail = surfaceTailColor(backgroundColor());
         const tail = surfaceTail === lastSurfaceTail ? '' : surfaceTail;
@@ -169,9 +235,16 @@ export function createTerminalSurfaceStream<T extends TerminalSurfaceStream>(
     // newline write was scrollback.
     if (erase) {
       const next = frameRows(text.slice(erase.length));
-      if (next !== null) previousFrame = next;
+      if (next !== null) {
+        previousFrame = { rows: next, dimensions };
+        unconfirmedFrame = null;
+      }
     } else if (text.includes('\n')) {
       previousFrame = null;
+      const next = frameRows(text);
+      unconfirmedFrame = next !== null && !text.includes('\u001b[2J') && !text.includes('\u001b[3J')
+        ? { rows: next, dimensions }
+        : null;
     }
 
     const tail = needsTerminalSurfaceTail(text) ? surfaceTailColor(backgroundColor()) : '';

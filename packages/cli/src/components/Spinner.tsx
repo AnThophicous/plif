@@ -1,9 +1,9 @@
 import React from 'react';
 import { Text } from 'ink';
 
+import { activityGlyphAt, activityKindForLabel, activityVisual, GradientText } from '../activity-visuals.js';
+import { plifGlyphFramesForTerminal } from '../plif-glyphs.js';
 import { color, formatCount, formatDuration, formatWorkedDuration, glyph, supportsRichGlyphs } from '../theme.js';
-import { PlifGlow } from './PlifGlow.js';
-import { useHighlightClock } from '../pulse.js';
 import { ANIMATION_INTERVAL_MS, useAnimationFrame, usePlifAnimation } from '../hooks/useAnimationClock.js';
 
 /**
@@ -29,10 +29,7 @@ const MIN_SPINNER_INTERVAL_MS = 220;
  * silhouette grows and shrinks in place instead of jittering the line beside
  * it — the same reason the braille frames were chosen over a spinning slash.
  */
-const BLOOM_FRAMES = ['●', '+', '*', '#', '*', '+'];
-const ASCII_BLOOM_FRAMES = ['o', '+', '*', '#', '*', '+'];
-
-const bloomFrames = supportsRichGlyphs ? BLOOM_FRAMES : ASCII_BLOOM_FRAMES;
+const bloomFrames = plifGlyphFramesForTerminal('bloom', supportsRichGlyphs);
 
 /** The open flower. Used at rest, where nothing is animating. */
 export const BLOOM_MARK = bloomFrames[3] as string;
@@ -147,18 +144,18 @@ export function workingFacts(
  */
 export const Working = React.memo(function Working({ seed, since, tokens, estimated, plif = false }: WorkingProps): React.ReactElement {
   const frame = useAnimationFrame();
-  const glowElapsed = useHighlightClock(plif);
   const elapsed = useElapsed(since, !plif);
   const facts = workingFacts(elapsed, tokens, estimated, plif);
+  const label = workingWord(seed);
+  const kind = activityKindForLabel(label);
+  const visual = activityVisual(kind);
 
   return (
     <Text>
-      {plif ? (
-        <PlifGlow value={BLOOM_MARK} elapsedMs={glowElapsed} />
-      ) : (
-        <Text color={color('accent')}>{bloomFrameAt(frame)}</Text>
-      )}
-      <Text color={color('muted')}> {workingWord(seed)}…</Text>
+      <Text color={color('accent')} bold>{activityGlyphAt(kind, frame * ANIMATION_INTERVAL_MS, true)}</Text>
+      <Text> </Text>
+      <GradientText value={label} from={visual.gradient[0]} to={visual.gradient[1]} bold />
+      <Text color={color('muted')}>…</Text>
       {facts.length > 0 && <Text color={color('ghost')}> ({facts.join(` ${glyph.divider} `)})</Text>}
     </Text>
   );
@@ -166,13 +163,17 @@ export const Working = React.memo(function Working({ seed, since, tokens, estima
 
 export const Spinner = React.memo(function Spinner({ label, since, tone = 'accent', plif = false }: SpinnerProps): React.ReactElement {
   const frame = useSpinnerFrame();
-  const glowElapsed = useHighlightClock(plif);
+  const activityFrame = useAnimationFrame(true, 'slow');
   const elapsed = useElapsed(since ?? Date.now(), since !== undefined && !plif);
+  const activityLabel = label ?? 'Working';
+  const kind = activityKindForLabel(activityLabel);
+  const visual = activityVisual(kind);
 
   return (
     <Text>
-      {plif ? <PlifGlow value={frames[0] as string} elapsedMs={glowElapsed} /> : <Text color={color(tone)}>{frame}</Text>}
-      {label && <Text color={color('muted')}> {label}</Text>}
+      <Text color={color(tone)} bold>{plif ? activityGlyphAt(kind, activityFrame * ANIMATION_INTERVAL_MS, true) : frame}</Text>
+      <Text> </Text>
+      <GradientText value={activityLabel} from={visual.gradient[0]} to={visual.gradient[1]} bold />
       {!plif && since !== undefined && elapsed >= 1000 && (
         <Text color={color('ghost')}> {formatDuration(elapsed)}</Text>
       )}

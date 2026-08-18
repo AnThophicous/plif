@@ -47,6 +47,7 @@ import {
   searchPlugins,
   loadCatalog,
   installMarketplacePlugin,
+  modelSupportsImages,
   sourceUrl,
   globalConfigPath,
   loadGlobalConfig,
@@ -82,21 +83,21 @@ import type {
 import type { SandboxCapabilityReport } from '@plif/sandbox';
 
 import { Approval, APPROVAL_CHOICES, approvalHeight } from './components/Approval.js';
-import { Browser } from './components/Browser.js';
+import { Browser, mcpStatusKind, sessionAge, sortMcpStatuses } from './components/Browser.js';
 import { Compaction, COMPACTION_HEIGHT } from './components/Compaction.js';
 import { Completions, EmojiMenu } from './components/Completions.js';
 import { Discovery, discoveryHeight } from './components/Discovery.js';
 import { Queue, queueHeight } from './components/Queue.js';
 import { Question, questionHeight } from './components/Question.js';
-import { Footer } from './components/Footer.js';
+import { Footer, FOOTER_HEIGHT } from './components/Footer.js';
 import type { Hint } from './components/Footer.js';
 import { Header, headerHeight } from './components/Header.js';
 import { Picker, filterItems, filterPickerGroups, flattenPickerGroups, pickerRows as visiblePickerRows } from './components/Picker.js';
-import { Prompt, promptBodyRows, promptHeight } from './components/Prompt.js';
-import { PlifDock, plifDockHeight } from './components/PlifDock.js';
-import { PlifIntro, PLIF_INTRO_DURATION_MS } from './components/PlifIntro.js';
+import { Prompt, layoutPrompt, promptBodyRows, promptHeight, visiblePromptRows } from './components/Prompt.js';
+import { PastedTextDialog } from './components/PastedTextDialog.js';
+import { PlifActivation, PLIF_ACTIVATION_DURATION_MS } from './components/PlifActivation.js';
 import { terminalSurfaceLayout } from './components/TerminalSurface.js';
-import { Working } from './components/Spinner.js';
+import { LoadingStatus } from './components/LoadingStatus.js';
 import { visibleTasks } from './components/TaskIndicator.js';
 import { WorkDock, workDockHeight } from './components/WorkDock.js';
 import { Timeline, TimelineRow, estimateHeight } from './components/Timeline.js';
@@ -108,6 +109,7 @@ import {
   findCommand,
   matchArgumentCompletions,
   matchCommands,
+  isExactCommandMatch,
   runsWhileWorking,
   tabArgumentCompletion,
 } from './commands.js';
@@ -120,6 +122,7 @@ import {
   imagePathsInPaste,
   isTerminalPaste,
   languageServerNote,
+  PASTE_ATTACHMENT_MIN_CHARS,
   parseSearchResults,
   pastedContentToken,
   sanitizePastedText,
@@ -139,7 +142,7 @@ import {
 import { IDLE_PASTE, hasPasteMarker, readPasteChunk } from './paste.js';
 import type { PasteState } from './paste.js';
 import { expandShortcodes, matchEmoji, openShortcode } from './emoji.js';
-import { stepLeft, stepRight } from './text.js';
+import { displayWidth, stepLeft, stepRight } from './text.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { AnimationClockProvider } from './hooks/useAnimationClock.js';
 import { useTranscriptController } from './hooks/useTranscriptController.js';
@@ -149,6 +152,8 @@ import type { BrowserRow, BrowserState, QueuedMessage, TimelineEntry } from './s
 import { ComposerHistory } from './composer/history.js';
 import { composerReducer, initialComposerState } from './composer/state.js';
 import type { PastedAttachment } from './composer/state.js';
+import { materializePastedLine } from './composer/paste.js';
+import { attachmentsForPrimaryModel, hasImageAttachments } from './attachments.js';
 import { allTranscriptCells } from './transcript/reducer.js';
 import { initialViewport, viewportReducer } from './transcript/scroll.js';
 import {
@@ -162,7 +167,7 @@ import type { SessionUsage, StatusInput } from './status.js';
 import { StreamFrameScheduler } from './stream-frame.js';
 import type { StreamFrame } from './stream-frame.js';
 import { deriveLiveStatus } from './live-status.js';
-import { animationClockActive } from './animation-activity.js';
+import { animationClockActive, strongFrameActive } from './animation-activity.js';
 import {
   appendCompletionDelta,
   classifySubmission,
@@ -181,6 +186,16 @@ import { sessionFrameHeight, terminalFrameRows } from './terminal-resize.js';
 import { activateTheme } from './themes.js';
 import type { ThemeCatalogue } from './themes.js';
 import { formatSessionExport, sessionExportFileName } from './session-export.js';
+import {
+  activityModel,
+  monotonicNow,
+  type LoadingPhase,
+} from './loading-state.js';
+import {
+  EMPTY_CLICK_SEQUENCE,
+  nextClickSequence,
+  SgrMouseReader,
+} from './mouse.js';
 
 export interface AppProps {
   readonly engine: Engine;
@@ -227,6 +242,7 @@ const STREAM_FLUSH_MS = 90;
 const SEMANTIC_STREAM_FRAME_MS = 33;
 /** Window in which a second Ctrl+C means "really quit". */
 const DOUBLE_INTERRUPT_MS = 1500;
+/** Short prompt-frame transition after an explicit model/effort change. */
 const PLAN_BLOCKED_TOOLS = new Set([
   'write_file',
   'edit_file',
@@ -273,6 +289,10 @@ type PastedDraft =
       readonly bytes: number;
     };
 
+interface PastedTextPopup {
+  readonly text: string;
+}
+
 /**
  * An image the developer pasted, waiting to be sent with their message.
  *
@@ -283,6 +303,28 @@ type PastedDraft =
 /** True once nothing can change this row again. */
 function isSettled(item: { status?: string }): boolean {
   return item.status === undefined || item.status === 'done' || item.status === 'failed';
+}
+
+/** Move inside a multiline draft before giving the arrows to shell history. */
+function verticalCursor(text: string, cursor: number, delta: -1 | 1): number | null {
+  if (!text.includes('\n')) return null;
+  const starts = [0];
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === '\n') starts.push(index + 1);
+  }
+  let line = 0;
+  for (let index = 1; index < starts.length; index += 1) {
+    if (starts[index]! > cursor) break;
+    line = index;
+  }
+  const lineStart = starts[line]!;
+  const column = cursor - lineStart;
+  const target = line + delta;
+  if (target < 0 || target >= starts.length) return null;
+  const targetStart = starts[target]!;
+  const targetEnd = text.indexOf('\n', targetStart);
+  const targetLength = (targetEnd < 0 ? text.length : targetEnd) - targetStart;
+  return targetStart + Math.min(column, targetLength);
 }
 
 export const BANNER_ROW_ID = 'plif:banner';
@@ -413,6 +455,7 @@ export function App({
     contextMax: provider?.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
   });
   const [composer, composerDispatch] = useReducer(composerReducer, initialComposerState);
+  const [pastedTextPopup, setPastedTextPopup] = useState<PastedTextPopup | null>(null);
   const input = composer.draft;
   const cursor = composer.cursor;
   const pasted = composer.attachments;
@@ -449,20 +492,18 @@ export function App({
   const [skillList, setSkillList] = useState<readonly Skill[]>(initialSkills);
   const [turn, setTurn] = useState(() => countAgentTurns(replay));
   const [agentTurnStartedAt, setAgentTurnStartedAt] = useState<number | null>(null);
+  const [plifActivation, setPlifActivation] = useState(false);
+  const plifActivationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [interruptArmed, setInterruptArmed] = useState(false);
   const [effort, setEffortState] = useState<Effort | undefined>(initialEffort);
-  const [effortTransitionId, setEffortTransitionId] = useState(() => initialEffort === 'plif' ? 1 : 0);
-  const effortTransitioning = effortTransitionId > 0;
-  useEffect(() => {
-    if (!effortTransitioning) return;
-    const timer = setTimeout(() => setEffortTransitionId(0), PLIF_INTRO_DURATION_MS);
-    timer.unref?.();
-    return () => clearTimeout(timer);
-  }, [effortTransitionId, effortTransitioning]);
+  useEffect(() => () => {
+    if (plifActivationTimer.current) clearTimeout(plifActivationTimer.current);
+  }, []);
   useEffect(() => {
     applyEffortPalette(effort);
   }, [effort]);
-  const [completionMeter, setCompletionMeter] = useState<CompletionMeter>(initialCompletionMeter);
+  // Completion tokens live in loadingTelemetry, not App state. A fast stream
+  // must not reconcile the whole Ink tree just to update one number.
   const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
   const [tasksOpen, setTasksOpen] = useState(false);
   /**
@@ -477,10 +518,11 @@ export function App({
   const { exit } = useApp();
   const { stdout } = useStdout();
   const { columns: width, rows } = useTerminalSize();
+  const headerAvailableWidth = Math.max(1, width - layout.gutter * 2);
   const surface = terminalSurfaceLayout(
     width,
     rows,
-    headerHeight(width - layout.gutter * 2),
+    headerHeight(headerAvailableWidth),
   );
   const transcript = useTranscriptController({ engine, workspace: cwd, session, replay });
   const [transcriptViewport, dispatchTranscriptViewport] = useReducer(
@@ -507,6 +549,9 @@ export function App({
   const retryRow = useRef<string | null>(null);
   /** Numbers the compact paste tokens for this session. */
   const pasteCount = useRef(0);
+  /** Three clicks on a pasted-text token open its readable clipboard modal. */
+  const pastedClick = useRef(EMPTY_CLICK_SEQUENCE);
+  const mouseReader = useRef(new SgrMouseReader());
   /**
    * The live queue, for the loop's drain callback.
    *
@@ -526,6 +571,39 @@ export function App({
   const usage = useRef<SessionUsage>(emptySessionUsage);
   const turnCompletionTokens = useRef(0);
   const subagentTokens = useRef(new Map<string, number>());
+  /** Identity for the loading line; late events from an older turn are ignored. */
+  const loadingOperationRef = useRef<{ id: number; turnId: string } | null>(null);
+  const loadingSequence = useRef(0);
+  const loadingMetricPaintAt = useRef(0);
+
+  const beginLoading = useCallback((turnId: string): number => {
+    const id = ++loadingSequence.current;
+    loadingOperationRef.current = { id, turnId };
+    loadingMetricPaintAt.current = 0;
+    activityModel.start(id, turnId);
+    setAgentTurnStartedAt(Date.now());
+    return id;
+  }, []);
+
+  const isCurrentLoadingTurn = useCallback((turnId: string): boolean => {
+    return loadingOperationRef.current?.turnId === turnId;
+  }, []);
+
+  const updateLoadingPhase = useCallback((turnId: string, phase: LoadingPhase): void => {
+    const active = loadingOperationRef.current;
+    if (!active || active.turnId !== turnId) return;
+    if (phase === 'reasoning') activityModel.reasoningStart(active.id);
+    else if (phase === 'cancelling') activityModel.phase(active.id, 'cancelling');
+    else activityModel.phase(active.id, phase as Exclude<LoadingPhase, 'idle' | 'done' | 'error'>);
+  }, []);
+
+  useEffect(() => () => {
+    // The UI can unmount while the provider is being torn down. Drop the
+    // subscription source as well, so a late stream event cannot repaint a new
+    // session's loading line.
+    activityModel.reset();
+    loadingOperationRef.current = null;
+  }, []);
 
   // --- live output plumbing ---
   // Chunks arrive far faster than the terminal can usefully repaint, so they
@@ -610,7 +688,14 @@ export function App({
       }
       if (meter !== completionMeterRef.current) {
         completionMeterRef.current = meter;
-        setCompletionMeter(meter);
+        const active = loadingOperationRef.current;
+        const now = monotonicNow();
+        // Token text can arrive every 33ms. The loading metrics have a calm,
+        // human-readable cadence; the stream itself remains fully batched.
+        if (active && now - loadingMetricPaintAt.current >= 360) {
+          loadingMetricPaintAt.current = now;
+          activityModel.tokens(active.id, meter.tokens, meter.estimated);
+        }
       }
       transcriptRef.current.applyStreamFrame(frame);
       if (frame.kind === 'complete' || frame.kind === 'dispose') {
@@ -866,7 +951,9 @@ export function App({
        * "still thinking" from "thought, and is now doing something else".
        */
       engine.bus.on('agent.thinking', (event) => {
+        const currentLoading = isCurrentLoadingTurn(event.turnId);
         if (event.phase === 'start') {
+          if (currentLoading) updateLoadingPhase(event.turnId, 'reasoning');
           // Prose written before a thought is a finished thought of its own.
           closeAnswer();
           const row = entry('thinking', effortRef.current === 'plif' ? 'Plif Thinking' : 'Thinking', { status: 'active' });
@@ -874,6 +961,11 @@ export function App({
           push(row);
           return;
         }
+        const active = loadingOperationRef.current;
+        // The UI owns a monotonic start timestamp. Do not replace it with the
+        // loop's wall-clock duration, which can jump when the system clock is
+        // adjusted during a long request.
+        if (currentLoading && active) activityModel.reasoningEnd(active.id);
         closeThinking(event.durationMs);
       }),
 
@@ -884,6 +976,7 @@ export function App({
       engine.bus.on('agent.cycle', () => undefined),
 
       engine.bus.on('agent.reasoning', (event) => {
+        if (isCurrentLoadingTurn(event.turnId)) updateLoadingPhase(event.turnId, 'reasoning');
         settleRetry('recovered');
         let live = thinkRow.current;
         if (!live) {
@@ -915,6 +1008,7 @@ export function App({
        * 15s (3/10)" waits, and one who sees an unchanging spinner kills it.
        */
       engine.bus.on('agent.retry', (event) => {
+        if (isCurrentLoadingTurn(event.turnId)) updateLoadingPhase(event.turnId, 'waiting');
         const seconds = Math.round(event.waitMs / 1000);
         const patch = {
           title: `${glyph.retry} Retry in ${seconds}s`,
@@ -931,7 +1025,8 @@ export function App({
         }
       }),
 
-      engine.bus.on('agent.reset', () => {
+      engine.bus.on('agent.reset', (event) => {
+        if (isCurrentLoadingTurn(event.turnId)) updateLoadingPhase(event.turnId, 'waiting');
         // The attempt that wrote these is being abandoned. Dropping the rows is
         // the only honest option: leaving half an answer above the retry would
         // read as text the model actually produced and stood by.
@@ -943,7 +1038,8 @@ export function App({
         thinkRow.current = null;
         stream.current = { rowId: null, text: '', dirty: false };
         completionMeterRef.current = discardCompletionEstimate(completionMeterRef.current);
-        setCompletionMeter(completionMeterRef.current);
+        const active = loadingOperationRef.current;
+        if (active) activityModel.tokens(active.id, completionMeterRef.current.tokens, completionMeterRef.current.estimated);
         if (answer) dispatch({ type: 'drop', id: answer });
         if (think) dispatch({ type: 'drop', id: think.id });
       }),
@@ -1014,7 +1110,11 @@ export function App({
           completionMeterRef.current,
           event.completionTokens,
         );
-        setCompletionMeter(completionMeterRef.current);
+        const active = loadingOperationRef.current;
+        if (active?.turnId === event.turnId) {
+          loadingMetricPaintAt.current = monotonicNow();
+          activityModel.tokens(active.id, completionMeterRef.current.tokens, completionMeterRef.current.estimated);
+        }
       }),
 
       /**
@@ -1031,6 +1131,7 @@ export function App({
        * text that had been ready, a sentence at a time, the whole while.
        */
       engine.bus.on('agent.text', (event) => {
+        if (isCurrentLoadingTurn(event.turnId)) updateLoadingPhase(event.turnId, 'streaming');
         // The endpoint is answering, so whatever it was retrying worked.
         settleRetry('recovered');
         if (!agentRow.current) {
@@ -1046,7 +1147,10 @@ export function App({
         ]);
       }),
 
-      engine.bus.on('agent.pre_tool_prose', settlePreToolProse),
+      engine.bus.on('agent.pre_tool_prose', (event) => {
+        if (isCurrentLoadingTurn(event.turnId)) updateLoadingPhase(event.turnId, 'streaming');
+        settlePreToolProse(event);
+      }),
 
       /**
        * One row per tool call, opened when it starts and closed when it ends.
@@ -1059,6 +1163,14 @@ export function App({
        */
       engine.bus.on('agent.tool', (event) => {
         if (event.phase === 'start') settleRetry('recovered');
+        if (isCurrentLoadingTurn(event.turnId)) {
+          updateLoadingPhase(event.turnId, event.phase === 'start' ? 'tool' : 'waiting');
+          const active = loadingOperationRef.current;
+          if (active) {
+            if (event.phase === 'start') activityModel.toolStart(active.id, event.id, event.name);
+            else activityModel.toolEnd(active.id, event.id, event.ok !== false);
+          }
+        }
         const described = describeToolCall(event.name, event.input);
         const lane = toolLane(event.name);
         const discoveryKind = event.name === 'read_file' ? 'Read' : event.name === 'list_dir' ? 'List' : null;
@@ -1333,7 +1445,16 @@ export function App({
       engine.bus.on('task.blocked', () => setTasks(visibleTasks(taskManager.current?.list() ?? []))),
     ];
     return () => offs.forEach((off) => off());
-  }, [engine, push, closeAnswer, closeThinking, settleRetry, settlePreToolProse]);
+  }, [
+    engine,
+    push,
+    closeAnswer,
+    closeThinking,
+    settleRetry,
+    settlePreToolProse,
+    isCurrentLoadingTurn,
+    updateLoadingPhase,
+  ]);
 
   /**
    * The MCP configuration with its credentials filled in.
@@ -1396,6 +1517,52 @@ export function App({
       }
     },
     [mcpRegistry],
+  );
+
+  const runMcpBrowserAction = useCallback(
+    async (action: 'connect' | 'disconnect' | 'authenticate' | 'test', server: string): Promise<void> => {
+      if (!mcpRegistry) {
+        push(entry('notice', 'no MCP registry in this session', { tone: 'warn', status: 'failed' }));
+        return;
+      }
+
+      if (action === 'authenticate') {
+        push(await loginMcp(server));
+        setMcpStatuses(mcpRegistry.statuses());
+        return;
+      }
+
+      try {
+        const status = action === 'connect'
+          ? await mcpRegistry.connectServer(server)
+          : action === 'disconnect'
+            ? await mcpRegistry.disconnect(server)
+            : await mcpRegistry.testConnection(server);
+        setMcpStatuses(mcpRegistry.statuses());
+        const healthy = action === 'test' ? status.connected : action === 'connect' ? status.connected : true;
+        push(entry(
+          'notice',
+          action === 'test'
+            ? `${status.name} connection ${healthy ? 'healthy' : 'failed'}`
+            : `${status.name} ${action === 'disconnect' ? 'disconnected' : 'connected'}`,
+          {
+            tone: healthy ? 'accent' : 'warn',
+            status: healthy ? 'done' : 'failed',
+            subtitle: status.detail,
+          },
+        ));
+      } catch (error) {
+        setMcpStatuses(mcpRegistry.statuses());
+        const { title, detail } = formatError(error);
+        push(entry('notice', `${server} ${action} failed`, {
+          tone: 'danger',
+          status: 'failed',
+          subtitle: title,
+          ...(detail ? { detail, expand: true } : {}),
+        }));
+      }
+    },
+    [loginMcp, mcpRegistry, push],
   );
 
   const reconnectMcp = useCallback(
@@ -1505,9 +1672,13 @@ export function App({
 
   useEffect(() => {
     if (!stdout.isTTY) return;
-    // Release modes that another TUI may have left enabled, then leave mouse
-    // selection, wheel scrolling and viewport position entirely to the terminal.
-    stdout.write('\u001B[?1000l\u001B[?1002l\u001B[?1003l\u001B[?1006l');
+    // SGR click reporting is scoped to the session and is disabled again on
+    // unmount. We only ask for button press/release; wheel, drag and motion stay
+    // with the terminal so selecting text remains predictable.
+    stdout.write('\u001B[?1002l\u001B[?1003l\u001B[?1000h\u001B[?1006h');
+    return () => {
+      stdout.write('\u001B[?1000l\u001B[?1006l');
+    };
   }, [stdout]);
 
   // Mirror the queue into a ref so the running turn's drain callback sees the
@@ -1529,14 +1700,19 @@ export function App({
       const needle = browser.filter.trim().toLowerCase();
 
       if (browser.tab === 'mcp') {
-        return mcpStatuses
+        return sortMcpStatuses(mcpStatuses)
           .filter((server) => !needle || server.name.toLowerCase().includes(needle))
-          .map((server) => ({
-            id: server.name,
-            title: `${server.name}  ${server.connected ? `${server.toolCount} tools` : 'offline'}`,
-            mark: server.connected ? glyph.done : glyph.failed,
-            tone: server.connected ? ('success' as const) : ('danger' as const),
-          }));
+          .map((server) => {
+            const kind = mcpStatusKind(server);
+            return {
+              id: server.name,
+              title: `${server.name}  ${server.connected ? `${server.toolCount} tools` : kind}`,
+              mark: kind === 'connected' ? glyph.done : kind === 'error' ? glyph.failed : glyph.pending,
+              tone: kind === 'connected'
+                ? ('success' as const)
+                : kind === 'error' ? ('danger' as const) : ('muted' as const),
+            };
+          });
       }
 
       if (browser.tab === 'skills') {
@@ -1555,6 +1731,21 @@ export function App({
           }));
       }
 
+      if (browser.tab === 'sessions') {
+        const currentId = transcript.session?.id;
+        return browser.sessions
+          .filter((session) => {
+            const haystack = `${session.id} ${session.title} ${session.workspace}`.toLowerCase();
+            return !needle || haystack.includes(needle);
+          })
+          .map((session) => ({
+            id: session.id,
+            title: `${session.title || '(no title)'}  ${sessionAge(session.updatedAt)}`,
+            mark: session.id === currentId ? glyph.done : glyph.step,
+            tone: session.id === currentId ? ('accent' as const) : ('muted' as const),
+          }));
+      }
+
       const plugins = browser.catalog
         ? searchPlugins(browser.catalog.plugins, browser.filter, 400)
         : [];
@@ -1568,23 +1759,29 @@ export function App({
         tone: plugin.origin === 'official' ? ('success' as const) : ('ghost' as const),
       }));
     },
-    [mcpStatuses, skillList],
+    [mcpStatuses, skillList, transcript.session?.id],
   );
 
-  /** Recompute the visible list whenever anything it derives from moves. */
-  useEffect(() => {
-    if (!state.browser) return;
-    dispatch({ type: 'browser.rows', rows: browserRows(state.browser) });
-    // `rows` is intentionally not a dependency: this action sets it, and
-    // depending on it would loop.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    state.browser?.tab,
-    state.browser?.filter,
-    state.browser?.catalog,
-    browserRows,
-    state.browser !== null,
-  ]);
+  /**
+   * Rows are a pure projection of factual MCP/skill/catalog state. Keeping
+   * them out of the session reducer removes the old effect-driven
+   * `browser.rows` dispatch and its guaranteed second reconciliation after
+   * every filter, tab, or status change.
+   */
+  const browserRowsForView = useMemo(
+    () => state.browser ? browserRows(state.browser) : [],
+    [browserRows, state.browser],
+  );
+  const browserView = useMemo(
+    () => state.browser
+      ? {
+          ...state.browser,
+          rows: browserRowsForView,
+          selected: Math.min(state.browser.selected, Math.max(0, browserRowsForView.length - 1)),
+        }
+      : null,
+    [browserRowsForView, state.browser],
+  );
 
   /**
    * Fetch the catalogue when the marketplace tab first needs it.
@@ -1609,11 +1806,26 @@ export function App({
     [engine],
   );
 
+  const openSessions = useCallback(async () => {
+    try {
+      const sessions = await engine.sessions.list(cwd);
+      dispatch({ type: 'browser.sessions', sessions });
+    } catch (error) {
+      const { title } = formatError(error);
+      dispatch({ type: 'browser.sessions', sessions: [], problem: title });
+    }
+  }, [cwd, engine]);
+
   useEffect(() => {
     if (state.browser?.tab !== 'marketplace') return;
     if (state.browser.catalog || state.browser.problem) return;
     void openCatalog(false);
   }, [state.browser?.tab, state.browser?.catalog, state.browser?.problem, openCatalog]);
+
+  useEffect(() => {
+    if (state.browser?.tab !== 'sessions' || !state.browser.loading || state.browser.sessionsLoaded) return;
+    void openSessions();
+  }, [state.browser?.tab, state.browser?.loading, state.browser?.sessionsLoaded, openSessions]);
 
 
   /**
@@ -1849,7 +2061,7 @@ export function App({
         max: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
       });
       push(
-        entry('notice', `model is now ${selection.model}`, {
+        entry('notice', `${glyph.done}  model    ${selection.model}`, {
           tone: persisted.persisted ? 'accent' : 'warn',
           subtitle: persisted.persisted
             ? conversation.current.length > 0
@@ -1902,7 +2114,19 @@ export function App({
       applyEffortPalette(effort);
       effortRef.current = effort;
       setEffortState(effort);
-      if (previous !== effort) setEffortTransitionId((value) => value + 1);
+      if (effort === 'plif' && previous !== 'plif') {
+        if (plifActivationTimer.current) clearTimeout(plifActivationTimer.current);
+        setPlifActivation(true);
+        plifActivationTimer.current = setTimeout(() => {
+          plifActivationTimer.current = null;
+          setPlifActivation(false);
+        }, PLIF_ACTIVATION_DURATION_MS);
+        plifActivationTimer.current.unref?.();
+      } else if (effort !== 'plif' && plifActivation) {
+        if (plifActivationTimer.current) clearTimeout(plifActivationTimer.current);
+        plifActivationTimer.current = null;
+        setPlifActivation(false);
+      }
     },
     setPlanMode: async (enabled, description) => {
       planModeRef.current = enabled;
@@ -2084,10 +2308,14 @@ export function App({
   const submit = useCallback(
     async (line: string, suppliedAttachments?: readonly PastedAttachment[]) => {
       if (credentialPromptPending) return;
-      const trimmed = line.trim();
-      if (!trimmed) return;
-      if (trimmed.startsWith('/')) {
-        await runSlash(trimmed);
+      const visibleLine = line.trim();
+      if (!visibleLine) return;
+      if (visibleLine.startsWith('/')) {
+        // Slash commands are local actions. They must never carry an image that
+        // was left in the composer from a previous prompt.
+        if (suppliedAttachments === undefined) setPasted([]);
+        history.current.record(visibleLine);
+        await runSlash(visibleLine);
         return;
       }
 
@@ -2095,22 +2323,25 @@ export function App({
       // second message does not re-send the first one's screenshot.
       const carried = suppliedAttachments ?? pasted;
       if (suppliedAttachments === undefined) setPasted([]);
+      const materialized = materializePastedLine(visibleLine, carried);
+      const trimmed = materialized.text.trim();
 
-      const privateShell = trimmed.startsWith('!!');
+      const privateShell = visibleLine.startsWith('!!');
       const submissionKind = classifySubmission(trimmed);
       const agentSubmission = submissionKind === 'agent';
-      history.current.record(privateShell ? '!! [private command]' : trimmed);
+      history.current.record(privateShell ? '!! [private command]' : visibleLine);
       if (agentSubmission) {
-        setAgentTurnStartedAt(Date.now());
         setTurn((value) => value + 1);
         turnCompletionTokens.current = 0;
         completionMeterRef.current = initialCompletionMeter;
-        setCompletionMeter(initialCompletionMeter);
       }
       setCompletionIndex(0);
       dispatch({ type: 'discovery.reset' });
 
-      push(entry('input', privateShell ? '!! [private command]' : trimmed));
+      // Keep the compact token in scrollback, but persist the actual text in
+      // the durable conversation. This makes the editor cheap without ever
+      // sending its visual placeholder to the model or transcript backend.
+      push(entry('input', privateShell ? '!! [private command]' : visibleLine));
       const turnId = !privateShell && !trimmed.startsWith('/') && !trimmed.startsWith('!')
         ? transcript.appendUserTurn(trimmed)
         : undefined;
@@ -2137,7 +2368,7 @@ export function App({
         } else {
           await runAgent(
             trimmed,
-            await encodePasted(carried),
+            await encodePasted(materialized.attachments),
             turnId,
             planModeRef.current ? 'plan' : 'normal',
           );
@@ -2156,7 +2387,6 @@ export function App({
       } finally {
         dispatch({ type: 'discovery.flush' });
         dispatch({ type: 'busy', busy: false });
-        if (agentSubmission) setAgentTurnStartedAt(null);
       }
     },
     [credentialPromptPending, pasted, push, transcript],
@@ -2352,6 +2582,17 @@ export function App({
     const lspForAgent = lspManager.current ? lspTools(lspManager.current) : [];
     const edits = new EditCoordinator();
     const storedConfig = profileConfig;
+    const directImageSupport = modelSupportsImages(storedConfig, {
+      model: providerRef.current.info.id,
+      preset: providerIdForConfig(storedConfig),
+    });
+    const wireAttachments = attachmentsForPrimaryModel(attachments, directImageSupport);
+    if (hasImageAttachments(attachments) && !directImageSupport) {
+      push(entry('notice', 'image held for vision inspection', {
+        tone: 'muted',
+        subtitle: 'the active model is text-only; raw pixels stay available to inspect_image instead of being sent to an unsupported endpoint',
+      }));
+    }
     const planOnly = mode === 'plan';
     const goalInstructions = goalRef.current
       ? `SESSION GOAL (user-defined, guidance only): ${goalRef.current.condition}\nRead this goal to understand the user's final desired outcome across subsequent turns. Do not start work merely because the goal was recorded; act on the user's current request and use ask_user when scope or approval is unclear.`
@@ -2390,8 +2631,11 @@ export function App({
     const carried = conversation.current;
     const outgoing: Message[] = [
       ...carried,
-      { role: 'user', content: text, ...(attachments.length ? { attachments } : {}) },
+      { role: 'user', content: text, ...(wireAttachments.length ? { attachments: wireAttachments } : {}) },
     ];
+
+    const loadingOperationId = beginLoading(durableTurnId);
+    let loadingResult: 'done' | 'error' | 'cancelled' = 'done';
 
     try {
       const result = await runLoop(
@@ -2453,18 +2697,22 @@ export function App({
             if (forModel.length === 0) return [];
             dispatch({ type: 'queue.deliver', ids: forModel.map((message) => message.id) });
             for (const message of forModel) {
+              const materialized = materializePastedLine(message.text, message.attachments);
               push(entry('input', message.text, { tag: '[queued]' }));
               transcript.persist({
                 ...eventBase('user.message', durableTurnId),
-                text: message.text,
+                text: materialized.text,
               });
             }
             return await Promise.all(
-              forModel.map(async (message) => ({
+              forModel.map(async (message) => {
+                const materialized = materializePastedLine(message.text, message.attachments);
+                return {
                 role: 'user' as const,
-                content: message.text,
-                attachments: await encodePasted(message.attachments),
-              })),
+                content: materialized.text,
+                attachments: await encodePasted(materialized.attachments),
+                };
+              }),
             );
           },
           activateProfile: async (name) => {
@@ -2509,6 +2757,8 @@ export function App({
       // system prompt is rebuilt each turn rather than stored, so a container
       // swap is reflected immediately.
       conversation.current = result.messages.slice(1);
+      if (result.stop === 'cancelled') loadingResult = 'cancelled';
+      else if (result.stop !== 'complete' || result.error) loadingResult = 'error';
 
       const streamed = agentRow.current !== null;
       closeAnswer();
@@ -2536,6 +2786,7 @@ export function App({
         }
       }
     } catch (error) {
+      loadingResult = abort.signal.aborted ? 'cancelled' : 'error';
       if (conversation.current === carried) conversation.current = outgoing;
       const recovered = await recoverModelAuth(error);
       if (!recovered) {
@@ -2546,6 +2797,21 @@ export function App({
       }
     } finally {
       execAbort.current = null;
+      if (loadingOperationRef.current?.id === loadingOperationId) {
+        // Some OpenAI-compatible providers omit the final usage chunk. Flush
+        // the real streamed delta estimate before hiding the loading row so a
+        // short response is not reported as zero simply because it completed
+        // before the 360ms low-rate metric sample.
+        activityModel.tokens(
+          loadingOperationId,
+          completionMeterRef.current.tokens,
+          completionMeterRef.current.estimated,
+        );
+        if (loadingResult === 'error') activityModel.fail(loadingOperationId, 'request failed');
+        activityModel.finish(loadingOperationId, loadingResult);
+        loadingOperationRef.current = null;
+        setAgentTurnStartedAt(null);
+      }
       // Also on the error and cancel paths: whatever the model managed to say
       // before it broke is worth keeping on screen, and a row left `active`
       // would spin forever and never reach scrollback.
@@ -2731,6 +2997,8 @@ export function App({
   /** Stop the command in flight without tearing down the container. */
   function cancelRunning(): boolean {
     if (!execAbort.current) return false;
+    const activeLoading = loadingOperationRef.current;
+    if (activeLoading) activityModel.phase(activeLoading.id, 'cancelling');
     execAbort.current.abort();
     current.current?.cancelRunning();
     // An outstanding question belongs to the work being cancelled. Leaving it
@@ -2794,6 +3062,15 @@ export function App({
   // `/mcp ` became useful, and made the prompt look like it had eaten input.
   const completionCount = argumentCompletion ? argumentMatches.length : completions.length;
   const showCompletions = completionCount > 0;
+  // An exact command row is informational; there is no alternative for the
+  // arrows to choose. Let Up/Down recall history in `/effort` and similar
+  // states, while argument menus and ambiguous prefixes still own the keys.
+  const completionOwnsArrows = showCompletions && !(
+    argumentCompletion === null &&
+    completions.length === 1 &&
+    typedCommandName !== null &&
+    isExactCommandMatch(completions[0]!, typedCommandName)
+  );
 
   function applyCompletion(command: Command): void {
     const completed = `/${command.name} `;
@@ -2884,8 +3161,65 @@ export function App({
     }
   }
 
+  function pastedTextAtMouse(mouse: { readonly column: number; readonly row: number }): string | null {
+    if (pasted.length === 0) return null;
+
+    const bodyRows = visiblePromptRows(
+      layoutPrompt(input, cursor, Math.max(8, surface.contentWidth - 8)),
+      promptRows,
+    );
+    const framePromptHeight = promptHeight({
+      bodyRows: promptRows,
+      footerRows: promptFooterRows,
+      queueRows: promptQueueRows,
+    });
+    // The prompt is bottom-anchored inside the panel. Coordinates are one-based
+    // in SGR, and the first body row follows the frame's top rule.
+    const promptTop = surface.canvasHeight - surface.panelPaddingY - footerRows - framePromptHeight + 1;
+    const row = bodyRows[mouse.row - promptTop - 1];
+    if (!row) return null;
+
+    // Frame border + vertical rail + inner gutter + the two-cell prompt glyph.
+    const draftColumn = surface.panelPaddingX + 5;
+    for (const attachment of pasted) {
+      if (attachment.kind !== 'text') continue;
+      const tokenStart = input.indexOf(attachment.token);
+      if (tokenStart < 0) continue;
+      const tokenEnd = tokenStart + attachment.token.length;
+      const overlapStart = Math.max(row.start, tokenStart);
+      const overlapEnd = Math.min(row.end, tokenEnd);
+      if (overlapStart >= overlapEnd) continue;
+      const cellStart = draftColumn + displayWidth(input.slice(row.start, overlapStart));
+      const cellEnd = draftColumn + displayWidth(input.slice(row.start, overlapEnd));
+      if (mouse.column >= cellStart && mouse.column < cellEnd) return attachment.text;
+    }
+    return null;
+  }
+
+  function handleMouse(mouse: { readonly button: number; readonly action: string; readonly column: number; readonly row: number }): void {
+    if (mouse.action !== 'press' || mouse.button !== 0 || pastedTextPopup) return;
+    if (state.browser || state.approval || state.question || state.picker || credentialPromptPending) return;
+
+    const sequence = nextClickSequence(pastedClick.current, mouse, Date.now());
+    pastedClick.current = sequence.count >= 3 ? EMPTY_CLICK_SEQUENCE : sequence;
+    if (sequence.count !== 3) return;
+
+    const text = pastedTextAtMouse(mouse);
+    if (text !== null) setPastedTextPopup({ text });
+  }
+
   useInput((char, key) => {
     if (state.exiting) return;
+
+    // Ink strips the leading ESC from unknown sequences. Classify SGR before
+    // the paste/composer pipeline, and replay only candidates that proved to
+    // be ordinary printable text.
+    const mouseRead = mouseReader.current.read(char);
+    if (mouseRead.handled) {
+      if (mouseRead.event) handleMouse(mouseRead.event);
+      if (mouseRead.text) handleKey(mouseRead.text, key);
+      return;
+    }
 
     if (!pasteStream.current.open && !hasPasteMarker(char)) {
       handleKey(char, key);
@@ -2902,6 +3236,11 @@ export function App({
 
   function handleKey(char: string, key: Key): void {
     if (state.exiting) return;
+
+    if (pastedTextPopup) {
+      if (key.escape || (key.ctrl && char === 'c')) setPastedTextPopup(null);
+      return;
+    }
 
     // The browser is a full-screen view and owns every key while it is up.
     // Letting the prompt underneath see them would type into a field nobody
@@ -3133,7 +3472,7 @@ export function App({
         if (showCompletions && picked) applyCompletion(picked);
         return;
       }
-      if ((key.upArrow || key.downArrow) && showCompletions) {
+      if ((key.upArrow || key.downArrow) && completionOwnsArrows) {
         setCompletionIndex((value) =>
           key.upArrow
             ? Math.max(0, value - 1)
@@ -3144,7 +3483,10 @@ export function App({
       if (key.return) {
         if (showCompletions && completions.length > 0 && completionIndex >= 0) {
           const picked = completions[completionIndex];
-          if (picked && picked.name !== tokenize(input.slice(1))[0]) {
+          const sameCommand = picked && (
+            picked.name === typedCommandName || picked.aliases?.includes(typedCommandName ?? '')
+          );
+          if (picked && !sameCommand) {
             applyCompletion(picked);
             return;
           }
@@ -3177,7 +3519,10 @@ export function App({
         // looking at.
         if (showCompletions && completions.length > 0 && completionIndex >= 0) {
           const picked = completions[completionIndex];
-          if (picked && picked.name !== tokenize(input.slice(1))[0]) {
+          const sameCommand = picked && (
+            picked.name === typedCommandName || picked.aliases?.includes(typedCommandName ?? '')
+          );
+          if (picked && !sameCommand) {
             applyCompletion(picked);
             return;
           }
@@ -3203,12 +3548,17 @@ export function App({
 
       if (key.upArrow || key.downArrow) {
         // Arrows drive the menu when it is open, and history when it is not.
-        if (showCompletions) {
+        if (completionOwnsArrows) {
           setCompletionIndex((value) =>
             key.upArrow
               ? Math.max(0, value - 1)
               : Math.min(completionCount - 1, value + 1),
           );
+          return;
+        }
+        const movedWithinDraft = verticalCursor(input, cursor, key.upArrow ? -1 : 1);
+        if (movedWithinDraft !== null) {
+          setCursor(movedWithinDraft);
           return;
         }
         if (history.current.size === 0) return;
@@ -3250,22 +3600,18 @@ export function App({
       return;
     }
     if (char && !key.ctrl && !key.meta) {
-      if (isTerminalPaste(char)) {
-        void receivePastedContent(sanitizePastedText(char));
+      const pastedText = sanitizePastedText(char);
+      if (isTerminalPaste(char) || pastedText.length >= PASTE_ATTACHMENT_MIN_CHARS || pastedText.includes('\n')) {
+        void receivePastedContent(pastedText);
         return;
       }
       // A paste arrives as one chunk, not as N keypresses, so this branch must
       // cope with arbitrary text — including embedded newlines and control
       // bytes. Inserting the chunk raw would put a literal CR in the buffer and
       // silently corrupt the command.
-      const text = sanitizePastedText(char);
+      const text = pastedText;
       if (imagePathsInPaste(text).length > 0) {
         void receivePastedContent(text);
-        return;
-      }
-      if (text.endsWith('\n')) {
-        const typed = text.replace(/\n+$/, '');
-        sendLine(expandShortcodes(input.slice(0, cursor) + typed + input.slice(cursor)));
         return;
       }
       const raw = input.slice(0, cursor) + text + input.slice(cursor);
@@ -3287,6 +3633,7 @@ export function App({
     setInput('');
     setCursor(0);
     setCompletionIndex(0);
+    setPasted([]);
     history.current.record(trimmed);
     push(entry('input', trimmed));
     void runSlash(trimmed).catch((error: unknown) => {
@@ -3316,6 +3663,81 @@ export function App({
     setInput('');
     setCursor(0);
     void submit(line);
+  }
+
+  async function resumeBrowserSession(id: string): Promise<void> {
+    if (state.busy) {
+      push(entry('notice', 'finish the current turn before switching sessions', { tone: 'warn' }));
+      return;
+    }
+    try {
+      const next = await engine.sessions.resolve(cwd, id);
+      if (!next) throw new PlifError('INVALID_ARGUMENT', `session "${id}" was not found`);
+      const replay = await next.replay();
+      transcript.switchSession(next, replay);
+      conversation.current = conversationFromTranscript(replay);
+      dispatch({ type: 'clear' });
+      dispatch({ type: 'context', used: estimateTokens(conversation.current) });
+      setTurn(countAgentTurns(replay));
+      setAgentTurnStartedAt(null);
+      usage.current = emptySessionUsage;
+      sessionStartedAt.current = Date.now();
+      dispatch({ type: 'browser.close' });
+      push(entry('notice', `resumed ${next.id}`, {
+        tone: 'success',
+        subtitle: `${replay.length} stored events · ${conversation.current.length} messages in context`,
+      }));
+    } catch (error) {
+      const { title, detail } = formatError(error);
+      push(entry('notice', `could not resume ${id}`, {
+        tone: 'danger',
+        ...(detail ? { detail: `${title}\n${detail}` } : { detail: title }),
+      }));
+    }
+  }
+
+  async function renameBrowserSession(id: string, title: string): Promise<void> {
+    const clean = title.trim();
+    if (!clean) {
+      dispatch({ type: 'browser.rename.cancel' });
+      return;
+    }
+    try {
+      const target = await engine.sessions.resolve(cwd, id);
+      if (!target) throw new PlifError('INVALID_ARGUMENT', `session "${id}" was not found`);
+      await target.rename(clean);
+      dispatch({ type: 'browser.loading', loading: true });
+      await openSessions();
+    } catch (error) {
+      const { title: errorTitle, detail } = formatError(error);
+      push(entry('notice', `could not rename ${id}`, {
+        tone: 'danger',
+        detail: [errorTitle, detail].filter(Boolean).join('\n'),
+      }));
+      dispatch({ type: 'browser.rename.cancel' });
+    }
+  }
+
+  async function deleteBrowserSession(id: string): Promise<void> {
+    if (transcript.session?.id === id) {
+      dispatch({ type: 'browser.confirmDelete', id: null });
+      push(entry('notice', 'the current session cannot be deleted while it is open', { tone: 'warn' }));
+      return;
+    }
+    try {
+      const target = await engine.sessions.resolve(cwd, id);
+      if (!target) throw new PlifError('INVALID_ARGUMENT', `session "${id}" was not found`);
+      await engine.sessions.remove(target.meta);
+      dispatch({ type: 'browser.loading', loading: true });
+      await openSessions();
+    } catch (error) {
+      const { title, detail } = formatError(error);
+      push(entry('notice', `could not delete ${id}`, {
+        tone: 'danger',
+        detail: [title, detail].filter(Boolean).join('\n'),
+      }));
+      dispatch({ type: 'browser.confirmDelete', id: null });
+    }
   }
 
   /**
@@ -3348,6 +3770,37 @@ export function App({
     const browser = state.browser;
     if (!browser) return;
 
+    if (browser.renameId) {
+      if (key.escape || (key.ctrl && char === 'c')) {
+        dispatch({ type: 'browser.rename.cancel' });
+        return;
+      }
+      if (key.return) {
+        void renameBrowserSession(browser.renameId, browser.renameDraft);
+        return;
+      }
+      if (key.backspace || key.delete) {
+        dispatch({ type: 'browser.rename.input', draft: browser.renameDraft.slice(0, -1) });
+        return;
+      }
+      if (char && !key.ctrl && !key.meta) {
+        const { text } = splitPaste(char);
+        if (text) dispatch({ type: 'browser.rename.input', draft: browser.renameDraft + text });
+      }
+      return;
+    }
+
+    if (browser.deleteConfirm) {
+      if (key.escape || (key.ctrl && char === 'c')) {
+        dispatch({ type: 'browser.confirmDelete', id: null });
+        return;
+      }
+      if (browser.tab === 'sessions' && char === 'D') {
+        void deleteBrowserSession(browser.deleteConfirm);
+        return;
+      }
+    }
+
     if (key.escape || (key.ctrl && char === 'c')) {
       dispatch({ type: 'browser.close' });
       return;
@@ -3357,39 +3810,65 @@ export function App({
       return;
     }
     if (key.upArrow) {
-      dispatch({ type: 'browser.move', delta: -1 });
+      dispatch({ type: 'browser.move', delta: -1, count: browserRowsForView.length });
       return;
     }
     if (key.downArrow) {
-      dispatch({ type: 'browser.move', delta: 1 });
+      dispatch({ type: 'browser.move', delta: 1, count: browserRowsForView.length });
       return;
     }
     // A page at a time, because scrolling three thousand entries one row at a
     // time is not navigation.
     if (key.pageUp) {
-      dispatch({ type: 'browser.move', delta: -10 });
+      dispatch({ type: 'browser.move', delta: -10, count: browserRowsForView.length });
       return;
     }
     if (key.pageDown) {
-      dispatch({ type: 'browser.move', delta: 10 });
+      dispatch({ type: 'browser.move', delta: 10, count: browserRowsForView.length });
       return;
     }
     if (key.ctrl && char === 'r') {
-      void openCatalog(true);
+      if (browser.tab === 'sessions') {
+        dispatch({ type: 'browser.loading', loading: true });
+        void openSessions();
+      }
+      else void openCatalog(true);
       return;
     }
     if (key.return) {
-      void actOnBrowserRow();
+      if (browser.tab === 'sessions') {
+        const row = browserView?.rows[browserView.selected];
+        if (row) void resumeBrowserSession(row.id);
+      } else {
+        void actOnBrowserRow();
+      }
       return;
     }
-    // Uppercase only. Lowercase belongs to the filter, and a browser where
-    // typing a server's name starts logging into a different one is a trap.
-    if (char === 'L' && !key.ctrl && !key.meta && browser.tab === 'mcp') {
-      const row = browser.rows[browser.selected];
+    // Uppercase action keys only. Lowercase belongs to the filter, and a
+    // browser where typing a server's name starts a lifecycle action is a
+    // trap. Actions stay in the browser so status changes are visible in
+    // place; the resulting notice is also retained in the transcript.
+    if (browser.tab === 'mcp' && !key.ctrl && !key.meta && /^[CDAT]$/.test(char)) {
+      const row = browserView?.rows[browserView.selected];
       if (row) {
-        dispatch({ type: 'browser.close' });
-        void loginMcp(row.id).then(push);
+        const action = char === 'C'
+          ? 'connect'
+          : char === 'D'
+            ? 'disconnect'
+            : char === 'A' ? 'authenticate' : 'test';
+        void runMcpBrowserAction(action, row.id);
       }
+      return;
+    }
+    if (browser.tab === 'sessions' && !key.ctrl && !key.meta && char === 'R') {
+      const row = browserView?.rows[browserView.selected];
+      const session = row ? browser.sessions.find((item) => item.id === row.id) : undefined;
+      if (row && session) dispatch({ type: 'browser.rename.start', id: row.id, draft: session.title });
+      return;
+    }
+    if (browser.tab === 'sessions' && !key.ctrl && !key.meta && char === 'D') {
+      const row = browserView?.rows[browserView.selected];
+      if (row) dispatch({ type: 'browser.confirmDelete', id: row.id });
       return;
     }
     if (key.backspace || key.delete) {
@@ -3414,7 +3893,7 @@ export function App({
    */
   async function actOnBrowserRow(): Promise<void> {
     const browser = state.browser;
-    const row = browser?.rows[browser.selected];
+    const row = browserView?.rows[browserView.selected];
     if (!browser || !row) return;
 
     if (browser.tab === 'marketplace') {
@@ -3499,6 +3978,7 @@ export function App({
       downArrow?: boolean;
       backspace?: boolean;
       delete?: boolean;
+      tab?: boolean;
       ctrl?: boolean;
       meta?: boolean;
     },
@@ -3506,7 +3986,13 @@ export function App({
     const picker = state.picker;
     if (!picker) return;
 
-    if (key.escape || (key.ctrl && char === 'c')) {
+    if (key.escape) {
+      const onBack = picker.onBack;
+      dispatch({ type: 'picker.close' });
+      onBack?.();
+      return;
+    }
+    if (key.ctrl && char === 'c') {
       dispatch({ type: 'picker.close' });
       return;
     }
@@ -3516,6 +4002,10 @@ export function App({
     }
     if (key.downArrow) {
       dispatch({ type: picker.groups ? 'picker.moveVisible' : 'picker.move', delta: 1 });
+      return;
+    }
+    if (key.tab) {
+      dispatch({ type: 'picker.details' });
       return;
     }
     if (key.return) {
@@ -3543,7 +4033,7 @@ export function App({
       const matches = filterItems(picker.items ?? [], picker.filter);
       const chosen = matches[picker.selected];
       dispatch({ type: 'picker.close' });
-      if (chosen) picker.onPick(chosen.value);
+      if (chosen) picker.onPick(chosen.selection ?? chosen.value);
       return;
     }
     if (key.backspace || key.delete) {
@@ -3789,8 +4279,13 @@ export function App({
         { key: '↑↓', label: 'move' },
         { key: 'Tab', label: 'switch tab' },
         { key: 'Enter', label: 'details' },
-        ...(state.browser.tab === 'mcp' ? [{ key: 'L', label: 'login' }] : []),
-        ...(state.browser.tab === 'marketplace' ? [{ key: 'Ctrl+R', label: 'refresh' }] : []),
+        ...(state.browser.tab === 'mcp'
+          ? [{ key: 'C', label: 'connect' }, { key: 'D', label: 'disconnect' }, { key: 'A', label: 'auth' }, { key: 'T', label: 'test' }]
+          : []),
+        ...(state.browser.tab === 'sessions'
+          ? [{ key: 'R', label: 'rename' }, { key: 'D', label: 'delete' }]
+          : []),
+        ...(['marketplace', 'sessions'].includes(state.browser.tab) ? [{ key: 'Ctrl+R', label: 'refresh' }] : []),
         { key: 'Esc', label: 'close' },
       ]
     : state.question
@@ -3853,24 +4348,46 @@ export function App({
             { key: '↑↓', label: 'history' },
             { key: 'Ctrl+C', label: 'quit' },
           ];
+  const showFooterHints = Boolean(
+    state.browser ||
+    state.question ||
+    state.picker ||
+    state.approval ||
+    showEmoji ||
+    showCompletions,
+  );
+  // Provider/model/effort/context are useful during a decision or an active
+  // turn, but they do not earn permanent space in the quiet idle shell.
+  const showContextualFooter = state.busy || showFooterHints || interruptArmed;
+  const footerRows = showContextualFooter ? FOOTER_HEIGHT : 0;
 
   // While the agent runs, the elapsed time and the token count live on the
   // working line directly above the prompt, where the eye already is. Repeating
   // them in the footer was the same three facts twice on one screen.
   const status = interruptArmed ? 'press Ctrl+C again to quit' : undefined;
   const working =
-    agentTurnStartedAt !== null ? (
-      <Working
-        seed={turn}
-        since={agentTurnStartedAt}
-        tokens={completionMeter.tokens}
-        estimated={completionMeter.estimated}
-        plif={effort === 'plif'}
+    agentTurnStartedAt !== null && loadingOperationRef.current !== null ? (
+      <LoadingStatus
+        active
+        operationId={loadingOperationRef.current.id}
+        width={surface.contentWidth}
       />
     ) : undefined;
   const promptStatus = planMode ? (
     <Text color={color('accent')}>plan mode · read-only · /plan off to work</Text>
-  ) : working;
+  ) : undefined;
+  const queuedPrompt = useMemo(
+    () => state.queue.length > 0
+      ? (
+        <Queue
+          messages={state.queue}
+          selected={queuedIndex}
+          width={Math.max(1, surface.contentWidth - 4)}
+        />
+      )
+      : undefined,
+    [state.queue, queuedIndex, surface.contentWidth],
+  );
 
   // A dialog is the only thing on screen worth attention, and the prompt line
   // already carries the elapsed time and "Esc to cancel". A spinner underneath
@@ -3887,9 +4404,10 @@ export function App({
   const pickerRows = Math.max(3, Math.min(12, rows - 12));
   const compactDialogs = rows < 34;
   const suggestionRows = Math.max(1, Math.min(6, surface.contentHeight - 8));
+  const completionHeadingRows = showCompletions && !argumentCompletion ? 2 : 0;
 
-  const effortFrame = plifDockHeight(effort) > 0;
-  const promptFooterRows = (promptStatus ? 1 : 0) + (effortFrame ? 1 : 0);
+  const workingRows = working ? 1 : 0;
+  const promptFooterRows = promptStatus ? 1 : 0;
   const promptQueueRows = queueHeight(state.queue);
   const inputRows = promptBodyRows(input, cursor, surface.contentWidth);
 
@@ -3897,11 +4415,16 @@ export function App({
   // budgeted from the same frame geometry that Prompt renders; a long draft is
   // clipped to the rows that fit while its complete value remains editable.
   const fixedChrome =
-    1 + // footer
+    footerRows + // contextual bottom HUD; zero rows in quiet idle
+    workingRows +
     workRows +
-    (showCompletions ? suggestionRows + (completions.length > suggestionRows ? 1 : 0) : 0) +
-    (showEmoji ? suggestionRows + (emojiMatches.length > suggestionRows ? 1 : 0) : 0) +
-    (state.picker ? pickerRows + 8 : 0) +
+    (showCompletions ? suggestionRows + (completionCount > suggestionRows ? 1 : 0) + 1 + completionHeadingRows : 0) +
+    (showEmoji ? suggestionRows + (emojiMatches.length > suggestionRows ? 1 : 0) + 1 : 0) +
+    (state.picker
+      ? state.picker.countLabel === 'efforts'
+        ? 12
+        : pickerRows + 8
+      : 0) +
     (state.approval ? approvalHeight(compactDialogs) : 0) +
     (state.question ? questionHeight(state.question, compactDialogs, state.questionExpanded) : 0) +
     (state.compaction ? COMPACTION_HEIGHT + 1 : 0) +
@@ -3935,7 +4458,6 @@ export function App({
   );
   const animationActive = animationClockActive({
       effort,
-      effortTransitioning,
     busy: state.busy,
     compacting: state.compaction !== null,
     browserLoading: state.browser?.loading === true,
@@ -3945,6 +4467,26 @@ export function App({
     runningSubagent: state.subagents.some((view) => view.status === 'running'),
     runningDiscovery: state.discovery.calls.some((call) => call.ok === undefined),
       runningTimeline: state.entries.some((entry) => entry.status === 'active'),
+    // Only the focused idle prompt may breathe on the shared slow clock. Open
+    // selectors stay completely static; keyboard navigation must be the only
+    // thing that changes them.
+    ambientFocus: Boolean(stdout.isTTY) && (
+      !state.approval && !state.question && !state.picker && !state.browser && !state.exiting
+    ),
+  });
+  // The full travelling wave is reserved for actual work and bounded
+  // transitions; an idle frame that waved as hard as a busy one would make
+  // "waiting" and "working" the same visual.
+  const frameActive = strongFrameActive({
+    busy: state.busy,
+    compacting: state.compaction !== null,
+    browserLoading: state.browser?.loading === true,
+    runningTask: tasks.some(
+      (task) => task.status === 'running' || task.status === 'awaiting_approval',
+    ),
+    runningSubagent: state.subagents.some((view) => view.status === 'running'),
+    runningDiscovery: state.discovery.calls.some((call) => call.ok === undefined),
+    runningTimeline: state.entries.some((entry) => entry.status === 'active'),
   });
 
   return (
@@ -3968,34 +4510,47 @@ export function App({
     */
     <AnimationClockProvider
       active={animationActive}
+      // The live activity glyphs use the calm 120ms clock. The 33ms clock is
+      // started only for the bounded PLIF signature overlay, never for idle
+      // work or the whole App tree.
+      fastActive={plifActivation}
       plif={effort === 'plif'}
     >
     <Box flexDirection="column" width={width} height={surface.canvasHeight}>
-      <Box paddingX={layout.gutter} flexShrink={0}>
-        <Header
-          cwd={cwd}
-          width={width - layout.gutter * 2}
-          model={provider?.info.id ?? ''}
-          effort={effort}
-          version={version}
-        />
-      </Box>
-      {/*
-        Scrollback. Ink prints each item once, above the frame, and never again
-        — which is both why history survives here and why the array behind it
-        must only ever grow. The key is what makes /clear safe: a new key is a
-        new component with a fresh count, rather than the same one being handed
-        a shorter list it will misread.
-      */}
-      <Static key={state.epoch} items={scrollback as TimelineEntry[]}>
-        {(item) => (
-          <Box key={item.id} paddingX={layout.gutter}>
-            <TimelineRow entry={item} width={width - layout.gutter * 2} />
+      {pastedTextPopup ? (
+        <PastedTextDialog text={pastedTextPopup.text} width={width} height={surface.canvasHeight} />
+      ) : (
+        <>
+          <Box paddingX={layout.gutter} flexShrink={0}>
+            <Header
+              cwd={cwd}
+              width={headerAvailableWidth}
+              model={provider?.info.id ?? ''}
+              effort={effort}
+              version={version}
+            />
           </Box>
-        )}
-      </Static>
+          <PlifActivation
+            active={plifActivation}
+            width={surface.contentWidth}
+            height={surface.canvasHeight}
+          />
+          {/*
+            Scrollback. Ink prints each item once, above the frame, and never again
+            — which is both why history survives here and why the array behind it
+            must only ever grow. The key is what makes /clear safe: a new key is a
+            new component with a fresh count, rather than the same one being handed
+            a shorter list it will misread.
+          */}
+          <Static key={state.epoch} items={scrollback as TimelineEntry[]}>
+            {(item) => (
+              <Box key={item.id} paddingX={layout.gutter}>
+                <TimelineRow entry={item} width={width - layout.gutter * 2} />
+              </Box>
+            )}
+          </Static>
 
-      {thinkingViewport.open ? (
+          {thinkingViewport.open ? (
         <ThinkingOverlay
           document={thinkingDoc}
           viewport={thinkingViewport}
@@ -4021,9 +4576,10 @@ export function App({
           {...{ height: sessionFrameHeight(rows, 'browser'), overflowY: 'hidden' as const }}
         >
           <Browser
-            state={state.browser}
+            state={browserView!}
             servers={mcpStatuses}
             skills={skillList}
+            sessions={browserView?.sessions ?? []}
             width={width}
             rows={rows}
           />
@@ -4059,11 +4615,13 @@ export function App({
                 <Picker
                   title={state.picker.title}
                   hint={state.picker.hint}
+                  countLabel={state.picker.countLabel}
                   {...(state.picker.groups
                     ? { groups: state.picker.groups, expanded: state.picker.expanded }
                     : { items: filterItems(state.picker.items ?? [], state.picker.filter) })}
                   filter={state.picker.filter}
                   selected={state.picker.selected}
+                  details={state.picker.details}
                   width={Math.max(1, surface.contentWidth - 2)}
                   rows={pickerRows}
                 />
@@ -4122,13 +4680,19 @@ export function App({
             )}
 
             <Box flexDirection="column" flexShrink={0}>
+              {working && (
+                <Box paddingX={layout.gutter}>
+                  {working}
+                </Box>
+              )}
               <Prompt
                 value={input}
                 cursor={cursor}
                 placeholder={
                   // Short enough to survive a narrow terminal without being clipped
-                  // mid-word.
-                  state.container ? 'run a command, or / for commands' : 'describe a task, or / for commands'
+                  // mid-word, and honest about the two things a beginner can do
+                  // from an empty line: talk to the agent, or open commands.
+                  'describe a task, or / for commands'
                 }
                 // Focused while busy too: the field takes input the whole time, and
                 // an unfocused-looking box that nonetheless accepts typing is a lie
@@ -4140,39 +4704,24 @@ export function App({
                 maxRows={promptRows}
                 effort={effort}
                 {...(promptStatus ? { status: promptStatus } : {})}
-                frameActive={animationActive}
+                frameActive={frameActive}
                 plif={effort === 'plif'}
-                {...(effortFrame
-                  ? {
-                      frameFooter: (
-                        <PlifDock
-                          cwd={cwd}
-                          model={providerRef.current?.info.id ?? provider?.info.id ?? ''}
-                          effort={effort}
-                          contextUsed={state.contextUsed}
-                          contextMax={state.contextMax}
-                          working={state.busy}
-                          transitioning={effortTransitioning}
-                          animated={animationActive}
-                          width={Math.max(18, surface.contentWidth - 4)}
-                        />
-                      ),
-                    }
-                  : {})}
                 {...(state.busySince !== null ? { busySince: state.busySince } : {})}
-                {...(state.queue.length > 0
-                  ? {
-                      queue: (
-                        <Queue
-                          messages={state.queue}
-                          selected={queuedIndex}
-                          width={Math.max(1, surface.contentWidth - 4)}
-                        />
-                      ),
-                    }
-                  : {})}
+                {...(queuedPrompt ? { queue: queuedPrompt } : {})}
               />
-              <Footer hints={hints} width={surface.contentWidth} {...(status ? { status } : {})} />
+              {showContextualFooter && (
+                <Footer
+                  hints={hints}
+                  width={surface.contentWidth}
+                  provider={providerRef.current?.info.endpoint ?? provider?.info.endpoint}
+                  model={providerRef.current?.info.id ?? provider?.info.id}
+                  effort={effort}
+                  contextUsed={state.contextUsed}
+                  contextMax={state.contextMax}
+                  showHints={showFooterHints}
+                  {...(status ? { status } : {})}
+                />
+              )}
             </Box>
 
             {state.exiting && (
@@ -4182,13 +4731,10 @@ export function App({
             )}
           </Box>
         </Box>
+          )}
+        </>
       )}
 
-      <PlifIntro
-        active={effort === 'plif' && effortTransitioning}
-        width={width}
-        height={surface.canvasHeight}
-      />
     </Box>
     </AnimationClockProvider>
   );

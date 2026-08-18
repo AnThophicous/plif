@@ -1,12 +1,9 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
-import { effortPulseCells, effortSymbol, effortTagline, effortVisual } from '../effort-visuals.js';
-import { useHighlightClock } from '../pulse.js';
+import { effortSymbol, effortTagline, effortVisual } from '../effort-visuals.js';
 import { color, layout, shortenPath, truncate } from '../theme.js';
-import { InfinityMark } from './FocusFrame.js';
 import { Meter } from './Meter.js';
-import { PlifGlow } from './PlifGlow.js';
 export { plifDockItems } from '../live-status.js';
 
 const DOCK_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode', 'plif'] as const;
@@ -41,10 +38,9 @@ export function PlifDock({
   const plif = effort === 'plif';
   const visual = effortVisual(effort);
   const animated = working || transitioning || ambientAnimation;
-  const elapsed = useHighlightClock(animated);
   if (plifDockHeight(effort) === 0) return null;
 
-  const pulse = effortPulseCells(effort, elapsed, animated);
+  const identitySymbol = effortSymbol(effort);
   const inner = Math.max(18, width - 4);
   const narrow = inner < layout.narrowWidth;
   const compact = inner < 28;
@@ -58,30 +54,15 @@ export function PlifDock({
   return (
     <Box width="100%" justifyContent="space-between" flexWrap="nowrap">
       <Box flexGrow={1} flexShrink={1} minWidth={0}>
-        <InfinityMark active={animated} plif={plif} />
         {compact ? (
-          <Text color={color(animated ? 'accentBright' : 'muted')} bold wrap="truncate">{` ${effortSymbol(effort)} ${visual.label.slice(0, 8)}`}</Text>
+          <Text color={color(animated ? 'accentBright' : 'muted')} bold wrap="truncate">{` ${identitySymbol} ${visual.label.slice(0, 8)}`}</Text>
         ) : (
           <Text bold>
-            <Text color={color(animated ? 'accentBright' : 'muted')}>{` ${effortSymbol(effort)} `}</Text>
-            <PlifGlow
-              value={visual.label}
-              elapsedMs={elapsed}
-              active={animated}
-              fallback="faint"
-              stops={visual.stops}
-            />
+            {identitySymbol && <Text color={color(animated ? 'accentBright' : 'muted')}>{` ${identitySymbol} `}</Text>}
+            <Text color={color(animated ? 'accentBright' : 'muted')}>{visual.label}</Text>
           </Text>
         )}
         {animated && !compact && <Text color={color('muted')}>{` · ${effortTagline(effort, working)}`}</Text>}
-        {animated && (
-          <Text wrap={compact ? 'truncate' : 'wrap'}>
-            {' '}
-            {pulse.map((cell, index) => (
-            <Text key={index} color={cell.color}>{cell.text}</Text>
-            ))}
-          </Text>
-        )}
         {!narrow && (
           <Text color={color(working ? 'muted' : 'faint')}>
             {`  ·  ${truncate(shortenPath(cwd, pathWidth), pathWidth)}${animated ? `  ·  ${visual.descriptor}` : ''}`}

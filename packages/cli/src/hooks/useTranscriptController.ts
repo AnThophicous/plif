@@ -33,6 +33,8 @@ export interface TranscriptController {
   readonly persist: (event: ConversationEvent) => void;
   readonly applyStreamFrame: (frame: StreamFrame) => void;
   readonly resetStream: () => void;
+  /** Move the live transcript pointer without remounting the Ink app. */
+  readonly switchSession: (session: Session, replay: readonly ConversationEvent[]) => void;
 }
 
 function seedTranscript(events: readonly ConversationEvent[]): TranscriptState {
@@ -136,6 +138,17 @@ export function useTranscriptController({
     if (turnId) dispatch({ type: 'stream.reset', turnId });
   }, []);
 
+  const switchSession = useCallback((nextSession: Session, nextReplay: readonly ConversationEvent[]): void => {
+    sessionRef.current = nextSession;
+    sessionCreate.current = Promise.resolve(nextSession);
+    persisted.current = new Set(nextReplay.map((event) => event.eventId));
+    currentTurnId.current = null;
+    persistenceFailed.current = false;
+    setPersistenceWarning(null);
+    setLiveSession(nextSession);
+    dispatch({ type: 'replace', events: [...nextReplay] });
+  }, []);
+
   useEffect(() => {
     const turnFor = (requestId: string): string => currentTurnId.current ?? `dialog:${requestId}`;
     return engine.bus.on('approval.request', (request) => {
@@ -186,5 +199,6 @@ export function useTranscriptController({
     persist,
     applyStreamFrame,
     resetStream,
+    switchSession,
   };
 }

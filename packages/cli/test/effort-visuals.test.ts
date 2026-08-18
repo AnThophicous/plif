@@ -6,6 +6,7 @@ import {
   effortPulseCells,
   effortSymbol,
   effortTagline,
+  effortTone,
   effortVisual,
 } from '../src/effort-visuals.js';
 import { displayWidth } from '../src/text.js';
@@ -40,9 +41,20 @@ describe('effort visual identities', () => {
   });
 
   it('gives PLIF a distinct display signature', () => {
-    assert.equal(effortSymbol('plif'), '✦');
-    assert.equal(effortDisplay('plif'), '✦ PLIF');
+    assert.equal(effortSymbol('plif'), '');
+    assert.equal(effortDisplay('plif'), 'PLIF');
     assert.notEqual(effortSymbol('plif'), effortSymbol('max'));
+  });
+
+  it('reserves the one warm tone for PLIF and steps the rest up the cold ramp', () => {
+    assert.equal(effortTone('plif'), 'gold');
+    assert.equal(effortTone('max'), 'accentBright');
+    assert.equal(effortTone('low'), 'faint');
+    // PLIF's travelling light passes through champagne; no other level does.
+    assert.ok(effortVisual('plif').stops.includes('gold'));
+    for (const effort of ['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode']) {
+      assert.ok(!effortVisual(effort).stops.includes('gold'), effort);
+    }
   });
 
   it('falls back safely for an absent or unknown effort', () => {

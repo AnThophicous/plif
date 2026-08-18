@@ -36,22 +36,24 @@ export const supportsRichGlyphs = richGlyphs;
 
 /**
  * The Plif cold palette. The two anchors are deliberately few:
- * `#CDD6F4` is the primary ink and `#A2ADB5` is the secondary ink.
- * Everything else is a quiet derived role or a genuinely semantic state.
+ * `#A2ADB5` is the primary ink and `#CDD6F4` is the reserved accent.
+ * Everything else is a quiet derived role or a genuinely semantic state —
+ * with one exception: the champagne `gold` pair exists so the PLIF signature
+ * can carry a single warm note on an otherwise cold surface.
  */
 const defaultPalette = {
-  /** Primary reading colour. Used for content, never for chrome. */
-  text: '#CDD6F4',
+  /** Dominant reading colour and structural ink. */
+  text: '#A2ADB5',
   /** The full-bleed shell surface that holds the current Plif frame. */
   panel: '#303030',
   /** Quiet filled surface for the developer's own message row. */
-  surface: '#383C43',
-  /** Secondary and highlighted text, including compact tables. */
-  muted: '#A2ADB5',
+  surface: '#2C2D2E',
+  /** Secondary text: readable, but quieter than the main ink. */
+  muted: '#89959E',
   /** Tertiary: borders, separators, hints. Present but never competing. */
-  faint: '#6B7782',
-  /** Barely there. Timestamps, inactive states. */
-  ghost: '#56616B',
+  faint: '#7C848A',
+  /** Quiet metadata and inactive states. */
+  ghost: '#6F767C',
 
   /** Border and structural identity colour. */
   brand: '#AAB8CC',
@@ -61,6 +63,25 @@ const defaultPalette = {
   accentBright: '#CDD6F4',
   /** Important details and de-emphasised accents. */
   accentDim: '#84919D',
+
+  /**
+   * Warm champagne gold, reserved for the PLIF signature.
+   *
+   * The interface stays cold; this is the one warm note, and it belongs to
+   * identity moments only — the `✦ PLIF` mark, the signature effort, the
+   * travelling glow's warm flash. It is deliberately off-gold: quiet enough
+   * to sit beside `#A2ADB5` without the screen reading as yellow.
+   */
+  /** Dark gold / transition anchor. */
+  goldDim: '#A99159',
+  /** Base champagne gold. */
+  goldBase: '#D6B968',
+  /** Primary PLIF champagne. */
+  gold: '#E2C675',
+  /** Bright champagne used at the centre of a controlled emphasis. */
+  goldBright: '#ECD894',
+  /** Warm ivory at the centre of the PLIF light concentration. */
+  warmIvory: '#F2E3B1',
 
   success: '#8FB3A6',
   warn: '#BDAA82',
@@ -110,7 +131,8 @@ export const emphasis: Record<EmphasisKey, { tone: PaletteKey; bold: boolean }> 
 /**
  * Effort changes the active signal, not the legibility of the whole terminal.
  * The ramp stays inside the Plif blue-grey family; PLIF reaches the primary
- * anchor and gets its own glyph treatment in `effort-visuals.ts`.
+ * anchor and, through the stops in `effort-visuals.ts`, the one warm flash the
+ * signature is allowed.
  */
 export const effortPalette: Readonly<Record<string, Partial<Record<PaletteKey, string>>>> = {
   low: {
@@ -171,19 +193,19 @@ const glyphPairs = {
   /** The Plif mark. */
   infinity: ['oo', 'oo'],
   /** Input prompt. */
-  prompt: ['❯', '>'],
+  prompt: ['›', '>'],
   /** A step the agent took. */
-  step: ['•', '*'],
+  step: ['·', '.'],
   /** An agent or task row. */
   task: ['∷', '::'],
   /** Currently running. */
-  active: ['●', '*'],
+  active: ['…', '...'],
   /** Queued, not started. */
   pending: ['○', 'o'],
   /** Finished cleanly. */
   done: ['✓', 'v'],
   /** Failed. */
-  failed: ['✗', 'x'],
+  failed: ['×', 'x'],
   /** Blocked, waiting on a human. */
   waiting: ['◆', '?'],
   /** Vertical separator in the hint bar. */
@@ -191,7 +213,7 @@ const glyphPairs = {
   /** Leading rail on continuation lines. */
   rail: ['│', '|'],
   /** Points at a nested detail. */
-  branch: ['└', '`'],
+  branch: ['↳', '`->'],
   /**
    * Joins a compacted batch line to the one detail worth naming under it.
    *
@@ -200,7 +222,7 @@ const glyphPairs = {
    */
   hook: ['⎿', '`-'],
   /** Right-pointing marker. */
-  caret: ['▸', '>'],
+  caret: ['›', '>'],
   /** Disclosure marker used by compact trays and expandable surfaces. */
   disclosure: ['▾', 'v'],
   /** Meter fill and track. */
@@ -216,8 +238,8 @@ const glyphPairs = {
   clip: ['‹', '<'],
   /** Leads the token counter on the thinking line. */
   tokens: ['↓', 'v'],
-  /** A tool call that ran. Filled, because it is a thing that happened. */
-  tool: ['⏺', 'o'],
+  /** An activity/detail row attached to the agent's work. */
+  tool: ['↳', '->'],
   /**
    * Marks the gutter of something the agent said, as opposed to did.
    *
@@ -225,7 +247,11 @@ const glyphPairs = {
    * on Windows the text font has no glyph for it, so fallback draws it from the
    * emoji font — coloured, and two cells wide where the layout budgeted one.
    */
-  speak: ['●', '*'],
+  speak: ['✦', '*'],
+  /** The warm identity mark used by PLIF, header and thinking rows. */
+  sparkle: ['✦', '*'],
+  /** A quieter phase of the same identity mark. */
+  subtleSparkle: ['✧', '*'],
   shell: ['$', '$'],
   read: ['R', 'R'],
   list: ['L', 'L'],
@@ -246,7 +272,6 @@ export const glyph: Record<GlyphKey, string> = Object.fromEntries(
   Object.entries(glyphPairs).map(([key, [rich, plain]]) => [key, richGlyphs ? rich : plain]),
 ) as Record<GlyphKey, string>;
 
-glyph.tool = richGlyphs ? '•' : '*';
 const defaultGlyph = { ...glyph };
 
 /**
@@ -261,7 +286,7 @@ const defaultGlyph = { ...glyph };
 const defaultLayout = {
   gutter: 1,
   boxPadX: 1,
-  surfacePadX: 1,
+  surfacePadX: 4,
   surfacePadY: 1,
   /** Width of the status column that `[done]`-style tags right-align into. */
   statusColumn: 12,

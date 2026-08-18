@@ -20,7 +20,7 @@ export function workDockHeight(
     (subagents.length > 0 ? 1 : 0);
 }
 
-export function WorkDock({
+export const WorkDock = React.memo(function WorkDock({
   tasks,
   subagents,
   subagentFocus,
@@ -35,10 +35,11 @@ export function WorkDock({
   readonly width: number;
   readonly now: number;
 }): React.ReactElement | null {
-  if (tasks.length === 0 && subagents.length === 0) return null;
-
   const active = tasks.filter((task) => task.status === 'running' || task.status === 'awaiting_approval').length;
-  const spinner = useSpinnerFrame(80, active > 0 || subagents.some((agent) => agent.status === 'running'));
+  const hasWork = tasks.length > 0 || subagents.length > 0;
+  const running = active > 0 || subagents.some((agent) => agent.status === 'running');
+  const spinner = useSpinnerFrame(80, hasWork && running);
+  if (!hasWork) return null;
   const label = trayLabel(tasks.length, subagents.length);
   const inner = Math.max(18, width - layout.gutter * 2);
 
@@ -79,7 +80,9 @@ export function WorkDock({
       {subagents.length > 0 && <Text color={color('ghost')}>Tab select {glyph.divider} Ctrl+S inspect {glyph.divider} Ctrl+X stop</Text>}
     </Box>
   );
-}
+});
+
+WorkDock.displayName = 'WorkDock';
 
 function TaskLine({
   task,

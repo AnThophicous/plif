@@ -118,6 +118,65 @@ describe('terminal surface output', () => {
     assert.doesNotMatch(patch, /row 0/);
   });
 
+  it('repaints the full reflowed frame once after dimensions change, then resumes row diffs', () => {
+    const writes: string[] = [];
+    const target = {
+      columns: 10,
+      rows: 20,
+      write(chunk: string | Uint8Array): boolean {
+        writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+        return true;
+      },
+    } as unknown as NodeJS.WriteStream;
+    const stream = createTerminalSurfaceStream(target, () => '#171719');
+    const eraseLines = (count: number): string =>
+      `${'\u001b[2K\u001b[1A'.repeat(Math.max(0, count - 1))}\u001b[2K\u001b[G`;
+    const before = '\u001b[31m12345678🙂\u001b[39m\nbeta\n';
+    const after = '12345\nBETA\n';
+
+    stream.write(before);
+    stream.write(`${eraseLines(3)}${before}`);
+    target.columns = 5;
+    target.rows = 12;
+    stream.write(`${eraseLines(3)}${after}`);
+
+    assert.equal(
+      writes.at(-1),
+      `${eraseLines(4)}${after}${terminalSurfaceTail('#171719')}`,
+      'the 10-cell ANSI/emoji row reflows to two physical rows at five columns',
+    );
+
+    stream.write(`${eraseLines(3)}12345\nbeta\n`);
+    const incremental = writes.at(-1) ?? '';
+    assert.match(incremental, /\u001b\[2Kbeta/);
+    assert.doesNotMatch(incremental, /12345/);
+  });
+
+  it('uses reflowed rows when a resize is followed by Ink scrollback cleanup', () => {
+    const writes: string[] = [];
+    const target = {
+      columns: 10,
+      rows: 20,
+      write(chunk: string | Uint8Array): boolean {
+        writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+        return true;
+      },
+    } as unknown as NodeJS.WriteStream;
+    const stream = createTerminalSurfaceStream(target, () => '#171719');
+    const eraseLines = (count: number): string =>
+      `${'\u001b[2K\u001b[1A'.repeat(Math.max(0, count - 1))}\u001b[2K\u001b[G`;
+    const frame = '1234567890\nbeta\n';
+
+    stream.write(frame);
+    stream.write(`${eraseLines(3)}${frame}`);
+    target.columns = 5;
+    stream.write(eraseLines(3));
+
+    assert.equal(writes.at(-1), eraseLines(4));
+    stream.write('history\n');
+    assert.equal(writes.at(-1), `history\n${terminalSurfaceTail('#171719')}`);
+  });
+
   it('drops the baseline when Ink clears for append-only scrollback', () => {
     const writes: string[] = [];
     const target = {

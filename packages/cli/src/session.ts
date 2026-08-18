@@ -8,7 +8,7 @@
  */
 
 import { DEFAULT_CONTEXT_TOKENS, diffStats, parseDiff } from '@plif/core';
-import type { Catalog, Decision, Effort, PolicyAction } from '@plif/core';
+import type { Catalog, Decision, Effort, PolicyAction, SessionMeta } from '@plif/core';
 import type { ModelSelection } from '@plif/core';
 import { filterItems, filterPickerGroups, flattenPickerGroups, pickerRows, preservePickerSelection } from './components/Picker.js';
 import type { PickerGroup, PickerItem } from './components/Picker.js';
@@ -64,6 +64,7 @@ export interface TimelineEntry {
     | 'faint'
     | 'accent'
     | 'brand'
+    | 'gold'
     | 'success'
     | 'warn'
     | 'danger'
@@ -146,7 +147,7 @@ export interface QueuedMessage {
   readonly attachments: readonly PastedAttachment[];
 }
 
-export type BrowserTab = 'mcp' | 'skills' | 'marketplace';
+export type BrowserTab = 'mcp' | 'skills' | 'marketplace' | 'sessions';
 
 /** One line in the browser list, flattened so the renderer stays dumb. */
 export interface BrowserRow {
@@ -161,15 +162,22 @@ export interface BrowserRow {
  * The extension browser: what is installed, and what could be.
  *
  * The catalogue is held here rather than re-fetched per render — three
- * thousand entries is a megabyte and a half, and filtering it is a synchronous
- * pass over an array that has to happen on every keystroke.
+ * thousand entries is a megabyte and a half. Filtered rows are derived by the
+ * app render boundary, not stored as a second source of truth in the reducer.
  */
 export interface BrowserState {
   readonly tab: BrowserTab;
   readonly filter: string;
   readonly selected: number;
-  readonly rows: readonly BrowserRow[];
   readonly catalog: Catalog | null;
+  /** Authoritative workspace sessions, loaded only when the tab is opened. */
+  readonly sessions: readonly SessionMeta[];
+  readonly sessionsLoaded: boolean;
+  /** A destructive action is a two-key gesture, never a one-key accident. */
+  readonly deleteConfirm: string | null;
+  /** Rename is an inline field so the browser keeps ownership of the keyboard. */
+  readonly renameId: string | null;
+  readonly renameDraft: string;
   readonly loading: boolean;
   readonly problem: string | null;
   /** The catalogue came from disk because the network did not answer. */
@@ -234,12 +242,16 @@ export interface PendingApproval {
 export interface PickerState {
   readonly title: string;
   readonly hint?: string;
+  readonly countLabel?: string;
   readonly items?: readonly PickerItem[];
   readonly groups?: readonly PickerGroup[];
   readonly expanded?: readonly string[];
   readonly filter: string;
   readonly selected: number;
   readonly onPick: (value: string | ModelSelection) => void;
+  readonly details?: boolean;
+  /** Nested provider → model pickers return here before closing. */
+  readonly onBack?: () => void;
 }
 
 export interface SessionState {
@@ -360,10 +372,14 @@ export type SessionAction =
   | { type: 'browser.close' }
   | { type: 'browser.tab'; delta: number }
   | { type: 'browser.filter'; filter: string }
-  | { type: 'browser.move'; delta: number }
-  | { type: 'browser.rows'; rows: readonly BrowserRow[] }
+  | { type: 'browser.move'; delta: number; count: number }
   | { type: 'browser.loading'; loading: boolean }
   | { type: 'browser.catalog'; catalog: Catalog | null; problem?: string }
+  | { type: 'browser.sessions'; sessions: readonly SessionMeta[]; problem?: string }
+  | { type: 'browser.confirmDelete'; id: string | null }
+  | { type: 'browser.rename.start'; id: string; draft: string }
+  | { type: 'browser.rename.input'; draft: string }
+  | { type: 'browser.rename.cancel' }
   | { type: 'queue.push'; message: QueuedMessage }
   | { type: 'queue.drop'; id: string }
   /** Everything queued has been handed to the agent. */
@@ -411,6 +427,7 @@ export type SessionAction =
   | { type: 'picker.move'; delta: number }
   | { type: 'picker.moveVisible'; delta: number }
   | { type: 'picker.toggle'; id: string }
+  | { type: 'picker.details' }
   | { type: 'picker.close' }
   | { type: 'exit' };
 
@@ -629,11 +646,16 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
           tab: action.tab,
           filter: '',
           selected: 0,
-          rows: [],
           catalog: state.browser?.catalog ?? null,
+          sessions: state.browser?.sessions ?? [],
+          sessionsLoaded: state.browser?.sessionsLoaded ?? false,
+          deleteConfirm: null,
+          renameId: null,
+          renameDraft: '',
           // Only the catalogue needs fetching, and only if it is not already
           // held from a previous open. The other two tabs read local state.
-          loading: action.tab === 'marketplace' && !state.browser?.catalog,
+          loading: (action.tab === 'marketplace' && !state.browser?.catalog)
+            || (action.tab === 'sessions' && !(state.browser?.sessionsLoaded ?? false)),
           problem: null,
           stale: state.browser?.stale ?? false,
         },
@@ -644,7 +666,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
 
     case 'browser.tab': {
       if (!state.browser) return state;
-      const order: BrowserTab[] = ['mcp', 'skills', 'marketplace'];
+      const order: BrowserTab[] = ['mcp', 'skills', 'marketplace', 'sessions'];
       const at = order.indexOf(state.browser.tab);
       const next = order[(at + action.delta + order.length) % order.length] as BrowserTab;
       return {
@@ -656,8 +678,11 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
           // into a two-item MCP list shows nothing and looks broken.
           filter: '',
           selected: 0,
-          rows: [],
-          loading: next === 'marketplace' && !state.browser.catalog,
+          deleteConfirm: null,
+          renameId: null,
+          renameDraft: '',
+          loading: (next === 'marketplace' && !state.browser.catalog)
+            || (next === 'sessions' && !state.browser.sessionsLoaded),
         },
       };
     }
@@ -668,24 +693,12 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
 
     case 'browser.move': {
       if (!state.browser) return state;
-      const count = state.browser.rows.length;
+      const count = action.count;
       if (count === 0) return state;
       // Clamped, not wrapped. In a list of three thousand, one press past the
       // bottom landing back at the top is disorienting rather than convenient.
       const next = Math.max(0, Math.min(count - 1, state.browser.selected + action.delta));
       return { ...state, browser: { ...state.browser, selected: next } };
-    }
-
-    case 'browser.rows': {
-      if (!state.browser) return state;
-      return {
-        ...state,
-        browser: {
-          ...state.browser,
-          rows: action.rows,
-          selected: Math.min(state.browser.selected, Math.max(0, action.rows.length - 1)),
-        },
-      };
     }
 
     case 'browser.loading':
@@ -704,6 +717,46 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
           problem: action.problem ?? null,
         },
       };
+
+    case 'browser.sessions':
+      if (!state.browser) return state;
+      return {
+        ...state,
+        browser: {
+          ...state.browser,
+          sessions: action.sessions,
+          sessionsLoaded: true,
+          loading: false,
+          problem: action.problem ?? null,
+          deleteConfirm: null,
+          renameId: null,
+          renameDraft: '',
+        },
+      };
+
+    case 'browser.confirmDelete':
+      if (!state.browser) return state;
+      return { ...state, browser: { ...state.browser, deleteConfirm: action.id } };
+
+    case 'browser.rename.start':
+      if (!state.browser) return state;
+      return {
+        ...state,
+        browser: {
+          ...state.browser,
+          renameId: action.id,
+          renameDraft: action.draft,
+          deleteConfirm: null,
+        },
+      };
+
+    case 'browser.rename.input':
+      if (!state.browser || !state.browser.renameId) return state;
+      return { ...state, browser: { ...state.browser, renameDraft: action.draft } };
+
+    case 'browser.rename.cancel':
+      if (!state.browser) return state;
+      return { ...state, browser: { ...state.browser, renameId: null, renameDraft: '' } };
 
     case 'queue.push':
       return { ...state, queue: [...state.queue, action.message] };
@@ -881,7 +934,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case 'picker.open':
       return {
         ...state,
-        picker: { ...action.picker, filter: '', selected: action.picker.selected ?? 0 },
+        picker: { ...action.picker, filter: '', selected: action.picker.selected ?? 0, details: false },
       };
 
     case 'picker.filter': {
@@ -952,6 +1005,11 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         },
       };
     }
+
+    case 'picker.details':
+      return state.picker
+        ? { ...state, picker: { ...state.picker, details: !state.picker.details } }
+        : state;
 
     case 'picker.close':
       return state.picker === null ? state : { ...state, picker: null };
