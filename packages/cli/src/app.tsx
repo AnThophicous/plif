@@ -100,7 +100,7 @@ import { terminalSurfaceLayout } from './components/TerminalSurface.js';
 import { LoadingStatus } from './components/LoadingStatus.js';
 import { visibleTasks } from './components/TaskIndicator.js';
 import { WorkDock, workDockHeight } from './components/WorkDock.js';
-import { Timeline, TimelineRow, estimateHeight } from './components/Timeline.js';
+import { Timeline, TimelineRow } from './components/Timeline.js';
 import { measureTranscriptCells } from './components/Timeline.js';
 import { TranscriptOverlay } from './components/TranscriptOverlay.js';
 import { ThinkingOverlay, thinkingBodyHeight } from './components/ThinkingOverlay.js';
@@ -147,7 +147,7 @@ import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { AnimationClockProvider } from './hooks/useAnimationClock.js';
 import { useTranscriptController } from './hooks/useTranscriptController.js';
 import { withoutReasoning } from './conversation.js';
-import { entry, initialSession, sessionReducer } from './session.js';
+import { entry, initialSession, scrollbackCommitEnd, sessionReducer } from './session.js';
 import type { BrowserRow, BrowserState, QueuedMessage, TimelineEntry } from './session.js';
 import { ComposerHistory } from './composer/history.js';
 import { composerReducer, initialComposerState } from './composer/state.js';
@@ -1833,30 +1833,22 @@ export function App({
    *
    * A row can still change while it is the newest thing on screen — output
    * streams into it, its status resolves, an approval is inserted above it — so
-   * it has to stay in the live frame until it cannot. Once `LIVE_TAIL` newer
-   * rows exist and it is no longer running, nothing will touch it again, and it
-   * belongs in `<Static>`: printed once, scrollable forever, and out of the
-   * frame Ink has to repaint on every keystroke.
+   * the whole current turn stays in the live frame until the next input marks a
+   * new turn. At that boundary the previous settled prefix can move to
+   * `<Static>` in one ordered batch. This avoids the terminal viewport jumping
+   * away from the answer at the exact moment the request finishes.
    */
   useEffect(() => {
     // Committing prints settled rows to native terminal scrollback. Plif does
     // not inspect or reposition the terminal viewport while doing so.
+    const boundary = scrollbackCommitEnd(state.entries, LIVE_TAIL);
     let end = 0;
-    for (let index = 0; index < state.entries.length; index += 1) {
+    for (let index = 0; index < boundary; index += 1) {
       const item = state.entries[index]!;
       // Order is the constraint: scrollback is append-only, so a row can only
       // be committed once everything before it already has been.
       if (!isSettled(item)) break;
-      const behindTheTail = index < state.entries.length - LIVE_TAIL;
-      // A row taller than the window cannot be displayed live whatever the
-      // budget says, and keeping it in the frame is what makes the frame
-      // overflow. `/help` and `/policy` are the ones that hit this. In
-      // scrollback it simply scrolls, which is what the developer wanted.
-      const tallerThanTheScreen = estimateHeight(item, width - 2) > rows - 10;
-      // Not a `break`: a short row inside the tail is happy to stay live, but
-      // if something after it has to be committed then this one goes too —
-      // scrollback is ordered, so a row cannot jump ahead of its predecessor.
-      if (behindTheTail || tallerThanTheScreen) end = index + 1;
+      end = index + 1;
     }
     if (end > 0) {
       dispatch({
@@ -1865,7 +1857,7 @@ export function App({
         ids: state.entries.slice(0, end).map((entry) => entry.id),
       });
     }
-  }, [state.entries, width, rows]);
+  }, [state.entries]);
 
   /** Drain accumulated command output into its active row on a fixed cadence. */
   useEffect(() => {
