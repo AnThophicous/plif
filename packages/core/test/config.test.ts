@@ -20,7 +20,7 @@ import {
   stripJsonComments,
 } from '../src/config/global.js';
 import type { GlobalConfig } from '../src/config/global.js';
-import { visionCandidates } from '../src/model/config.js';
+import { modelSupportsImages, visionCandidates } from '../src/model/config.js';
 import { routeVision } from '../src/harness/vision.js';
 import { updateConfig } from '../src/harness/tools.js';
 
@@ -62,6 +62,25 @@ describe('declared vision providers', () => {
     };
     assert.equal(routeVision({ provider, visionModel: 'custom/vision' }).kind, 'saved');
     assert.equal(routeVision({ provider, visionModel: 'custom/removed' }).kind, 'select');
+  });
+
+  it('allows direct image input only for an explicitly declared active model', () => {
+    const config = {
+      preset: 'vision-provider',
+      model: 'vision-provider/vision',
+      provider: {
+        'vision-provider': {
+          options: { baseURL: 'https://models.example.test/v1' },
+          models: {
+            plain: { modalities: ['text'] as const },
+            vision: { modalities: ['text', 'image'] as const },
+          },
+        },
+      },
+    };
+    assert.equal(modelSupportsImages(config), true);
+    assert.equal(modelSupportsImages({ ...config, model: 'vision-provider/plain' }), false);
+    assert.equal(modelSupportsImages({ model: 'opencode/deepseek-v4-flash-free' }), false);
   });
 });
 

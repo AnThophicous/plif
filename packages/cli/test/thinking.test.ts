@@ -70,17 +70,17 @@ describe('the height a thinking row claims', () => {
   const thinking = (detail: string, status?: 'active') =>
     entry('thinking', 'Thinking', { detail, ...(status ? { status } : {}) });
 
-  it('is one line once it has settled', () => {
-    assert.equal(estimateHeight(thinking('a page of reasoning '.repeat(50)), WIDTH), 1);
+  it('keeps breathing room once it has settled', () => {
+    assert.equal(estimateHeight(thinking('a page of reasoning '.repeat(50)), WIDTH), 3);
   });
 
-  it('is one line while active with nothing written yet', () => {
-    assert.equal(estimateHeight(thinking('', 'active'), WIDTH), 1);
+  it('keeps the thinking heading visible while active with nothing written yet', () => {
+    assert.equal(estimateHeight(thinking('', 'active'), WIDTH), 3);
   });
 
   it('accounts for the live window while active, and is bounded by it', () => {
     const height = estimateHeight(thinking('a page of reasoning '.repeat(50), 'active'), WIDTH);
-    assert.equal(height, 1 + LIVE_THOUGHT_LINES);
+    assert.equal(height, 3 + LIVE_THOUGHT_LINES + 1);
   });
 });
 
@@ -101,7 +101,7 @@ describe('working bloom', () => {
   it('starts as a ball and opens into a flower', () => {
     assert.equal(bloomFrameAt(0), supportsRichGlyphs ? '●' : 'o');
     assert.notEqual(bloomFrameAt(0), bloomFrameAt(3));
-    assert.match(bloomFrameAt(5), /^[+*#]$/);
+    assert.match(bloomFrameAt(5), /^[+*✧]$/);
   });
 
   it('does not animate Plif working text from the colour clock', () => {

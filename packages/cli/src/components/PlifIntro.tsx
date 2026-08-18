@@ -1,7 +1,8 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
-import { mix, semanticWaveTone, useHighlightClock } from '../pulse.js';
+import { mix, PLIF_SIGNATURE_STOPS, semanticWaveTone } from '../pulse.js';
+import { ANIMATION_INTERVAL_MS, useAnimationFrame } from '../hooks/useAnimationClock.js';
 import { color, type PaletteKey } from '../theme.js';
 
 export const PLIF_INTRO_DURATION_MS = 5_200;
@@ -91,13 +92,13 @@ export function PlifIntro({
   readonly width: number;
   readonly height: number;
 }): React.ReactElement | null {
-  const clock = useHighlightClock(active);
+  const clock = useAnimationFrame(active, 'slow') * ANIMATION_INTERVAL_MS;
   if (!active) return null;
 
   const elapsed = elapsedMs ?? clock;
   const frame = plifIntroFrame(elapsed, height);
   if (frame.progress >= 1) return null;
-  const stops = ['brand', 'accentDim', 'accent', 'accentBright'] as const;
+  const stops: readonly PaletteKey[] = PLIF_SIGNATURE_STOPS;
   const largeTitle: readonly string[] = width < 64 ? ['PLIF'] : PLIF_ASCII_ART;
   const stageHeight = largeTitle.length + 2;
   const showLargeTitle = frame.largeOpacity >= frame.compactOpacity;

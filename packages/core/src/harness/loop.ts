@@ -376,6 +376,7 @@ export async function runLoop(
     const endThinking = (): void => {
       if (thinkingSince === null) return;
       options.bus.emit('agent.thinking', {
+        turnId,
         phase: 'end',
         durationMs: Date.now() - thinkingSince,
       });
@@ -391,20 +392,21 @@ export async function runLoop(
         if (event.kind === 'text') {
           endThinking();
           turnText += event.delta;
-          options.bus.emit('agent.text', { delta: event.delta });
+          options.bus.emit('agent.text', { turnId, delta: event.delta });
         } else if (event.kind === 'reasoning') {
           // Kept, not just shown. It has to go back on the wire next turn or a
           // reasoning model refuses the follow-up request outright.
           if (thinkingSince === null) {
             thinkingSince = Date.now();
-            options.bus.emit('agent.thinking', { phase: 'start' });
+            options.bus.emit('agent.thinking', { turnId, phase: 'start' });
           }
           turnReasoning += event.delta;
-          options.bus.emit('agent.reasoning', { delta: event.delta });
+          options.bus.emit('agent.reasoning', { turnId, delta: event.delta });
         } else if (event.kind === 'tool') {
           requested.push(event.call);
         } else if (event.kind === 'retry') {
           options.bus.emit('agent.retry', {
+            turnId,
             attempt: event.attempt,
             of: event.of,
             waitMs: event.waitMs,
@@ -418,7 +420,7 @@ export async function runLoop(
           turnText = '';
           turnReasoning = '';
           requested.length = 0;
-          options.bus.emit('agent.reset', { reason: 'the endpoint failed part-way through' });
+          options.bus.emit('agent.reset', { turnId, reason: 'the endpoint failed part-way through' });
         } else {
           promptTokens += event.usage.promptTokens;
           completionTokens += event.usage.completionTokens;
@@ -428,6 +430,7 @@ export async function runLoop(
           // a broken one.
           const reported = event.usage.promptTokens > 0;
           options.bus.emit('agent.usage', {
+            turnId,
             promptTokens: reported ? event.usage.promptTokens : estimateTokens(messages),
             // Cumulative for this user turn. A tool-using turn may make
             // several provider requests, and the TUI must not reset its meter
@@ -452,6 +455,7 @@ export async function runLoop(
     const preToolProse = classifyPreToolProse(turnText, requested.length);
     if (preToolProse) {
       options.bus.emit('agent.pre_tool_prose', {
+        turnId,
         iteration: iterations,
         text: turnText,
         visibility: preToolProse,
@@ -540,6 +544,7 @@ export async function runLoop(
 
       for (const item of prepared) {
         options.bus.emit('agent.tool', {
+          turnId,
           id: item.call.id,
           name: item.call.name,
           input: item.parseError ? item.call.arguments : item.parsed,
@@ -578,6 +583,7 @@ export async function runLoop(
         await recordStrategy(options, item.call, item.parsed, item.ok, item.durationMs);
 
         options.bus.emit('agent.tool', {
+          turnId,
           id: item.call.id,
           name: item.call.name,
           input: item.parsed,

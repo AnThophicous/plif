@@ -13,10 +13,10 @@ describe('user themes', () => {
     activateTheme(MINIMAL_THEME);
     assert.equal(color('panel'), '#303030');
     assert.equal(color('brand'), '#AAB8CC');
-    assert.equal(color('faint'), '#6B7782');
-    assert.equal(color('muted'), '#A2ADB5');
+    assert.equal(color('faint'), '#7C848A');
+    assert.equal(color('muted'), '#89959E');
     assert.equal(color('accentBright'), '#CDD6F4');
-    assert.equal(color('text'), '#CDD6F4');
+    assert.equal(color('text'), '#A2ADB5');
   });
 
   it('keeps effort accents inside one cold ramp and reserves the anchor for Plif', () => {
@@ -26,8 +26,8 @@ describe('user themes', () => {
       for (const [key, value] of Object.entries(paletteValues)) {
         assert.equal(palette[key as keyof typeof palette], value, `${effort}.${key}`);
       }
-      assert.equal(palette.text, '#CDD6F4', `${effort} keeps primary text stable`);
-      assert.equal(palette.muted, '#A2ADB5', `${effort} keeps secondary text stable`);
+      assert.equal(palette.text, '#A2ADB5', `${effort} keeps primary text stable`);
+      assert.equal(palette.muted, '#89959E', `${effort} keeps secondary text stable`);
     }
     applyEffortPalette('plif');
     assert.equal(palette.accentBright, '#CDD6F4');

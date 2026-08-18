@@ -7,6 +7,8 @@ import path from 'node:path';
 import {
   COMMANDS,
   builtInPickerProviders,
+  findCommand,
+  matchCommands,
   providerModelIds,
   validateEffortArgument,
 } from '../src/commands.js';
@@ -15,6 +17,7 @@ import { entry } from '../src/session.js';
 import type { BrowserTab, TimelineEntry } from '../src/session.js';
 
 const mcp = COMMANDS.find((command) => command.name === 'mcp');
+const sessions = COMMANDS.find((command) => command.name === 'sessions');
 const plan = COMMANDS.find((command) => command.name === 'plan');
 const goal = COMMANDS.find((command) => command.name === 'goal');
 const effort = COMMANDS.find((command) => command.name === 'effort');
@@ -100,6 +103,16 @@ describe('/mcp', () => {
   });
 });
 
+describe('/sessions', () => {
+  it('opens the shared session navigator', async () => {
+    const { context, opened } = recorder();
+    const result = await sessions!.run([], context);
+
+    assert.deepEqual(opened, ['sessions']);
+    assert.deepEqual(result.entries, []);
+  });
+});
+
 describe('/plan', () => {
   it('enters read-only planning mode and can leave it', async () => {
     const calls: Array<{ enabled: boolean; description?: string }> = [];
@@ -180,8 +193,46 @@ describe('/effort validation', () => {
     } finally {
       if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
       else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
-      await fs.rm(root, { recursive: true, force: true });
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
+  });
+
+  it('applies /effort plif directly instead of reopening the picker', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-effort-plif-'));
+    const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
+    process.env['PLIF_CONFIG_PATH'] = path.join(root, 'config.toml');
+    await fs.writeFile(process.env['PLIF_CONFIG_PATH'], '');
+    let opened = 0;
+    const calls: Array<string | undefined> = [];
+    try {
+      const result = await effort!.run(['plif'], {
+        supportedEfforts: () => ['low', 'medium', 'high', 'plif'],
+        setEffort: async (value) => { calls.push(value); },
+        openPicker: () => { opened += 1; },
+      } as unknown as CommandContext);
+      assert.equal(opened, 0, 'a typed, valid effort must not reopen the picker');
+      assert.deepEqual(calls, ['plif']);
+      assert.match(result.entries[0]?.title ?? '', /effort\s+PLIF/);
+      assert.equal(result.entries[0]?.tone, 'gold');
+    } finally {
+      if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
+      else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
+  it('applies /models <id> directly and lets the switch report itself', async () => {
+    let opened = 0;
+    const switched: string[] = [];
+    const models = COMMANDS.find((command) => command.name === 'models')!;
+    const result = await models.run(['z-ai/glm-5.2'], {
+      openPicker: () => { opened += 1; },
+      switchModel: async (selection) => { switched.push(String(selection)); },
+    } as unknown as CommandContext);
+
+    assert.equal(opened, 0, 'a typed, valid model id must not open the catalog');
+    assert.deepEqual(switched, ['z-ai/glm-5.2']);
+    assert.equal(result.entries.length, 0);
   });
 });
 
@@ -203,6 +254,34 @@ describe('/export', () => {
 });
 
 describe('provider model picker', () => {
+  it('keeps /model and /provider as aliases without duplicate command rows', () => {
+    assert.equal(findCommand('model')?.name, 'models');
+    assert.equal(findCommand('provider')?.name, 'providers');
+    assert.deepEqual(matchCommands('prov').map((command) => command.name), ['providers']);
+  });
+
+  it('opens a provider-first picker without probing provider credentials', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-provider-picker-'));
+    const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
+    process.env['PLIF_CONFIG_PATH'] = path.join(root, 'config.toml');
+    await fs.writeFile(process.env['PLIF_CONFIG_PATH'], '');
+    let picker: { title: string; countLabel?: string; items?: readonly { value: string }[] } | undefined;
+    try {
+      await findCommand('providers')!.run([], {
+        openPicker: (request) => {
+          if ('items' in request) picker = request;
+        },
+      } as unknown as CommandContext);
+      assert.equal(picker?.title, 'Select provider');
+      assert.equal(picker?.countLabel, 'providers');
+      assert.ok(picker?.items?.some((item) => item.value === 'nvidia'));
+    } finally {
+      if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
+      else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('keeps NVIDIA GLM 5.2 when live discovery omits it', () => {
     const catalog = {
       id: 'nvidia',

@@ -1,11 +1,13 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
-import { useHighlightClock } from '../pulse.js';
+import { mix, toneBetween, useBreath } from '../pulse.js';
+import { plifGlyphAt, plifGlyphColor } from '../plif-glyphs.js';
+import { ANIMATION_INTERVAL_MS, useAnimationFrame } from '../hooks/useAnimationClock.js';
 import { clusterAt, clusterLength, displayWidth, snap } from '../text.js';
 import { color, glyph, layout, truncate } from '../theme.js';
 import { FocusFrame } from './FocusFrame.js';
-import { PlifGlow, plifGlowCells } from './PlifGlow.js';
+import { PlifGlow } from './PlifGlow.js';
 
 export interface PromptProps {
   readonly value: string;
@@ -14,6 +16,8 @@ export interface PromptProps {
   readonly focused: boolean;
   readonly busy: boolean;
   readonly frameActive?: boolean;
+  /** Let the idle frame inhale slowly while the prompt holds focus. */
+  readonly breathing?: boolean;
   /** Enables the Plif treatment; the selected effort also controls the frame identity. */
   readonly plif?: boolean;
   /** Selected effort controls the frame's visual identity. */
@@ -61,7 +65,10 @@ export function promptHeight({
   const body = Math.max(1, Math.floor(bodyRows));
   const footer = Math.max(0, Math.floor(footerRows));
   const queue = Math.max(0, Math.floor(queueRows));
-  return 2 + body + queue + (footer > 0 ? 1 + footer : 0);
+  // FocusFrame is deliberately compact: two border rows plus the content.
+  // Keeping this geometry here prevents the dock budget from lying to Ink and
+  // leaves the conversation the same single-frame composition as the shell.
+  return 2 + body + queue + footer;
 }
 
 /**
@@ -131,13 +138,14 @@ export function layoutPrompt(value: string, cursor: number, width: number): read
   });
 }
 
-export function Prompt({
+export const Prompt = React.memo(function Prompt({
   value,
   cursor,
   placeholder,
   focused,
   busy,
   frameActive,
+  breathing = false,
   plif = false,
   effort,
   width,
@@ -150,18 +158,31 @@ export function Prompt({
   // width, so wrapping stays stable without needing a surrounding frame.
   const available = Math.max(8, width - 8);
   const active = frameActive ?? busy;
-  const elapsed = useHighlightClock(plif && active);
-  const hint = busy ? 'type to queue a message for the agent' : placeholder;
+  // The active prompt keeps its PLIF glow, but samples the slow shared clock.
+  // A 33ms subscription here made the entire lower chrome look like it was
+  // refreshing while a provider was waiting.
+  const promptFrame = useAnimationFrame(plif && active, 'slow');
+  const elapsed = promptFrame * ANIMATION_INTERVAL_MS;
+  const hint = busy ? 'queue a message…' : placeholder;
   const rows = visiblePromptRows(
     value.length ? layoutPrompt(value, cursor, available) : [],
     maxRows,
   );
 
-  const PromptGlyph = ({ continuation = false }: { continuation?: boolean }): React.ReactElement => (
-    <Text color={plif && active ? plifGlowCells(glyph.prompt, elapsed, true)[0]?.color : color(busy ? 'ghost' : 'muted')}>
-      {continuation ? ' ' : glyph.prompt}{' '}
-    </Text>
-  );
+  const PromptGlyph = ({ continuation = false }: { continuation?: boolean }): React.ReactElement => {
+    if (continuation) return <Text>{'  '}</Text>;
+    const glint = plif && active ? plifGlyphAt(elapsed, 'quiet', 840) : ' ';
+    return (
+      <Text>
+        <Text color={plif && active ? plifGlyphColor(elapsed, 'active') : color(busy ? 'accentDim' : 'muted')}>
+          {glyph.prompt}
+        </Text>
+        <Text color={plif && active ? plifGlyphColor(elapsed, 'quiet') : color(busy ? 'accentDim' : 'muted')}>
+          {glint}
+        </Text>
+      </Text>
+    );
+  };
 
   const content = (
     <>
@@ -170,13 +191,15 @@ export function Prompt({
           <PromptGlyph />
           {plif ? (
             <PlifGlow
-              value={truncate(hint, available)}
+              value={truncate(hint, Math.max(1, available - 1))}
               elapsedMs={elapsed}
               active={active}
               fallback="ghost"
             />
           ) : (
-            <Text color={color('ghost')} wrap="truncate">{truncate(hint, available)}</Text>
+            <Text color={color(busy ? 'accentDim' : 'muted')} wrap="truncate">
+              {truncate(hint, Math.max(1, available - 1))}
+            </Text>
           )}
         </Box>
       ) : (
@@ -204,6 +227,7 @@ export function Prompt({
       active={active}
       plif={plif}
       effort={effort}
+      breathing={breathing && focused}
       {...(footer ? { footer } : {})}
     >
       <Box flexDirection="column" width="100%" paddingX={layout.gutter}>
@@ -211,7 +235,27 @@ export function Prompt({
       </Box>
     </FocusFrame>
   );
-}
+}, (previous, next) => (
+  previous.value === next.value &&
+  previous.cursor === next.cursor &&
+  previous.placeholder === next.placeholder &&
+  previous.focused === next.focused &&
+  previous.busy === next.busy &&
+  previous.frameActive === next.frameActive &&
+  previous.breathing === next.breathing &&
+  previous.plif === next.plif &&
+  previous.effort === next.effort &&
+  previous.width === next.width &&
+  previous.maxRows === next.maxRows &&
+  previous.status === next.status &&
+  previous.frameFooter === next.frameFooter &&
+  previous.queue === next.queue
+));
+
+Prompt.displayName = 'Prompt';
+
+/** The cursor's luminance cycle: slow enough to read as breathing, not blinking. */
+const CURSOR_BREATH_MS = 1_500;
 
 function CursorRow({
   row,
@@ -224,6 +268,9 @@ function CursorRow({
   plif: boolean;
   elapsed: number;
 }): React.ReactElement {
+  // The slow clock, not the fast one: an idle caret must breathe, and a
+  // 33 ms repaint forever is the expensive kind of alive.
+  const breath = useBreath(focused && row.cursor !== null, CURSOR_BREATH_MS);
   if (!focused || row.cursor === null) {
     return plif
       ? <PlifGlow value={row.text} elapsedMs={elapsed} />
@@ -233,10 +280,16 @@ function CursorRow({
   const at = clusterAt(row.text, index);
   const before = row.text.slice(0, index);
   const after = row.text.slice(index + (index < row.text.length ? at.length : 0));
+  // A filled block whose luminance inhales, rather than hard inverse video.
+  // Inverse reads as a selection; a breathing block reads as a caret that
+  // knows the interface is alive. PLIF leans the block toward champagne.
+  const block = plif
+    ? mix(color('accent'), color('gold'), 0.35 + 0.4 * breath)
+    : toneBetween('accentDim', 'accent', 0.3 + 0.5 * breath);
   return (
     <Text>
       {plif ? <PlifGlow value={before} elapsedMs={elapsed} /> : <Text color={color('text')}>{before}</Text>}
-      <Text inverse>{at}</Text>
+      <Text backgroundColor={block} color={color('panel')}>{at}</Text>
       {plif ? <PlifGlow value={after} elapsedMs={elapsed} /> : <Text color={color('text')}>{after}</Text>}
     </Text>
   );

@@ -221,6 +221,7 @@ export {
   keyOptional,
   formatModelRef,
   loadStoredConfig,
+  modelSupportsImages,
   migrateProviderCredentials,
   parseModelRef,
   providerIdForConfig,

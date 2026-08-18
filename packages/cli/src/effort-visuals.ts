@@ -53,7 +53,7 @@ const VISUALS: Record<string, EffortVisual> = {
   medium: {
     id: 'medium',
     label: 'Medium',
-    symbol: '◦',
+    symbol: '○',
     asciiSymbol: 'o',
     descriptor: 'balanced',
     stops: STANDARD_STOPS,
@@ -96,7 +96,7 @@ const VISUALS: Record<string, EffortVisual> = {
     asciiSymbol: '*',
     descriptor: 'deep reasoning',
     stops: ['brand', 'accentDim', 'accent', 'accentBright'],
-    pattern: ['◇', '◆', '◈', '✦', '◈', '◆', '◇'],
+    pattern: ['◇', '◆', '◈', '◆', '◈', '◆', '◇'],
     asciiPattern: ['.', 'o', 'O', '*', 'O', 'o', '.'],
     cycleMs: 680,
     resting: 'max ready',
@@ -109,7 +109,7 @@ const VISUALS: Record<string, EffortVisual> = {
     asciiSymbol: '#',
     descriptor: 'wide search',
     stops: ['brand', 'accentDim', 'accent', 'accentBright'],
-    pattern: ['·', '✧', '✦', '✹', '✦', '✧', '·'],
+    pattern: ['·', '◇', '◆', '◇', '◆', '◇', '·'],
     asciiPattern: ['.', '+', '*', '#', '*', '+', '.'],
     cycleMs: 600,
     resting: 'ultra ready',
@@ -118,12 +118,12 @@ const VISUALS: Record<string, EffortVisual> = {
   ultracode: {
     id: 'ultracode',
     label: 'UltraCode',
-    symbol: '▣',
+    symbol: '◇',
     asciiSymbol: '#',
     descriptor: 'code synthesis',
     stops: ['brand', 'accentDim', 'accent', 'accentBright'],
-    pattern: ['╺', '━', '╋', '━', '╸', '━', '╋', '━'],
-    asciiPattern: ['-', '=', '#', '=', '>', '=', '#', '='],
+    pattern: ['·', '◇', '◆', '◇', '◆', '◇', '·'],
+    asciiPattern: ['.', '+', '#', '+', '#', '+', '.'],
     cycleMs: 520,
     resting: 'code ready',
     working: 'synthesizing code',
@@ -131,12 +131,15 @@ const VISUALS: Record<string, EffortVisual> = {
   plif: {
     id: 'plif',
     label: 'PLIF',
-    symbol: '✦',
-    asciiSymbol: '*',
+    // PLIF is a mode name, never an animated effort icon.
+    symbol: '',
+    asciiSymbol: '',
     descriptor: 'adaptive reasoning',
-    stops: ['brand', 'accentDim', 'accent', 'accentBright'],
-    pattern: ['·', '◦', '✧', '✦', '✧', '◦', '·'],
-    asciiPattern: ['.', 'o', '*', '*', '*', 'o', '.'],
+    // The signature ramp: cold greys with one champagne stop, so the working
+    // pulse flashes warm instead of merely brighter.
+    stops: ['accentDim', 'accent', 'goldBase', 'gold', 'goldBright', 'warmIvory', 'goldBright', 'gold', 'goldBase', 'accentBright'],
+    pattern: ['PLIF'],
+    asciiPattern: ['PLIF'],
     cycleMs: 540,
     resting: 'signature ready',
     working: 'adaptive reasoning',
@@ -154,10 +157,32 @@ export function effortSymbol(effort?: string): string {
   return supportsRichGlyphs ? visual.symbol : visual.asciiSymbol;
 }
 
+/**
+ * The picker shows several efforts at once, so the active effort palette
+ * cannot be reused for every row. This quiet ramp gives each option a place
+ * in the same family without turning the list into a rainbow. PLIF breaks the
+ * ramp on purpose: the one warm row is what makes the signature read as a
+ * signature rather than as the top of a grey ladder.
+ */
+export function effortTone(effort?: string): PaletteKey {
+  switch (effort) {
+    case 'low': return 'faint';
+    case 'medium': return 'muted';
+    case 'high': return 'text';
+    case 'xhigh': return 'brand';
+    case 'ultra':
+    case 'ultracode': return 'accent';
+    case 'max': return 'accentBright';
+    case 'plif': return 'gold';
+    default: return 'muted';
+  }
+}
+
 export function effortDisplay(effort: string | undefined): string {
   if (!effort) return 'Default';
   const visual = effortVisual(effort);
-  return `${effortSymbol(effort)} ${visual.label}`;
+  const symbol = effortSymbol(effort);
+  return symbol ? `${symbol} ${visual.label}` : visual.label;
 }
 
 export function effortTagline(effort: string | undefined, working: boolean): string {
@@ -177,8 +202,10 @@ export function effortPulseCells(
     // travelling light; changing terminal glyphs mid-frame causes Windows
     // hosts to re-measure a row and makes the whole prompt appear to shake.
     text,
-    color: active
+    color: active && effort !== 'plif'
       ? semanticWaveTone(elapsedMs, index, pattern.length, visual.stops, visual.cycleMs)
-      : color('faint'),
+      : effort === 'plif'
+        ? color('gold')
+        : color('faint'),
   }));
 }

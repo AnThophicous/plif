@@ -156,8 +156,14 @@ export function sanitizePastedText(chunk: string): string {
 /** Compact, uniform UI representation of every clipboard payload. */
 export function pastedContentToken(index: number, text?: string): string {
   if (text === undefined) return `[Pasted Image #${index}]`;
-  const lines = text.split('\n').length;
-  return `[Pasted Content #${index} - ${lines} Lines]`;
+  const normalized = text.replace(/\r\n?/g, '\n');
+  const lines = normalized.length === 0
+    ? 0
+    : normalized.endsWith('\n')
+      ? normalized.slice(0, -1).split('\n').length
+      : normalized.split('\n').length;
+  const label = `${lines.toLocaleString('en-US')} ${lines === 1 ? 'line' : 'lines'}`;
+  return `${glyph.subtleSparkle} Plif Pasted ${label}`;
 }
 
 /** Last-resort paste detection for terminals that ignore bracketed paste: only a chunk carrying more than one line of content is a shape the keyboard cannot produce. */
@@ -165,7 +171,8 @@ export function isTerminalPaste(chunk: string): boolean {
   return sanitizePastedText(chunk).replace(/\n+$/, '').includes('\n');
 }
 
-export const PASTE_ATTACHMENT_MIN_CHARS = 500;
+/** 200 characters remain inline; 201 is the first compacted paste. */
+export const PASTE_ATTACHMENT_MIN_CHARS = 201;
 
 export function shouldAttachPastedText(text: string): boolean {
   return text.length >= PASTE_ATTACHMENT_MIN_CHARS;
