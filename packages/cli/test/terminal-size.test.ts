@@ -5,7 +5,7 @@ import { describe, it } from 'node:test';
 import { render } from 'ink';
 import React, { useEffect } from 'react';
 
-import { Header, HEADER_MAX_WIDTH } from '../src/components/Header.js';
+import { Header } from '../src/components/Header.js';
 import { useTerminalSize } from '../src/hooks/useTerminalSize.js';
 import { detachImmediateInkResize, RESIZE_SETTLE_MS } from '../src/terminal-resize.js';
 import type { TerminalSize } from '../src/terminal-resize.js';
@@ -47,33 +47,27 @@ function ResponsiveHeader({
   }, [onMount]);
 
   return React.createElement(Header, {
-    cwd: 'C:\\work',
     width: size.columns,
-    model: 'model',
-    version: '0.3.0',
   });
 }
 
-function latestRule(stdout: ResizeStdout): string {
+function latestWordmark(stdout: ResizeStdout): string {
   for (const write of [...stdout.writes].reverse()) {
-    const rule = write
+    const wordmark = write
       .replace(ANSI, '')
       .replace(/\r/g, '')
       .split('\n')
-      .find((line) => line.includes('─'));
-    if (rule) return rule;
+      .find((line) => line.includes('PLIF'));
+    if (wordmark) return wordmark;
   }
   return '';
 }
 
 function assertHeaderCentered(stdout: ResizeStdout): void {
-  const border = latestRule(stdout);
-  const cardWidth = Math.min(stdout.columns, HEADER_MAX_WIDTH);
-  const leftEdge = border.indexOf('╭');
-  assert.ok(border, `missing header rule at ${stdout.columns} columns`);
-  assert.ok(leftEdge >= 0, `missing header left edge at ${stdout.columns} columns`);
-  assert.equal(leftEdge, Math.floor((stdout.columns - cardWidth) / 2));
-  assert.equal(border.slice(leftEdge).length, cardWidth);
+  const wordmark = latestWordmark(stdout);
+  assert.ok(wordmark, `missing header wordmark at ${stdout.columns} columns`);
+  assert.equal(wordmark.indexOf('PLIF'), Math.floor((stdout.columns - 4) / 2));
+  assert.match(stdout.writes.join('').replace(ANSI, ''), /╭.*╮/);
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));

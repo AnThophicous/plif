@@ -160,7 +160,18 @@ export type {
   TaskContainer,
   TaskSnapshot,
   TaskStatus,
+  WaitTaskOptions,
+  WaitTaskResult,
 } from './tasks/manager.js';
+export { TaskMonitor } from './tasks/monitor.js';
+export type {
+  TaskMonitorCheckResult,
+  TaskMonitorDebugEvent,
+  TaskMonitorOptions,
+  TaskMonitorResult,
+  TaskMonitorStatus,
+  TaskMonitorTask,
+} from './tasks/monitor.js';
 export { classifyDangerousCommand } from './tasks/dangerous.js';
 
 export { LspClient } from './lsp/client.js';
@@ -255,6 +266,8 @@ export type {
 export { EFFORT_LEVELS } from './model/config.js';
 export {
   MODEL_CATALOG,
+  providerForModel,
+  selectAvailableModels,
   catalogSelection,
   findCatalogModel,
   findCatalogProvider,
@@ -267,6 +280,8 @@ export type {
   ModelCatalogOrigin,
   ModelCatalogProvider,
   ModelSelection,
+  AvailableCatalogModel,
+  ProviderAccess,
 } from './model/catalog.js';
 export { discoverProviderModels, forgetDiscoveredModels } from './model/discovery.js';
 export type { DiscoveredModels, DiscoverOptions } from './model/discovery.js';

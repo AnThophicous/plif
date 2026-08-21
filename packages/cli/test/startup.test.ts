@@ -62,6 +62,6 @@ describe('interactive startup surface', () => {
   it('reads the published CLI version from package metadata', async () => {
     const manifest = await import('../package.json', { with: { type: 'json' } });
     assert.equal(VERSION, manifest.default.version);
-    assert.equal(VERSION_LABEL, '0.3.0');
+    assert.equal(VERSION_LABEL, '0.3.5');
   });
 });

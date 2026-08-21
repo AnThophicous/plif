@@ -1,8 +1,8 @@
 <div align="center">
 
-**Plif 0.3.0 — the stable, adaptive coding agent for your terminal.**
+**Plif 0.3.5 — the stable, adaptive coding agent for your terminal.**
 
-Bring your own model. Configure the provider yourself. Plif 0.3.0 is built for
+Bring your own model. Configure the provider yourself. Plif 0.3.5 is built for
 long coding sessions with durable memory, better adaptation to the user, a
 calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 
@@ -16,15 +16,64 @@ calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 
 ---
 
-## Why 0.3.1
+## What's new in 0.3.5
+
+### `/status`
+
+`/status` opens a focused, read-only view of the current PLIF session: runtime,
+provider, model, effort, context, configuration source and integrations. It
+redacts credentials instead of printing them.
+
+### `/config`
+
+`/config` opens a keyboard-first settings browser with search, categories,
+inline editors and persistent TOML-backed settings. Provider, model, effort,
+MCP and skills actions reuse the existing PLIF flows instead of creating a
+second configuration system.
+
+### Provider-aware model selection
+
+`/model` now shows only models that are usable with the providers currently
+available to the session. The picker keeps the active model visible, shows
+provider, access, context and capability details while you browse, and uses a
+bounded list/details layout that remains readable in wide and narrow terminals.
+Use `/providers` to configure another provider; its models then appear in
+`/model`. Provider names are added to rows only when two providers would
+otherwise display the same model name.
+
+### Free-first onboarding
+
+A clean install can start through OpenCode's explicitly marked free route,
+including `deepseek-v4-flash-free`, without asking for an unrelated provider
+key. Paid providers remain locked until you configure them, and the picker
+keeps those access boundaries visible instead of mixing unusable models into
+the default list.
+
+### Quieter startup
+
+The home screen now keeps the PLIF wordmark above a compact outlined panel with
+the mascot on the left and readiness on the right. Runtime details moved to
+`/status`, so startup is calmer without losing the PLIF identity.
+
+### Under the hood
+
+- `/status`, `/config`, `/models`, `/providers` and `/effort` read and update
+  the same runtime/configuration state.
+- Configuration writes continue through PLIF's existing atomic TOML persistence
+  layer, with credentials kept redacted and outside the transcript.
+- Screen-owned keyboard handling, terminal resize coverage and narrow/wide TUI
+  previews received additional regression coverage.
+
+## Why 0.3.5
 
 - **Adaptive memory.** Useful facts are ranked and reused without turning the
   conversation into noise.
 - **Built-in skills.** Galileo, deep engineering audits, Office/rendering
   skills, MCP discovery, and focused planning workflows are ready to use.
-- **Your model, your choice.** No hidden default model. `/model` discovers
-  real provider models, separates your providers from Plif's, and ranks the
-  most-used entries first.
+- **Your model, your choice.** `/model` starts with usable routes only,
+  including the explicit free OpenCode path on a clean install. Configure
+  another provider through `/providers` to unlock its models; no unrelated
+  provider key is requested in the process.
 - **Long-session reliability.** Navigable transcript history, `/goal`, `/plan`,
   `/export`, compaction and recovery keep large sessions usable.
 - **Safer execution.** Container-native workspaces, policy checks and an audit
@@ -89,12 +138,12 @@ down this page lists the gaps, including one that is genuinely awkward for us.
 
 **The model is yours.** plif speaks the OpenAI-compatible wire format, plus
 Anthropic's own, so any endpoint that speaks either works: a hosted frontier
-model, a free tier, or Ollama on your own machine with no key at all. There is
-no default model — plif installs empty and the first run opens the picker, so
-the first endpoint your code reaches is one you chose. `/model` asks each
-provider what it actually serves rather than trusting a list baked in at
-release time, and shows the models people reach for first. Nothing phones home
-except one cached version check you can switch off.
+model, a free tier, or Ollama on your own machine with no key at all. A clean
+install starts on PLIF's built-in OpenCode free route; you can change it from
+`/model` or configure another provider from `/providers`. `/model` shows only
+models from providers that are already available in this session instead of
+making you filter the entire catalog. Nothing phones home except one cached
+version check you can switch off.
 
 ## Why not Claude Code or Codex
 
@@ -132,6 +181,8 @@ Press `/` for commands. Nothing is configured yet and that is intentional:
 
 ```
 /model                    pick a provider and model, free ones included
+/status                   inspect the current session and runtime
+/config                   browse and edit PLIF settings
 /new                      create a container for the agent to work in
 /sandbox                  what your machine enforces, and what it does not
 /mcp                      browse MCP servers, skills and the plugin marketplace
@@ -178,8 +229,8 @@ through [koffi](https://koffi.dev), an FFI binding. Linux uses Bubblewrap, user
 and PID namespaces, and systemd-managed cgroup v2 limits. There is no Plif
 native addon to compile at install time and no prebuild matrix to maintain.
 
-Tests are `node:test`, no framework. There are just over four hundred of them
-and they run in about twenty seconds.
+Tests are `node:test`, with no additional test framework. The release suite
+covers the core runtime, sandbox boundary and CLI/TUI together.
 
 ### Three packages, one direction
 
@@ -310,6 +361,23 @@ A regression there is a sandbox escape, not a bug.
 
 ---
 
+## Models and providers
+
+PLIF includes an OpenCode Zen free path so a new installation can start with
+the models explicitly marked `no key`, including `deepseek-v4-flash-free`.
+`/model` is intentionally small: it derives its rows from providers available
+right now instead of showing the entire built-in catalog. Provider details are
+visible while you browse, including the serving provider, access mode, and
+only the capabilities/context metadata that PLIF actually knows.
+
+Want more models? Run `/providers`, choose a provider, and enter its API key
+when prompted. Once that provider is configured, its usable models appear in
+`/model` immediately; removing or changing the provider removes stale rows and
+keeps the active selection on a usable route.
+
+Rows with distinct visible names stay concise. A provider suffix is shown only
+when two available providers would otherwise make the model name ambiguous.
+
 ## Models and vision
 
 The active model and its capabilities live in `~/.plif/config.toml`. Plif does
@@ -360,6 +428,16 @@ collect and save a missing key without putting it in the transcript.
 
 For isolated automation, `PLIF_CONFIG_PATH` can point at a different TOML file;
 ordinary sessions continue to use `~/.plif/config.toml`.
+
+## Waiting for long-running work
+
+`start_task` uses PLIF's runtime `TaskMonitor`. It waits on native task
+completion events first and uses a slow, adaptive check only as a fallback.
+Those checks never call the model and never append polling messages to the
+transcript. When the task finishes, fails, times out, or is cancelled, one
+structured tool result returns to the existing agent loop so it can continue
+with the original goal. Ctrl+C and session shutdown cancel the wait and clean
+its listeners/timers.
 
 ## Research and Plif effort
 

@@ -2,6 +2,42 @@
 
 All notable changes to plif. This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] — 2026-08-21
+
+### Added
+
+- **`/status`.** A read-only full-screen snapshot of the current session,
+  provider, model, effort, context, configuration source and integrations,
+  with credentials redacted.
+- **`/config`.** A keyboard-first settings browser with search, categories,
+  inline editors and atomic TOML persistence, reusing the existing provider,
+  model, effort, MCP and skills flows.
+- **Adaptive task waiting.** Long-running work now waits on task lifecycle
+  events with a slow, cleaned-up fallback check instead of polling the model
+  or transcript on every UI tick.
+
+### Changed
+
+- The startup surface is now a compact PLIF identity panel: the wordmark sits
+  above the outline, the mascot anchors the left side, and readiness stays
+  quiet on the right. Runtime diagnostics no longer crowd the home screen.
+- `/model` is provider-aware: it shows usable models, keeps the active model
+  explicit, reveals details by default, qualifies duplicate names only when
+  needed, and uses `/providers` as the deliberate unlock path for paid models.
+- Clean installs use the explicitly free OpenCode route when available, so a
+  DeepSeek free model does not trigger an unrelated API-key prompt.
+- Full-screen utility views own their keyboard and animation lifecycle, while
+  terminal resize and narrow-layout behavior have additional coverage.
+
+### Fixed
+
+- Configuration edits no longer need to duplicate provider/model state or expose
+  credentials in the screen, transcript or persisted plaintext config.
+- A stale or unreadable credential record no longer blocks anonymous/local
+  model routes; paid providers remain locked until their credential is fixed.
+- Task completion no longer disappears from the active timeline when the final
+  answer is committed; monitor cancellation, timeout and cleanup are explicit.
+
 ## [0.3.0] — 2026-08-13
 
 ### Added
@@ -116,6 +152,7 @@ npm install -g @plif/cli@latest
 
 First release.
 
+[0.3.5]: https://github.com/AnThophicous/plif/compare/v0.3.0...v0.3.5
 [0.3.0]: https://github.com/AnThophicous/plif/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/AnThophicous/plif/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/AnThophicous/plif/releases/tag/v0.1.0

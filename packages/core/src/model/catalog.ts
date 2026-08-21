@@ -2,6 +2,7 @@ import {
   PRESETS,
   type CustomProvider,
   type ModelCapability,
+  type ModelCost,
   type StoredConfig,
 } from './config.js';
 
@@ -13,6 +14,11 @@ export interface ModelCatalogModel {
   readonly badges: readonly string[];
   /** Present only when the developer explicitly declared the capability. */
   readonly modalities?: readonly ModelCapability[];
+  /** Present only when the source declares a trustworthy limit. */
+  readonly contextWindow?: number;
+  readonly reasoning?: boolean;
+  readonly tools?: boolean;
+  readonly cost?: ModelCost;
 }
 
 /**
@@ -46,18 +52,28 @@ export interface ModelSelection {
   readonly model: string;
 }
 
+export type ProviderAccess = 'free' | 'configured' | 'local';
+
+export interface AvailableCatalogModel {
+  readonly provider: ModelCatalogProvider;
+  readonly model: ModelCatalogModel;
+  readonly access: ProviderAccess;
+}
+
 const model = (
   id: string,
   label: string,
   description: string,
   badges: readonly string[] = [],
   modalities?: readonly ModelCapability[],
+  metadata: Pick<ModelCatalogModel, 'contextWindow' | 'reasoning' | 'tools' | 'cost'> = {},
 ): ModelCatalogModel => Object.freeze({
   id,
   label,
   description,
   badges: Object.freeze([...badges]),
   ...(modalities ? { modalities: Object.freeze([...modalities]) } : {}),
+  ...metadata,
 });
 
 /** A picker badge based on declarations, never guesses made from a model id. */
@@ -96,9 +112,9 @@ const provider = (
  * endpoint advertises are matched against these, so the models people actually
  * use surface above the long tail of dated snapshots and retired variants.
  *
- * The lists are a starting point, not a registry. Providers rename and retire
- * models constantly, so nothing here is load-bearing: `/model` asks the
- * endpoint what it really serves, and falls back to this only when it cannot.
+ * The lists are static metadata, not a live registry. Providers rename and
+ * retire models constantly, so availability is resolved separately from this
+ * catalogue; opening `/model` does not contact every provider endpoint.
  */
 export const MODEL_CATALOG: readonly ModelCatalogProvider[] = Object.freeze([
   provider('anthropic', 'Claude (Anthropic)', 'Claude models, via the official SDK', [
@@ -235,6 +251,37 @@ export function findCatalogModel(
 }
 
 /**
+ * The one gate from provider access to selectable models. Callers decide which
+ * providers are available from credentials/runtime state; this function is the
+ * only place that turns that state into model rows. Free access intentionally
+ * admits only models explicitly marked `no key`.
+ */
+export function selectAvailableModels(
+  providers: readonly ModelCatalogProvider[],
+  access: ReadonlyMap<string, ProviderAccess>,
+): readonly AvailableCatalogModel[] {
+  return providers.flatMap((entryProvider) => {
+    const state = access.get(entryProvider.id);
+    if (!state) return [];
+    const models = state === 'free'
+      ? entryProvider.models.filter((entry) => entry.badges.includes('no key'))
+      : entryProvider.models;
+    return models.map((entry) => ({ provider: entryProvider, model: entry, access: state }));
+  });
+}
+
+/** Resolve a bare model id only when its catalog mapping is unambiguous. */
+export function providerForModel(
+  modelId: string,
+  providers: readonly ModelCatalogProvider[] = MODEL_CATALOG,
+): string | undefined {
+  const matches = providers.filter((entryProvider) => entryProvider.models.some((entry) => entry.id === modelId));
+  if (matches.length === 1) return matches[0]!.id;
+  const anonymous = matches.find((entryProvider) => entryProvider.anonymous);
+  return anonymous?.id;
+}
+
+/**
  * The providers the developer declared in their own configuration.
  *
  * Read from both `providers` and `provider` because the config schema accepts
@@ -254,8 +301,14 @@ export function userCatalog(config: StoredConfig): readonly ModelCatalogProvider
     preset: id,
     endpoint: entry.options?.baseURL ?? '',
     models: Object.entries(entry.models ?? {}).map(([modelId, metadata]) =>
-      model(modelId, metadata.name ?? modelId, entry.name ?? id, ['yours'], metadata.modalities),
+      model(modelId, metadata.name ?? modelId, entry.name ?? id, ['yours'], metadata.modalities, {
+        ...(metadata.contextWindow === undefined ? {} : { contextWindow: metadata.contextWindow }),
+        ...(metadata.reasoning === undefined ? {} : { reasoning: metadata.reasoning }),
+        ...(metadata.tools === undefined ? {} : { tools: metadata.tools }),
+        ...(metadata.cost === undefined ? {} : { cost: metadata.cost }),
+      }),
     ),
+    ...((entry.options?.needKey === false || entry.options?.NeedKey === false) ? { anonymous: true } : {}),
   }));
 }
 
