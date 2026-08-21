@@ -26,7 +26,7 @@ import {
   DEVELOPER_POLICY,
   Engine,
   createModelProvider,
-  WindowsDpapiSecretStore,
+  platformSecretStore,
   resolveServerConfigs,
   PlifError,
   STRICT_POLICY,
@@ -484,7 +484,7 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
   const capabilityCache = new ProviderCapabilityCache({
     file: path.join(engine.paths.root, 'model-capabilities.json'),
   });
-  const credentials = new CredentialBroker({ store: new WindowsDpapiSecretStore() });
+  const credentials = new CredentialBroker({ store: platformSecretStore() });
   const provider = await buildProvider(engine, invocation.flags, capabilityCache, credentials);
   const promptConfig = resolveConfig(await loadStoredConfig(engine.paths), {
     ...(invocation.flags.model ? { model: invocation.flags.model } : {}),
@@ -726,7 +726,7 @@ async function runModel(invocation: Extract<Invocation, { kind: 'model' }>): Pro
   await engine.start();
 
   const loaded = await loadStoredConfig(engine.paths);
-  const credentials = new CredentialBroker({ store: new WindowsDpapiSecretStore() });
+  const credentials = new CredentialBroker({ store: platformSecretStore() });
   const providerId = providerIdForConfig(loaded, {
     ...(invocation.flags.model ? { model: invocation.flags.model } : {}),
     ...(invocation.flags.preset ? { preset: invocation.flags.preset } : {}),
@@ -898,7 +898,7 @@ async function runInteractive(
   // One broker is shared by startup resolution, model adoption, and MCP. A
   // typed model key therefore has one encrypted home and survives restart.
   const credentials = new CredentialBroker({
-    store: new WindowsDpapiSecretStore(),
+    store: platformSecretStore(),
     prompt: (request) =>
       engine.questions.ask({
         text: `${request.variable} for ${request.purpose}`,
