@@ -51,7 +51,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.release_ref || github.ref_name }}
         run: |
-          $tag = ($env:RELEASE_TAG -replace '^refs/tags/v', '')
+          $tag = ($env:RELEASE_TAG -replace '^refs/tags/', '' -replace '^v', '')
           $version = (Get-Content packages/cli/package.json | ConvertFrom-Json).version
           if ($tag -ne $version) {
             throw "tag v$tag does not match packages/cli/package.json version $version"
