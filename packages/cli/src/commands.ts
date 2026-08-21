@@ -16,11 +16,11 @@ import {
   credentialVariableForProvider,
   EFFORT_LEVELS,
   MODEL_CATALOG,
-  discoverProviderModels,
   modelVisionBadge,
   rankFacts,
   rankModelIds,
   providerIdForConfig,
+  selectAvailableModels,
   supportedEfforts,
   strategyStatus,
   userCatalog,
@@ -34,6 +34,7 @@ import type {
   ModelCatalogModel,
   ModelProvider,
   ModelSelection,
+  ProviderAccess,
   StoredConfig,
 } from '@plif/core';
 import {
@@ -49,7 +50,7 @@ import {
 } from '@plif/core';
 
 import { formatCapabilities, tokenize } from './format.js';
-import { effortDisplay, effortVisual } from './effort-visuals.js';
+import { effortVisual } from './effort-visuals.js';
 import {
   effortPickerItems,
 } from './components/Picker.js';
@@ -108,6 +109,9 @@ export interface CommandContext {
   readonly themes: readonly ThemeDefinition[];
   readonly switchTheme: (id: string) => Promise<void>;
   readonly sessionStatus?: () => StatusInput;
+  /** Full-screen utility views keep their own keyboard lifecycle. */
+  readonly openStatus?: () => void;
+  readonly openConfig?: () => void;
 }
 
 export interface FlatPickerRequest {
@@ -249,68 +253,6 @@ function pickerBadges(
   return vision ? [...new Set([...candidate.badges, vision])] : candidate.badges;
 }
 
-/**
- * One provider, as a picker group.
- *
- * Asks the endpoint what it serves and shows that; the curated list is the
- * fallback, not the source. Discovery declines instantly when no credential is
- * available, so opening the picker costs a round trip only for the providers
- * the developer has actually signed in to.
- */
-async function providerGroup(
-  catalog: ModelCatalogProvider,
-  section: string,
-  currentModel: string | undefined,
-  stored: StoredConfig,
-  credentials: CredentialBroker | undefined,
-): Promise<PickerGroup> {
-  const variable = credentialVariableForProvider(catalog.id, stored);
-  const key = credentials
-    ? await credentials.lookup(variable) ?? (
-        variable === 'PLIF_API_KEY' ? undefined : await credentials.lookup('PLIF_API_KEY')
-      )
-    : undefined;
-  const discovered = await discoverProviderModels(catalog.id, {
-    stored,
-    ...(key ? { apiKey: key } : {}),
-  });
-
-  const known = new Map(catalog.models.map((item) => [item.id, item]));
-  const hasVisionHelper = visionCandidates(stored).length > 0;
-  const ids = rankModelIds(catalog.id, providerModelIds(catalog, discovered.ids, discovered.live));
-  const items: PickerItem[] = discovered.live
-    ? ids.map((id) => {
-        const curated = known.get(id);
-        return {
-          value: id,
-          label: curated?.label ?? prettyModelId(id),
-          detail: curated?.description ?? id,
-          badges: pickerBadges(curated, hasVisionHelper),
-          current: id === currentModel,
-        };
-      })
-    : catalog.models.map((item) => ({
-        value: item.id,
-        label: item.label,
-        detail: item.description,
-        badges: pickerBadges(item, hasVisionHelper),
-        current: item.id === currentModel,
-      }));
-
-  return {
-    id: catalog.id,
-    label: catalog.label,
-    section,
-    detail: discovered.live ? `${catalog.description} · live` : catalog.description,
-    items,
-  };
-}
-
-/** `moonshotai/kimi-k2-instruct` reads better as `kimi k2 instruct`. */
-function prettyModelId(id: string): string {
-  return id.slice(id.lastIndexOf('/') + 1).replace(/[-_]+/g, ' ');
-}
-
 interface ProviderSource {
   readonly entryProvider: ModelCatalogProvider;
   readonly section: string;
@@ -324,33 +266,23 @@ function providerSources(stored: StoredConfig): ProviderSource[] {
   ];
 }
 
-interface ModelRowData {
-  readonly id: string;
-  readonly label: string;
-  readonly description: string;
-  readonly badges: readonly string[];
-}
-
 function modelRowItem(
   source: ModelCatalogProvider,
-  model: ModelRowData,
+  model: ModelCatalogModel,
+  access: ProviderAccess | undefined,
   currentProvider: string | undefined,
   currentModel: string | undefined,
   hasVisionHelper: boolean,
 ): PickerItem {
-  const candidate: ModelCatalogModel = {
-    id: model.id,
-    label: model.label,
-    description: model.description,
-    badges: model.badges,
-  };
-  const badges = pickerBadges(candidate, hasVisionHelper);
-  const capabilities = badges.filter((badge) => !['no key', 'key needed'].includes(badge));
-  const auth = source.anonymous || badges.includes('no key')
-    ? 'no key'
-    : source.origin === 'user' || source.id === currentProvider
-      ? 'configured'
-      : 'key required';
+  const badges = pickerBadges(model, hasVisionHelper);
+  const capabilities = model.modalities?.map((modality) => modality === 'image' ? 'vision' : 'text') ?? [];
+  const auth = access === 'free'
+    ? 'Free · no key'
+    : access === 'local'
+      ? 'Local'
+      : access === 'configured'
+        ? 'Configured'
+        : 'API key';
   const current = source.id === currentProvider && model.id === currentModel;
   return {
     value: `${source.id}:${model.id}`,
@@ -360,17 +292,20 @@ function modelRowItem(
     current,
     provider: source.label,
     capabilities,
-    context: '—',
+    ...(model.contextWindow === undefined ? {} : { context: formatContext(model.contextWindow) }),
     auth,
+    ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
+    ...(model.tools === undefined ? {} : { tools: model.tools }),
+    ...(model.cost === undefined ? {} : { cost: model.cost }),
     searchText: [source.id, source.label, model.id, model.description, ...badges].join(' '),
     selection: { preset: source.id, model: model.id },
   };
 }
 
 /**
- * Model-first catalog. Only the active provider is discovered live; every
- * other row comes from the registry and stays cheap to open. Enter still
- * carries the exact provider/model pair, so duplicate model names are safe.
+ * Model-first catalog. Availability is resolved once from provider state and
+ * the existing catalog; opening the picker never contacts every provider.
+ * `/providers` can deliberately open one locked provider to configure it.
  */
 async function openModelPicker(
   context: CommandContext,
@@ -381,34 +316,44 @@ async function openModelPicker(
   title: string,
   hint: string,
   onBack?: () => void,
+  options: { readonly availableOnly?: boolean } = {},
 ): Promise<void> {
-  const activeSource = sources.find(({ entryProvider }) => entryProvider.id === currentProvider);
-  const activeGroup = activeSource
-    ? await providerGroup(activeSource.entryProvider, 'active', currentModel, stored, context.credentials)
-    : undefined;
+  const access = await providerAccessMap(sources, stored, context.credentials, currentProvider);
+  const visibleSources = options.availableOnly
+    ? sources.filter(({ entryProvider }) => access.has(entryProvider.id))
+    : sources;
+  const selectedModels = options.availableOnly
+    ? selectAvailableModels(visibleSources.map(({ entryProvider }) => entryProvider), access)
+    : visibleSources.flatMap(({ entryProvider }) => entryProvider.models.map((model) => ({
+        provider: entryProvider,
+        model,
+        access: access.get(entryProvider.id),
+      })));
   const hasVisionHelper = visionCandidates(stored).length > 0;
-  const items: PickerItem[] = [];
-
-  for (const source of sources) {
-    const rows: readonly ModelRowData[] = source.entryProvider.id === currentProvider && activeGroup
-      ? activeGroup.items.map((item) => ({
-          id: item.value,
-          label: item.label,
-          description: item.detail ?? item.value,
-          badges: item.badges ?? [],
-        }))
-      : source.entryProvider.models;
-    for (const model of rows) {
-      items.push(modelRowItem(source.entryProvider, model, currentProvider, currentModel, hasVisionHelper));
-    }
-  }
+  const items = selectedModels.map(({ provider, model, access: providerAccess }) =>
+    modelRowItem(provider, model, providerAccess, currentProvider, currentModel, hasVisionHelper));
+  const duplicateLabels = new Map<string, number>();
+  for (const item of items) duplicateLabels.set(item.label.toLowerCase(), (duplicateLabels.get(item.label.toLowerCase()) ?? 0) + 1);
+  const qualifiedItems = items.map((item) => duplicateLabels.get(item.label.toLowerCase())! > 1 && item.provider
+    ? { ...item, label: `${item.label} (${shortProviderName(item.provider)})` }
+    : item);
+  const currentItem = selectedModels.find(({ provider, model }) =>
+    provider.id === currentProvider && model.id === currentModel);
+  const availableProviderIds = new Set(selectedModels.map(({ provider }) => provider.id));
+  const hasLockedProviders = sources.some(({ entryProvider }) => !availableProviderIds.has(entryProvider.id));
+  const modelHint = options.availableOnly
+    ? [
+        `Current  ${currentItem?.model.label ?? currentModel ?? 'none'}`,
+        ...(hasLockedProviders ? ['Add providers with /providers to unlock more models.'] : []),
+      ].join('\n')
+    : hint;
 
   context.openPicker({
     title,
-    hint,
-    countLabel: 'models',
-    items,
-    selected: Math.max(0, items.findIndex((item) => item.current)),
+    hint: modelHint,
+    countLabel: 'available',
+    items: qualifiedItems,
+    selected: Math.max(0, qualifiedItems.findIndex((item) => item.current)),
     onPick: (selection) => {
       if (typeof selection !== 'string') void context.switchModel(selection);
     },
@@ -416,20 +361,73 @@ async function openModelPicker(
   });
 }
 
+async function providerAccessMap(
+  sources: readonly ProviderSource[],
+  stored: StoredConfig,
+  credentials: CredentialBroker | undefined,
+  activeProvider: string | undefined,
+): Promise<Map<string, ProviderAccess>> {
+  const entries = await Promise.all(sources.map(async ({ entryProvider }) => {
+    let key: string | undefined;
+    if (credentials) {
+      try {
+        key = await credentials.lookup(credentialVariableForProvider(entryProvider.id, stored));
+      } catch {
+        // The free/local route remains usable when an unrelated or stale
+        // credential record is unreadable. Paid providers stay locked until
+        // their key can be resolved normally.
+        key = undefined;
+      }
+    }
+    if (entryProvider.anonymous) return [entryProvider.id, key ? 'configured' as const : 'free' as const] as const;
+    if (isLocalEndpoint(entryProvider.endpoint)) return [entryProvider.id, 'local' as const] as const;
+    // Preview/test contexts have no broker. A declared custom provider or the
+    // already active provider is trusted there; production always has the
+    // broker and therefore remains key-gated.
+    if (key || (!credentials && (entryProvider.origin === 'user' || entryProvider.id === activeProvider))) {
+      return [entryProvider.id, 'configured' as const] as const;
+    }
+    return null;
+  }));
+  return new Map(entries.filter((entry): entry is readonly [string, ProviderAccess] => entry !== null));
+}
+
+function isLocalEndpoint(endpoint: string): boolean {
+  return /^https?:\/\/(?:127\.0\.0\.1|localhost|::1)(?::\d+)?(?:\/|$)/i.test(endpoint);
+}
+
+function formatContext(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens <= 0) return 'Unknown';
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}m`;
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`;
+  return String(tokens);
+}
+
+function shortProviderName(provider: string): string {
+  return provider.replace(/\s*\([^)]*\)\s*$/, '').replace(/\s+AI$/i, '').trim();
+}
+
 function providerPickerItems(
   sources: readonly ProviderSource[],
   activeProvider: string | undefined,
+  access: ReadonlyMap<string, ProviderAccess>,
 ): PickerItem[] {
   return sources.map(({ entryProvider }) => {
-    const auth = entryProvider.anonymous
-      ? 'no key'
-      : entryProvider.origin === 'user' || entryProvider.id === activeProvider
-        ? 'configured'
-        : 'key required';
+    const state = access.get(entryProvider.id);
+    const auth = state === 'free'
+      ? 'Free · no key'
+      : state === 'local'
+        ? 'Local'
+        : state === 'configured'
+          ? 'Configured'
+          : 'API key to unlock';
+    const available = state
+      ? selectAvailableModels([entryProvider], new Map([[entryProvider.id, state]])).length
+      : 0;
     return {
       value: entryProvider.id,
       label: entryProvider.label,
-      detail: entryProvider.description,
+      detail: `${entryProvider.description} · ${available > 0 ? `${available} model${available === 1 ? '' : 's'} available` : auth}`,
       badges: [entryProvider.origin === 'user' ? 'custom' : 'built-in', auth],
       current: entryProvider.id === activeProvider,
       searchText: [entryProvider.id, entryProvider.label, entryProvider.description, auth].join(' '),
@@ -445,7 +443,8 @@ async function openProviderPicker(
 ): Promise<void> {
   const activeProvider = providerIdForConfig(stored) ?? undefined;
   const activeLabel = sources.find(({ entryProvider }) => entryProvider.id === activeProvider)?.entryProvider.label;
-  const items = providerPickerItems(sources, activeProvider);
+  const access = await providerAccessMap(sources, stored, context.credentials, activeProvider);
+  const items = providerPickerItems(sources, activeProvider, access);
   context.openPicker({
     title: 'Select provider',
     hint: `active: ${activeLabel ?? 'none'} · Enter opens its models`,
@@ -465,6 +464,7 @@ async function openProviderPicker(
         `Provider / ${selected.label}`,
         `${selected.description} · select a model · Esc returns to providers`,
         () => { void openProviderPicker(context, stored, sources, onBack); },
+        { availableOnly: false },
       );
     },
     ...(onBack ? { onBack } : {}),
@@ -701,8 +701,12 @@ export const COMMANDS: readonly Command[] = [
   {
     name: 'status',
     concurrent: true,
-    summary: 'Show the model, the context window and everything this session has used',
+    summary: 'Show the current PLIF runtime and session status',
     run: async (_argv, context) => {
+      if (context.openStatus) {
+        context.openStatus();
+        return ok();
+      }
       const read = context.sessionStatus;
       if (!read) {
         throw new PlifError('INVALID_ARGUMENT', 'status is only available in an interactive session');
@@ -976,11 +980,7 @@ export const COMMANDS: readonly Command[] = [
     autocomplete: {
       getValues: ({ context, argumentIndex }) => {
         if (argumentIndex !== 0) return [];
-        const curated = MODEL_CATALOG.flatMap((provider) => provider.models.map((model) => model.id));
-        return [...new Set([
-          ...(context.modelCompletionValues?.() ?? []),
-          ...curated,
-        ])];
+        return [...new Set(context.modelCompletionValues?.() ?? [])];
       },
     },
     run: async (argv, context) => {
@@ -997,7 +997,6 @@ export const COMMANDS: readonly Command[] = [
       const currentModel = context.model?.info.id;
       const stored = (await loadGlobalConfig().catch(() => ({}))) as StoredConfig;
       const currentProvider = providerIdForConfig(stored) ?? undefined;
-      const currentEffort = stored.effort ? effortDisplay(stored.effort) : 'Default';
       await openModelPicker(
         context,
         stored,
@@ -1005,7 +1004,9 @@ export const COMMANDS: readonly Command[] = [
         currentProvider,
         currentModel,
         'Select model',
-        `active: ${currentModel ?? 'none'} · effort ${currentEffort} · type a model, provider, capability, or alias`,
+        '',
+        undefined,
+        { availableOnly: true },
       );
       return ok();
     },
@@ -1226,8 +1227,12 @@ export const COMMANDS: readonly Command[] = [
     name: 'config',
     concurrent: true,
     args: 'auto-approve [on|off|show]',
-    summary: 'Show or change global Plif configuration',
+    summary: 'Open PLIF settings, or change approval mode directly',
     run: async (argv, context) => {
+      if (argv.length === 0 && context.openConfig) {
+        context.openConfig();
+        return ok();
+      }
       const config = await loadGlobalConfig();
       const action = argv[0] === 'auto-approve' ? (argv[1] ?? 'show') : (argv[0] ?? 'show');
       if (action === 'show') {

@@ -527,14 +527,17 @@ describe('model catalog picker', () => {
     const result = await findCommand('model')!.run([], context);
 
     assert.deepEqual(result.entries, []);
-    // `/models` is model-first: it is flat, searchable, and carries the
-    // provider identity on each row instead of forcing a provider expansion.
-    assert.equal(picker?.countLabel, 'models');
+    // `/models` is model-first and availability-gated: it is flat, searchable,
+    // and carries the provider identity on each row without exposing locked
+    // providers as if their models were immediately usable.
+    assert.equal(picker?.countLabel, 'available');
     assert.equal(picker?.selected, 0);
-    assert.match(picker?.hint ?? '', /type a model, provider, capability, or alias/);
+    assert.match(picker?.hint ?? '', /Current\s+none/);
+    assert.match(picker?.hint ?? '', /Add providers with \/providers to unlock more models/);
     assert.ok(picker?.items?.every((item) => item.provider));
-    assert.ok(picker?.items?.some((item) => item.provider === 'Claude (Anthropic)'));
-    assert.ok(picker?.items?.some((item) => item.value === 'anthropic:claude-opus-5'));
+    assert.ok(picker?.items?.some((item) => item.provider === 'OpenCode Zen'));
+    assert.ok(picker?.items?.some((item) => item.value === 'opencode:deepseek-v4-flash-free'));
+    assert.ok(!picker?.items?.some((item) => item.value === 'anthropic:claude-opus-5'));
   });
 
   it('labels the internal adaptive effort as PLIF and marks the active effort', () => {

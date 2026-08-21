@@ -69,6 +69,7 @@ describe('minimal TUI hierarchy', () => {
   it('reserves terminal height only for full-screen views', () => {
     assert.equal(sessionFrameHeight(40, 'normal'), undefined);
     assert.equal(sessionFrameHeight(40, 'browser'), 39);
+    assert.equal(sessionFrameHeight(40, 'screen'), 39);
     assert.equal(sessionFrameHeight(40, 'transcript'), 39);
   });
 

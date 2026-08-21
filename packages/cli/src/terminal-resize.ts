@@ -13,7 +13,7 @@ export function terminalFrameRows(rows: number): number {
   return Math.max(1, Math.floor(rows) - 1);
 }
 
-export type SessionFrameView = 'normal' | 'browser' | 'transcript';
+export type SessionFrameView = 'normal' | 'browser' | 'screen' | 'transcript';
 
 /** Normal chat follows its content; only explicit full-screen views reserve rows. */
 export function sessionFrameHeight(

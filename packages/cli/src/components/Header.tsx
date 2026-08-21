@@ -1,113 +1,105 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
-import { effortSymbol, effortVisual } from '../effort-visuals.js';
-import { color, shortenPath, truncate } from '../theme.js';
-import { PNG_HEADER_ART_HEIGHT, PNG_HEADER_ART_WIDTH, PngHeaderArt } from './PngHeaderArt.js';
+import { color } from '../theme.js';
+import { PNG_HEADER_ART_HEIGHT, PngHeaderArt } from './PngHeaderArt.js';
 
-export const HEADER_MAX_WIDTH = 84;
+export const HEADER_MAX_WIDTH = 68;
+const MIN_SPLIT_WIDTH = 56;
+const HEADER_TOP_SPACE = 1;
+const HEADER_WORDMARK_GAP = 1;
+const HEADER_BOTTOM_SPACE = 1;
+const HEADER_CARD_PADDING_Y = 1;
+const HEADER_BORDER_ROWS = 2;
 
-/** Width of the centered header card within the available terminal cells. */
+/** Width reserved for the centered startup identity within the terminal. */
 export function headerWidth(width: number): number {
   return Math.min(HEADER_MAX_WIDTH, Math.max(1, Math.floor(width)));
 }
 
-/** Rows occupied by the live header, including its breathing margin. */
+/**
+ * Rows occupied by the quiet startup identity, including its outline and
+ * breathing margins.
+ *
+ * Runtime details belong to `/status`; keeping this footprint small lets the
+ * prompt take over the screen without a layout jump.
+ */
 export function headerHeight(width: number): number {
-  return headerWidth(width) < 74 ? 8 : PNG_HEADER_ART_HEIGHT + 10;
+  const compact = headerWidth(width) < MIN_SPLIT_WIDTH;
+  const cardContentRows = compact ? PNG_HEADER_ART_HEIGHT + 2 : PNG_HEADER_ART_HEIGHT;
+  return HEADER_TOP_SPACE + 1 + HEADER_WORDMARK_GAP
+    + HEADER_CARD_PADDING_Y * 2 + HEADER_BORDER_ROWS + cardContentRows
+    + HEADER_BOTTOM_SPACE;
 }
 
 export interface HeaderProps {
-  readonly cwd: string;
   readonly width: number;
-  readonly model: string;
-  readonly effort?: string;
-  readonly version: string;
 }
 
-export function Header({
-  cwd,
-  width,
-  model,
-  effort,
-  version,
-}: HeaderProps): React.ReactElement {
+/**
+ * PLIF's startup identity.
+ *
+ * Design brief:
+ * - Who and what for: a developer arriving at the CLI, deciding what to do.
+ * - Direction: quiet terminal technicalism with luxury restraint.
+ * - One memorable thing: the wordmark floats above a compact mascot/status split.
+ * - What it is not: a dashboard, status card, or permanent diagnostics panel.
+ *
+ * This component is deliberately still. Work-state motion belongs to the
+ * working surface, not to the idle identity shown on every launch.
+ */
+export function Header({ width }: HeaderProps): React.ReactElement {
   const frameWidth = headerWidth(width);
-  const narrow = frameWidth < 74;
-  const modelLabel = model || 'model not configured';
-  const effortLabel = effort ? `${effortSymbol(effort)} ${effortVisual(effort).label}` : '';
-  const workspace = truncate(
-    shortenPath(cwd, Math.max(16, frameWidth - 20)),
-    Math.max(1, frameWidth - 20),
-  );
-
-  if (narrow) {
-    return (
-      <Box width="100%" justifyContent="center" marginBottom={1}>
-        <Box
-          flexDirection="column"
-          width={frameWidth}
-          borderStyle="round"
-          borderColor={color('faint')}
-          paddingX={1}
-          paddingY={1}
-        >
-          <Box justifyContent="space-between" width="100%">
-            <Text color={color('text')} bold>PLIF Code</Text>
-            <Text color={color('ghost')}>v{version}</Text>
-          </Box>
-          <Text color={color('muted')} wrap="truncate">workspace: {workspace}</Text>
-          <Text color={color('ghost')} wrap="truncate">
-            {truncate(`${modelLabel}${effortLabel ? ` · ${effortLabel}` : ''}`, Math.max(8, frameWidth - 10))} · /model
-          </Text>
-        </Box>
-      </Box>
-    );
-  }
-
-  // The PNG raster has its own measured column so
-  // Ink never wraps the art into a different shape while laying out the header.
-  const leftWidth = Math.max(
-    PNG_HEADER_ART_WIDTH + 8,
-    Math.min(PNG_HEADER_ART_WIDTH + 12, frameWidth - 18),
-  );
-  const rightWidth = Math.max(10, frameWidth - leftWidth - 3);
+  const compact = frameWidth < MIN_SPLIT_WIDTH;
+  const contentWidth = Math.max(1, frameWidth - 4);
+  const leftWidth = compact ? contentWidth : Math.max(18, Math.floor(contentWidth * 0.38));
+  const rightWidth = Math.max(1, contentWidth - leftWidth - 1);
 
   return (
-    <Box width="100%" justifyContent="center" marginBottom={1}>
-      <Box borderStyle="round" borderColor={color('faint')} width={frameWidth}>
-        <Box flexDirection="column" width={leftWidth} paddingX={1} paddingY={1}>
-          <Box flexDirection="column" alignItems="center">
+    <Box
+      width="100%"
+      justifyContent="center"
+      alignItems="center"
+      flexDirection="column"
+      marginTop={HEADER_TOP_SPACE}
+      marginBottom={HEADER_BOTTOM_SPACE}
+    >
+      <Box marginBottom={HEADER_WORDMARK_GAP}>
+        <Text color={color('text')} bold>PLIF</Text>
+      </Box>
+      <Box
+        width={frameWidth}
+        borderStyle="round"
+        borderColor={color('faint')}
+        paddingX={1}
+        paddingY={HEADER_CARD_PADDING_Y}
+      >
+        {compact ? (
+          <Box flexDirection="column" alignItems="center" width={contentWidth}>
             <PngHeaderArt />
-            <Text color={color('text')} bold>PLIF</Text>
+            <Text color={color('accentDim')}>Ready to work</Text>
+            <Text color={color('ghost')}>/ for commands</Text>
           </Box>
-          <Box justifyContent="space-between">
-            <Text color={color('ghost')}>v{version}</Text>
-          </Box>
-          <Text color={color('text')} bold>Code workspace</Text>
-          <Text color={color('muted')} wrap="truncate">{workspace}</Text>
-          <Text color={color('ghost')} wrap="truncate">
-            {truncate(modelLabel, Math.max(8, leftWidth - 4))}
-          </Text>
-          {effortLabel && (
-            <Text color={color('accent')} bold wrap="truncate">
-              {truncate(effortLabel, Math.max(8, leftWidth - 4))}
+        ) : (
+          <Box width={contentWidth} height={PNG_HEADER_ART_HEIGHT}>
+            <Box width={leftWidth} alignItems="center" justifyContent="center">
+              <PngHeaderArt />
+            </Box>
+            <Text color={color('ghost')}>
+              {'│\n'.repeat(PNG_HEADER_ART_HEIGHT - 1)}│
             </Text>
-          )}
-        </Box>
-        <Text color={color('faint')}>
-          {'│\n'.repeat(Math.max(0, PNG_HEADER_ART_HEIGHT + 3))}│
-        </Text>
-        <Box
-          flexDirection="column"
-          width={rightWidth}
-          paddingX={1}
-          paddingY={1}
-        >
-          <Text color={color('accentDim')} bold>Ready to work</Text>
-          <Text color={color('muted')}>Plan, work, review — then ship with evidence.</Text>
-          <Text color={color('ghost')}>Type / commands · Ctrl+T log · Ctrl+C stop</Text>
-        </Box>
+            <Box
+              flexDirection="column"
+              justifyContent="center"
+              width={rightWidth}
+              height={PNG_HEADER_ART_HEIGHT}
+              paddingLeft={2}
+            >
+              <Text color={color('text')} bold>Ready to work</Text>
+              <Text color={color('muted')} wrap="truncate">Describe a task, or / for commands</Text>
+            </Box>
+          </Box>
+        )}
       </Box>
     </Box>
   );

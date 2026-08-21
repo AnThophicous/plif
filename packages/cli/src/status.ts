@@ -41,6 +41,7 @@ export interface StatusSnapshot {
   readonly skills: number;
   readonly queued: number;
   readonly sessionId: string | null;
+  readonly sessionName?: string | null;
 }
 
 export type StatusInput = Omit<StatusSnapshot, 'permission' | 'autoApprove'>;

@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import { COMMANDS, findCommand, runsWhileWorking } from '../src/commands.js';
 import { contextBar, contextPercent, emptySessionUsage, formatStatus } from '../src/status.js';
+import { statusSections } from '../src/components/StatusScreen.js';
 import type { StatusInput } from '../src/status.js';
 
 const BASE: StatusInput = {
@@ -20,7 +21,7 @@ const BASE: StatusInput = {
     toolCalls: 41,
     turns: 7,
   },
-  workspace: 'C:\\Users\\dev\\Documents\\FrontTest',
+  workspace: 'C:\\workspace\\FrontTest',
   container: 'plif-quiet-otter',
   containerState: 'running',
   planMode: false,
@@ -100,6 +101,42 @@ describe('the status report', () => {
   });
 });
 
+describe('the full-screen status snapshot', () => {
+  it('shows real runtime/configuration metadata without exposing config secrets', () => {
+    const sections = statusSections(
+      BASE,
+      '0.3.0',
+      {
+        theme: 'midnight',
+        permissionMode: 'ask',
+        apiKey: 'sk-never-show-this',
+        providerKeys: { opencode: 'also-secret' },
+      },
+      'minimal',
+      'C:\\workspace\\.plif\\config.toml',
+      false,
+      null,
+      'API request failed at https://user:sk-provider-secret@example.invalid/v1',
+    );
+    const text = JSON.stringify(sections);
+
+    assert.match(text, /0\.3\.0/);
+    assert.match(text, /midnight/);
+    assert.match(text, /19%/);
+    assert.match(text, /2\/3 connected/);
+    assert.doesNotMatch(text, /never-show-this|also-secret|sk-provider-secret|example\.invalid/);
+    assert.equal(sections.find((section) => section.title === 'Runtime')?.rows.find((row) => row.label === 'Provider state')?.value, 'needs attention');
+    assert.equal(sections.find((section) => section.title === 'Runtime')?.rows.some((row) => row.label === 'Provider state'), true);
+  });
+
+  it('states when the persisted config cannot be read instead of inventing values', () => {
+    const sections = statusSections(BASE, '0.3.0', null, 'minimal', '~/.plif/config.toml', false, 'config unavailable');
+    const configuration = sections.find((section) => section.title === 'Configuration');
+    assert.equal(configuration?.rows.find((row) => row.label === 'Source')?.value, 'unavailable');
+    assert.equal(configuration?.rows.find((row) => row.label === 'Permissions')?.value, 'unknown');
+  });
+});
+
 describe('commands that answer while the agent is working', () => {
   it('exposes /status, and it is one of them', () => {
     assert.ok(findCommand('status'));
@@ -124,5 +161,17 @@ describe('commands that answer while the agent is working', () => {
     for (const command of COMMANDS) {
       assert.ok(command.summary.length <= 80, `/${command.name}: ${command.summary}`);
     }
+  });
+
+  it('routes /status and bare /config to their full-screen views', async () => {
+    const opened: string[] = [];
+    const context = {
+      openStatus: () => opened.push('status'),
+      openConfig: () => opened.push('config'),
+    } as never;
+
+    assert.deepEqual(await findCommand('status')!.run([], context), { entries: [] });
+    assert.deepEqual(await findCommand('config')!.run([], context), { entries: [] });
+    assert.deepEqual(opened, ['status', 'config']);
   });
 });

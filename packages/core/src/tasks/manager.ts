@@ -5,6 +5,8 @@ import type { EventBus } from '../events/bus.js';
 import type { ApprovalBroker } from '../policy/approval.js';
 import type { ExecRequest, ExecResult } from '../types.js';
 import { classifyDangerousCommand } from './dangerous.js';
+import { TaskMonitor } from './monitor.js';
+import type { TaskMonitorResult } from './monitor.js';
 
 export type TaskStatus =
   | 'awaiting_approval'
@@ -16,6 +18,8 @@ export type TaskStatus =
 
 export interface TaskSnapshot {
   readonly id: string;
+  /** Stable ownership boundary so a result cannot be handed to another session. */
+  readonly sessionId: string;
   readonly title: string;
   readonly argv: readonly string[];
   readonly reason: string;
@@ -42,6 +46,13 @@ export interface StartTaskInput {
   readonly reason: string;
 }
 
+export interface WaitTaskOptions {
+  readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
+}
+
+export type WaitTaskResult = TaskMonitorResult<TaskSnapshot>;
+
 type MutableTask = {
   -readonly [Key in keyof TaskSnapshot]: TaskSnapshot[Key];
 } & {
@@ -56,12 +67,15 @@ export class TaskManager {
 
   #bus: EventBus;
   #approvals: ApprovalBroker;
+  #sessionId: string;
+  #monitor = new TaskMonitor();
   #tasks = new Map<string, MutableTask>();
 
-  constructor(options: { container: TaskContainer; bus: EventBus; approvals: ApprovalBroker }) {
+  constructor(options: { container: TaskContainer; bus: EventBus; approvals: ApprovalBroker; sessionId?: string }) {
     this.container = options.container;
     this.#bus = options.bus;
     this.#approvals = options.approvals;
+    this.#sessionId = options.sessionId ?? 'interactive';
   }
 
   async create(input: StartTaskInput): Promise<TaskSnapshot> {
@@ -74,6 +88,7 @@ export class TaskManager {
 
     const task: MutableTask = {
       id: randomUUID().slice(0, 8),
+      sessionId: this.#sessionId,
       title: input.title.trim(),
       argv: [...input.argv],
       reason: input.reason.trim() || 'background work requested by the agent',
@@ -142,6 +157,7 @@ export class TaskManager {
         task.endedAt = Date.now();
       }
     }
+    if (this.#monitor.has(id)) await this.#monitor.cancel(id);
     if (task.promise) await task.promise;
     return this.snapshot(task);
   }
@@ -151,6 +167,7 @@ export class TaskManager {
       (task) => task.status === 'awaiting_approval' || task.status === 'running',
     );
     for (const task of running) task.controller.abort();
+    await this.#monitor.stopAll();
     await Promise.allSettled(running.map((task) => task.promise).filter(Boolean) as Promise<void>[]);
     for (const task of running) {
       if (task.status === 'awaiting_approval') {
@@ -158,6 +175,63 @@ export class TaskManager {
         task.endedAt = Date.now();
       }
     }
+  }
+
+  /**
+   * Wait for one task without asking the model to poll it. Native task events
+   * wake the monitor immediately; its timer is only a bounded fallback for a
+   * missed event or a future task backend that cannot emit one.
+   */
+  async waitFor(id: string, options: WaitTaskOptions = {}): Promise<WaitTaskResult | null> {
+    const task = this.#tasks.get(id);
+    if (!task) return null;
+
+    const check = async (): Promise<
+      | { readonly state: 'unchanged' }
+      | { readonly state: 'completed'; readonly result: TaskSnapshot }
+      | { readonly state: 'cancelled' }
+      | { readonly state: 'failed'; readonly error: unknown }
+    > => {
+      const current = this.#tasks.get(id);
+      if (!current) return { state: 'failed', error: new Error(`task ${id} no longer exists`) };
+      const snapshot = this.snapshot(current);
+      if (snapshot.status === 'done') return { state: 'completed', result: snapshot };
+      if (snapshot.status === 'failed' || snapshot.status === 'blocked') {
+        return { state: 'failed', error: new Error(snapshot.error ?? `task ${id} failed`) };
+      }
+      if (snapshot.status === 'cancelled') return { state: 'cancelled' };
+      return { state: 'unchanged' };
+    };
+
+    return await this.#monitor.watch({
+      id,
+      kind: 'shell',
+      sessionId: task.sessionId,
+      check,
+      subscribe: (wake) => {
+        const offFinished = this.#bus.on('task.finished', (event) => {
+          if (event.taskId === id) wake();
+        });
+        const offBlocked = this.#bus.on('task.blocked', (event) => {
+          if (event.taskId === id) wake();
+        });
+        return () => {
+          offFinished();
+          offBlocked();
+        };
+      },
+      cancel: () => task.controller.abort(),
+    }, {
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+      debug: (event) => {
+        this.#bus.emit('log', {
+          level: 'debug',
+          message: `task monitor ${event.type}`,
+          detail: { taskId: event.id, kind: event.kind, sessionId: event.sessionId },
+        });
+      },
+    });
   }
 
   #block(task: MutableTask, reason: string): void {
