@@ -12,8 +12,8 @@ import type {
 import { PlifError } from '../errors.js';
 import type { EventBus } from '../events/bus.js';
 import {
-  WindowsDpapiOAuthStore,
   mcpOAuthKey,
+  platformMcpOAuthStore,
   type McpOAuthStore,
   type OAuthCredentialScope,
   type StoredMcpOAuthState,
@@ -103,12 +103,13 @@ export class McpOAuthCoordinator {
   readonly #interactive: boolean;
   readonly #timeoutMs: number;
   readonly #pending = new Map<string, PendingCallback>();
+  readonly #storeWrites = new Map<string, Promise<void>>();
   #server: http.Server | undefined;
   #callbackUrl: URL | undefined;
 
   constructor(bus?: EventBus, options: McpOAuthCoordinatorOptions = {}) {
     this.#bus = bus;
-    this.#store = options.store ?? new WindowsDpapiOAuthStore();
+    this.#store = options.store ?? platformMcpOAuthStore();
     this.#openBrowser = options.openBrowser ?? openOAuthBrowser;
     this.#interactive = options.interactive ?? true;
     this.#timeoutMs = options.timeoutMs ?? 5 * 60_000;
@@ -145,6 +146,17 @@ export class McpOAuthCoordinator {
     });
     promise.catch(() => undefined);
     return promise;
+  }
+
+  async updateStore(key: string, operation: () => Promise<void>): Promise<void> {
+    const previous = this.#storeWrites.get(key) ?? Promise.resolve();
+    const write = previous.catch(() => undefined).then(operation);
+    this.#storeWrites.set(key, write);
+    try {
+      await write;
+    } finally {
+      if (this.#storeWrites.get(key) === write) this.#storeWrites.delete(key);
+    }
   }
 
   async authorize(provider: McpOAuthProvider, authorizationUrl: URL): Promise<void> {
@@ -310,9 +322,13 @@ export class McpOAuthProvider implements OAuthClientProvider {
   }
   async saveDiscoveryState(value: OAuthDiscoveryState): Promise<void> { await this.#patch({ discoveryState: value }); }
   async discoveryState(): Promise<OAuthDiscoveryState | undefined> { return (await this.#store.load(this.#key))?.discoveryState; }
-  async invalidateCredentials(scope: OAuthCredentialScope): Promise<void> { await this.#store.clear(this.#key, scope); }
+  async invalidateCredentials(scope: OAuthCredentialScope): Promise<void> {
+    await this.#coordinator.updateStore(this.#key, async () => this.#store.clear(this.#key, scope));
+  }
 
   async #patch(patch: Partial<StoredMcpOAuthState>): Promise<void> {
-    await this.#store.save(this.#key, { ...(await this.#store.load(this.#key)), ...patch });
+    await this.#coordinator.updateStore(this.#key, async () => {
+      await this.#store.save(this.#key, { ...(await this.#store.load(this.#key)), ...patch });
+    });
   }
 }

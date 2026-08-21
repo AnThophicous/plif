@@ -196,7 +196,7 @@ export class PortableBackend implements SandboxBackend {
       isolation: 'none',
       killProcessTree: false,
       memoryLimit: false,
-      processLimit: true, // counted by us, not the kernel
+      processLimit: false,
       cpuLimit: false,
       filesystemWriteBlock: false,
       networkBlock: false,
