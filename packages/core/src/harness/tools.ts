@@ -1418,10 +1418,26 @@ export const startTask: Tool = {
       throw new PlifError('INVALID_ARGUMENT', 'start_task needs a non-empty argv array');
     }
     const task = await context.tasks.create({ title, reason, argv: argv as string[] });
+    // Keep the task asynchronous at the runtime boundary, but do not make the
+    // model spend inference turns asking whether it changed. TaskManager's
+    // TaskMonitor waits on native task events and returns one proper tool
+    // result when the work is actionable.
+    const waited = task.status === 'running'
+      ? await context.tasks.waitFor(task.id, { signal: context.signal })
+      : null;
+    const settled = waited?.result ?? context.tasks.get(task.id) ?? task;
+    const output = [
+      `${settled.id} ${settled.status}: ${settled.title}`,
+      settled.argv.join(' '),
+      settled.stdout ? `stdout:\n${settled.stdout}` : '',
+      settled.stderr ? `stderr:\n${settled.stderr}` : '',
+      settled.error ? `error: ${settled.error}` : '',
+      waited?.status === 'timed_out' ? 'monitor: timed out while waiting for the task' : '',
+      waited?.status === 'cancelled' ? 'monitor: waiting was cancelled' : '',
+    ].filter(Boolean).join('\n');
     return {
-      output: `${task.id} ${task.status}: ${task.title}\n${task.argv.join(' ')}` +
-        (task.error ? `\nblocked: ${task.error}` : ''),
-      ok: task.status === 'running' || task.status === 'awaiting_approval',
+      output,
+      ok: settled.status === 'done' || settled.status === 'running' || settled.status === 'awaiting_approval',
     };
   },
 };

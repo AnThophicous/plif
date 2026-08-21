@@ -37,6 +37,8 @@ import {
   catalogSelection,
   findCatalogModel,
   modelVisionBadge,
+  providerForModel,
+  selectAvailableModels,
   rankModelIds,
   userCatalog,
 } from '../src/model/catalog.js';
@@ -503,6 +505,30 @@ describe('the free tier needs no credential', () => {
 });
 
 describe('model catalog', () => {
+  it('derives selectable models from provider access instead of the whole catalog', () => {
+    const opencode = MODEL_CATALOG.find((entry) => entry.id === 'opencode')!;
+    const openai = MODEL_CATALOG.find((entry) => entry.id === 'openai')!;
+    const free = selectAvailableModels(
+      [opencode, openai],
+      new Map([['opencode', 'free']]),
+    );
+    assert.ok(free.length > 0);
+    assert.ok(free.every((entry) => entry.provider.id === 'opencode'));
+    assert.ok(free.every((entry) => entry.model.badges.includes('no key')));
+
+    const configured = selectAvailableModels(
+      [opencode, openai],
+      new Map([['openai', 'configured']]),
+    );
+    assert.ok(configured.length > 0);
+    assert.ok(configured.every((entry) => entry.provider.id === 'openai'));
+  });
+
+  it('maps a bare free model to its only anonymous provider', () => {
+    assert.equal(providerForModel('deepseek-v4-flash-free'), 'opencode');
+    assert.equal(providerForModel('does-not-exist'), undefined);
+  });
+
   it('badges no model as the default, because there is no default', () => {
     const badges = MODEL_CATALOG.flatMap((provider) =>
       provider.models.flatMap((model) => model.badges),

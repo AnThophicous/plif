@@ -19,6 +19,8 @@ import { missingMcpCredentials, parseServerConfigs, resolveServerConfigs } from 
 import { redactedConfig } from '../src/harness/tools.js';
 import type { GlobalConfig } from '../src/config/global.js';
 
+const linuxIt = process.platform === 'linux' ? it : it.skip;
+
 const SECRET = 'sk-live-do-not-print-me';
 
 describe('the configuration the model is allowed to read', () => {
@@ -113,7 +115,7 @@ describe('the credential store', () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
-  it('round-trips Linux credentials without cleartext or service names', async () => {
+  linuxIt('round-trips Linux credentials without cleartext or service names', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-linux-secrets-'));
     const runner = async (_mode: 'protect' | 'unprotect', input: string, _name: string) =>
       [...input].reverse().join('');
@@ -129,7 +131,7 @@ describe('the credential store', () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
-  it('binds Linux credentials to their logical names', async () => {
+  linuxIt('binds Linux credentials to their logical names', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-linux-secrets-'));
     const runner = async (_mode: 'protect' | 'unprotect', input: string, _name: string) =>
       [...input].reverse().join('');
@@ -156,7 +158,7 @@ describe('the credential store', () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
-  it('allows concurrent Linux credential writes', async () => {
+  linuxIt('allows concurrent Linux credential writes', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-linux-secrets-'));
     const runner = async (_mode: 'protect' | 'unprotect', input: string, _name: string) =>
       [...input].reverse().join('');

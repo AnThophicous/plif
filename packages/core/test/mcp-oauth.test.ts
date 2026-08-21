@@ -28,6 +28,8 @@ import { EventBus } from '../src/events/bus.js';
 import { McpRegistry, parseServerConfigs } from '../src/harness/mcp.js';
 import type { ToolContext } from '../src/harness/tools.js';
 
+const linuxIt = process.platform === 'linux' ? it : it.skip;
+
 interface ProtectedMcpFixture {
   readonly url: string;
   readonly counters: {
@@ -278,7 +280,7 @@ describe('MCP OAuth credential store', () => {
     assert.equal((await store.load('server'))?.tokens?.access_token, 'private-token');
   });
 
-  it('persists Linux OAuth state through the systemd credentials seam', async () => {
+  linuxIt('persists Linux OAuth state through the systemd credentials seam', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'plif-linux-oauth-store-'));
     const runner = async (_mode: 'protect' | 'unprotect', input: string, _name: string) =>
       [...input].reverse().join('');
@@ -293,7 +295,7 @@ describe('MCP OAuth credential store', () => {
     assert.equal((await store.load('server'))?.tokens?.access_token, 'private-token');
   });
 
-  it('binds Linux OAuth state to its endpoint key', async () => {
+  linuxIt('binds Linux OAuth state to its endpoint key', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'plif-linux-oauth-store-'));
     const runner = async (_mode: 'protect' | 'unprotect', input: string, _name: string) =>
       [...input].reverse().join('');

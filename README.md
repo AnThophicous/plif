@@ -1,30 +1,79 @@
 <div align="center">
 
-**Plif 0.3.0 — the stable, adaptive coding agent for your terminal.**
+**Plif 0.3.5 — the stable, adaptive coding agent for your terminal.**
 
-Bring your own model. Configure the provider yourself. Plif 0.3.0 is built for
+Bring your own model. Configure the provider yourself. Plif 0.3.5 is built for
 long coding sessions with durable memory, better adaptation to the user, a
 calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 
 [![npm](https://img.shields.io/npm/v/%40plif%2Fcli?color=0b7285&label=npm)](https://www.npmjs.com/package/@plif/cli)
 [![license](https://img.shields.io/badge/license-Apache--2.0-0b7285)](LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D20.11-0b7285)](https://nodejs.org)
-[![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0b7285)](#what-the-sandbox-actually-enforces)
+[![platform](https://img.shields.io/badge/platform-Windows-0b7285)](#what-the-sandbox-actually-enforces)
 [![ci](https://github.com/AnThophicous/plif/actions/workflows/ci.yml/badge.svg)](https://github.com/AnThophicous/plif/actions/workflows/ci.yml)
 
 </div>
 
 ---
 
-## Why 0.3.1
+## What's new in 0.3.5
+
+### `/status`
+
+`/status` opens a focused, read-only view of the current PLIF session: runtime,
+provider, model, effort, context, configuration source and integrations. It
+redacts credentials instead of printing them.
+
+### `/config`
+
+`/config` opens a keyboard-first settings browser with search, categories,
+inline editors and persistent TOML-backed settings. Provider, model, effort,
+MCP and skills actions reuse the existing PLIF flows instead of creating a
+second configuration system.
+
+### Provider-aware model selection
+
+`/model` now shows only models that are usable with the providers currently
+available to the session. The picker keeps the active model visible, shows
+provider, access, context and capability details while you browse, and uses a
+bounded list/details layout that remains readable in wide and narrow terminals.
+Use `/providers` to configure another provider; its models then appear in
+`/model`. Provider names are added to rows only when two providers would
+otherwise display the same model name.
+
+### Free-first onboarding
+
+A clean install can start through OpenCode's explicitly marked free route,
+including `deepseek-v4-flash-free`, without asking for an unrelated provider
+key. Paid providers remain locked until you configure them, and the picker
+keeps those access boundaries visible instead of mixing unusable models into
+the default list.
+
+### Quieter startup
+
+The home screen now keeps the PLIF wordmark above a compact outlined panel with
+the mascot on the left and readiness on the right. Runtime details moved to
+`/status`, so startup is calmer without losing the PLIF identity.
+
+### Under the hood
+
+- `/status`, `/config`, `/models`, `/providers` and `/effort` read and update
+  the same runtime/configuration state.
+- Configuration writes continue through PLIF's existing atomic TOML persistence
+  layer, with credentials kept redacted and outside the transcript.
+- Screen-owned keyboard handling, terminal resize coverage and narrow/wide TUI
+  previews received additional regression coverage.
+
+## Why 0.3.5
 
 - **Adaptive memory.** Useful facts are ranked and reused without turning the
   conversation into noise.
 - **Built-in skills.** Galileo, deep engineering audits, Office/rendering
   skills, MCP discovery, and focused planning workflows are ready to use.
-- **Your model, your choice.** No hidden default model. `/model` discovers
-  real provider models, separates your providers from Plif's, and ranks the
-  most-used entries first.
+- **Your model, your choice.** `/model` starts with usable routes only,
+  including the explicit free OpenCode path on a clean install. Configure
+  another provider through `/providers` to unlock its models; no unrelated
+  provider key is requested in the process.
 - **Long-session reliability.** Navigable transcript history, `/goal`, `/plan`,
   `/export`, compaction and recovery keep large sessions usable.
 - **Safer execution.** Container-native workspaces, policy checks and an audit
@@ -32,18 +81,8 @@ calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 
 ## Install
 
-Windows:
-
 ```powershell
 irm https://raw.githubusercontent.com/AnThophicous/plif/main/install.ps1 | iex
-```
-
-Linux:
-
-```bash
-sudo apt install bubblewrap systemd
-npm install -g @plif/cli
-plif sandbox
 ```
 
 That script checks your Node version and runs `npm install -g @plif/cli`. If you
@@ -59,9 +98,7 @@ too close to `plist` and `plop`, so the package is `@plif/cli` and the binary it
 installs is `plif`.
 
 You need Node 20.11 or newer. You do not need Docker, WSL, administrator, or an
-API key to start. Linux uses Bubblewrap for namespaces and a delegated systemd
-cgroup v2 hierarchy when available. `plif sandbox` reports exactly which parts
-are active.
+API key to start.
 
 To remove it: `npm uninstall -g @plif/cli`. Your sessions and credentials live
 in `~/.plif` and are left alone unless you delete them.
@@ -89,12 +126,12 @@ down this page lists the gaps, including one that is genuinely awkward for us.
 
 **The model is yours.** plif speaks the OpenAI-compatible wire format, plus
 Anthropic's own, so any endpoint that speaks either works: a hosted frontier
-model, a free tier, or Ollama on your own machine with no key at all. There is
-no default model — plif installs empty and the first run opens the picker, so
-the first endpoint your code reaches is one you chose. `/model` asks each
-provider what it actually serves rather than trusting a list baked in at
-release time, and shows the models people reach for first. Nothing phones home
-except one cached version check you can switch off.
+model, a free tier, or Ollama on your own machine with no key at all. A clean
+install starts on PLIF's built-in OpenCode free route; you can change it from
+`/model` or configure another provider from `/providers`. `/model` shows only
+models from providers that are already available in this session instead of
+making you filter the entire catalog. Nothing phones home except one cached
+version check you can switch off.
 
 ## Why not Claude Code or Codex
 
@@ -132,6 +169,8 @@ Press `/` for commands. Nothing is configured yet and that is intentional:
 
 ```
 /model                    pick a provider and model, free ones included
+/status                   inspect the current session and runtime
+/config                   browse and edit PLIF settings
 /new                      create a container for the agent to work in
 /sandbox                  what your machine enforces, and what it does not
 /mcp                      browse MCP servers, skills and the plugin marketplace
@@ -174,12 +213,11 @@ TypeScript throughout, on Node 20.11+, ESM only, strict compiler settings and no
 transpiler in production — the shipped artifact is `tsc` output. The interface
 is [Ink](https://github.com/vadimdemedes/ink), which is React reconciled onto a
 terminal instead of a DOM. The Windows isolation layer reaches the Win32 API
-through [koffi](https://koffi.dev), an FFI binding. Linux uses Bubblewrap, user
-and PID namespaces, and systemd-managed cgroup v2 limits. There is no Plif
-native addon to compile at install time and no prebuild matrix to maintain.
+through [koffi](https://koffi.dev), an FFI binding, so there is no native addon
+to compile at install time and no prebuild matrix to maintain.
 
-Tests are `node:test`, no framework. There are just over four hundred of them
-and they run in about twenty seconds.
+Tests are `node:test`, with no additional test framework. The release suite
+covers the core runtime, sandbox boundary and CLI/TUI together.
 
 ### Three packages, one direction
 
@@ -228,23 +266,7 @@ suggestion.
 
 ## What the sandbox actually enforces
 
-On Linux with Bubblewrap and delegated systemd cgroup v2:
-
-| Enforced by the kernel | Not enforced |
-|---|---|
-| PID, mount, user, IPC and UTS namespaces | Hostname-based network allowlists |
-| Filesystem visibility and read-only mounts | Disk-write quotas for shell commands |
-| Network blocking when network is disabled | Seccomp syscall filtering |
-| Process-tree kill | |
-| Memory, process-count and CPU ceilings | |
-| CPU and memory accounting | |
-
-Without delegated cgroups, namespace and filesystem/network isolation remain,
-but resource limits and accounting are reported as degraded. Strict and
-semi-trusted policies refuse to run when their required cgroup capabilities are
-missing.
-
-On Windows:
+On Windows today:
 
 | Enforced by the kernel | Not enforced |
 |---|---|
@@ -256,7 +278,7 @@ On Windows:
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` is the flag doing the heavy lifting: if
 plif dies to a SIGKILL, the OS still reaps the agent's entire process tree.
 
-### The Windows gap you need to know about
+### The gap you need to know about
 
 Running the agent for real, it had `write_file` denied by capability and
 **worked around it** with `run_command ["node","-e","fs.writeFileSync(...)"]`.
@@ -310,6 +332,23 @@ A regression there is a sandbox escape, not a bug.
 
 ---
 
+## Models and providers
+
+PLIF includes an OpenCode Zen free path so a new installation can start with
+the models explicitly marked `no key`, including `deepseek-v4-flash-free`.
+`/model` is intentionally small: it derives its rows from providers available
+right now instead of showing the entire built-in catalog. Provider details are
+visible while you browse, including the serving provider, access mode, and
+only the capabilities/context metadata that PLIF actually knows.
+
+Want more models? Run `/providers`, choose a provider, and enter its API key
+when prompted. Once that provider is configured, its usable models appear in
+`/model` immediately; removing or changing the provider removes stale rows and
+keeps the active selection on a usable route.
+
+Rows with distinct visible names stay concise. A provider suffix is shown only
+when two available providers would otherwise make the model name ambiguous.
+
 ## Models and vision
 
 The active model and its capabilities live in `~/.plif/config.toml`. Plif does
@@ -360,6 +399,16 @@ collect and save a missing key without putting it in the transcript.
 
 For isolated automation, `PLIF_CONFIG_PATH` can point at a different TOML file;
 ordinary sessions continue to use `~/.plif/config.toml`.
+
+## Waiting for long-running work
+
+`start_task` uses PLIF's runtime `TaskMonitor`. It waits on native task
+completion events first and uses a slow, adaptive check only as a fallback.
+Those checks never call the model and never append polling messages to the
+transcript. When the task finishes, fails, times out, or is cancelled, one
+structured tool result returns to the existing agent loop so it can continue
+with the original goal. Ctrl+C and session shutdown cancel the wait and clean
+its listeners/timers.
 
 ## Research and Plif effort
 
@@ -446,11 +495,8 @@ the turn, and falls back to protocol-safe mechanical trimming.
 ## Credentials
 
 plif asks for an API key in the interface and encrypts it with your Windows
-account through DPAPI or, when the host credential key is accessible, through
-`systemd-creds` on Linux. Linux sessions without access to that key retain the
-credential in memory for the current process instead of writing cleartext. One
-record per name lives under a hashed filename so that listing the directory
-does not reveal which services you use.
+account through DPAPI. One record per name, under a hashed filename so that
+listing the directory does not reveal which services you use.
 
 The value reaches the code that needs it by resolving a promise and by no other
 route. It is deliberately left out of the event that reports the answer, so
@@ -520,10 +566,11 @@ reviewed without a terminal.
 
 Version 0.1.0. It is used daily by its author and it is early.
 
-What is honestly not done: Windows still cannot enforce filesystem or network
-blocking at the OS level; Linux does not enforce hostname-based network
-allowlists or shell-command disk quotas; and the plugin marketplace can install
-MCP servers but not the skills that many catalogue entries ship as directories.
+What is honestly not done: filesystem write blocking and network blocking are
+not enforced at the OS level (see above), the sandbox is Windows-first because
+that is where the isolation primitives are implemented, and the plugin
+marketplace can install MCP servers but not the skills that many catalogue
+entries ship as directories.
 
 Bug reports that include what you expected and what happened are welcome. So are
 disagreements about the security model, which is the part most worth arguing
