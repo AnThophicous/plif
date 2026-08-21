@@ -37,6 +37,9 @@ import {
   resolveConfig,
   saveStoredConfig,
   providerIdForConfig,
+  providerForModel,
+  findCatalogProvider,
+  userCatalog,
   stripStoredCredentials,
   buildSystemPrompt,
   DEFAULT_TOOLS,
@@ -391,16 +394,58 @@ async function buildProvider(
   const activeName = typeof loaded.activeProfile === 'string' ? loaded.activeProfile : undefined;
   const active = activeName ? profilesOf(loaded)[activeName] : undefined;
   const selectedModel = flags.model ?? active?.model;
+  const inferredProvider = selectedModel ? providerForModel(selectedModel) : undefined;
   const providerId = providerIdForConfig(loaded, {
     ...(selectedModel ? { model: selectedModel } : {}),
     ...(flags.preset ? { preset: flags.preset } : {}),
   });
+  const effectiveProvider = inferredProvider ?? providerId;
   const stored = credentials
-    ? await migrateStoredCredentials(engine, loaded, credentials, providerId ?? '')
+    ? await migrateStoredCredentials(engine, loaded, credentials, effectiveProvider ?? '')
     : loaded;
-  const credentialVariable = providerId === undefined
+
+  // A clean install should be usable immediately. This is deliberately a
+  // provider-level fallback, not a model-id auth exception: OpenCode is the
+  // built-in anonymous route and the selected model travels through its normal
+  // resolver and validation path. Explicit model/provider/base-url choices
+  // still win and are never silently redirected here.
+  const hasExplicitRoute = Boolean(
+    selectedModel || stored.model || stored.preset || effectiveProvider || flags.baseURL || flags.apiKey || stored.baseURL ||
+    process.env['PLIF_MODEL'] || process.env['PLIF_PRESET'] || process.env['PLIF_BASE_URL'],
+  );
+  if (!hasExplicitRoute) {
+    const fallback = { preset: 'opencode', model: 'deepseek-v4-flash-free' } as const;
+    const fallbackConfig = resolveConfig(stored, fallback);
+    const fallbackCheck = validateModelConfig(fallbackConfig);
+    if (fallbackCheck.ok) {
+      const next = { ...stored, ...fallback };
+      await saveStoredConfig(engine.paths, next, { preserveProviderKeys: false });
+      return createModelProvider(fallbackConfig, { capabilityCache, bus: engine.bus });
+    }
+  }
+
+  // A provider can disappear from config while its old preset/model remains
+  // persisted. Do not keep launching into an unusable route: fall back only
+  // for that stale-provider case, never for an explicit CLI selection or a
+  // known provider that merely needs its key.
+  const knownCustom = new Set(userCatalog(stored).map((entry) => entry.id));
+  const staleProvider = Boolean(
+    !flags.model && !flags.preset && effectiveProvider &&
+    !findCatalogProvider(effectiveProvider) && !knownCustom.has(effectiveProvider),
+  );
+  if (staleProvider) {
+    const fallback = { preset: 'opencode', model: 'deepseek-v4-flash-free' } as const;
+    const fallbackConfig = resolveConfig(stored, fallback);
+    const fallbackCheck = validateModelConfig(fallbackConfig);
+    if (fallbackCheck.ok) {
+      const next = { ...stored, ...fallback };
+      await saveStoredConfig(engine.paths, next, { preserveProviderKeys: false });
+      return createModelProvider(fallbackConfig, { capabilityCache, bus: engine.bus });
+    }
+  }
+  const credentialVariable = effectiveProvider === undefined
     ? credentialVariableForProvider('', stored)
-    : credentialVariableForProvider(providerId, stored);
+    : credentialVariableForProvider(effectiveProvider, stored);
   const storedKey = credentials
     ? await credentials.lookup(credentialVariable)
     : undefined;
@@ -408,6 +453,7 @@ async function buildProvider(
     ...(selectedModel ? { model: selectedModel } : {}),
     ...(flags.baseURL ? { baseURL: flags.baseURL } : {}),
     ...(flags.preset ? { preset: flags.preset } : {}),
+    ...(!flags.preset && inferredProvider ? { preset: inferredProvider } : {}),
     ...((flags.apiKey ?? storedKey) ? { apiKey: flags.apiKey ?? storedKey } : {}),
   });
 
@@ -573,7 +619,12 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
   );
 
   const tools = [...DEFAULT_TOOLS, skillTool(skills), createSkillTool(skills), ...mcp.tools()];
-  const tasks = new TaskManager({ container, bus: engine.bus, approvals: engine.approvals });
+  const tasks = new TaskManager({
+    container,
+    bus: engine.bus,
+    approvals: engine.approvals,
+    sessionId: session.id,
+  });
   const lsp = new LspManager({ root: await container.hostPathFor(container.workdir), bus: engine.bus });
   void lsp.warmup().catch(() => undefined);
   // The subagent inherits the LSP tools but not the parent's own subagent tool

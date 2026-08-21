@@ -184,6 +184,23 @@ export interface BrowserState {
   readonly stale: boolean;
 }
 
+export interface ConfigEditState {
+  readonly id: string;
+  readonly value: string;
+  readonly error: string | null;
+}
+
+export interface ConfigScreenState {
+  readonly filter: string;
+  readonly selected: number;
+  readonly editing: ConfigEditState | null;
+  readonly feedback: string | null;
+}
+
+export type SessionScreen =
+  | { readonly kind: 'status' }
+  | { readonly kind: 'config'; readonly state: ConfigScreenState };
+
 /** A compaction pass in flight. */
 export interface CompactionState {
   readonly stage: string;
@@ -249,7 +266,6 @@ export interface PickerState {
   readonly filter: string;
   readonly selected: number;
   readonly onPick: (value: string | ModelSelection) => void;
-  readonly details?: boolean;
   /** Nested provider → model pickers return here before closing. */
   readonly onBack?: () => void;
 }
@@ -284,6 +300,8 @@ export interface SessionState {
   readonly compaction: CompactionState | null;
   /** Open when /mcp or /skills is showing. Null the rest of the time. */
   readonly browser: BrowserState | null;
+  /** A full-screen utility view that temporarily owns the keyboard. */
+  readonly screen: SessionScreen | null;
   /** Typed while the agent was working, waiting for the next tool call. */
   readonly queue: readonly QueuedMessage[];
   readonly subagents: readonly SubagentView[];
@@ -317,6 +335,7 @@ export const initialSession: SessionState = {
   questionExpanded: false,
   compaction: null,
   browser: null,
+  screen: null,
   queue: [],
   subagents: [],
   subagentFocus: 0,
@@ -380,6 +399,14 @@ export type SessionAction =
   | { type: 'browser.rename.start'; id: string; draft: string }
   | { type: 'browser.rename.input'; draft: string }
   | { type: 'browser.rename.cancel' }
+  | { type: 'screen.open'; screen: 'status' | 'config' }
+  | { type: 'screen.close' }
+  | { type: 'config.filter'; filter: string }
+  | { type: 'config.move'; delta: number; count: number }
+  | { type: 'config.edit.start'; id: string; value: string }
+  | { type: 'config.edit.value'; value: string }
+  | { type: 'config.edit.cancel' }
+  | { type: 'config.feedback'; message: string | null }
   | { type: 'queue.push'; message: QueuedMessage }
   | { type: 'queue.drop'; id: string }
   /** Everything queued has been handed to the agent. */
@@ -427,7 +454,6 @@ export type SessionAction =
   | { type: 'picker.move'; delta: number }
   | { type: 'picker.moveVisible'; delta: number }
   | { type: 'picker.toggle'; id: string }
-  | { type: 'picker.details' }
   | { type: 'picker.close' }
   | { type: 'exit' };
 
@@ -789,6 +815,87 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       if (!state.browser) return state;
       return { ...state, browser: { ...state.browser, renameId: null, renameDraft: '' } };
 
+    case 'screen.open':
+      return {
+        ...state,
+        screen: action.screen === 'status'
+          ? { kind: 'status' }
+          : {
+              kind: 'config',
+              state: { filter: '', selected: 0, editing: null, feedback: null },
+            },
+        browser: null,
+        picker: null,
+      };
+
+    case 'screen.close':
+      return state.screen === null ? state : { ...state, screen: null };
+
+    case 'config.filter':
+      if (state.screen?.kind !== 'config') return state;
+      return {
+        ...state,
+        screen: {
+          kind: 'config',
+          state: { ...state.screen.state, filter: action.filter, selected: 0, editing: null, feedback: null },
+        },
+      };
+
+    case 'config.move':
+      if (state.screen?.kind !== 'config' || action.count <= 0) return state;
+      return {
+        ...state,
+        screen: {
+          kind: 'config',
+          state: {
+            ...state.screen.state,
+            selected: Math.max(0, Math.min(action.count - 1, state.screen.state.selected + action.delta)),
+            feedback: null,
+          },
+        },
+      };
+
+    case 'config.edit.start':
+      if (state.screen?.kind !== 'config') return state;
+      return {
+        ...state,
+        screen: {
+          kind: 'config',
+          state: {
+            ...state.screen.state,
+            editing: { id: action.id, value: action.value, error: null },
+            feedback: null,
+          },
+        },
+      };
+
+    case 'config.edit.value':
+      if (state.screen?.kind !== 'config' || !state.screen.state.editing) return state;
+      return {
+        ...state,
+        screen: {
+          kind: 'config',
+          state: {
+            ...state.screen.state,
+            editing: { ...state.screen.state.editing, value: action.value, error: null },
+          },
+        },
+      };
+
+    case 'config.edit.cancel':
+      if (state.screen?.kind !== 'config') return state;
+      return {
+        ...state,
+        screen: { kind: 'config', state: { ...state.screen.state, editing: null, feedback: null } },
+      };
+
+    case 'config.feedback':
+      if (state.screen?.kind !== 'config') return state;
+      return {
+        ...state,
+        screen: { kind: 'config', state: { ...state.screen.state, feedback: action.message } },
+      };
+
     case 'queue.push':
       return { ...state, queue: [...state.queue, action.message] };
 
@@ -965,7 +1072,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case 'picker.open':
       return {
         ...state,
-        picker: { ...action.picker, filter: '', selected: action.picker.selected ?? 0, details: false },
+        picker: { ...action.picker, filter: '', selected: action.picker.selected ?? 0 },
       };
 
     case 'picker.filter': {
@@ -1036,11 +1143,6 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         },
       };
     }
-
-    case 'picker.details':
-      return state.picker
-        ? { ...state, picker: { ...state.picker, details: !state.picker.details } }
-        : state;
 
     case 'picker.close':
       return state.picker === null ? state : { ...state, picker: null };

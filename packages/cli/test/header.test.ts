@@ -52,18 +52,15 @@ describe('CLI header', () => {
   });
 
   it('reports its real footprint so the input frame stays in the viewport', async () => {
-    assert.equal(headerHeight(96), 15);
-    assert.equal(headerHeight(74), 15);
-    assert.equal(headerHeight(73), 8);
+    assert.equal(headerHeight(96), 13);
+    assert.equal(headerHeight(74), 13);
+    assert.equal(headerHeight(16), 15);
 
     for (const width of [96, 73]) {
       const stdout = new CaptureStdout(width);
       const app = render(
         React.createElement(Header, {
-          cwd: 'C:\\work',
           width,
-          model: 'model',
-          version: '0.3.0',
         }),
         { stdout: stdout as unknown as NodeJS.WriteStream, exitOnCtrlC: false, patchConsole: false },
       );
@@ -75,35 +72,28 @@ describe('CLI header', () => {
     }
   });
 
-  it('centers the whole card with Ink layout at wide terminal widths', async () => {
+  it('centers the identity block with Ink layout at wide terminal widths', async () => {
     const stdout = new CaptureStdout(120);
     const app = render(
       React.createElement(Header, {
-        cwd: 'C:\\work',
         width: 120,
-        model: 'model',
-        version: '0.3.0',
       }),
       { stdout: stdout as unknown as NodeJS.WriteStream, exitOnCtrlC: false, patchConsole: false },
     );
     await new Promise<void>((resolve) => setTimeout(resolve, 20));
     app.unmount();
 
-    const border = stdout.output.replace(ANSI, '').replace(/\r/g, '').split('\n')[0] ?? '';
+    const output = stdout.output.replace(ANSI, '').replace(/\r/g, '');
+    const wordmarkLine = output.split('\n').find((line) => line.includes('PLIF')) ?? '';
     assert.equal(headerWidth(120), HEADER_MAX_WIDTH);
-    assert.equal(border.indexOf('╭'), (120 - HEADER_MAX_WIDTH) / 2);
-    assert.equal(border.trimStart().length, HEADER_MAX_WIDTH);
+    assert.equal(wordmarkLine.indexOf('PLIF'), (120 - 4) / 2);
   });
 
-  it('keeps the Plif mark, workspace, model, and operating cues in a stable order', async () => {
+  it('keeps the wordmark outside a compact mascot/status split', async () => {
     const stdout = new CaptureStdout();
     const app = render(
       React.createElement(Header, {
-        cwd: 'C:\\Users\\Elaine Araújo\\Documents\\Plif-Code',
         width: 96,
-        model: 'claude-opus-5',
-        effort: 'medium',
-        version: '0.3.0',
       }),
       { stdout: stdout as unknown as NodeJS.WriteStream, exitOnCtrlC: false, patchConsole: false },
     );
@@ -112,11 +102,14 @@ describe('CLI header', () => {
 
     const lines = stdout.output.replace(ANSI, '').replace(/\r/g, '').split('\n').filter(Boolean);
     const output = lines.join('\n');
-    assert.match(output, /PLIF/);
-    assert.match(output, /Code workspace/);
-    assert.match(output, /claude-opus-5/);
-    assert.match(output, /Medium/);
+    const wordmarkLine = lines.findIndex((line) => line.includes('PLIF'));
+    const outlineLine = lines.findIndex((line) => line.includes('╭'));
+    assert.ok(wordmarkLine >= 0 && outlineLine > wordmarkLine);
+    assert.match(output, /│/);
     assert.match(output, /Ready to work/);
-    assert.match(output, /Plan, work, review/);
+    assert.match(output, /Describe a task/);
+    assert.doesNotMatch(output, /Code workspace|claude-opus-5|0\.3\.0|Documents|Plan, work, review|Ctrl\+T/);
+    assert.match(output, /╭.*╮/);
+    assert.match(output, /╰.*╯/);
   });
 });

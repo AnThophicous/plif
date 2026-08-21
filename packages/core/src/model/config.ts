@@ -282,6 +282,8 @@ export interface CustomProviderModel {
   readonly contextWindow?: number;
   /** Explicit capability declaration; an endpoint model id is not evidence. */
   readonly modalities?: readonly ModelCapability[];
+  readonly reasoning?: boolean;
+  readonly tools?: boolean;
   /** Price is displayed before a vision subagent is allowed to start. */
   readonly cost?: ModelCost;
   readonly needKey?: boolean;
@@ -392,14 +394,7 @@ export function providerIdForConfig(
   return ref.preset ?? options.preset ?? env['PLIF_PRESET'] ?? stored.preset;
 }
 
-/**
- * There is deliberately no default model or provider.
- *
- * Plif ships unconfigured: the first run opens the picker instead of quietly
- * talking to somebody else's endpoint on the developer's behalf. A built-in
- * default is a decision made for the user about where their code goes, and it
- * is the one decision a coding agent has no business making silently.
- */
+/** The rest of the defaults are transport-only; model selection is resolved by the CLI. */
 const DEFAULTS = {
   temperature: 0.2,
   timeoutMs: 120_000,

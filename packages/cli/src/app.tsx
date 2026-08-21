@@ -41,6 +41,7 @@ import {
   parseDiff,
   profilesOf,
   providerIdForConfig,
+  providerForModel,
   saveStoredConfig,
   storedProviderCredentials,
   userCatalog,
@@ -92,6 +93,8 @@ import { Question, questionHeight } from './components/Question.js';
 import { Footer, FOOTER_HEIGHT } from './components/Footer.js';
 import type { Hint } from './components/Footer.js';
 import { Header, headerHeight } from './components/Header.js';
+import { ConfigScreen } from './components/ConfigScreen.js';
+import { StatusScreen } from './components/StatusScreen.js';
 import { Picker, filterItems, filterPickerGroups, flattenPickerGroups, pickerRows as visiblePickerRows } from './components/Picker.js';
 import { Prompt, layoutPrompt, promptBodyRows, promptHeight, visiblePromptRows } from './components/Prompt.js';
 import { PastedTextDialog } from './components/PastedTextDialog.js';
@@ -186,6 +189,8 @@ import { sessionFrameHeight, terminalFrameRows } from './terminal-resize.js';
 import { activateTheme } from './themes.js';
 import type { ThemeCatalogue } from './themes.js';
 import { formatSessionExport, sessionExportFileName } from './session-export.js';
+import { createConfigSettings, filterConfigSettings } from './configuration.js';
+import type { ConfigActions } from './configuration.js';
 import {
   activityModel,
   monotonicNow,
@@ -355,7 +360,14 @@ async function providerCredential(
 ): Promise<string | undefined> {
   if (!credentials) return undefined;
   const variable = credentialVariableForProvider(provider, stored);
-  return await credentials.lookup(variable);
+  // An anonymous provider must remain selectable even when an old/corrupt
+  // credential-store record cannot be read. A paid provider will still fail
+  // closed later at model validation and can then request a fresh key.
+  try {
+    return await credentials.lookup(variable);
+  } catch {
+    return undefined;
+  }
 }
 
 /** Move legacy config credentials to the encrypted broker before saving a model selection. */
@@ -715,6 +727,37 @@ export function App({
   const planModeRef = useRef(false);
   const goalRef = useRef<GoalState | null>(null);
   const activeThemeId = useRef(initialThemeId ?? themeCatalogue.themes[0]?.id ?? 'minimal');
+  const [configSnapshot, setConfigSnapshot] = useState<GlobalConfig | null>(null);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configProblem, setConfigProblem] = useState<string | null>(null);
+
+  const loadConfigSnapshot = useCallback(async (): Promise<void> => {
+    setConfigLoading(true);
+    setConfigProblem(null);
+    try {
+      setConfigSnapshot(await loadGlobalConfig());
+    } catch (error) {
+      const { title } = formatError(error);
+      setConfigSnapshot(null);
+      setConfigProblem(title);
+    } finally {
+      setConfigLoading(false);
+    }
+  }, []);
+
+  const openStatusScreen = useCallback((): void => {
+    setConfigSnapshot(null);
+    setConfigProblem(null);
+    dispatch({ type: 'screen.open', screen: 'status' });
+    void loadConfigSnapshot();
+  }, [loadConfigSnapshot]);
+
+  const openConfigScreen = useCallback((): void => {
+    setConfigSnapshot(null);
+    setConfigProblem(null);
+    dispatch({ type: 'screen.open', screen: 'config' });
+    void loadConfigSnapshot();
+  }, [loadConfigSnapshot]);
 
   const push = useCallback(
     (item: ReturnType<typeof entry>) => dispatch({ type: 'append', entry: item }),
@@ -1968,9 +2011,10 @@ export function App({
       const stored = await loadStoredConfig(engine.paths);
       const selection: ModelSelection =
         typeof requested === 'string'
-          // A bare `/model <id>` keeps whatever provider is already configured.
-          // There is no default to fall back on when none is.
-          ? { preset: providerIdForConfig(stored) ?? '', model: requested }
+          // A known catalog id carries an unambiguous provider. This is what
+          // keeps a bare free model on OpenCode instead of inheriting a stale
+          // paid provider and prompting for its unrelated key.
+          ? { preset: providerForModel(requested) ?? providerIdForConfig(stored) ?? '', model: requested }
           : requested;
       const savedKey = await providerCredential(credentials, selection.preset, stored);
       let config = resolveConfig(stored, {
@@ -2265,8 +2309,11 @@ export function App({
       skills: skillList.length,
       queued: state.queue.length,
       sessionId: transcript.session?.id ?? null,
+      sessionName: transcript.session?.meta.title ?? null,
     }),
     themes: themeCatalogue.themes,
+    openStatus: openStatusScreen,
+    openConfig: openConfigScreen,
     switchTheme: async (id) => {
       const theme = themeCatalogue.themes.find((entry) => entry.id === id);
       if (!theme) throw new Error(`unknown theme ${id}`);
@@ -2296,6 +2343,81 @@ export function App({
       setThemeRevision((value) => value + 1);
     },
   };
+
+  const updateGlobalConfig = useCallback(async (patch: Record<string, unknown>): Promise<void> => {
+    const loaded = await loadGlobalConfig();
+    const safe = credentials
+      ? await migrateCredentialsForWrite(loaded, credentials)
+      : Object.keys(storedProviderCredentials(loaded, providerIdForConfig(loaded) ?? '')).length > 0
+        ? undefined
+        : loaded;
+    if (!safe) {
+      throw new PlifError('INTERNAL', 'setting was not saved because credential migration failed', {
+        hint: 'Fix the encrypted credential store and retry; config.toml was left untouched.',
+      });
+    }
+    const nextRecord: Record<string, unknown> = { ...safe };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) delete nextRecord[key];
+      else nextRecord[key] = value;
+    }
+    const next = nextRecord as GlobalConfig;
+    await saveGlobalConfig(next, globalConfigPath(), { preserveProviderKeys: false });
+    setConfigSnapshot(next);
+  }, [credentials]);
+
+  const setPermissionFromConfig = useCallback(async (mode: 'ask' | 'auto-approve' | 'deny'): Promise<void> => {
+    await updateGlobalConfig({ permissionMode: mode, autoApprove: mode === 'auto-approve' });
+    context.engine.approvals.setPermissionMode(mode);
+  }, [context.engine, updateGlobalConfig]);
+
+  const openConfigCommand = useCallback(async (name: 'models' | 'providers'): Promise<void> => {
+    dispatch({ type: 'screen.close' });
+    const command = findCommand(name);
+    if (!command) return;
+    const result = await command.run([], context);
+    result.entries.forEach(push);
+  }, [context, push]);
+
+  const configActions: ConfigActions = {
+    setTheme: context.switchTheme,
+    setEffort: context.setEffort,
+    setPermissionMode: setPermissionFromConfig,
+    updateGlobal: updateGlobalConfig,
+    openModels: () => openConfigCommand('models'),
+    openProviders: () => openConfigCommand('providers'),
+    openMcp: () => {
+      dispatch({ type: 'screen.close' });
+      context.openBrowser('mcp');
+    },
+    openSkills: () => {
+      dispatch({ type: 'screen.close' });
+      context.openBrowser('skills');
+    },
+  };
+
+  const configSettings = configSnapshot
+    ? createConfigSettings({
+        config: configSnapshot,
+        activeThemeId: activeThemeId.current,
+        themes: themeCatalogue.themes,
+        provider: redactedProviderId(providerRef.current?.info.endpoint ?? provider?.info.endpoint ?? ''),
+        model: providerRef.current?.info.id ?? provider?.info.id ?? '',
+        effort: effortRef.current,
+        supportedEfforts: supportedEfforts(
+          providerRef.current?.info.endpoint ?? provider?.info.endpoint ?? '',
+          providerRef.current?.info.id ?? provider?.info.id ?? '',
+        ),
+        mcpConnected: mcpStatuses.filter((server) => server.connected).length,
+        mcpServers: mcpStatuses.length,
+        skills: skillList.length,
+        workspace: cwd,
+      }, configActions)
+    : [];
+  const filteredConfigSettings = state.screen?.kind === 'config'
+    ? filterConfigSettings(configSettings, state.screen.state.filter)
+    : [];
+  const screenStatus = context.sessionStatus?.();
 
   const submit = useCallback(
     async (line: string, suppliedAttachments?: readonly PastedAttachment[]) => {
@@ -2554,6 +2676,7 @@ export function App({
         container,
         bus: engine.bus,
         approvals: engine.approvals,
+        sessionId: transcript.session?.id ?? 'interactive',
       });
       setTasks(visibleTasks(taskManager.current.list()));
       const nextLsp = new LspManager({
@@ -3018,7 +3141,7 @@ export function App({
    * what Tab will do.
    */
   const shortcode =
-    !state.busy && !state.approval && !state.question && !state.picker
+    !state.busy && !state.screen && !state.approval && !state.question && !state.picker
       ? openShortcode(input, cursor)
       : null;
   const emojiMatches = shortcode ? matchEmoji(shortcode.fragment) : [];
@@ -3097,6 +3220,11 @@ export function App({
       if (firstLine) dispatch({ type: 'browser.filter', filter: state.browser.filter + firstLine });
       return;
     }
+    if (state.screen?.kind === 'config') {
+      if (firstLine) dispatch({ type: 'config.filter', filter: state.screen.state.filter + firstLine });
+      return;
+    }
+    if (state.screen?.kind === 'status') return;
     if (state.approval) return;
     if (state.question) {
       if (firstLine) dispatch({ type: 'question.draft', draft: state.questionDraft + firstLine });
@@ -3190,7 +3318,7 @@ export function App({
 
   function handleMouse(mouse: { readonly button: number; readonly action: string; readonly column: number; readonly row: number }): void {
     if (mouse.action !== 'press' || mouse.button !== 0 || pastedTextPopup) return;
-    if (state.browser || state.approval || state.question || state.picker || credentialPromptPending) return;
+    if (state.screen || state.browser || state.approval || state.question || state.picker || credentialPromptPending) return;
 
     const sequence = nextClickSequence(pastedClick.current, mouse, Date.now());
     pastedClick.current = sequence.count >= 3 ? EMPTY_CLICK_SEQUENCE : sequence;
@@ -3231,6 +3359,11 @@ export function App({
 
     if (pastedTextPopup) {
       if (key.escape || (key.ctrl && char === 'c')) setPastedTextPopup(null);
+      return;
+    }
+
+    if (state.screen) {
+      handleConfigKey(char, key);
       return;
     }
 
@@ -3732,6 +3865,105 @@ export function App({
     }
   }
 
+  async function applyConfigSetting(setting: (typeof configSettings)[number], value: string): Promise<void> {
+    if (!setting.apply) return;
+    try {
+      await setting.apply(value);
+      await loadConfigSnapshot();
+      dispatch({ type: 'config.edit.cancel' });
+      dispatch({ type: 'config.feedback', message: `${setting.label} updated` });
+    } catch (error) {
+      const { title, detail } = formatError(error);
+      dispatch({
+        type: 'config.feedback',
+        message: [title, detail].filter(Boolean).join(' · '),
+      });
+    }
+  }
+
+  function handleConfigKey(char: string, key: Key): void {
+    const screen = state.screen;
+    if (!screen) return;
+    if (screen.kind === 'status') {
+      if (key.escape || (key.ctrl && char === 'c')) dispatch({ type: 'screen.close' });
+      return;
+    }
+
+    const editing = screen.state.editing;
+    const setting = editing
+      ? configSettings.find((item) => item.id === editing.id)
+      : filteredConfigSettings[screen.state.selected];
+
+    if (editing && setting) {
+      if (key.escape || (key.ctrl && char === 'c')) {
+        dispatch({ type: 'config.edit.cancel' });
+        return;
+      }
+      if (key.return) {
+        void applyConfigSetting(setting, editing.value);
+        return;
+      }
+      if (setting.options && (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow)) {
+        const index = setting.options.findIndex((item) => item.value === editing.value);
+        const delta = key.upArrow || key.leftArrow ? -1 : 1;
+        const next = Math.max(0, Math.min(setting.options.length - 1, Math.max(0, index) + delta));
+        dispatch({ type: 'config.edit.value', value: setting.options[next]?.value ?? editing.value });
+        return;
+      }
+      if (key.backspace || key.delete) {
+        dispatch({ type: 'config.edit.value', value: editing.value.slice(0, -1) });
+        return;
+      }
+      if (char && !key.ctrl && !key.meta && !setting.options) {
+        dispatch({ type: 'config.edit.value', value: editing.value + char });
+      }
+      return;
+    }
+
+    if (key.escape || (key.ctrl && char === 'c')) {
+      if (screen.state.filter) dispatch({ type: 'config.filter', filter: '' });
+      else dispatch({ type: 'screen.close' });
+      return;
+    }
+    if (key.upArrow || key.downArrow) {
+      dispatch({
+        type: 'config.move',
+        delta: key.upArrow ? -1 : 1,
+        count: filteredConfigSettings.length,
+      });
+      return;
+    }
+    if (key.return || char === ' ') {
+      if (!setting) return;
+      if (setting.action) {
+        dispatch({ type: 'screen.close' });
+        void Promise.resolve(setting.action()).catch((error: unknown) => {
+          const { title, detail } = formatError(error);
+          push(entry('notice', title, { tone: 'danger', ...(detail ? { detail } : {}) }));
+        });
+        return;
+      }
+      if (setting.kind === 'boolean' && setting.apply) {
+        void applyConfigSetting(setting, setting.inputValue === 'true' ? 'false' : 'true');
+        return;
+      }
+      if (setting.apply) {
+        dispatch({ type: 'config.edit.start', id: setting.id, value: setting.inputValue });
+        return;
+      }
+      dispatch({ type: 'config.feedback', message: `${setting.label} is read-only` });
+      return;
+    }
+    if (key.backspace || key.delete) {
+      dispatch({ type: 'config.filter', filter: screen.state.filter.slice(0, -1) });
+      return;
+    }
+    if (char && !key.ctrl && !key.meta) {
+      const { text } = splitPaste(char);
+      if (text) dispatch({ type: 'config.filter', filter: screen.state.filter + text });
+    }
+  }
+
   /**
    * Navigating the browser.
    *
@@ -3994,10 +4226,6 @@ export function App({
     }
     if (key.downArrow) {
       dispatch({ type: picker.groups ? 'picker.moveVisible' : 'picker.move', delta: 1 });
-      return;
-    }
-    if (key.tab) {
-      dispatch({ type: 'picker.details' });
       return;
     }
     if (key.return) {
@@ -4265,7 +4493,13 @@ export function App({
     background: tasks.some((task) => task.status === 'running'),
     queued: state.queue.length,
   });
-  const hints: Hint[] = state.browser
+  const hints: Hint[] = state.screen?.kind === 'status'
+    ? [{ key: 'Esc', label: 'close' }]
+    : state.screen?.kind === 'config'
+    ? state.screen.state.editing
+      ? [{ key: '↑↓', label: 'choose' }, { key: 'Enter', label: 'apply' }, { key: 'Esc', label: 'cancel' }]
+      : [{ key: 'type', label: 'search' }, { key: '↑↓', label: 'move' }, { key: 'Enter', label: 'edit' }, { key: 'Esc', label: 'clear / close' }]
+    : state.browser
     ? [
         { key: 'type', label: 'filter' },
         { key: '↑↓', label: 'move' },
@@ -4341,6 +4575,7 @@ export function App({
             { key: 'Ctrl+C', label: 'quit' },
           ];
   const showFooterHints = Boolean(
+    state.screen ||
     state.browser ||
     state.question ||
     state.picker ||
@@ -4448,7 +4683,7 @@ export function App({
     (): readonly TimelineEntry[] => state.committed,
     [state.committed],
   );
-  const animationActive = animationClockActive({
+  const animationActive = !state.screen && animationClockActive({
       effort,
     busy: state.busy,
     compacting: state.compaction !== null,
@@ -4463,13 +4698,13 @@ export function App({
     // selectors stay completely static; keyboard navigation must be the only
     // thing that changes them.
     ambientFocus: Boolean(stdout.isTTY) && (
-      !state.approval && !state.question && !state.picker && !state.browser && !state.exiting
+      !state.approval && !state.question && !state.picker && !state.browser && !state.screen && !state.exiting
     ),
   });
   // The full travelling wave is reserved for actual work and bounded
   // transitions; an idle frame that waved as hard as a busy one would make
   // "waiting" and "working" the same visual.
-  const frameActive = strongFrameActive({
+  const frameActive = !state.screen && strongFrameActive({
     busy: state.busy,
     compacting: state.compaction !== null,
     browserLoading: state.browser?.loading === true,
@@ -4513,20 +4748,20 @@ export function App({
         <PastedTextDialog text={pastedTextPopup.text} width={width} height={surface.canvasHeight} />
       ) : (
         <>
-          <Box paddingX={layout.gutter} flexShrink={0}>
-            <Header
-              cwd={cwd}
-              width={headerAvailableWidth}
-              model={provider?.info.id ?? ''}
-              effort={effort}
-              version={version}
-            />
-          </Box>
-          <PlifActivation
-            active={plifActivation}
-            width={surface.contentWidth}
-            height={surface.canvasHeight}
-          />
+          {!state.screen && (
+            <>
+              <Box paddingX={layout.gutter} flexShrink={0}>
+                <Header
+                  width={headerAvailableWidth}
+                />
+              </Box>
+              <PlifActivation
+                active={plifActivation}
+                width={surface.contentWidth}
+                height={surface.canvasHeight}
+              />
+            </>
+          )}
           {/*
             Scrollback. Ink prints each item once, above the frame, and never again
             — which is both why history survives here and why the array behind it
@@ -4557,6 +4792,38 @@ export function App({
           width={width}
           height={terminalFrameRows(rows)}
         />
+      ) : state.screen ? (
+        <Box
+          flexDirection="column"
+          {...{ height: sessionFrameHeight(rows, 'screen'), overflowY: 'hidden' as const }}
+        >
+          {state.screen.kind === 'status' && screenStatus ? (
+            <StatusScreen
+              snapshot={screenStatus}
+              version={version}
+              config={configSnapshot}
+              configPath={globalConfigPath()}
+              activeTheme={activeThemeId.current}
+              providerProblem={providerProblem}
+              configLoading={configLoading}
+              configProblem={configProblem}
+              width={width}
+              rows={rows}
+            />
+          ) : state.screen.kind === 'config' ? (
+            <ConfigScreen
+              settings={filteredConfigSettings}
+              filter={state.screen.state.filter}
+              selected={state.screen.state.selected}
+              editing={state.screen.state.editing}
+              feedback={state.screen.state.feedback}
+              loading={configLoading}
+              problem={configProblem}
+              width={width}
+              rows={rows}
+            />
+          ) : null}
+        </Box>
       ) : state.browser ? (
         /*
           Full-screen, replacing the normal panel rather than sitting above it.
@@ -4613,7 +4880,6 @@ export function App({
                     : { items: filterItems(state.picker.items ?? [], state.picker.filter) })}
                   filter={state.picker.filter}
                   selected={state.picker.selected}
-                  details={state.picker.details}
                   width={Math.max(1, surface.contentWidth - 2)}
                   rows={pickerRows}
                 />

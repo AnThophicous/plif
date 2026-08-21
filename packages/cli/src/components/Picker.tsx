@@ -20,6 +20,9 @@ export interface PickerItem {
   readonly capabilities?: readonly string[];
   readonly context?: string;
   readonly auth?: string;
+  readonly reasoning?: boolean;
+  readonly tools?: boolean;
+  readonly cost?: string;
   /** Searchable aliases/metadata kept out of the visible row. */
   readonly searchText?: string;
   /** Flat model rows carry their provider/model pair through Enter. */
@@ -206,7 +209,6 @@ interface PickerProps {
   readonly expanded?: readonly string[];
   readonly filter: string;
   readonly selected: number;
-  readonly details?: boolean;
   readonly width: number;
   readonly rows?: number;
 }
@@ -239,19 +241,22 @@ export function Picker({
   expanded,
   filter,
   selected,
-  details = false,
   width,
   rows = 8,
 }: PickerProps): React.ReactElement {
-  const inner = width - 4;
-  const compact = inner < 88;
+  const availableWidth = Math.max(1, width - 4);
   const grouped = groups !== undefined;
   const visibleGroups = grouped ? filterPickerGroups(groups, filter) : [];
   const visibleRows = grouped ? pickerRows(groups, expanded ?? [], filter) : [];
   const visibleItems = grouped ? [] : filterItems(items ?? [], filter);
   const modelFirst = !grouped && visibleItems.some((item) => item.provider !== undefined);
+  // Model selection is intentionally bounded: a 200-column terminal should
+  // make the list/details relationship calmer, not push the details panel to
+  // the far edge of the screen. Other pickers keep their existing full width.
+  const inner = modelFirst ? Math.min(availableWidth, 112) : availableWidth;
+  const compact = inner < 88;
   const selectedFlatItem = !grouped ? visibleItems[selected] : undefined;
-  const splitDetails = details === true && modelFirst && selectedFlatItem !== undefined && inner >= 96;
+  const splitDetails = modelFirst && selectedFlatItem !== undefined && inner >= 96;
   const listWidth = splitDetails ? Math.max(28, Math.floor(inner * 0.56)) : inner;
   const detailWidth = Math.max(24, inner - listWidth - 3);
   const count = grouped ? visibleGroups.length : visibleItems.length;
@@ -283,7 +288,7 @@ export function Picker({
 
   return (
     <Box flexDirection="column" width="100%" marginBottom={1}>
-      <Box flexDirection="column" width="100%">
+      <Box flexDirection="column" width={inner}>
         <Box justifyContent="space-between">
           <Text color={color('accent')} bold>
             {title}
@@ -295,16 +300,16 @@ export function Picker({
           </Text>
         </Box>
 
-        {hint && (
-          <Text color={color('ghost')}>{truncate(hint, inner)}</Text>
-        )}
+        {hint?.split('\n').map((line, index) => (
+          <Text key={`${line}-${index}`} color={color('ghost')}>{truncate(line, inner)}</Text>
+        ))}
 
         <Box marginTop={1}>
           <Text color={color('muted')}>{glyph.prompt} </Text>
           {filter ? (
             <Text color={color('text')}>{filter}</Text>
           ) : (
-            <Text color={color('ghost')}>type to filter</Text>
+            <Text color={color('ghost')}>{modelFirst ? 'Search models' : 'type to filter'}</Text>
           )}
         </Box>
 
@@ -491,16 +496,15 @@ export function Picker({
           )}
         </Box>
 
-        {details && modelFirst && selectedFlatItem && !splitDetails && (
+        {modelFirst && selectedFlatItem && !splitDetails && (
           <PickerDetails item={selectedFlatItem} width={inner} />
         )}
 
         <Box marginTop={1} justifyContent="space-between">
           <Text color={color('muted')}>
-            {grouped ? '↑↓ move · ←→ expand' : '↑↓ move · Enter select'} · / search
+            {grouped ? '↑↓ move · ←→ expand · Enter select' : '↑↓ move · Enter select'} · / search
           </Text>
           <Text color={color('ghost')}>
-            {modelFirst && <><Text inverse bold> Tab </Text> details · </>}
             <Text inverse bold> Esc </Text> close
           </Text>
         </Box>
@@ -517,12 +521,15 @@ function PickerDetails({ item, width }: { readonly item: PickerItem; readonly wi
       {item.current && <Text color={color('success')}>current</Text>}
       {item.provider && <Text color={color('muted')}>{`Provider  ${value(item.provider)}`}</Text>}
       <Text color={color('ghost')}>{`ID        ${value(item.selection?.model ?? item.value)}`}</Text>
-      {item.context && <Text color={color('ghost')}>{`Context   ${value(item.context)}`}</Text>}
+      <Text color={color('ghost')}>{`Context   ${value(item.context ?? 'Unknown')}`}</Text>
+      <Text color={color('ghost')}>{`Access    ${value(item.auth ?? 'Unknown')}`}</Text>
+      <Text color={color('ghost')}>{`Reasoning ${item.reasoning === undefined ? 'Unknown' : item.reasoning ? 'Yes' : 'No'}`}</Text>
+      <Text color={color('ghost')}>{`Tools     ${item.tools === undefined ? 'Unknown' : item.tools ? 'Yes' : 'No'}`}</Text>
       {item.capabilities && item.capabilities.length > 0 && (
         <Text color={color('ghost')}>{`Provides  ${value(item.capabilities.join(' · '))}`}</Text>
       )}
+      {item.cost && <Text color={color('ghost')}>{`Cost      ${value(item.cost)}`}</Text>}
       {item.detail && <Text color={color('faint')}>{value(item.detail)}</Text>}
-      {item.auth && <Text color={item.auth === 'key required' ? color('warn') : color('muted')}>{`Auth      ${item.auth}`}</Text>}
     </Box>
   );
 }

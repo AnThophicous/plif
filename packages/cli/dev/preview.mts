@@ -262,6 +262,27 @@ const SCENARIOS: Record<string, Step[]> = {
   /** The command menu, opened by a bare slash. */
   completions: [{ wait: 150 }, { type: '/' }, { wait: 400 }],
 
+  /** The read-only runtime snapshot, reached through the real slash router. */
+  'status-screen': [
+    { wait: 150 },
+    { type: '/status' },
+    { type: '\r' },
+    { wait: 450 },
+    { capture: 'PLIF status screen' },
+  ],
+
+  /** Settings search and navigation, using the real persisted configuration. */
+  'config-screen': [
+    { wait: 150 },
+    { type: '/config' },
+    { type: '\r' },
+    { wait: 450 },
+    { capture: 'PLIF config screen' },
+    { type: 'model' },
+    { wait: 250 },
+    { capture: 'config filtered by model' },
+  ],
+
   /** The local provider catalog, filtered without a remote provider. */
   'model-catalog': [
     { wait: 150 },
@@ -899,7 +920,7 @@ const app = render(React.createElement(App, {
     capabilityCache,
     // Plif visual scenarios are event-only; the model picker would obscure
     // the surface being previewed when this machine has no provider config.
-    providerProblem: scenarioName.endsWith('-plif') || scenarioName === 'model-catalog' || scenarioName === 'pasted-popup' || scenarioName === 'sessions'
+    providerProblem: scenarioName.endsWith('-plif') || scenarioName === 'model-catalog' || scenarioName === 'pasted-popup' || scenarioName === 'sessions' || scenarioName === 'status-screen' || scenarioName === 'config-screen'
       ? null
       : previewProblem,
     tools: (await import('@plif/core')).DEFAULT_TOOLS,
