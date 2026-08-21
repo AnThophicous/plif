@@ -6,6 +6,13 @@ name: release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release_ref:
+        description: 'Existing tag to publish'
+        required: true
+        default: 'v0.3.5'
+        type: string
 
 permissions:
   contents: write
@@ -20,6 +27,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_ref || github.ref }}
 
       - uses: actions/setup-node@v4
         with:
@@ -34,8 +43,10 @@ jobs:
 
       - name: Check the tag matches the version
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_ref || github.ref_name }}
         run: |
-          $tag = ($env:GITHUB_REF -replace '^refs/tags/v', '')
+          $tag = ($env:RELEASE_TAG -replace '^refs/tags/v', '')
           $version = (Get-Content packages/cli/package.json | ConvertFrom-Json).version
           if ($tag -ne $version) {
             throw "tag v$tag does not match packages/cli/package.json version $version"
@@ -54,8 +65,9 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_ref || github.ref_name }}
         run: |
-          gh release create $env:GITHUB_REF_NAME `
-            --title "plif $env:GITHUB_REF_NAME" `
+          gh release create $env:RELEASE_TAG `
+            --title "plif $env:RELEASE_TAG" `
             --generate-notes `
             --verify-tag
