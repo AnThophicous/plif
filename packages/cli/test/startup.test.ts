@@ -31,6 +31,7 @@ describe('interactive startup surface', () => {
     }), true);
 
     assert.equal(output.writes[0], INTERACTIVE_CLEAR);
+    assert.match(output.writes[0] ?? '', /\u001B\[3J/);
     assert.equal(output.writes.filter((write) => write.includes('\u001B[2J')).length, 1);
     assert.match(output.writes[1] ?? '', new RegExp(`Plif ${VERSION_LABEL.replaceAll('.', '\\.')}`));
   });

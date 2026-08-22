@@ -46,6 +46,12 @@ export interface ModelConfig {
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | 'ultracode' | 'plif';
 
+/** Structural identity used when deciding which premium effort modes exist. */
+export interface EffortModelIdentity {
+  readonly providerId?: string;
+  readonly vendor?: string;
+}
+
 /** Ordered UI levels. Higher entries are deliberately opt-in by provider. */
 export const EFFORT_LEVELS: readonly Effort[] = Object.freeze([
   'low', 'medium', 'high', 'xhigh', 'ultra', 'ultracode', 'max', 'plif',
@@ -54,22 +60,36 @@ export const EFFORT_LEVELS: readonly Effort[] = Object.freeze([
 /**
  * Return the levels that make sense for this endpoint/model combination.
  * Plif is always available: it negotiates the strongest wire level the
- * provider accepts. Ultra is reserved for the GPT Sol 5.6 family, while
- * UltraCode is reserved for Claude/Anthropic models.
+ * provider accepts. Ultra and UltraCode are Anthropic-only capabilities. The
+ * provider identity is deliberately preferred over a model-name substring:
+ * a gateway can expose a Claude-named offer without being the Anthropic
+ * provider, and an offer must not gain controls it cannot execute.
  */
-export function supportedEfforts(baseURL: string, model: string): readonly Effort[] {
+export function supportedEfforts(
+  baseURL: string,
+  model: string,
+  identity: EffortModelIdentity = {},
+): readonly Effort[] {
+  void model;
   const endpoint = baseURL.toLowerCase();
-  const modelId = model.toLowerCase();
   const base: Effort[] = ['low', 'medium', 'high', 'xhigh'];
-  if (endpoint.includes('anthropic.com') || endpoint.includes('claude') || modelId.includes('claude')) {
-    return [...base, 'ultracode', 'max', 'plif'];
-  }
-  if ((endpoint.includes('openai.com') || endpoint.includes('chatgpt')) &&
-      /(?:gpt[-_ ]?sol|gpt[-_ ]?5\.6|sol[-_ ]?5\.6)/i.test(modelId) &&
-      !modelId.includes('claude')) {
-    return [...base, 'ultra', 'max', 'plif'];
+  const provider = identity.providerId?.toLowerCase();
+  const vendor = identity.vendor?.toLowerCase();
+  const anthropic = provider === 'anthropic' || vendor === 'anthropic' ||
+    endpoint.includes('anthropic.com');
+  if (anthropic) {
+    return [...base, 'ultra', 'ultracode', 'max', 'plif'];
   }
   return [...base, 'max', 'plif'];
+}
+
+/** Keep a persisted effort valid when the selected model changes capability. */
+export function normalizeEffort(
+  effort: Effort | undefined,
+  available: readonly Effort[],
+): Effort | undefined {
+  if (effort === undefined || available.includes(effort)) return effort;
+  return available.includes('max') ? 'max' : available.at(-1);
 }
 
 /**
@@ -541,7 +561,11 @@ export function resolveConfig(
     modelMetadata?.NeedKey,
     modelMetadata?.needKey,
   );
-  const needKey = configuredNeedKey ?? !keyOptional(baseURL, model, providerId);
+  const anonymousRemote = !isLocal(baseURL) && keyOptional(baseURL, model, providerId);
+  // A stale NeedKey from a paid model must not override the provider's live
+  // anonymous contract when the user switches to a newly discovered `-free`
+  // offer. Keep explicit NeedKey behavior for local/custom endpoints.
+  const needKey = anonymousRemote ? false : configuredNeedKey ?? !keyOptional(baseURL, model, providerId);
   const protocol = options.protocol ?? modelMetadata?.protocol ?? protocolForModel(providerId, model) ?? providerOffer(providerId)?.protocol;
 
   // Try the preset's own key variable before the generic one, so switching
@@ -579,7 +603,10 @@ export function resolveConfig(
     maxTokens: numberFrom(env['PLIF_MAX_TOKENS']) ?? stored.maxTokens,
     contextWindow: modelMetadata?.contextWindow,
     timeoutMs: numberFrom(env['PLIF_TIMEOUT_MS']) ?? stored.timeoutMs ?? DEFAULTS.timeoutMs,
-    effort: stored.effort,
+    effort: normalizeEffort(
+      stored.effort,
+      supportedEfforts(baseURL, model, { providerId }),
+    ),
   };
 }
 
@@ -819,11 +846,26 @@ const ANONYMOUS_HOSTS: ReadonlySet<string> = new Set(['opencode.ai']);
  * Does this model cost nothing and need no account?
  *
  * Kept for ranking and backwards-compatible display helpers. It is not used
- * for authentication: anonymous access is decided by the explicit offer and
- * exact model registry below.
+ * for authentication: anonymous access is decided by the provider offer and
+ * OpenCode Zen's published `-free` contract below.
  */
 export function isFreeModel(model: string): boolean {
-  return model.endsWith('-free');
+  return model.toLowerCase().endsWith('-free');
+}
+
+/** Cost markers understood by a provider's model-list contract. */
+export function discoveredModelCost(
+  providerId: string | undefined,
+  model: string,
+  declared?: ModelCost,
+): ModelCost | undefined {
+  if (declared !== undefined) return declared;
+  // OpenCode Zen's public /models response does not include pricing fields;
+  // its documented anonymous offers use the provider-owned `-free` suffix.
+  // This is a provider contract, not a generic guess about model names.
+  if (providerId === 'opencode' && isFreeModel(model)) return 'free';
+  if (providerOffer(providerId)?.cost === 'paid') return 'paid';
+  return undefined;
 }
 
 /**
@@ -836,7 +878,10 @@ export function isFreeModel(model: string): boolean {
 export function keyOptional(baseURL: string, model: string, providerId?: string): boolean {
   if (isLocal(baseURL)) return true;
   if (providerId !== 'opencode') return false;
-  if (!OPENCODE_ZEN_ANONYMOUS_MODELS.has(model)) return false;
+  const normalizedModel = model.toLowerCase();
+  // The suffix is part of OpenCode Zen's published offer contract. This keeps
+  // newly added free models anonymous without hardcoding every future id.
+  if (!OPENCODE_ZEN_ANONYMOUS_MODELS.has(normalizedModel) && !isFreeModel(normalizedModel)) return false;
   try {
     return ANONYMOUS_HOSTS.has(new URL(baseURL).hostname) && providerOffer(providerId)?.tier === 'Zen';
   } catch {

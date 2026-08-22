@@ -15,6 +15,7 @@ import {
   CredentialBroker,
   credentialVariableForProvider,
   discoverProviderModels,
+  discoveredModelCost,
   EFFORT_LEVELS,
   findCatalogModel,
   findCatalogProvider,
@@ -249,7 +250,8 @@ export function providerModelIds(
     // anonymous badge merely because they came from the same endpoint.
     const discovered = metadata.get(id);
     const curated = catalog.models.find((model) => model.id === id);
-    return discovered?.cost === 'free' || curated?.badges.includes('no key') === true;
+    return discoveredModelCost(catalog.id, id, discovered?.cost) === 'free' ||
+      curated?.badges.includes('no key') === true;
   });
 }
 
@@ -361,9 +363,15 @@ async function openModelPicker(
   const discovered = new Map<string, Awaited<ReturnType<typeof discoverProviderModels>>>();
   await Promise.all(visibleSources.map(async ({ entryProvider }) => {
     const key = await providerKey(entryProvider.id, stored, context.credentials);
+    const isCurrentProvider = entryProvider.id === currentProvider;
     const result = await discoverProviderModels(entryProvider.id, {
       stored,
-      waitForNetwork: false,
+      // Opening /models is an explicit catalog request. Refresh the active
+      // offer synchronously so removed models disappear and newly published
+      // offers are visible in this picker. Other providers keep their cached
+      // or background path and are refreshed when selected, avoiding a burst
+      // of network calls just to paint a menu.
+      ...(isCurrentProvider ? { refresh: true, waitForNetwork: true } : { waitForNetwork: false }),
       ...(key ? { apiKey: key } : {}),
     });
     discovered.set(entryProvider.id, result);

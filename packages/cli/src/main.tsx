@@ -15,6 +15,7 @@
 
 import process from 'node:process';
 import { randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 import { render } from 'ink';
@@ -90,6 +91,24 @@ function buildEngine(flags: GlobalFlags): Engine {
     ...(flags.root ? { root: flags.root } : {}),
     policy: flags.strict ? STRICT_POLICY : DEVELOPER_POLICY,
   });
+}
+
+/**
+ * Windows Terminal/ConPTY may ignore CSI 3 J, leaving npm's scrollback above
+ * the app even after the ANSI viewport clear. `cls` uses the console host's
+ * native buffer operation, so interactive development starts on a genuinely
+ * empty screen. Non-Windows terminals keep the portable ANSI path.
+ */
+function clearNativeInteractiveTerminal(): void {
+  if (!process.stdout.isTTY || process.platform !== 'win32') return;
+  try {
+    spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', 'cls'], {
+      stdio: 'inherit',
+      windowsHide: true,
+    });
+  } catch {
+    // The ANSI clear in startInteractiveSurface remains the safe fallback.
+  }
 }
 
 /**
@@ -830,6 +849,7 @@ async function runInteractive(
     return;
   }
 
+  clearNativeInteractiveTerminal();
   startInteractiveSurface(process.stdout, {
     version: VERSION_LABEL,
     workspace: invocation.flags.workspace,

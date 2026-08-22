@@ -61,6 +61,7 @@ import {
   validateModelConfig,
   PlifError,
   supportedEfforts,
+  normalizeEffort,
   redactedProviderId,
 } from '@plif/core';
 import type {
@@ -2025,6 +2026,7 @@ export function App({
     supportedEfforts: () => supportedEfforts(
       providerRef.current?.info.endpoint ?? '',
       providerRef.current?.info.id ?? '',
+      { providerId: providerRef.current?.info.providerId },
     ),
     modelCompletionValues: () => providerRef.current?.info.id ? [providerRef.current.info.id] : [],
     current: current.current,
@@ -2062,6 +2064,25 @@ export function App({
         ...(selection.streamSemantics ? { streamSemantics: selection.streamSemantics } : {}),
         ...(savedKey ? { apiKey: savedKey } : {}),
       });
+      // resolveConfig applies the same capability policy used by the effort
+      // menu. Carry that normalized value into the next persisted selection so
+      // switching away from Claude cannot leave Ultra/UltraCode in config.
+      let selectionStored: GlobalConfig = stored;
+      const rememberNormalizedEffort = (resolved: typeof config): void => {
+        const normalized = normalizeEffort(
+          stored.effort,
+          supportedEfforts(resolved.baseURL, resolved.model, { providerId: resolved.providerId }),
+        );
+        if (normalized === stored.effort) return;
+        if (normalized === undefined) {
+          const next = { ...stored };
+          delete next.effort;
+          selectionStored = next;
+        } else {
+          selectionStored = { ...stored, effort: normalized };
+        }
+      };
+      rememberNormalizedEffort(config);
       let check = validateModelConfig(config);
       let typedKey: string | undefined;
       if (!check.ok) {
@@ -2084,6 +2105,7 @@ export function App({
             ...(selection.streamSemantics ? { streamSemantics: selection.streamSemantics } : {}),
             apiKey: key,
           });
+          rememberNormalizedEffort(config);
           check = validateModelConfig(config);
           if (!check.ok) {
             push(entry('notice', `cannot switch to ${selection.model}`, {
@@ -2109,7 +2131,7 @@ export function App({
 
       const persisted = await persistModelSelection(
         engine,
-        stored,
+        selectionStored,
         selection,
         typedKey,
         credentials,
@@ -2132,6 +2154,13 @@ export function App({
 
       const previousPreset = providerIdForConfig(stored) ?? '';
       providerRef.current = createModelProvider(config);
+      const previousEffort = effortRef.current;
+      const normalizedEffort = config.effort;
+      if (normalizedEffort !== previousEffort) {
+        effortRef.current = normalizedEffort;
+        setEffortState(normalizedEffort);
+        applyEffortPalette(normalizedEffort);
+      }
       if (selection.preset !== previousPreset) {
         conversation.current = withoutReasoning(conversation.current);
       }
@@ -2177,7 +2206,9 @@ export function App({
       const providerId = providerIdForConfig(next) ?? '';
       const savedKey = await providerCredential(credentials, providerId, next);
       const config = resolveConfig(next, savedKey ? { apiKey: savedKey } : {});
-      const availableEfforts = supportedEfforts(config.baseURL, config.model);
+      const availableEfforts = supportedEfforts(config.baseURL, config.model, {
+        providerId: config.providerId,
+      });
       if (effort && !availableEfforts.includes(effort)) {
         throw new PlifError('INVALID_ARGUMENT', `${effort} is not supported by the current model.`, {
           hint: `Supported: ${availableEfforts.join(', ')}`,
@@ -2459,6 +2490,7 @@ export function App({
         supportedEfforts: supportedEfforts(
           providerRef.current?.info.endpoint ?? provider?.info.endpoint ?? '',
           providerRef.current?.info.id ?? provider?.info.id ?? '',
+          { providerId: providerRef.current?.info.providerId },
         ),
         mcpConnected: mcpStatuses.filter((server) => server.connected).length,
         mcpServers: mcpStatuses.length,

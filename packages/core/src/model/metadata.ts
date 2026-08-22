@@ -1,4 +1,4 @@
-import { providerOffer, type ModelConfig } from './config.js';
+import { discoveredModelCost, providerOffer, type ModelConfig } from './config.js';
 import type { ModelListResult, ModelProtocol, ProviderModel, StreamSemantics } from './provider.js';
 
 type RawModel = Record<string, unknown>;
@@ -28,6 +28,7 @@ export function normalizeProviderModel(
   const rawProduct = typeof raw['product'] === 'string' ? raw['product'] : undefined;
   const rawTier = typeof raw['tier'] === 'string' ? raw['tier'] : undefined;
   const rawCost = knownCost(raw['cost']);
+  const cost = discoveredModelCost(config.providerId, id, rawCost);
   const rawProtocol = knownProtocol(raw['protocol']);
   const rawSemantics = knownSemantics(raw['streamSemantics'] ?? raw['stream_semantics']);
   const name = (options.nameKeys ?? ['name', 'display_name'])
@@ -45,11 +46,8 @@ export function normalizeProviderModel(
     ...(rawProvider ?? config.providerId ? { provider: rawProvider ?? config.providerId } : {}),
     ...(rawProduct ?? offer?.product ? { product: rawProduct ?? offer?.product } : {}),
     ...(rawTier ?? offer?.tier ? { tier: rawTier ?? offer?.tier } : {}),
-    // Go is an explicitly paid offer. Zen's provider-level free tier is not a
-    // blanket authorization for every live id; Zen rows remain unknown unless
-    // the endpoint or curated registry says `free`.
-    ...(rawCost ?? (config.providerId === 'opencode-go' ? 'paid' : undefined)
-      ? { cost: rawCost ?? 'paid' }
+    ...(cost
+      ? { cost }
       : {}),
     ...(rawProtocol ?? config.protocol ? { protocol: rawProtocol ?? config.protocol } : {}),
     ...(rawSemantics ?? config.streamSemantics

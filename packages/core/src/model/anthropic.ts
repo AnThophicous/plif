@@ -58,7 +58,12 @@ export class AnthropicProvider implements ModelProvider {
         baseURL: config.baseURL.replace(/\/v1\/?$/, ''),
         timeout: config.timeoutMs,
       });
-    this.info = { id: config.model, endpoint: config.baseURL, contextWindow: config.contextWindow };
+    this.info = {
+      id: config.model,
+      ...(config.providerId ? { providerId: config.providerId } : {}),
+      endpoint: config.baseURL,
+      contextWindow: config.contextWindow,
+    };
   }
 
   async *stream(request: CompletionRequest): AsyncGenerator<CompletionEvent> {

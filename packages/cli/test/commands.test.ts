@@ -301,6 +301,25 @@ describe('provider model picker', () => {
     );
   });
 
+  it('keeps a newly discovered OpenCode free offer without requiring curated metadata', () => {
+    const catalog = {
+      id: 'opencode',
+      label: 'OpenCode Zen',
+      description: 'OpenCode',
+      origin: 'builtin',
+      preset: 'opencode',
+      endpoint: 'https://opencode.ai/zen/v1',
+      anonymous: true,
+      defaultCost: 'free',
+      models: [],
+    } as const;
+
+    assert.deepEqual(
+      providerModelIds(catalog, ['ox-alpha-free'], true, 'free', [{ id: 'ox-alpha-free', name: 'OX Alpha Free' }]),
+      ['ox-alpha-free'],
+    );
+  });
+
   it('does not duplicate a built-in provider hidden by a custom declaration', () => {
     const custom = [{ id: 'openai' }, { id: 'company' }] as const;
     const builtins = [{ id: 'openai' }, { id: 'anthropic' }] as const;

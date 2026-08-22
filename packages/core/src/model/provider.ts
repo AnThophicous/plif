@@ -152,6 +152,8 @@ export const NO_USAGE: Usage = Object.freeze({ promptTokens: 0, completionTokens
 
 export interface ModelInfo {
   readonly id: string;
+  /** Stable provider identity, kept apart from the model id for capabilities. */
+  readonly providerId?: string;
   /** Where it is served from, for display. Never includes credentials. */
   readonly endpoint: string;
   /** Context window in tokens, if the provider reports or we know it. */

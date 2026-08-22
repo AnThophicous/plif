@@ -60,14 +60,25 @@ describe('config precedence', () => {
   it('limits the highest effort levels to the providers that support them', () => {
     assert.deepEqual(EFFORT_LEVELS, ['low', 'medium', 'high', 'xhigh', 'ultra', 'ultracode', 'max', 'plif']);
     assert.deepEqual(supportedEfforts(PRESETS.anthropic.baseURL, 'claude-opus-5'), [
-      'low', 'medium', 'high', 'xhigh', 'ultracode', 'max', 'plif',
+      'low', 'medium', 'high', 'xhigh', 'ultra', 'ultracode', 'max', 'plif',
     ]);
     assert.deepEqual(supportedEfforts(PRESETS.openai.baseURL, 'gpt-sol-5.6'), [
-      'low', 'medium', 'high', 'xhigh', 'ultra', 'max', 'plif',
+      'low', 'medium', 'high', 'xhigh', 'max', 'plif',
     ]);
     assert.deepEqual(supportedEfforts(PRESETS.openai.baseURL, 'gpt-4.1'), [
       'low', 'medium', 'high', 'xhigh', 'max', 'plif',
     ]);
+  });
+
+  it('derives premium efforts from provider identity, not a model-name coincidence', () => {
+    assert.deepEqual(supportedEfforts(PRESETS.openai.baseURL, 'claude-opus-5', { providerId: 'openai' }), [
+      'low', 'medium', 'high', 'xhigh', 'max', 'plif',
+    ]);
+    assert.equal(resolveConfig({
+      preset: 'openai',
+      model: 'gpt-4.1',
+      effort: 'ultra',
+    }, { env: {} }).effort, 'max');
   });
 
   it('removes a rejected provider credential without touching other providers', () => {
@@ -455,9 +466,9 @@ describe('the free tier needs no credential', () => {
     assert.equal(isFreeModel('deepseek-v4-flash'), false);
 
     assert.equal(keyOptional(PRESETS.opencode.baseURL, 'deepseek-v4-flash-free', 'opencode'), true);
+    assert.equal(keyOptional(PRESETS.opencode.baseURL, 'x-preview-f-free', 'opencode'), true);
     assert.equal(keyOptional(PRESETS.opencode.baseURL, 'deepseek-v4-flash'), false);
     assert.equal(keyOptional(PRESETS['opencode-go'].baseURL, 'anything-free', 'opencode-go'), false);
-    assert.equal(keyOptional(PRESETS.opencode.baseURL, 'anything-free', 'opencode'), false);
     // The suffix means nothing to a host that does not publish that convention.
     assert.equal(keyOptional('https://api.openai.com/v1', 'something-free'), false);
     assert.equal(keyOptional('http://127.0.0.1:11434/v1', 'llama3.1'), true);
@@ -471,6 +482,15 @@ describe('the free tier needs no credential', () => {
       { preset: 'opencode', model: 'deepseek-v4-flash-free', env: {} },
     );
     assert.equal(config.apiKey, '');
+    assert.equal(validate(config).ok, true);
+  });
+
+  it('clears a stale key requirement for a newly discovered free offer', () => {
+    const config = resolveConfig(
+      { preset: 'opencode', model: 'deepseek-v4-flash', NeedKey: true },
+      { preset: 'opencode', model: 'x-preview-f-free', env: {} },
+    );
+    assert.equal(config.needKey, false);
     assert.equal(validate(config).ok, true);
   });
 
@@ -663,6 +683,40 @@ describe('secret handling', () => {
     assert.equal(redact(''), '(none)');
     assert.equal(redact('local'), '(not required — local endpoint)');
     assert.match(redact('sk-abcdefghijklmnop'), /^sk-…mnop \(\d+ chars\)$/);
+  });
+});
+
+describe('model discovery adapter', () => {
+  it('normalizes every model in the provider response', async () => {
+    const server = http.createServer((_request, response) => {
+      const body = {
+        object: 'list',
+        data: [
+          { id: 'first-model', object: 'model', owned_by: 'opencode' },
+          { id: 'ox-alpha-free', object: 'model', owned_by: 'opencode' },
+        ],
+        has_more: false,
+      };
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(body));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const provider = new OpenAIProvider({
+        model: 'first-model',
+        baseURL: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`,
+        apiKey: 'test',
+        temperature: 0,
+        maxTokens: undefined,
+        timeoutMs: 10_000,
+        providerId: 'opencode',
+      });
+      const result = await provider.listModels();
+      assert.deepEqual(result.models.map((model) => model.id), ['first-model', 'ox-alpha-free']);
+      assert.equal(result.models[1]?.cost, 'free');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });
 

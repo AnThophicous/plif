@@ -262,6 +262,7 @@ export class OpenAIProvider implements ModelProvider {
     });
     this.info = {
       id: config.model,
+      ...(config.providerId ? { providerId: config.providerId } : {}),
       endpoint: config.baseURL,
       contextWindow: config.contextWindow,
     };
@@ -678,10 +679,17 @@ export class OpenAIProvider implements ModelProvider {
 
   async listModels(): Promise<ModelListResult> {
     try {
-      const models = await this.#client.models.list();
-      const entries = models.data
-        .map((model) => normalizeProviderModel(model as unknown as Record<string, unknown>, this.#config))
-        .filter((model): model is ProviderModel => model !== undefined);
+      // PagePromise is async-iterable. Consume the provider's complete result
+      // through that contract instead of coupling discovery to one SDK page
+      // shape; this also keeps adapters that implement paging compatible.
+      const entries: ProviderModel[] = [];
+      for await (const model of this.#client.models.list()) {
+        const normalized = normalizeProviderModel(
+          model as unknown as Record<string, unknown>,
+          this.#config,
+        );
+        if (normalized) entries.push(normalized);
+      }
       return modelListResult(this.#config, entries);
     } catch (error) {
       // Plenty of compatible servers do not implement /models. That is not an

@@ -1,5 +1,9 @@
 export const INTERACTIVE_CLEAR =
-  '\u001B[?1000l\u001B[?1002l\u001B[?1003l\u001B[?1006l\u001B[2J\u001B[H';
+  // 3J removes the terminal's saved scrollback as well as the visible
+  // viewport. npm and PowerShell print their lifecycle lines before Node
+  // starts; without 3J those lines remain above the PLIF surface on Windows
+  // Terminal even though 2J cleared the current screen.
+  '\u001B[?1000l\u001B[?1002l\u001B[?1003l\u001B[?1006l\u001B[3J\u001B[2J\u001B[H';
 
 interface StartupOutput {
   readonly isTTY?: boolean;
