@@ -59,12 +59,30 @@ jobs:
 
       # Dependency order: sandbox, then core which needs it, then the CLI.
       - name: Publish to npm
+        shell: pwsh
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          npm publish --workspace @plif/sandbox --access public --provenance
-          npm publish --workspace @plif/core --access public --provenance
-          npm publish --workspace @plif/cli --access public --provenance
+          $ErrorActionPreference = 'Stop'
+          $targets = @(
+            @{ Workspace = '@plif/sandbox'; Package = '@plif/sandbox'; Manifest = 'packages/sandbox/package.json' },
+            @{ Workspace = '@plif/core'; Package = '@plif/core'; Manifest = 'packages/core/package.json' },
+            @{ Workspace = '@plif/cli'; Package = '@plif/cli'; Manifest = 'packages/cli/package.json' }
+          )
+
+          foreach ($target in $targets) {
+            $version = (Get-Content $target.Manifest | ConvertFrom-Json).version
+            $published = (npm view "$($target.Package)@$version" version 2>$null | Out-String).Trim()
+            if ($LASTEXITCODE -eq 0 -and $published -eq $version) {
+              Write-Host "$($target.Package)@$version is already published; skipping."
+              continue
+            }
+
+            npm publish --workspace $target.Workspace --access public --provenance
+            if ($LASTEXITCODE -ne 0) {
+              throw "npm publish failed for $($target.Package)@$version"
+            }
+          }
 
       - name: Publish the GitHub release
         shell: pwsh
@@ -72,7 +90,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_ref || github.ref_name }}
         run: |
-          gh release create $env:RELEASE_TAG `
-            --title "plif $env:RELEASE_TAG" `
-            --generate-notes `
-            --verify-tag
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "GitHub release $env:RELEASE_TAG already exists; leaving it unchanged."
+          } else {
+            gh release create $env:RELEASE_TAG `
+              --title "plif $env:RELEASE_TAG" `
+              --generate-notes `
+              --verify-tag
+            if ($LASTEXITCODE -ne 0) {
+              throw "GitHub release creation failed for $env:RELEASE_TAG"
+            }
+          }
