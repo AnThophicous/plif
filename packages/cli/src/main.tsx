@@ -639,7 +639,8 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
     resolveCredential: async (providerId: string, childStored: StoredConfig) =>
       await lookupProviderCredential(credentials, providerId, childStored),
     agents: agentsOf(stored),
-    extraTools: [...lspForAgent, ...WEB_TOOLS],
+    extraTools: [skillTool(skills), ...lspForAgent, ...WEB_TOOLS],
+    skillCatalogue: skills.catalogue(),
     edits,
     ...(agentInstructions ? { agentInstructions } : {}),
   };

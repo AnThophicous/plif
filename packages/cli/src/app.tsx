@@ -29,6 +29,7 @@ import {
   resolveServerConfigs,
   runCompaction,
   runLoop,
+  skillTool,
   subagentTool,
   SubagentCoordinator,
   visionTools,
@@ -2777,7 +2778,12 @@ export function App({
       resolveCredential: async (providerId: string, childStored: GlobalConfig) =>
         await providerCredential(credentials, providerId, childStored),
       agents: agentsOf(storedConfig),
-      extraTools: [...lspForAgent, ...WEB_TOOLS],
+      extraTools: [
+        ...(skillRegistry ? [skillTool(skillRegistry)] : []),
+        ...lspForAgent,
+        ...WEB_TOOLS,
+      ],
+      skillCatalogue: skillRegistry?.catalogue() ?? skillCatalogue,
       edits,
       coordinator: subagents.current,
       ...(turnInstructions ? { agentInstructions: turnInstructions } : {}),

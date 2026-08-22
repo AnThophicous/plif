@@ -34,22 +34,46 @@ mutations, costs, retries, verification, and refusal boundaries.`;
 export const skillsModule = definePromptModule({
   id: '70-skills',
   order: 70,
-  enabled: (context) => Boolean(context.skills?.trim()),
-  render: (context) => `# Available skills
+  enabled: (context) => context.effort === 'plif' || Boolean(context.skills?.trim()),
+  render: (context) => {
+    const catalogue = context.skills?.trim() || '(No skills are installed.)';
+    const galileuListed = catalogue
+      .split(/\r?\n/)
+      .some((line) => /^\s*-\s+galileu\s*:/i.test(line));
+    const lines = [
+      '# Available skills',
+      '',
+      catalogue,
+      '',
+      'Treat this catalogue as an active routing table. For every request, silently scan',
+      'names, package labels, and descriptions for a clear match. The user does not need',
+      'to mention a skill or know that it exists. Load the smallest sufficient matching',
+      'set through the skill tool before covered work begins. A package groups related',
+      'skills but does not require loading every child.',
+      '',
+      'This catalogue is routing metadata, not the skill body. If no entry clearly',
+      'matches, proceed normally without announcing the scan. If a selected non-mandatory',
+      'skill cannot',
+      'load or does not fit after inspection, discard it and continue with the default',
+      'workflow. The default skill policy governs precedence, resources, and user',
+      'updates. The mandatory PLIF gate below overrides this optional degradation policy.',
+    ];
 
-${context.skills!.trim()}
+    if (context.effort === 'plif') {
+      lines.push(
+        '',
+        '## Mandatory PLIF skill',
+        'The PLIF effort has a non-optional skill gate. Before answering, asking a question, planning, editing, running a command, or using another tool, call the `skill` tool with the exact name `{ "name": "galileu" }` and wait for a successful result.',
+        'Do not proceed when the Galileu load fails. If the `skill` tool is unavailable or Galileu is missing from the catalogue, stop and report a runtime configuration error instead of silently falling back.',
+        galileuListed
+          ? 'The `galileu` skill is available in the catalogue and must be loaded now.'
+          : 'Galileu is not present in the catalogue; this PLIF session is misconfigured.',
+        'Once loaded, follow its procedure for this turn. Do not persist its decision record automatically.',
+      );
+    }
 
-Treat this catalogue as an active routing table. For every request, silently scan
-names, package labels, and descriptions for a clear match. The user does not need
-to mention a skill or know that it exists. Load the smallest sufficient matching
-set through the skill tool before covered work begins. A package groups related
-skills but does not require loading every child.
-
-This catalogue is routing metadata, not the skill body. If no entry clearly
-matches, proceed normally without announcing the scan. If a selected skill cannot
-load or does not fit after inspection, discard it and continue with the default
-workflow. The default skill policy governs precedence, resources, and user
-updates.`,
+    return lines.join('\n');
+  },
 });
 
 export const toolsModule = definePromptModule({

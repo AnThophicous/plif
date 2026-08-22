@@ -49,6 +49,8 @@ export interface SubagentOptions {
   readonly edits?: EditCoordinator;
   readonly coordinator?: SubagentCoordinator;
   readonly agentInstructions?: string;
+  /** The parent's routable skill catalogue, inherited by the child prompt. */
+  readonly skillCatalogue?: string;
   /** Inherited from the parent session; subagents never resolve a new dialect. */
   readonly shellDialect?: ShellDialect;
 }
@@ -413,6 +415,7 @@ export function subagentTool(options: SubagentOptions): Tool {
             effort: options.stored.effort,
             contextTokens: resolved.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
             tools: tools.map((tool) => tool.spec),
+            ...(options.skillCatalogue ? { skills: options.skillCatalogue } : {}),
             ...(options.agentInstructions ? { agentInstructions: options.agentInstructions } : {}),
           }),
         },

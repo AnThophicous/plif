@@ -30,6 +30,11 @@ All notable changes to plif. This project follows [Semantic Versioning](https://
   appended indefinitely.
 - Provider-specific paid/free classification no longer relies on a `-free`
   suffix or accidentally requests a key for an unrelated model.
+- The `PLIF` effort now requires the `galileu` skill before any answer, question,
+  plan, command or other tool call; missing skill configuration fails closed
+  instead of silently bypassing the review procedure.
+- Subagents inherit the active skill catalogue and Galileu loader, so PLIF's
+  mandatory review gate remains intact when work is delegated.
 - Startup/version metadata and workspace package dependencies are aligned for
   the `0.3.6` release.
 

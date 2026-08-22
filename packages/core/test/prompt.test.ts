@@ -57,6 +57,31 @@ describe('modular system prompt', () => {
     assert.match(plif, /evaluator-optimizer/i);
   });
 
+  it('requires Galileu before any work in the Plif effort', () => {
+    const skills = '- galileu: Socratic decision review';
+    const tools = [{ name: 'skill', description: 'Load a skill.', parameters: {} }];
+    const normal = buildSystemPrompt({ ...base, effort: 'high', skills, tools });
+    const plif = buildSystemPrompt({ ...base, effort: 'plif', skills, tools });
+
+    assert.doesNotMatch(normal, /## Mandatory PLIF skill/);
+    assert.match(plif, /## Mandatory PLIF skill/);
+    assert.match(plif, /skill.*name.*galileu/s);
+    assert.match(plif, /before answering.*using another tool/i);
+    assert.match(plif, /wait for a successful result/i);
+  });
+
+  it('fails closed when Plif cannot see the Galileu skill catalogue entry', () => {
+    const prompt = buildSystemPrompt({
+      ...base,
+      effort: 'plif',
+      skills: '- investigate: Find the cause of a bug or failure before changing anything.',
+      tools: [{ name: 'skill', description: 'Load a skill.', parameters: {} }],
+    });
+
+    assert.match(prompt, /PLIF session is misconfigured/i);
+    assert.match(prompt, /galileu.*not present in the catalogue/i);
+  });
+
   it('loads research guidance whenever discovery exists and degrades opening honestly', () => {
     const module = loadMarkdownInstructions().find((entry) => entry.id === '25-research');
     assert.deepEqual(module?.tools, ['research']);
