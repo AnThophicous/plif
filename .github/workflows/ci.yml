@@ -26,20 +26,4 @@ jobs:
       - if: runner.os == 'Linux'
         run: node --import tsx --test packages/sandbox/test/linux-backend.test.ts
       - run: npm run typecheck
-      - if: runner.os == 'Linux'
-        name: Run Linux tests with failure annotations
-        shell: bash
-        run: |
-          set +e
-          npm test 2>&1 | tee npm-test.log
-          status=${PIPESTATUS[0]}
-          if [ "$status" -ne 0 ]; then
-            while IFS= read -r line; do
-              case "$line" in
-                *"not ok"*|*"✖"*|*"Test failed"*|*"AssertionError"*|*"Error:"*|*"error"*) echo "::error title=Linux test failure::$line" ;;
-              esac
-            done < npm-test.log
-          fi
-          exit "$status"
-      - if: runner.os != 'Linux'
-        run: npm test
+      - run: npm test

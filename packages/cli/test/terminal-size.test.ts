@@ -105,6 +105,7 @@ describe('reactive terminal dimensions', () => {
       {
         stdout: stdout as unknown as NodeJS.WriteStream,
         exitOnCtrlC: false,
+        debug: true,
         patchConsole: false,
       },
     );

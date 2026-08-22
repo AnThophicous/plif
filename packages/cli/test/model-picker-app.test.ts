@@ -112,6 +112,9 @@ test('/model can request a missing provider key from the mounted app', async () 
       stdout: stdout as unknown as NodeJS.WriteStream,
       stdin: stdin as unknown as NodeJS.ReadStream,
       exitOnCtrlC: false,
+      // Ink suppresses dynamic output in CI unless debug mode is enabled.
+      // These tests drive the mounted prompt through captured terminal output.
+      debug: true,
       patchConsole: false,
     },
   );
@@ -174,6 +177,7 @@ test('/model shows the free OpenCode path and selects it without a key', async (
       stdout: stdout as unknown as NodeJS.WriteStream,
       stdin: stdin as unknown as NodeJS.ReadStream,
       exitOnCtrlC: false,
+      debug: true,
       patchConsole: false,
     },
   );
@@ -229,6 +233,7 @@ test('/model keeps the free path usable when the credential store is unavailable
       stdout: stdout as unknown as NodeJS.WriteStream,
       stdin: stdin as unknown as NodeJS.ReadStream,
       exitOnCtrlC: false,
+      debug: true,
       patchConsole: false,
     },
   );
