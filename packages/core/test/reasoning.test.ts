@@ -125,7 +125,7 @@ describe('reasoningFromDelta', () => {
     assert.deepEqual(reasoningObservationFromDelta({ reasoning_content: 'abc' }), {
       text: 'abc',
       source: 'reasoning_content',
-      semantics: 'unknown',
+      semantics: 'delta',
     });
     assert.deepEqual(reasoningObservationFromDelta({ reasoning_details: [{ text: 'abc' }] }), {
       text: 'abc',
@@ -154,11 +154,11 @@ describe('reasoningFromDelta', () => {
 });
 
 describe('ReasoningDeltaNormalizer', () => {
-  it('turns cumulative snapshots beginning at one character into true deltas', () => {
+  it('turns explicit cumulative snapshots beginning at one character into true deltas', () => {
     const normalizer = new ReasoningDeltaNormalizer();
-    assert.equal(normalizer.push({ text: 'a', source: 'reasoning', semantics: 'unknown' }), 'a');
-    assert.equal(normalizer.push({ text: 'ab', source: 'reasoning', semantics: 'unknown' }), 'b');
-    assert.equal(normalizer.push({ text: 'abc', source: 'reasoning', semantics: 'unknown' }), 'c');
+    assert.equal(normalizer.push({ text: 'a', source: 'reasoning', semantics: 'snapshot' }), 'a');
+    assert.equal(normalizer.push({ text: 'ab', source: 'reasoning', semantics: 'snapshot' }), 'b');
+    assert.equal(normalizer.push({ text: 'abc', source: 'reasoning', semantics: 'snapshot' }), 'c');
     assert.equal(normalizer.value, 'abc');
   });
 
@@ -169,15 +169,22 @@ describe('ReasoningDeltaNormalizer', () => {
     assert.equal(normalizer.value, 'the the ');
   });
 
-  it('drops unchanged unknown observations instead of repeating one token forever', () => {
+  it('does not erase legitimate repeated reasoning_content deltas', () => {
+    const normalizer = new ReasoningDeltaNormalizer();
+    assert.equal(normalizer.push({ text: 'Asp', source: 'reasoning_content', semantics: 'delta' }), 'Asp');
+    assert.equal(normalizer.push({ text: 'Asp', source: 'reasoning_content', semantics: 'delta' }), 'Asp');
+    assert.equal(normalizer.value, 'AspAsp');
+  });
+
+  it('does not deduplicate unclassified observations by comparing their text', () => {
     const normalizer = new ReasoningDeltaNormalizer();
     const emitted = Array.from({ length: 12 }, () => normalizer.push({
       text: 'Asp',
       source: 'reasoning_content',
       semantics: 'unknown',
     }));
-    assert.deepEqual(emitted, ['Asp', ...Array<string>(11).fill('')]);
-    assert.equal(normalizer.value, 'Asp');
+    assert.deepEqual(emitted, Array<string>(12).fill('Asp'));
+    assert.equal(normalizer.value, 'Asp'.repeat(12));
   });
 
   it('drops an unchanged explicit snapshot', () => {

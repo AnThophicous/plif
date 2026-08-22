@@ -2,6 +2,37 @@
 
 All notable changes to plif. This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] — 2026-08-22
+
+### Added
+
+- **Provider-backed model discovery.** `/model` now preserves provider, product,
+  tier, protocol and stream metadata instead of guessing from model names.
+- **OpenCode Go models.** The paid Go catalog is explicit, including the
+  Anthropic-compatible Qwen 3.8 Max route and DeepSeek V4 Flash.
+- **Protocol-aware content handling.** OpenAI-compatible delta streams,
+  snapshot responses and Anthropic message streams are normalized separately,
+  with divergence checks for malformed repeated content.
+
+### Changed
+
+- Model configuration now carries the selected provider's protocol and stream
+  semantics all the way to the adapter, so the UI selection cannot silently
+  route through the wrong transport.
+- Model discovery cache entries retain their source and raw provider metadata,
+  while stale results remain available during a controlled refresh.
+- The PLIF interface keeps its restrained neutral base and uses the pink accent
+  only for meaningful active and branded states.
+
+### Fixed
+
+- Repeated assistant text caused by treating snapshots as deltas is no longer
+  appended indefinitely.
+- Provider-specific paid/free classification no longer relies on a `-free`
+  suffix or accidentally requests a key for an unrelated model.
+- Startup/version metadata and workspace package dependencies are aligned for
+  the `0.3.6` release.
+
 ## [0.3.5] — 2026-08-21
 
 ### Added
@@ -152,6 +183,7 @@ npm install -g @plif/cli@latest
 
 First release.
 
+[0.3.6]: https://github.com/AnThophicous/plif/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/AnThophicous/plif/compare/v0.3.0...v0.3.5
 [0.3.0]: https://github.com/AnThophicous/plif/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/AnThophicous/plif/compare/v0.1.0...v0.2.0

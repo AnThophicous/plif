@@ -100,7 +100,7 @@ export const PastedTextDialog = React.memo(function PastedTextDialog({
     >
       <SurfaceFill width={Math.max(1, frameWidth - 2)} height={frameHeight} backgroundColor={color('panel')} />
       <Box width="100%" justifyContent="space-between" flexShrink={0}>
-        <Text color={color('gold')} bold>Texto colado</Text>
+        <Text color={color('accentBright')} bold>Texto colado</Text>
         <Text color={color('muted')}>esc</Text>
       </Box>
       <Text color={color('accentDim')}>
@@ -114,10 +114,10 @@ export const PastedTextDialog = React.memo(function PastedTextDialog({
         paddingY={1}
         flexDirection="column"
         borderStyle="round"
-        borderColor={color('gold')}
+        borderColor={color('accentBorder')}
         overflowY="hidden"
       >
-        <Text color={color('gold')} bold>Texto colado:</Text>
+        <Text color={color('accentBright')} bold>Texto colado:</Text>
         <Box flexDirection="column" marginTop={1} overflowY="hidden">
           {wrapped.lines.map((line, index) => (
             <Text key={`${index}:${line}`} color={color('text')}>{line.length > 0 ? line : ' '}</Text>

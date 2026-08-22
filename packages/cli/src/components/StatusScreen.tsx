@@ -24,7 +24,7 @@ export interface StatusScreenProps {
 export interface StatusScreenRow {
   readonly label: string;
   readonly value: string;
-  readonly tone?: 'text' | 'muted' | 'accent' | 'gold' | 'warn' | 'danger';
+  readonly tone?: 'text' | 'muted' | 'accent' | 'accentBright' | 'warn' | 'danger';
 }
 
 export interface StatusScreenSection {
@@ -76,7 +76,7 @@ export function statusSections(
       rows: [
         { label: 'Provider', value: snapshot.provider || 'not configured', tone: 'accent' },
         { label: 'Model', value: snapshot.model || 'not configured', tone: 'text' },
-        { label: 'Effort', value: snapshot.effort ? effortDisplay(snapshot.effort) : 'Default', tone: snapshot.effort === 'plif' ? 'gold' : 'accent' },
+        { label: 'Effort', value: snapshot.effort ? effortDisplay(snapshot.effort) : 'Default', tone: snapshot.effort === 'plif' ? 'accentBright' : 'accent' },
         ...(providerProblem
           ? [{ label: 'Provider state', value: 'needs attention', tone: 'danger' as const }]
           : []),

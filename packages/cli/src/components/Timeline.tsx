@@ -573,10 +573,10 @@ function ThinkingRow({
             return (
               <Box key={index}>
                 <Text color={color('ghost')}>{`  ${last ? '  ' : glyph.rail} ${glyph.branch} `}</Text>
-                <Text color={toneBetween(plif ? 'accent' : 'brand', plif ? 'gold' : 'accent', (index + 1) / live.length)}>{line}</Text>
+                <Text color={toneBetween(plif ? 'accent' : 'brand', plif ? 'accentBright' : 'accent', (index + 1) / live.length)}>{line}</Text>
                 {last
                   ? <Text color={color('muted')}>{' '.repeat(gap)}…</Text>
-                  : <Text color={color('goldDim')}>{' '.repeat(gap)}✓</Text>}
+                  : <Text color={color('accentBorder')}>{' '.repeat(gap)}✓</Text>}
               </Box>
             );
           })}
@@ -661,7 +661,7 @@ function UserRow({ entry, width }: { entry: TimelineEntry; width: number }): Rea
       {rows.map((line, index) => {
         const elision = hidden > 0 && index === rows.length - 1;
         return <Box key={index} width="100%">
-          <Text color={color(index === 0 ? 'gold' : 'muted')}>{index === 0 ? `${glyph.prompt} ` : '  '}</Text>
+          <Text color={color(index === 0 ? 'accentBright' : 'muted')}>{index === 0 ? `${glyph.prompt} ` : '  '}</Text>
           <Text color={color(elision ? 'ghost' : 'accentBright')}>{line}</Text>
         </Box>;
       })}
@@ -845,7 +845,7 @@ function marker(
   bullet: string;
   bulletTone: Parameters<typeof color>[0];
 } {
-  if (entry.kind === 'input') return { bullet: glyph.prompt, bulletTone: 'gold' };
+  if (entry.kind === 'input') return { bullet: glyph.prompt, bulletTone: 'accent' };
   if (entry.kind === 'approval' && entry.status !== 'done' && entry.status !== 'failed') {
     return { bullet: glyph.waiting, bulletTone: 'warn' };
   }

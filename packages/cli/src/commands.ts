@@ -14,7 +14,10 @@ import path from 'node:path';
 import {
   CredentialBroker,
   credentialVariableForProvider,
+  discoverProviderModels,
   EFFORT_LEVELS,
+  findCatalogModel,
+  findCatalogProvider,
   MODEL_CATALOG,
   modelVisionBadge,
   rankFacts,
@@ -34,6 +37,7 @@ import type {
   ModelCatalogModel,
   ModelProvider,
   ModelSelection,
+  ProviderModel,
   ProviderAccess,
   StoredConfig,
 } from '@plif/core';
@@ -227,12 +231,26 @@ export function providerModelIds(
   catalog: ModelCatalogProvider,
   discoveredIds: readonly string[],
   live: boolean,
+  access?: ProviderAccess,
+  discoveredModels: readonly ProviderModel[] = [],
 ): string[] {
-  if (!live) return catalog.models.map((item) => item.id);
-  return [...new Set([
-    ...catalog.models.map((item) => item.id),
-    ...discoveredIds,
-  ])];
+  if (!live) {
+    return catalog.models
+      .filter((item) => access !== 'free' || item.badges.includes('no key'))
+      .map((item) => item.id);
+  }
+  // A successful provider response is authoritative. Merging the static list
+  // here would keep retired models selectable forever.
+  const metadata = new Map(discoveredModels.map((model) => [model.id, model]));
+  return [...new Set(discoveredIds)].filter((id) => {
+    if (access !== 'free') return true;
+    // A live response is authoritative for availability, but not for
+    // authentication. Unknown/paid rows must not inherit Zen's provider-level
+    // anonymous badge merely because they came from the same endpoint.
+    const discovered = metadata.get(id);
+    const curated = catalog.models.find((model) => model.id === id);
+    return discovered?.cost === 'free' || curated?.badges.includes('no key') === true;
+  });
 }
 
 /** Built-ins hidden by a user provider with the same id. */
@@ -274,38 +292,56 @@ function modelRowItem(
   currentModel: string | undefined,
   hasVisionHelper: boolean,
 ): PickerItem {
+  const discoveredProvider = model.provider ? findCatalogProvider(model.provider) : undefined;
+  // Raw discovery provenance wins when a gateway explicitly identifies a
+  // different registered offer. This prevents a Go row from being rendered or
+  // persisted as Zen merely because the endpoint was opened through a stale
+  // provider entry.
+  const effectiveSource = discoveredProvider ?? source;
   const badges = pickerBadges(model, hasVisionHelper);
   const capabilities = model.modalities?.map((modality) => modality === 'image' ? 'vision' : 'text') ?? [];
   const auth = access === 'free'
-    ? 'Free · no key'
+    ? model.cost === 'free' || model.badges.includes('no key')
+      ? 'Free · no key'
+      : model.cost === 'paid'
+        ? 'Paid · key required'
+        : 'Unknown · verify access'
     : access === 'local'
       ? 'Local'
       : access === 'configured'
         ? 'Configured'
-        : 'API key';
-  const current = source.id === currentProvider && model.id === currentModel;
+        : model.cost === 'paid'
+          ? 'Paid · API key'
+          : 'API key';
+  const current = effectiveSource.id === currentProvider && model.id === currentModel;
   return {
-    value: `${source.id}:${model.id}`,
+    value: `${effectiveSource.id}:${model.id}`,
     label: model.label,
     detail: model.description,
     badges,
     current,
-    provider: source.label,
+    provider: effectiveSource.label,
     capabilities,
     ...(model.contextWindow === undefined ? {} : { context: formatContext(model.contextWindow) }),
     auth,
     ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
     ...(model.tools === undefined ? {} : { tools: model.tools }),
     ...(model.cost === undefined ? {} : { cost: model.cost }),
-    searchText: [source.id, source.label, model.id, model.description, ...badges].join(' '),
-    selection: { preset: source.id, model: model.id },
+    searchText: [effectiveSource.id, effectiveSource.label, model.id, model.description, ...badges].join(' '),
+    selection: {
+      preset: effectiveSource.id,
+      model: model.id,
+      ...(model.protocol ? { protocol: model.protocol } : {}),
+      ...(model.streamSemantics ? { streamSemantics: model.streamSemantics } : {}),
+    },
   };
 }
 
 /**
- * Model-first catalog. Availability is resolved once from provider state and
- * the existing catalog; opening the picker never contacts every provider.
- * `/providers` can deliberately open one locked provider to configure it.
+ * Model-first catalog. Availability is resolved from provider state and the
+ * provider-owned discovery cache; static catalog rows are used only until a
+ * provider has answered authoritatively. `/providers` can deliberately open
+ * one locked provider to configure it.
  */
 async function openModelPicker(
   context: CommandContext,
@@ -322,13 +358,45 @@ async function openModelPicker(
   const visibleSources = options.availableOnly
     ? sources.filter(({ entryProvider }) => access.has(entryProvider.id))
     : sources;
-  const selectedModels = options.availableOnly
-    ? selectAvailableModels(visibleSources.map(({ entryProvider }) => entryProvider), access)
-    : visibleSources.flatMap(({ entryProvider }) => entryProvider.models.map((model) => ({
-        provider: entryProvider,
-        model,
-        access: access.get(entryProvider.id),
-      })));
+  const discovered = new Map<string, Awaited<ReturnType<typeof discoverProviderModels>>>();
+  await Promise.all(visibleSources.map(async ({ entryProvider }) => {
+    const key = await providerKey(entryProvider.id, stored, context.credentials);
+    const result = await discoverProviderModels(entryProvider.id, {
+      stored,
+      waitForNetwork: false,
+      ...(key ? { apiKey: key } : {}),
+    });
+    discovered.set(entryProvider.id, result);
+  }));
+  const selectedModels = visibleSources.flatMap(({ entryProvider }) => {
+    const state = access.get(entryProvider.id);
+    const live = discovered.get(entryProvider.id);
+    const ids = providerModelIds(
+      entryProvider,
+      live?.ids ?? [],
+      live?.live === true,
+      access.get(entryProvider.id),
+      live?.models ?? [],
+    );
+    const metadata = new Map((live?.models ?? []).map((model) => [model.id, model]));
+    return ids.map((id) => ({
+      provider: entryProvider,
+      model: mergeDiscoveredModel(entryProvider, id, metadata.get(id)),
+      access: state,
+    }));
+  }).filter(({ provider }) => !options.availableOnly || access.has(provider.id));
+  const currentProviderResult = currentProvider ? discovered.get(currentProvider) : undefined;
+  if (currentProvider && currentModel && currentProviderResult?.live && !currentProviderResult.stale) {
+    const currentStillExists = currentProviderResult.ids.includes(currentModel);
+    const replacement = currentProviderResult.ids[0];
+    if (!currentStillExists && replacement) {
+      // A successful catalog response is stronger evidence than the static
+      // catalog. Move a dead active model to the provider's first stable
+      // result; if no result exists, leave the provider untouched and let the
+      // normal error path explain the next request.
+      void context.switchModel({ preset: currentProvider, model: replacement });
+    }
+  }
   const hasVisionHelper = visionCandidates(stored).length > 0;
   const items = selectedModels.map(({ provider, model, access: providerAccess }) =>
     modelRowItem(provider, model, providerAccess, currentProvider, currentModel, hasVisionHelper));
@@ -361,6 +429,61 @@ async function openModelPicker(
   });
 }
 
+function mergeDiscoveredModel(
+  source: ModelCatalogProvider,
+  id: string,
+  discovered?: ProviderModel,
+): ModelCatalogModel {
+  const curated = findCatalogModel(source.id, id);
+  if (!discovered) return curated ?? {
+    id,
+    label: friendlyModelName(id),
+    description: 'Discovered from the provider',
+    badges: ['live'],
+  };
+  return {
+    ...(curated ?? {
+      id,
+      label: discovered.name ?? friendlyModelName(id),
+      description: 'Discovered from the provider',
+      badges: ['live'],
+    }),
+    ...(discovered.name ? { label: discovered.name } : {}),
+    ...(discovered.contextWindow === undefined ? {} : { contextWindow: discovered.contextWindow }),
+    ...(discovered.reasoning === undefined ? {} : { reasoning: discovered.reasoning }),
+    ...(discovered.tools === undefined ? {} : { tools: discovered.tools }),
+    ...(discovered.modalities === undefined ? {} : { modalities: discovered.modalities }),
+    ...(discovered.cost === undefined ? {} : { cost: discovered.cost }),
+    ...(discovered.provider === undefined ? {} : { provider: discovered.provider }),
+    ...(discovered.product === undefined ? {} : { product: discovered.product }),
+    ...(discovered.tier === undefined ? {} : { tier: discovered.tier }),
+    ...(discovered.protocol === undefined ? {} : { protocol: discovered.protocol }),
+    ...(discovered.streamSemantics === undefined ? {} : { streamSemantics: discovered.streamSemantics }),
+    ...(discovered.cost === undefined && source.defaultCost ? { cost: source.defaultCost } : {}),
+  };
+}
+
+function friendlyModelName(id: string): string {
+  const tail = id.split('/').pop() ?? id;
+  return tail
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .trim();
+}
+
+async function providerKey(
+  providerId: string,
+  stored: StoredConfig,
+  credentials: CredentialBroker | undefined,
+): Promise<string | undefined> {
+  if (!credentials) return undefined;
+  try {
+    return await credentials.lookup(credentialVariableForProvider(providerId, stored));
+  } catch {
+    return undefined;
+  }
+}
+
 async function providerAccessMap(
   sources: readonly ProviderSource[],
   stored: StoredConfig,
@@ -368,17 +491,7 @@ async function providerAccessMap(
   activeProvider: string | undefined,
 ): Promise<Map<string, ProviderAccess>> {
   const entries = await Promise.all(sources.map(async ({ entryProvider }) => {
-    let key: string | undefined;
-    if (credentials) {
-      try {
-        key = await credentials.lookup(credentialVariableForProvider(entryProvider.id, stored));
-      } catch {
-        // The free/local route remains usable when an unrelated or stale
-        // credential record is unreadable. Paid providers stay locked until
-        // their key can be resolved normally.
-        key = undefined;
-      }
-    }
+    const key = await providerKey(entryProvider.id, stored, credentials);
     if (entryProvider.anonymous) return [entryProvider.id, key ? 'configured' as const : 'free' as const] as const;
     if (isLocalEndpoint(entryProvider.endpoint)) return [entryProvider.id, 'local' as const] as const;
     // Preview/test contexts have no broker. A declared custom provider or the
@@ -411,6 +524,7 @@ function providerPickerItems(
   sources: readonly ProviderSource[],
   activeProvider: string | undefined,
   access: ReadonlyMap<string, ProviderAccess>,
+  discovered: ReadonlyMap<string, Awaited<ReturnType<typeof discoverProviderModels>>> = new Map(),
 ): PickerItem[] {
   return sources.map(({ entryProvider }) => {
     const state = access.get(entryProvider.id);
@@ -421,13 +535,21 @@ function providerPickerItems(
         : state === 'configured'
           ? 'Configured'
           : 'API key to unlock';
-    const available = state
-      ? selectAvailableModels([entryProvider], new Map([[entryProvider.id, state]])).length
-      : 0;
+    const live = discovered.get(entryProvider.id);
+    const available = live?.live
+      ? live.ids.length
+      : state
+        ? selectAvailableModels([entryProvider], new Map([[entryProvider.id, state]])).length
+        : 0;
+    const discoveryState = live?.error
+      ? 'model discovery unavailable'
+      : live?.source === 'fallback'
+        ? 'discovering models…'
+        : undefined;
     return {
       value: entryProvider.id,
       label: entryProvider.label,
-      detail: `${entryProvider.description} · ${available > 0 ? `${available} model${available === 1 ? '' : 's'} available` : auth}`,
+      detail: `${entryProvider.description} · ${discoveryState ?? (available > 0 ? `${available} model${available === 1 ? '' : 's'} available` : auth)}`,
       badges: [entryProvider.origin === 'user' ? 'custom' : 'built-in', auth],
       current: entryProvider.id === activeProvider,
       searchText: [entryProvider.id, entryProvider.label, entryProvider.description, auth].join(' '),
@@ -444,7 +566,16 @@ async function openProviderPicker(
   const activeProvider = providerIdForConfig(stored) ?? undefined;
   const activeLabel = sources.find(({ entryProvider }) => entryProvider.id === activeProvider)?.entryProvider.label;
   const access = await providerAccessMap(sources, stored, context.credentials, activeProvider);
-  const items = providerPickerItems(sources, activeProvider, access);
+  const discovered = new Map<string, Awaited<ReturnType<typeof discoverProviderModels>>>();
+  await Promise.all(sources.filter(({ entryProvider }) => access.has(entryProvider.id)).map(async ({ entryProvider }) => {
+    const key = await providerKey(entryProvider.id, stored, context.credentials);
+    discovered.set(entryProvider.id, await discoverProviderModels(entryProvider.id, {
+      stored,
+      waitForNetwork: false,
+      ...(key ? { apiKey: key } : {}),
+    }));
+  }));
+  const items = providerPickerItems(sources, activeProvider, access, discovered);
   context.openPicker({
     title: 'Select provider',
     hint: `active: ${activeLabel ?? 'none'} · Enter opens its models`,
@@ -1026,7 +1157,7 @@ export const COMMANDS: readonly Command[] = [
         : value === 'default'
           ? 'provider default'
           : `${value} reasoning effort`,
-      getTone: (value) => value === 'plif' ? 'gold' : undefined,
+      getTone: (value) => value === 'plif' ? 'accentBright' : undefined,
     },
     run: async (argv, context) => {
       const stored = await loadGlobalConfig();
@@ -1061,7 +1192,7 @@ export const COMMANDS: readonly Command[] = [
       await context.setEffort(selected === 'default' ? undefined : selected);
       const isPlif = selected === 'plif';
       return ok(entry('notice', `${isPlif ? '' : `${glyph.done}  `}effort    ${effortVisual(selected === 'default' ? undefined : selected).label}`, {
-        tone: isPlif ? 'gold' : 'accent',
+        tone: isPlif ? 'accentBright' : 'accent',
         subtitle: 'conversation preserved · applies to the next request',
       }));
     },

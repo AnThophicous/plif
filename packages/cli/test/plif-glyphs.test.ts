@@ -31,10 +31,10 @@ describe('premium PLIF glyph system', () => {
     assert.equal(new Set(dots.map(displayWidth)).size, 1);
   });
 
-  it('routes PLIF light through champagne and warm ivory', () => {
-    assert.ok(plifGlyphStops('active').includes('gold'));
-    assert.ok(plifGlyphStops('active').includes('warmIvory'));
-    assert.ok(!plifGlyphStops('quiet').includes('gold'));
+  it('routes PLIF light through the canonical pink highlights', () => {
+    assert.ok(plifGlyphStops('active').includes('accentStrong'));
+    assert.ok(plifGlyphStops('active').includes('accentPastel'));
+    assert.ok(!plifGlyphStops('quiet').includes('accentStrong'));
   });
 
   it('uses one optical loading family with a synchronized centre peak', () => {

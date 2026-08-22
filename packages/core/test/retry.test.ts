@@ -52,6 +52,10 @@ function chunk(content: string): unknown {
   return { choices: [{ delta: { content }, finish_reason: null }] };
 }
 
+function contentSnapshot(content: string): unknown {
+  return { choices: [{ delta: { content }, finish_reason: null }] };
+}
+
 function reasoningSnapshot(text: string): unknown {
   return { choices: [{ delta: { reasoning_details: [{ text }] }, finish_reason: null }] };
 }
@@ -73,8 +77,11 @@ class ScriptedProvider extends OpenAIProvider {
   waits: number[] = [];
   #script: readonly Attempt[];
 
-  constructor(script: readonly Attempt[]) {
-    super({ ...CONFIG } as ConstructorParameters<typeof OpenAIProvider>[0]);
+  constructor(
+    script: readonly Attempt[],
+    overrides: Partial<ConstructorParameters<typeof OpenAIProvider>[0]> = {},
+  ) {
+    super({ ...CONFIG, ...overrides } as ConstructorParameters<typeof OpenAIProvider>[0]);
     this.#script = script;
   }
 
@@ -213,6 +220,36 @@ const ask = { messages: [{ role: 'user' as const, content: 'x' }] };
 afterEach(() => mock.restoreAll());
 
 describe('retry schedule', () => {
+  it('reconciles a cumulative content snapshot into one visible answer', async () => {
+    const provider = new ScriptedProvider([
+      [contentSnapshot('O'), contentSnapshot('Olá'), contentSnapshot('Olá '), contentSnapshot('Olá mundo'), FINISH],
+    ], { streamSemantics: 'snapshot' });
+
+    const result = await collect(provider.stream(ask));
+    assert.equal(result.text, 'Olá mundo');
+  });
+
+  it('does not append a full final message after streamed deltas', async () => {
+    const provider = new ScriptedProvider([[
+      chunk('Olá '),
+      {
+        choices: [{
+          delta: {},
+          message: { content: 'Olá mundo' },
+          finish_reason: 'stop',
+        }],
+        usage: { prompt_tokens: 1, completion_tokens: 2 },
+      },
+      // A gateway may repeat its terminal frame while closing the stream.
+      {
+        choices: [{ delta: {}, message: { content: 'Olá mundo' }, finish_reason: 'stop' }],
+      },
+    ]]);
+
+    const result = await collect(provider.stream(ask));
+    assert.equal(result.text, 'Olá mundo');
+    assert.equal(result.reason, 'stop');
+  });
   it('normalizes short cumulative reasoning through the provider event path', async () => {
     const provider = new ScriptedProvider([
       [reasoningSnapshot('a'), reasoningSnapshot('ab'), reasoningSnapshot('abc'), FINISH],
@@ -227,7 +264,7 @@ describe('retry schedule', () => {
 
   it('does not turn an unchanged reasoning chunk into an infinite repeated stream', async () => {
     const provider = new ScriptedProvider([
-      [...Array.from({ length: 12 }, () => reasoningDelta('Asp')), FINISH],
+      [...Array.from({ length: 12 }, () => reasoningSnapshot('Asp')), FINISH],
     ]);
 
     const all = await events(provider.stream(ask));
@@ -411,9 +448,9 @@ describe('retry schedule', () => {
       assert.deepEqual(all.map((event) => event.kind), [
         'reasoning',
         'reset',
-        'retry',
-        'text',
-        'done',
+      'retry',
+      'text',
+      'done',
       ]);
       const replayed = await collect((async function* () {
         for (const event of all) yield event;

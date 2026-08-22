@@ -14,8 +14,8 @@
  * line is bright, it earned it.
  *
  * The greys are spaced far enough apart to survive a low-contrast terminal
- * theme, and the accent sits at a lightness that holds up on both black and
- * near-black backgrounds, since we do not control the user's background.
+ * theme, and the pink accent sits at a lightness that holds up on both black
+ * and near-black backgrounds, since we do not control the user's background.
  */
 import { clusterLength, displayWidth } from './text.js';
 
@@ -35,15 +35,13 @@ const richGlyphs = process.env['PLIF_ASCII'] !== '1';
 export const supportsRichGlyphs = richGlyphs;
 
 /**
- * The Plif cold palette. The two anchors are deliberately few:
- * `#A2ADB5` is the primary ink and `#CDD6F4` is the reserved accent.
- * Everything else is a quiet derived role or a genuinely semantic state —
- * with one exception: the champagne `gold` pair exists so the PLIF signature
- * can carry a single warm note on an otherwise cold surface.
+ * The Plif neutral palette with one semantic pink signal. The gray hierarchy
+ * remains the atmosphere; pink appears only when the UI is active, focused,
+ * selected, or carrying the PLIF signature.
  */
 const defaultPalette = {
   /** Dominant reading colour and structural ink. */
-  text: '#A2ADB5',
+  text: '#CDD6F4',
   /** The full-bleed shell surface that holds the current Plif frame. */
   panel: '#303030',
   /** Quiet filled surface for the developer's own message row. */
@@ -58,30 +56,24 @@ const defaultPalette = {
   /** Border and structural identity colour. */
   brand: '#AAB8CC',
   /** Thinking and active-work colour. */
-  accent: '#B7C4D8',
+  accent: '#e8a8c9',
   /** Bright highlight used by the travelling glow. */
-  accentBright: '#CDD6F4',
+  accentBright: '#f0bcd8',
   /** Important details and de-emphasised accents. */
-  accentDim: '#84919D',
+  accentDim: '#c890ac',
 
-  /**
-   * Warm champagne gold, reserved for the PLIF signature.
-   *
-   * The interface stays cold; this is the one warm note, and it belongs to
-   * identity moments only — the `✦ PLIF` mark, the signature effort, the
-   * travelling glow's warm flash. It is deliberately off-gold: quiet enough
-   * to sit beside `#A2ADB5` without the screen reading as yellow.
-   */
-  /** Dark gold / transition anchor. */
-  goldDim: '#A99159',
-  /** Base champagne gold. */
-  goldBase: '#D6B968',
-  /** Primary PLIF champagne. */
-  gold: '#E2C675',
-  /** Bright champagne used at the centre of a controlled emphasis. */
-  goldBright: '#ECD894',
-  /** Warm ivory at the centre of the PLIF light concentration. */
-  warmIvory: '#F2E3B1',
+  /** Canonical pink identity tokens. */
+  accentStrong: '#c890ac',
+  accentPastel: '#f7d4e6',
+  accentTint: '#4a3542',
+  accentBorder: '#7a5568',
+
+  /** Legacy names retained for user themes; values now follow PLIF pink. */
+  goldDim: '#7a5568',
+  goldBase: '#e8a8c9',
+  gold: '#f0bcd8',
+  goldBright: '#f7d4e6',
+  warmIvory: '#f7d4e6',
 
   success: '#8FB3A6',
   warn: '#BDAA82',
@@ -136,28 +128,28 @@ export const emphasis: Record<EmphasisKey, { tone: PaletteKey; bold: boolean }> 
  */
 export const effortPalette: Readonly<Record<string, Partial<Record<PaletteKey, string>>>> = {
   low: {
-    brand: '#7F8B95', accentDim: '#71808A', accent: '#87949E', accentBright: '#A2ADB5', info: '#A2ADB5',
+    brand: '#7F8B95', info: '#A2ADB5',
   },
   medium: {
-    brand: '#8E9BA6', accentDim: '#7F8C97', accent: '#98A5B1', accentBright: '#B0BCCB', info: '#A2ADB5',
+    brand: '#8E9BA6', info: '#A2ADB5',
   },
   high: {
-    brand: '#9EACBC', accentDim: '#8C9AAA', accent: '#A8B5C7', accentBright: '#BDC8DB', info: '#AEB9C8',
+    brand: '#9EACBC', info: '#AEB9C8',
   },
   xhigh: {
-    brand: '#AAB8CC', accentDim: '#98A6B8', accent: '#B4C0D2', accentBright: '#C5CEE1', info: '#B7C3D4',
+    brand: '#AAB8CC', info: '#B7C3D4',
   },
   max: {
-    brand: '#AFBBD0', accentDim: '#9DAABE', accent: '#B9C4D7', accentBright: '#C8D1E3', info: '#BAC5D7',
+    brand: '#AFBBD0', info: '#BAC5D7',
   },
   ultra: {
-    brand: '#B5C1D6', accentDim: '#A3B0C4', accent: '#BECADE', accentBright: '#CAD3E7', info: '#C0CBDF',
+    brand: '#B5C1D6', info: '#C0CBDF',
   },
   ultracode: {
-    brand: '#B8C4D9', accentDim: '#A5B2C7', accent: '#C1CCE0', accentBright: '#CBD4E8', info: '#C3CEE1',
+    brand: '#B8C4D9', info: '#C3CEE1',
   },
   plif: {
-    brand: '#C0CBE3', accentDim: '#AAB8D0', accent: '#C6D1E9', accentBright: '#CDD6F4', info: '#CDD6F4',
+    brand: '#C0CBE3', info: '#CDD6F4',
   },
 };
 

@@ -210,6 +210,7 @@ export type {
   ReasoningSplit,
 } from './model/reasoning.js';
 export { collect, NO_USAGE } from './model/provider.js';
+export { ContentDeltaNormalizer, ContentProtocolError } from './model/content.js';
 export type {
   Attachment,
   CompletionEvent,
@@ -222,6 +223,11 @@ export type {
   ToolCall,
   ToolSpec,
   Usage,
+  ModelListResult,
+  ProviderModel,
+  ModelProtocol,
+  ModelSource,
+  StreamSemantics,
 } from './model/provider.js';
 export {
   PRESETS,
@@ -240,6 +246,8 @@ export {
   migrateProviderCredentials,
   parseModelRef,
   providerIdForConfig,
+  providerOffer,
+  protocolForModel,
   redact,
   resolveConfig,
   saveStoredConfig,
@@ -262,6 +270,7 @@ export type {
   ResolveOptions,
   StoredConfig,
   VisionCandidate,
+  ProviderOffer,
 } from './model/config.js';
 export { EFFORT_LEVELS } from './model/config.js';
 export {
@@ -283,8 +292,8 @@ export type {
   AvailableCatalogModel,
   ProviderAccess,
 } from './model/catalog.js';
-export { discoverProviderModels, forgetDiscoveredModels } from './model/discovery.js';
-export type { DiscoveredModels, DiscoverOptions } from './model/discovery.js';
+export { discoverProviderModels, forgetDiscoveredModels, scheduleProviderDiscovery } from './model/discovery.js';
+export type { DiscoveredModels, DiscoverOptions, DiscoverySource } from './model/discovery.js';
 export { AnthropicProvider } from './model/anthropic.js';
 export { createModelProvider, isAnthropicEndpoint } from './model/factory.js';
 

@@ -9,28 +9,26 @@ const BREATH_MS = 2_400;
 /** Semantic stops used by the Chromatic Reactor. The active theme supplies
  * every colour; the wave only chooses where to interpolate between them. */
 export const PLIF_WAVE_STOPS = [
-  'brand',
   'accentDim',
   'accent',
   'accentBright',
 ] as const satisfies readonly PaletteKey[];
 
 /**
- * The signature ramp: the cold Plif greys with one champagne stop, so a PLIF
- * glow reads as warm light travelling a cold surface rather than as a yellow
- * interface. One warm stop in four keeps the balance — the eye registers the
- * flash, not a theme change.
+ * The signature ramp: the neutral Plif greys carry the canonical pink family,
+ * so a PLIF glow reads as active identity travelling across a calm surface
+ * rather than as a full-theme colour change.
  */
 export const PLIF_SIGNATURE_STOPS = [
   'accentDim',
   'accent',
-  'goldBase',
-  'gold',
-  'goldBright',
-  'warmIvory',
-  'goldBright',
-  'gold',
-  'goldBase',
+  'accent',
+  'accentStrong',
+  'accentBright',
+  'accentPastel',
+  'accentBright',
+  'accentStrong',
+  'accent',
   'accentBright',
 ] as const satisfies readonly PaletteKey[];
 

@@ -184,7 +184,10 @@ export function reasoningObservationFromDelta(delta: unknown): ReasoningObservat
   ] as const;
   for (const key of stringSources) {
     const value = fields[key];
-    const semantics = key.endsWith('_delta') ? 'delta' : 'unknown';
+    // These top-level fields are emitted incrementally by the OpenAI-compatible
+    // streaming contract. Only fields explicitly documented as snapshots get
+    // snapshot reconciliation; a repeated delta can be legitimate model text.
+    const semantics = 'delta' as const;
     if (typeof value === 'string' && value) {
       return { text: value, source: key, semantics };
     }
@@ -212,7 +215,7 @@ export function reasoningObservationFromDelta(delta: unknown): ReasoningObservat
       return {
         text,
         source: key,
-        semantics: key === 'content_block_delta' ? 'delta' : 'unknown',
+        semantics: key === 'content_block_delta' ? 'delta' : 'snapshot',
       };
     }
   }
@@ -268,20 +271,6 @@ export class ReasoningDeltaNormalizer {
       else if (previousRaw && incoming.startsWith(previousRaw)) {
         emitted = incoming.slice(previousRaw.length);
       }
-    } else if (
-      observation.semantics === 'unknown' &&
-      previousRaw &&
-      (incoming === previousRaw || (
-        incoming.length > previousRaw.length &&
-        incoming.startsWith(previousRaw)
-      ))
-    ) {
-      // An unchanged side-channel value is a replayed snapshot/no-op, not new
-      // reasoning. Treating it as a delta turns one token such as "Asp" into
-      // an unbounded `AspAspAsp...` stream when a gateway repeats a snapshot
-      // while waiting for the next token. A strict extension is still reduced
-      // to its new suffix for cumulative snapshots.
-      emitted = incoming === previousRaw ? '' : incoming.slice(previousRaw.length);
     }
 
     this.#value += emitted;

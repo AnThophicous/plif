@@ -44,6 +44,8 @@ import {
 } from '../src/model/catalog.js';
 import { EFFORT_LEVELS, forgetProviderKey, supportedEfforts } from '../src/model/config.js';
 import { anthropicWireEffort } from '../src/model/anthropic.js';
+import { AnthropicProvider } from '../src/model/anthropic.js';
+import { createModelProvider } from '../src/model/factory.js';
 import { OpenAIProvider } from '../src/model/openai.js';
 import { collect } from '../src/model/provider.js';
 import { PlifError } from '../src/errors.js';
@@ -423,6 +425,19 @@ describe('config precedence', () => {
 });
 
 describe('the free tier needs no credential', () => {
+  it('keeps OpenCode Go paid and selects its Messages adapter for Qwen', () => {
+    const config = resolveConfig({}, {
+      preset: 'opencode-go',
+      model: 'qwen3.8-max',
+      env: {},
+    });
+    const provider = createModelProvider(config);
+    assert.equal(config.needKey, true);
+    assert.equal(provider instanceof AnthropicProvider, true);
+    assert.equal(MODEL_CATALOG.find((item) => item.id === 'opencode-go')?.label, 'OpenCode Go');
+    assert.equal(MODEL_CATALOG.find((item) => item.id === 'opencode-go')?.anonymous, undefined);
+  });
+
   it('constructs an anonymous OpenCode provider without asking for an API key', () => {
     const provider = new OpenAIProvider({
       model: 'deepseek-v4-flash-free',
@@ -439,8 +454,10 @@ describe('the free tier needs no credential', () => {
     assert.equal(isFreeModel('deepseek-v4-flash-free'), true);
     assert.equal(isFreeModel('deepseek-v4-flash'), false);
 
-    assert.equal(keyOptional(PRESETS.opencode.baseURL, 'deepseek-v4-flash-free'), true);
+    assert.equal(keyOptional(PRESETS.opencode.baseURL, 'deepseek-v4-flash-free', 'opencode'), true);
     assert.equal(keyOptional(PRESETS.opencode.baseURL, 'deepseek-v4-flash'), false);
+    assert.equal(keyOptional(PRESETS['opencode-go'].baseURL, 'anything-free', 'opencode-go'), false);
+    assert.equal(keyOptional(PRESETS.opencode.baseURL, 'anything-free', 'opencode'), false);
     // The suffix means nothing to a host that does not publish that convention.
     assert.equal(keyOptional('https://api.openai.com/v1', 'something-free'), false);
     assert.equal(keyOptional('http://127.0.0.1:11434/v1', 'llama3.1'), true);
@@ -455,6 +472,12 @@ describe('the free tier needs no credential', () => {
     );
     assert.equal(config.apiKey, '');
     assert.equal(validate(config).ok, true);
+  });
+
+  it('keeps the same model id distinct between Zen and Go offers', () => {
+    assert.equal(providerForModel('qwen3.8-max'), 'opencode-go');
+    assert.equal(catalogSelection('opencode', 'deepseek-v4-flash-free')?.preset, 'opencode');
+    assert.equal(catalogSelection('opencode-go', 'deepseek-v4-flash')?.preset, 'opencode-go');
   });
 
   it('leaves the key empty rather than borrowing OPENAI_API_KEY', () => {

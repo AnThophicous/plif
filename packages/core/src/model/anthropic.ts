@@ -23,11 +23,14 @@ import type {
   CompletionRequest,
   FinishReason,
   Message,
+  ModelListResult,
   ModelInfo,
   ModelProvider,
+  ProviderModel,
   Usage,
 } from './provider.js';
 import { NO_USAGE, safeToolCallArguments } from './provider.js';
+import { modelListResult, normalizeProviderModel } from './metadata.js';
 
 /** Anthropic requires an output ceiling; Plif's config leaves it optional. */
 const DEFAULT_MAX_TOKENS = 32_000;
@@ -151,12 +154,31 @@ export class AnthropicProvider implements ModelProvider {
   }
 
   async list(): Promise<string[]> {
+    const result = await this.listModels();
+    return result.models.map((model) => model.id).sort();
+  }
+
+  async listModels(): Promise<ModelListResult> {
     try {
-      const ids: string[] = [];
-      for await (const entry of this.#client.models.list()) ids.push(entry.id);
-      return ids.sort();
-    } catch {
-      return [];
+      const models: ProviderModel[] = [];
+      for await (const entry of this.#client.models.list()) {
+        const raw = entry as unknown as Record<string, unknown>;
+        const id = typeof raw['id'] === 'string' ? raw['id'] : '';
+        if (!id) continue;
+        const normalized = normalizeProviderModel(raw, this.#config, { nameKeys: ['display_name', 'name'] });
+        if (normalized) models.push(normalized);
+      }
+      return modelListResult(this.#config, models);
+    } catch (error) {
+      const status = (error as { readonly status?: unknown }).status;
+      const failure = status === 429
+        ? 'rate_limit'
+        : status === 401 || status === 403
+          ? 'unauthorized'
+          : status === 404
+            ? 'unsupported'
+            : 'unavailable';
+      return { supported: false, models: [], error: failure };
     }
   }
 

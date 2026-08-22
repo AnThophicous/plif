@@ -9,6 +9,7 @@ import {
   effortTone,
   effortVisual,
 } from '../src/effort-visuals.js';
+import { PLIF_WAVE_STOPS } from '../src/pulse.js';
 import { displayWidth } from '../src/text.js';
 
 describe('effort visual identities', () => {
@@ -46,14 +47,20 @@ describe('effort visual identities', () => {
     assert.notEqual(effortSymbol('plif'), effortSymbol('max'));
   });
 
-  it('reserves the one warm tone for PLIF and steps the rest up the cold ramp', () => {
-    assert.equal(effortTone('plif'), 'gold');
+  it('keeps the PLIF accent wave inside the accent family from its first stop', () => {
+    assert.ok(!PLIF_WAVE_STOPS.includes('brand'));
+    assert.ok(!PLIF_WAVE_STOPS.includes('muted'));
+    assert.equal(PLIF_WAVE_STOPS[0], 'accentDim');
+  });
+
+  it('reserves the full pink identity for PLIF and steps the rest up the neutral ramp', () => {
+    assert.equal(effortTone('plif'), 'accentBright');
     assert.equal(effortTone('max'), 'accentBright');
     assert.equal(effortTone('low'), 'faint');
     // PLIF's travelling light passes through champagne; no other level does.
-    assert.ok(effortVisual('plif').stops.includes('gold'));
+    assert.ok(effortVisual('plif').stops.includes('accentPastel'));
     for (const effort of ['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode']) {
-      assert.ok(!effortVisual(effort).stops.includes('gold'), effort);
+      assert.ok(!effortVisual(effort).stops.includes('accentPastel'), effort);
     }
   });
 

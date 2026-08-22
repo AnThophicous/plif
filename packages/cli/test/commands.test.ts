@@ -213,7 +213,7 @@ describe('/effort validation', () => {
       assert.equal(opened, 0, 'a typed, valid effort must not reopen the picker');
       assert.deepEqual(calls, ['plif']);
       assert.match(result.entries[0]?.title ?? '', /effort\s+PLIF/);
-      assert.equal(result.entries[0]?.tone, 'gold');
+      assert.equal(result.entries[0]?.tone, 'accentBright');
     } finally {
       if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
       else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
@@ -282,7 +282,7 @@ describe('provider model picker', () => {
     }
   });
 
-  it('keeps NVIDIA GLM 5.2 when live discovery omits it', () => {
+  it('treats a successful provider response as authoritative', () => {
     const catalog = {
       id: 'nvidia',
       label: 'NVIDIA NIM',
@@ -297,7 +297,7 @@ describe('provider model picker', () => {
 
     assert.deepEqual(
       providerModelIds(catalog, ['zai/glm-4.6'], true),
-      ['z-ai/glm-5.2', 'zai/glm-4.6'],
+      ['zai/glm-4.6'],
     );
   });
 

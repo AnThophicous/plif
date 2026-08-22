@@ -63,6 +63,7 @@ export interface TimelineEntry {
     | 'muted'
     | 'faint'
     | 'accent'
+    | 'accentBright'
     | 'brand'
     | 'gold'
     | 'success'

@@ -42,7 +42,7 @@ export function focusRule(
   const borderEffort = effort ?? (plif ? 'plif' : undefined);
   // The input frame is structural chrome, not a progress bar. Keep one solid
   // effort colour across the rule so it cannot read as an accidental
-  // gold-to-blue/purple gradient or trigger a high-frequency repaint.
+  // gradient or trigger a high-frequency repaint.
   const activeColor = color(borderEffort ? effortTone(borderEffort) : 'accentBright');
   // An idle frame is not a dead frame: while the prompt holds focus it inhales
   // slowly between the two quietest structural tones. Geometry never changes,

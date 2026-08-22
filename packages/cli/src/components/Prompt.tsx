@@ -284,7 +284,7 @@ function CursorRow({
   // Inverse reads as a selection; a breathing block reads as a caret that
   // knows the interface is alive. PLIF leans the block toward champagne.
   const block = plif
-    ? mix(color('accent'), color('gold'), 0.35 + 0.4 * breath)
+    ? mix(color('accent'), color('accentStrong'), 0.35 + 0.4 * breath)
     : toneBetween('accentDim', 'accent', 0.3 + 0.5 * breath);
   return (
     <Text>

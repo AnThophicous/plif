@@ -133,7 +133,7 @@ const ContextMeter = React.memo(function ContextMeter({ meter }: { readonly mete
   return (
     <Text>
       {Array.from(meter).map((segment, index) => (
-        <Text key={`${segment}:${index}`} color={segment === full ? color('gold') : color('ghost')}>
+        <Text key={`${segment}:${index}`} color={segment === full ? color('accentBright') : color('ghost')}>
           {segment}
         </Text>
       ))}

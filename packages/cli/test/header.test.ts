@@ -41,8 +41,8 @@ describe('CLI header', () => {
   it('rasterizes the supplied transparent PNG into stable terminal cells', () => {
     const cells = pngHeaderCells('#191b20');
     assert.equal(PNG_HEADER_ART_WIDTH, 16);
-    assert.equal(PNG_HEADER_ART_PIXEL_HEIGHT, 9);
-    assert.equal(PNG_HEADER_ART_HEIGHT, 5);
+    assert.equal(PNG_HEADER_ART_PIXEL_HEIGHT, 14);
+    assert.equal(PNG_HEADER_ART_HEIGHT, 7);
     assert.equal(cells.length, PNG_HEADER_ART_HEIGHT);
     assert.ok(cells.every((row) => row.length === PNG_HEADER_ART_WIDTH));
     assert.ok(cells.some((row) => row.some((cell) => cell.foreground !== '#191b20')));
@@ -52,9 +52,9 @@ describe('CLI header', () => {
   });
 
   it('reports its real footprint so the input frame stays in the viewport', async () => {
-    assert.equal(headerHeight(96), 13);
-    assert.equal(headerHeight(74), 13);
-    assert.equal(headerHeight(16), 15);
+    assert.equal(headerHeight(96), 10);
+    assert.equal(headerHeight(74), 10);
+    assert.equal(headerHeight(16), 10);
 
     for (const width of [96, 73]) {
       const stdout = new CaptureStdout(width);
@@ -89,7 +89,7 @@ describe('CLI header', () => {
     assert.equal(wordmarkLine.indexOf('PLIF'), (120 - 4) / 2);
   });
 
-  it('keeps the wordmark outside a compact mascot/status split', async () => {
+  it('keeps the wordmark and startup copy centered inside a quiet outline', async () => {
     const stdout = new CaptureStdout();
     const app = render(
       React.createElement(Header, {

@@ -214,7 +214,7 @@ export function subagentTool(options: SubagentOptions): Tool {
     return {
       ref: formatModelRef(parsed.preset, parsed.model),
       provider: (options.createProvider ?? createModelProvider)(config),
-      free: keyOptional(config.baseURL, config.model),
+      free: keyOptional(config.baseURL, config.model, config.providerId),
       maxIterations: agent?.maxIterations,
     };
   }

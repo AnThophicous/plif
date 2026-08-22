@@ -61,12 +61,12 @@ export const PLIF_GLYPHS = Object.freeze({
 const ROLE_STOPS: Record<PlifGlyphRole, SemanticWaveStops> = {
   quiet: ['ghost', 'muted', 'accentDim'],
   subtle: ['accentDim', 'muted', 'accentBright'],
-  active: ['accentDim', 'goldBase', 'gold', 'goldBright', 'warmIvory', 'goldBright', 'gold', 'goldBase', 'accentBright'],
-  thinking: ['accentDim', 'goldBase', 'gold', 'goldBright', 'warmIvory', 'goldBright', 'gold', 'goldBase', 'accentDim'],
-  peak: ['accent', 'goldBase', 'gold', 'goldBright', 'warmIvory', 'goldBright', 'gold', 'goldBase', 'accentBright'],
-  header: ['ghost', 'muted', 'accentDim', 'accentBright', 'goldBase', 'gold', 'goldBright', 'warmIvory', 'muted'],
-  loading: ['accentDim', 'goldBase', 'gold', 'goldBright', 'warmIvory', 'goldBright', 'gold', 'goldBase', 'accentDim'],
-  bloom: ['accentDim', 'accentBright', 'goldBase', 'goldBright', 'goldBase', 'accentBright'],
+  active: ['accentDim', 'accent', 'accentStrong', 'accentBright', 'accentPastel', 'accentBright', 'accentStrong', 'accent', 'accentDim'],
+  thinking: ['accentDim', 'accent', 'accentStrong', 'accentBright', 'accentPastel', 'accentBright', 'accentStrong', 'accent', 'accentDim'],
+  peak: ['accent', 'accentStrong', 'accentBright', 'accentPastel', 'accentPastel', 'accentBright', 'accentStrong', 'accent', 'accentBright'],
+  header: ['ghost', 'muted', 'accentDim', 'accentBright', 'accent', 'accentStrong', 'accentPastel', 'accentBright', 'muted'],
+  loading: ['accentDim', 'accent', 'accentStrong', 'accentBright', 'accentPastel', 'accentBright', 'accentStrong', 'accent', 'accentDim'],
+  bloom: ['accentDim', 'accentBright', 'accent', 'accentPastel', 'accent', 'accentBright'],
 };
 
 const ROLE_PERIODS: Record<PlifGlyphRole, number> = {

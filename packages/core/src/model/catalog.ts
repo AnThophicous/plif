@@ -5,6 +5,7 @@ import {
   type ModelCost,
   type StoredConfig,
 } from './config.js';
+import type { ModelProtocol, StreamSemantics } from './provider.js';
 
 /** A model exposed by the provider catalog. */
 export interface ModelCatalogModel {
@@ -19,6 +20,11 @@ export interface ModelCatalogModel {
   readonly reasoning?: boolean;
   readonly tools?: boolean;
   readonly cost?: ModelCost;
+  readonly provider?: string;
+  readonly product?: string;
+  readonly tier?: string;
+  readonly protocol?: ModelProtocol;
+  readonly streamSemantics?: StreamSemantics;
 }
 
 /**
@@ -44,12 +50,17 @@ export interface ModelCatalogProvider {
   readonly models: readonly ModelCatalogModel[];
   /** True when the endpoint serves models to callers with no credential. */
   readonly anonymous?: boolean;
+  readonly product?: string;
+  readonly tier?: string;
+  readonly defaultCost?: ModelCost;
 }
 
 /** The selection persisted when a catalog model is chosen. */
 export interface ModelSelection {
   readonly preset: string;
   readonly model: string;
+  readonly protocol?: ModelProtocol;
+  readonly streamSemantics?: StreamSemantics;
 }
 
 export type ProviderAccess = 'free' | 'configured' | 'local';
@@ -66,7 +77,7 @@ const model = (
   description: string,
   badges: readonly string[] = [],
   modalities?: readonly ModelCapability[],
-  metadata: Pick<ModelCatalogModel, 'contextWindow' | 'reasoning' | 'tools' | 'cost'> = {},
+  metadata: Pick<ModelCatalogModel, 'contextWindow' | 'reasoning' | 'tools' | 'cost' | 'provider' | 'product' | 'tier' | 'protocol' | 'streamSemantics'> = {},
 ): ModelCatalogModel => Object.freeze({
   id,
   label,
@@ -91,7 +102,7 @@ const provider = (
   label: string,
   description: string,
   models: readonly ModelCatalogModel[],
-  extra: { anonymous?: boolean } = {},
+  extra: { anonymous?: boolean; product?: string; tier?: string; defaultCost?: ModelCost } = {},
 ): ModelCatalogProvider =>
   Object.freeze({
     id,
@@ -102,6 +113,9 @@ const provider = (
     endpoint: PRESETS[id as keyof typeof PRESETS]?.baseURL ?? '',
     models: Object.freeze([...models]),
     ...(extra.anonymous ? { anonymous: true } : {}),
+    ...(extra.product ? { product: extra.product } : {}),
+    ...(extra.tier ? { tier: extra.tier } : {}),
+    ...(extra.defaultCost ? { defaultCost: extra.defaultCost } : {}),
   });
 
 /**
@@ -114,7 +128,8 @@ const provider = (
  *
  * The lists are static metadata, not a live registry. Providers rename and
  * retire models constantly, so availability is resolved separately from this
- * catalogue; opening `/model` does not contact every provider endpoint.
+ * catalogue; the discovery layer may refresh configured endpoints in the
+ * background without treating this list as live availability.
  */
 export const MODEL_CATALOG: readonly ModelCatalogProvider[] = Object.freeze([
   provider('anthropic', 'Claude (Anthropic)', 'Claude models, via the official SDK', [
@@ -233,7 +248,28 @@ export const MODEL_CATALOG: readonly ModelCatalogProvider[] = Object.freeze([
       model('claude-sonnet-5', 'Claude Sonnet 5', 'Paid, strong at long refactors', ['key needed']),
       model('gpt-5.4', 'GPT-5.4', 'Paid general-purpose model', ['key needed']),
     ],
-    { anonymous: true },
+    { anonymous: true, product: 'OpenCode', tier: 'Zen', defaultCost: 'free' },
+  ),
+  provider(
+    'opencode-go',
+    'OpenCode Go',
+    'Paid OpenCode models — API key required',
+    [
+      model('qwen3.8-max', 'Qwen3.8 Max', 'Long-context coding and reasoning model', ['paid'], undefined, {
+        cost: 'paid',
+        provider: 'opencode-go',
+        product: 'OpenCode',
+        tier: 'Go',
+        protocol: 'anthropic-messages',
+      }),
+      model('deepseek-v4-flash', 'DeepSeek V4 Flash', 'Fast paid coding model', ['paid'], undefined, {
+        cost: 'paid',
+        provider: 'opencode-go',
+        product: 'OpenCode',
+        tier: 'Go',
+      }),
+    ],
+    { product: 'OpenCode', tier: 'Go', defaultCost: 'paid' },
   ),
   provider('ollama', 'Ollama', 'Models running on this machine', []),
   provider('lmstudio', 'LM Studio', 'Local OpenAI-compatible server', []),
@@ -306,6 +342,8 @@ export function userCatalog(config: StoredConfig): readonly ModelCatalogProvider
         ...(metadata.reasoning === undefined ? {} : { reasoning: metadata.reasoning }),
         ...(metadata.tools === undefined ? {} : { tools: metadata.tools }),
         ...(metadata.cost === undefined ? {} : { cost: metadata.cost }),
+        ...(metadata.protocol === undefined ? {} : { protocol: metadata.protocol }),
+        ...(metadata.streamSemantics === undefined ? {} : { streamSemantics: metadata.streamSemantics }),
       }),
     ),
     ...((entry.options?.needKey === false || entry.options?.NeedKey === false) ? { anonymous: true } : {}),
@@ -328,7 +366,9 @@ export function rankModelIds(providerId: string, ids: readonly string[]): string
   const rank = (id: string): number => {
     const known = curated.get(id);
     if (known !== undefined) return known;
-    return isFreeId(id) ? 10_000 : 20_000;
+    // Unknown live ids stay unknown. Do not infer commercial tier from a
+    // suffix; only curated metadata or provider discovery can declare cost.
+    return 20_000;
   };
   return [...ids].sort((left, right) => {
     const delta = rank(left) - rank(right);
@@ -336,9 +376,6 @@ export function rankModelIds(providerId: string, ids: readonly string[]): string
   });
 }
 
-function isFreeId(id: string): boolean {
-  return id.endsWith('-free') || id.endsWith(':free');
-}
 
 /**
  * Turn a picked row into something the config can store.

@@ -62,10 +62,10 @@ export const activityVisuals: Readonly<Record<ActivityKind, ActivityVisual>> = O
   coding: visual('Coding', ['brand', 'accentBright'], 'active'),
   searching: visual('Searching', ['accent', 'accentBright'], 'subtle'),
   reading: visual('Reading', ['muted', 'brand'], 'subtle'),
-  writing: visual('Writing', ['goldBase', 'warmIvory'], 'active'),
+  writing: visual('Writing', ['accent', 'accentPastel'], 'active'),
   inspecting: visual('Inspecting', ['brand', 'accent'], 'subtle'),
   running: visual('Running', ['accentDim', 'accent'], 'active'),
-  cooking: visual('Cooking', ['goldBase', 'goldBright'], 'bloom'),
+  cooking: visual('Cooking', ['accent', 'accentPastel'], 'bloom'),
   thinking: visual('Thinking', ['accentDim', 'accentBright'], 'thinking'),
 });
 

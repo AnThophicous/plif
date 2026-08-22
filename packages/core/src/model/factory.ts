@@ -26,6 +26,8 @@ export function createModelProvider(
   config: ModelConfig,
   options: OpenAIProviderOptions = {},
 ): ModelProvider {
-  if (isAnthropicEndpoint(config.baseURL)) return new AnthropicProvider(config);
+  if (config.protocol === 'anthropic-messages' || isAnthropicEndpoint(config.baseURL)) {
+    return new AnthropicProvider(config);
+  }
   return new OpenAIProvider(config, options);
 }

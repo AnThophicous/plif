@@ -30,6 +30,8 @@ import type { ModelConfig } from './config.js';
 import { isLocal, keyOptional } from './config.js';
 import type { CachedEffort, EffortCapabilityCache } from './capabilities.js';
 import { redactedProviderId, streamTiming } from './stream-timing.js';
+import { modelListResult, normalizeProviderModel } from './metadata.js';
+import { ContentDeltaNormalizer } from './content.js';
 import type { StreamTiming } from './stream-timing.js';
 import type { EventBus } from '../events/bus.js';
 import {
@@ -42,8 +44,10 @@ import type {
   CompletionRequest,
   FinishReason,
   Message,
+  ModelListResult,
   ModelInfo,
   ModelProvider,
+  ProviderModel,
   ToolCall,
   Usage,
 } from './provider.js';
@@ -233,7 +237,7 @@ export class OpenAIProvider implements ModelProvider {
     this.#onTiming = options.onTiming ?? (options.bus
       ? (timing) => options.bus!.emit('stream.timing', timing)
       : undefined);
-    const anonymous = !config.apiKey && keyOptional(config.baseURL, config.model);
+    const anonymous = !config.apiKey && keyOptional(config.baseURL, config.model, config.providerId);
     type SdkFetch = NonNullable<ClientOptions['fetch']>;
     const anonymousFetch = anonymous
       ? (async (...args: Parameters<SdkFetch>): Promise<Awaited<ReturnType<SdkFetch>>> => {
@@ -404,6 +408,7 @@ export class OpenAIProvider implements ModelProvider {
     // the print path, a test — sees the same two kinds of event whichever way
     // the host happens to frame it.
     const splitter = new ReasoningSplitter();
+    const contentDeltas = new ContentDeltaNormalizer();
     const reasoningDeltas = new ReasoningDeltaNormalizer();
     let reason: FinishReason = 'stop';
     let usage: Usage = NO_USAGE;
@@ -494,9 +499,22 @@ export class OpenAIProvider implements ModelProvider {
         const choice = chunk.choices[0];
         if (!choice) continue;
 
-        const text = choice.delta?.content;
-        if (text) {
-          for (const part of splitter.push(text)) {
+        const rawChoice = choice as typeof choice & {
+          readonly message?: { readonly content?: unknown };
+        };
+        const text = typeof choice.delta?.content === 'string' ? choice.delta.content : '';
+        const visibleText = text
+          ? contentDeltas.push({
+              text,
+              semantics: this.#config.streamSemantics ?? 'delta',
+            })
+          : '';
+        const finalText = typeof rawChoice.message?.content === 'string'
+          ? contentDeltas.push({ text: rawChoice.message.content, semantics: 'snapshot' })
+          : '';
+        for (const content of [visibleText, finalText]) {
+          if (!content) continue;
+          for (const part of splitter.push(content)) {
             if (!firstDelta) {
               firstDelta = true;
               emitTiming('first-delta', {
@@ -654,13 +672,29 @@ export class OpenAIProvider implements ModelProvider {
   }
 
   async list(): Promise<string[]> {
+    const result = await this.listModels();
+    return result.models.map((model) => model.id).sort();
+  }
+
+  async listModels(): Promise<ModelListResult> {
     try {
       const models = await this.#client.models.list();
-      return models.data.map((model) => model.id).sort();
-    } catch {
+      const entries = models.data
+        .map((model) => normalizeProviderModel(model as unknown as Record<string, unknown>, this.#config))
+        .filter((model): model is ProviderModel => model !== undefined);
+      return modelListResult(this.#config, entries);
+    } catch (error) {
       // Plenty of compatible servers do not implement /models. That is not an
       // error worth surfacing — it just means we cannot offer a picker.
-      return [];
+      const status = (error as { readonly status?: unknown }).status;
+      const failure = status === 429
+        ? 'rate_limit'
+        : status === 401 || status === 403
+          ? 'unauthorized'
+          : status === 404
+            ? 'unsupported'
+            : 'unavailable';
+      return { supported: false, models: [], error: failure };
     }
   }
 

@@ -135,9 +135,9 @@ const VISUALS: Record<string, EffortVisual> = {
     symbol: '',
     asciiSymbol: '',
     descriptor: 'adaptive reasoning',
-    // The signature ramp: cold greys with one champagne stop, so the working
-    // pulse flashes warm instead of merely brighter.
-    stops: ['accentDim', 'accent', 'goldBase', 'gold', 'goldBright', 'warmIvory', 'goldBright', 'gold', 'goldBase', 'accentBright'],
+    // The signature ramp uses the complete PLIF pink family, so the working
+    // pulse has a recognisable identity without reintroducing retired gold.
+    stops: ['accentDim', 'accent', 'accentStrong', 'accentBright', 'accentPastel', 'accentPastel', 'accentBright', 'accentStrong', 'accent', 'accentDim'],
     pattern: ['PLIF'],
     asciiPattern: ['PLIF'],
     cycleMs: 540,
@@ -161,7 +161,7 @@ export function effortSymbol(effort?: string): string {
  * The picker shows several efforts at once, so the active effort palette
  * cannot be reused for every row. This quiet ramp gives each option a place
  * in the same family without turning the list into a rainbow. PLIF breaks the
- * ramp on purpose: the one warm row is what makes the signature read as a
+ * ramp on purpose: its full pink identity makes the signature read as a
  * signature rather than as the top of a grey ladder.
  */
 export function effortTone(effort?: string): PaletteKey {
@@ -170,10 +170,10 @@ export function effortTone(effort?: string): PaletteKey {
     case 'medium': return 'muted';
     case 'high': return 'text';
     case 'xhigh': return 'brand';
-    case 'ultra':
-    case 'ultracode': return 'accent';
+    case 'ultra': return 'accent';
     case 'max': return 'accentBright';
-    case 'plif': return 'gold';
+    case 'ultracode': return 'accentStrong';
+    case 'plif': return 'accentBright';
     default: return 'muted';
   }
 }
@@ -205,7 +205,7 @@ export function effortPulseCells(
     color: active && effort !== 'plif'
       ? semanticWaveTone(elapsedMs, index, pattern.length, visual.stops, visual.cycleMs)
       : effort === 'plif'
-        ? color('gold')
+        ? color('accentBright')
         : color('faint'),
   }));
 }

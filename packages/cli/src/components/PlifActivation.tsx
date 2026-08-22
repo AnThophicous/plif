@@ -30,12 +30,12 @@ const ACTIVATION_INTERVALS = [
   { duration: 200, interval: 28 },
 ] as const;
 const ACTIVATION_STOPS: SemanticWaveStops = [
-  'brand',
+  'accentDim',
   'accentBright',
-  'goldBase',
-  'gold',
-  'goldBright',
-  'warmIvory',
+  'accent',
+  'accentStrong',
+  'accentPastel',
+  'accentPastel',
 ];
 
 export interface PlifActivationFrame {
@@ -94,7 +94,7 @@ export function plifActivationFrame(elapsedMs: number): PlifActivationFrame {
 }
 
 function logoLine(value: string, elapsedMs: number, opacity: number, index: number): React.ReactElement {
-  const base = mix(color('ghost'), color('warmIvory'), opacity * 0.82);
+  const base = mix(color('ghost'), color('accentPastel'), opacity * 0.82);
   const highlight = semanticWave((elapsedMs / 1_800 + index / Math.max(1, PLIF_ASCII_ART.length)) % 1, ACTIVATION_STOPS);
   return (
     <Text>

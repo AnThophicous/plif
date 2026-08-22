@@ -596,13 +596,13 @@ export function EffortSelector({
       {hint && <Text color={color('ghost')}>{truncate(hint, inner)}</Text>}
       <Text color={color('text')}>
         current <Text color={color('muted')}>(</Text>
-        <Text color={color(currentValue === 'plif' ? 'gold' : 'accentBright')} bold>{currentLabel}</Text>
+        <Text color={color('accentBright')} bold>{currentLabel}</Text>
         <Text color={color('muted')}>)</Text>
       </Text>
       <Box marginTop={1} flexDirection="column">
         {items.map((item, index) => {
           const active = index === selected;
-          const tone = item.value === 'plif' ? (active ? 'goldBright' : 'goldBase') : item.tone ?? 'muted';
+          const tone = item.value === 'plif' ? (active ? 'accentPastel' : 'accent') : item.tone ?? 'muted';
           const symbol = referenceEffortSymbol(item.value);
           const label = `${symbol ? `${symbol} ` : ''}${referenceEffortLabel(item.value)}`;
           const suffix = item.detail;

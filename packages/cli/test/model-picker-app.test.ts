@@ -186,7 +186,7 @@ test('/model shows the free OpenCode path and selects it without a key', async (
     await waitFor(() => stdout.output.includes('describe a task, or / for commands'), 'app prompt did not mount');
     await new Promise<void>((resolve) => setTimeout(resolve, 300));
     await stdin.type('/model\r');
-    await waitFor(() => stdout.output.includes('6 available') && /no key|free/i.test(stdout.output), `free model picker did not open\n${stdout.output}`);
+    await waitFor(() => /\d+ available/.test(stdout.output) && /no key|free/i.test(stdout.output), `free model picker did not open\n${stdout.output}`);
     assert.doesNotMatch(stdout.output, /GPT-4o|Claude Opus|NVIDIA NIM/);
     await stdin.type('\r');
     await waitFor(() => stdout.output.includes('deepseek-v4-flash-free'), `free model was not selected\n${stdout.output}`);
@@ -242,7 +242,7 @@ test('/model keeps the free path usable when the credential store is unavailable
     await waitFor(() => stdout.output.includes('describe a task, or / for commands'), 'app prompt did not mount');
     await new Promise<void>((resolve) => setTimeout(resolve, 300));
     await stdin.type('/model\r');
-    await waitFor(() => stdout.output.includes('6 available'), `free model picker did not open\n${stdout.output}`);
+    await waitFor(() => /\d+ available/.test(stdout.output), `free model picker did not open\n${stdout.output}`);
     await stdin.type('\r');
     await waitFor(() => stdout.output.includes('deepseek-v4-flash-free'), `free model was not selected\n${stdout.output}`);
     assert.equal(asked, 0);

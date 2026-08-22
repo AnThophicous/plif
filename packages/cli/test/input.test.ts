@@ -553,7 +553,7 @@ describe('model catalog picker', () => {
       })),
       [
         { value: 'low', label: 'Low', tone: 'faint', detail: 'light touch', current: false },
-        { value: 'plif', label: 'PLIF', tone: 'gold', detail: 'PLIF signature mode · adaptive reasoning', current: true },
+        { value: 'plif', label: 'PLIF', tone: 'accentBright', detail: 'PLIF signature mode · adaptive reasoning', current: true },
       ],
     );
   });

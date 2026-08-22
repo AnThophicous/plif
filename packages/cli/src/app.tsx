@@ -9,6 +9,7 @@ import {
   adoptProvider,
   credentialVariableForProvider,
   createModelProvider,
+  discoverProviderModels,
   forgetProviderKey,
   findCatalogProvider,
   forgetDiscoveredModels,
@@ -38,6 +39,7 @@ import {
   EditCoordinator,
   agentsOf,
   diffStats,
+  MODEL_CATALOG,
   parseDiff,
   profilesOf,
   providerIdForConfig,
@@ -53,6 +55,7 @@ import {
   globalConfigPath,
   loadGlobalConfig,
   saveGlobalConfig,
+  scheduleProviderDiscovery,
   summariseMemory,
   validateModelConfig,
   PlifError,
@@ -514,6 +517,40 @@ export function App({
   useEffect(() => {
     applyEffortPalette(effort);
   }, [effort]);
+
+  // Provider catalogs evolve independently of PLIF releases. Warm the cache
+  // once after startup, then refresh at a controlled low frequency. This is a
+  // background cache operation: it deliberately publishes no React state and
+  // therefore cannot remount the header, input, transcript, or spinner.
+  useEffect(() => {
+    let stop = (): void => undefined;
+    let cancelled = false;
+    const start = async (): Promise<void> => {
+      const stored = await loadGlobalConfig().catch(() => ({} as GlobalConfig));
+      const ids = [...new Set([
+        ...MODEL_CATALOG.map((provider) => provider.id),
+        ...userCatalog(stored).map((provider) => provider.id),
+      ])];
+      if (cancelled) return;
+      stop = scheduleProviderDiscovery(ids, {
+        stored,
+        resolve: async (providerId) => {
+          if (!credentials) return { stored };
+          try {
+            const apiKey = await credentials.lookup(credentialVariableForProvider(providerId, stored));
+            return { stored, ...(apiKey ? { apiKey } : {}) };
+          } catch {
+            return { stored };
+          }
+        },
+      });
+    };
+    void start();
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [credentials]);
   // Completion tokens live in loadingTelemetry, not App state. A fast stream
   // must not reconcile the whole Ink tree just to update one number.
   const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
@@ -2020,6 +2057,8 @@ export function App({
       let config = resolveConfig(stored, {
         model: selection.model,
         preset: selection.preset,
+        ...(selection.protocol ? { protocol: selection.protocol } : {}),
+        ...(selection.streamSemantics ? { streamSemantics: selection.streamSemantics } : {}),
         ...(savedKey ? { apiKey: savedKey } : {}),
       });
       let check = validateModelConfig(config);
@@ -2040,6 +2079,8 @@ export function App({
           config = resolveConfig(stored, {
             model: selection.model,
             preset: selection.preset,
+            ...(selection.protocol ? { protocol: selection.protocol } : {}),
+            ...(selection.streamSemantics ? { streamSemantics: selection.streamSemantics } : {}),
             apiKey: key,
           });
           check = validateModelConfig(config);
@@ -2075,6 +2116,8 @@ export function App({
       config = resolveConfig(persisted.config, {
         model: selection.model,
         preset: selection.preset,
+        ...(selection.protocol ? { protocol: selection.protocol } : {}),
+        ...(selection.streamSemantics ? { streamSemantics: selection.streamSemantics } : {}),
         ...(persisted.apiKey ? { apiKey: persisted.apiKey } : {}),
       });
       check = validateModelConfig(config);
@@ -2095,6 +2138,14 @@ export function App({
         type: 'context',
         used: estimateTokens(conversation.current),
         max: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+      });
+      // Configuration and discovery are separate concerns: switching can be
+      // acknowledged immediately, while the provider catalog warms in the
+      // background for the next /models opening. The discovery layer dedupes
+      // this with startup and periodic refreshes.
+      void discoverProviderModels(selection.preset, {
+        stored: persisted.config,
+        ...(persisted.apiKey ? { apiKey: persisted.apiKey } : {}),
       });
       push(
         entry('notice', `${glyph.done}  model    ${selection.model}`, {

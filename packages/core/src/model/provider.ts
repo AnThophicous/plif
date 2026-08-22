@@ -158,6 +158,44 @@ export interface ModelInfo {
   readonly contextWindow: number | undefined;
 }
 
+/** Wire protocol selected by an explicit provider/model offer. */
+export type ModelProtocol = 'openai-chat' | 'anthropic-messages';
+
+/** Whether a streamed text field is incremental or a complete snapshot. */
+export type StreamSemantics = 'delta' | 'snapshot';
+
+/** Provenance carried from discovery to the picker and request adapter. */
+export interface ModelSource {
+  readonly provider?: string;
+  readonly product?: string;
+  readonly tier?: string;
+  readonly endpoint?: string;
+}
+
+/** Metadata returned by a provider's model-list endpoint when it is known. */
+export interface ProviderModel {
+  readonly id: string;
+  readonly name?: string;
+  readonly contextWindow?: number;
+  readonly reasoning?: boolean;
+  readonly tools?: boolean;
+  readonly modalities?: readonly ('text' | 'image')[];
+  readonly cost?: 'free' | 'paid' | 'unknown';
+  readonly provider?: string;
+  readonly product?: string;
+  readonly tier?: string;
+  readonly protocol?: ModelProtocol;
+  readonly streamSemantics?: StreamSemantics;
+}
+
+/** Listing support is distinct from an empty successful catalog. */
+export interface ModelListResult {
+  readonly supported: boolean;
+  readonly models: readonly ProviderModel[];
+  readonly source?: ModelSource;
+  readonly error?: 'rate_limit' | 'unauthorized' | 'unavailable' | 'unsupported';
+}
+
 export interface ModelProvider {
   readonly info: ModelInfo;
   /** Stream a completion. Throws `PlifError` with a MODEL_* code on failure. */
@@ -166,6 +204,8 @@ export interface ModelProvider {
   probe(): Promise<{ ok: boolean; detail: string }>;
   /** Model ids the endpoint advertises. Empty when it does not support listing. */
   list(): Promise<string[]>;
+  /** Rich listing result. Older/test providers may implement only list(). */
+  readonly listModels?: () => Promise<ModelListResult>;
 }
 
 /**

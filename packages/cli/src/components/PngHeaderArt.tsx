@@ -29,7 +29,9 @@ export interface PngHeaderCell {
   readonly glyph: '▀' | '▄' | ' ';
 }
 
-const ASSET_URL = new URL('../../assets/negrocomcachecol.png', import.meta.url);
+// Canonical PLIF mascot. Keep the source canvas and its transparent margins so
+// the supplied artwork is placed as-is instead of being enlarged by cropping.
+const ASSET_URL = new URL('../../assets/negaopelao2.png', import.meta.url);
 const PANEL_FALLBACK = '#303030';
 // Keep the mascot legible without letting the raster dominate the header card.
 const TARGET_WIDTH = 16;
@@ -204,7 +206,7 @@ function composite(pixelValue: Rgba, background: readonly [number, number, numbe
 }
 
 const image = decodePng(new Uint8Array(fs.readFileSync(ASSET_URL)));
-const crop = visibleCrop(image);
+const crop: Crop = { left: 0, top: 0, width: image.width, height: image.height };
 export const PNG_HEADER_ART_WIDTH = TARGET_WIDTH;
 export const PNG_HEADER_ART_PIXEL_HEIGHT = Math.max(1, Math.round(
   TARGET_WIDTH * crop.height / crop.width / HALF_ROW_ASPECT,

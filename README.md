@@ -1,8 +1,8 @@
 <div align="center">
 
-**Plif 0.3.5 — the stable, adaptive coding agent for your terminal.**
+**Plif 0.3.6 — the stable, adaptive coding agent for your terminal.**
 
-Bring your own model. Configure the provider yourself. Plif 0.3.5 is built for
+Bring your own model. Configure the provider yourself. Plif 0.3.6 is built for
 long coding sessions with durable memory, better adaptation to the user, a
 calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 
@@ -16,7 +16,7 @@ calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 
 ---
 
-## What's new in 0.3.5
+## What's new in 0.3.6
 
 ### `/status`
 
@@ -41,6 +41,17 @@ Use `/providers` to configure another provider; its models then appear in
 `/model`. Provider names are added to rows only when two providers would
 otherwise display the same model name.
 
+### Models follow your providers
+
+When a provider exposes model discovery, PLIF uses the authenticated provider
+response as the available model set. Results are cached without credentials,
+served stale while a low-frequency refresh runs, and updated when the provider
+adds or removes models. Providers without a discovery endpoint keep their
+curated fallback list and are labelled internally as fallback data.
+
+Use `/providers` to add a provider; its catalog is warmed immediately in the
+background and becomes available through `/model` without restarting PLIF.
+
 ### Free-first onboarding
 
 A clean install can start through OpenCode's explicitly marked free route,
@@ -53,7 +64,9 @@ the default list.
 
 The home screen now keeps the PLIF wordmark above a compact outlined panel with
 the mascot on the left and readiness on the right. Runtime details moved to
-`/status`, so startup is calmer without losing the PLIF identity.
+`/status`, so startup is calmer without losing the PLIF identity. The neutral
+gray interface keeps its hierarchy while interaction and active states use
+PLIF's pink accent identity.
 
 ### Under the hood
 
@@ -64,7 +77,7 @@ the mascot on the left and readiness on the right. Runtime details moved to
 - Screen-owned keyboard handling, terminal resize coverage and narrow/wide TUI
   previews received additional regression coverage.
 
-## Why 0.3.5
+## Why 0.3.6
 
 - **Adaptive memory.** Useful facts are ranked and reused without turning the
   conversation into noise.

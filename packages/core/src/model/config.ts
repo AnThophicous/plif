@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto';
 import { PlifError } from '../errors.js';
 import { globalConfigPath, loadGlobalConfig, saveGlobalConfig } from '../config/global.js';
 import type { StorePaths } from '../store/paths.js';
+import type { ModelProtocol, StreamSemantics } from './provider.js';
 
 export interface ModelConfig {
   /** Model id as the endpoint knows it, e.g. "gpt-4o-mini", "llama3.1:8b". */
@@ -26,6 +27,12 @@ export interface ModelConfig {
   /** OpenAI-compatible base URL, including `/v1` where the server expects it. */
   readonly baseURL: string;
   readonly apiKey: string;
+  /** Provider identity is part of the request contract, not display-only data. */
+  readonly providerId?: string;
+  /** Explicit wire adapter selected from provider/model provenance. */
+  readonly protocol?: ModelProtocol;
+  /** Explicit semantics for a provider's streamed content field. */
+  readonly streamSemantics?: StreamSemantics;
   /** Explicit credential requirement; also true for ordinary paid remotes. */
   readonly needKey?: boolean;
   readonly temperature: number;
@@ -286,6 +293,8 @@ export interface CustomProviderModel {
   readonly tools?: boolean;
   /** Price is displayed before a vision subagent is allowed to start. */
   readonly cost?: ModelCost;
+  readonly protocol?: ModelProtocol;
+  readonly streamSemantics?: StreamSemantics;
   readonly needKey?: boolean;
   readonly NeedKey?: boolean;
   readonly [key: string]: unknown;
@@ -293,6 +302,47 @@ export interface CustomProviderModel {
 
 export type ModelCapability = 'text' | 'image';
 export type ModelCost = 'free' | 'paid' | 'unknown';
+
+export interface ProviderOffer {
+  readonly product: string;
+  readonly tier: string;
+  readonly cost: ModelCost;
+  readonly protocol?: ModelProtocol;
+}
+
+/**
+ * Provider-level provenance. It is deliberately keyed by provider id and
+ * endpoint tier; model names never decide whether an offer is free or paid.
+ */
+const PROVIDER_OFFERS: Readonly<Record<string, ProviderOffer>> = Object.freeze({
+  opencode: { product: 'OpenCode', tier: 'Zen', cost: 'free', protocol: 'openai-chat' },
+  'opencode-go': { product: 'OpenCode', tier: 'Go', cost: 'paid', protocol: 'openai-chat' },
+});
+
+const OPENCODE_ZEN_ANONYMOUS_MODELS: ReadonlySet<string> = new Set([
+  'deepseek-v4-flash-free',
+  'longcat-2.0-free',
+  'nemotron-3-ultra-free',
+  'ling-3.0-tiny-free',
+  'mimo-v2.5-free',
+  'laguna-s-2.1-free',
+]);
+
+/** Exact provider/model protocol registrations. No model-name heuristics. */
+const MODEL_PROTOCOLS: ReadonlyMap<string, ModelProtocol> = new Map([
+  ['opencode-go/qwen3.8-max', 'anthropic-messages'],
+]);
+
+export function providerOffer(providerId: string | undefined): ProviderOffer | undefined {
+  return providerId ? PROVIDER_OFFERS[providerId] : undefined;
+}
+
+export function protocolForModel(
+  providerId: string | undefined,
+  model: string,
+): ModelProtocol | undefined {
+  return providerId ? MODEL_PROTOCOLS.get(`${providerId}/${model}`) : undefined;
+}
 
 export interface CustomProvider {
   /** Plif custom providers all use the OpenAI-compatible adapter. */
@@ -376,6 +426,8 @@ export interface ResolveOptions {
   readonly baseURL?: string;
   readonly preset?: string;
   readonly apiKey?: string;
+  readonly protocol?: ModelProtocol;
+  readonly streamSemantics?: StreamSemantics;
   /** Injected in tests so resolution can be checked without touching the real env. */
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
@@ -480,6 +532,7 @@ export function resolveConfig(
     PRESETS['openai']!.baseURL;
 
   const model = ref.model;
+  const providerId = presetName;
   const modelMetadata = custom?.models?.[model];
   const configuredNeedKey = firstBoolean(
     ...(rootFieldsApply ? [stored.NeedKey, stored.needKey] : []),
@@ -488,7 +541,8 @@ export function resolveConfig(
     modelMetadata?.NeedKey,
     modelMetadata?.needKey,
   );
-  const needKey = configuredNeedKey ?? !keyOptional(baseURL, model);
+  const needKey = configuredNeedKey ?? !keyOptional(baseURL, model, providerId);
+  const protocol = options.protocol ?? modelMetadata?.protocol ?? protocolForModel(providerId, model) ?? providerOffer(providerId)?.protocol;
 
   // Try the preset's own key variable before the generic one, so switching
   // preset picks up the right credential without renaming anything. Everything
@@ -508,7 +562,7 @@ export function resolveConfig(
     // OpenAI key sent to Zen's free tier is not ignored, it is *rejected*. A
     // developer who happens to have OPENAI_API_KEY exported would otherwise
     // find the free models broken for a reason nothing on screen explains.
-    (keyOptional(baseURL, model) || custom ? undefined : env['OPENAI_API_KEY']) ??
+    (keyOptional(baseURL, model, providerId) || custom ? undefined : env['OPENAI_API_KEY']) ??
     (rootFieldsApply && !customCollision ? stored.apiKey : undefined) ??
     // Local servers ignore the value but the SDK refuses an empty one.
     (isLocal(baseURL) && !needKey ? 'local' : '');
@@ -517,6 +571,9 @@ export function resolveConfig(
     model,
     baseURL,
     apiKey,
+    ...(providerId ? { providerId } : {}),
+    ...(protocol ? { protocol } : {}),
+    ...(options.streamSemantics ? { streamSemantics: options.streamSemantics } : {}),
     needKey,
     temperature: numberFrom(env['PLIF_TEMPERATURE']) ?? stored.temperature ?? DEFAULTS.temperature,
     maxTokens: numberFrom(env['PLIF_MAX_TOKENS']) ?? stored.maxTokens,
@@ -761,12 +818,9 @@ const ANONYMOUS_HOSTS: ReadonlySet<string> = new Set(['opencode.ai']);
 /**
  * Does this model cost nothing and need no account?
  *
- * The suffix is the contract Zen publishes — `deepseek-v4-flash-free`,
- * `ling-3.0-flash-free` — and it is the only signal available before a request
- * is made. It is a naming convention rather than a guarantee, so nothing here
- * *depends* on it being right: at worst the endpoint answers 401 and the error
- * path says which key to set, which is where an unconfigured model ends up
- * anyway.
+ * Kept for ranking and backwards-compatible display helpers. It is not used
+ * for authentication: anonymous access is decided by the explicit offer and
+ * exact model registry below.
  */
 export function isFreeModel(model: string): boolean {
   return model.endsWith('-free');
@@ -779,11 +833,12 @@ export function isFreeModel(model: string): boolean {
  * anonymously. Everything else needs a key, and saying so early is kinder than
  * a 401 three seconds into the first turn.
  */
-export function keyOptional(baseURL: string, model: string): boolean {
+export function keyOptional(baseURL: string, model: string, providerId?: string): boolean {
   if (isLocal(baseURL)) return true;
-  if (!isFreeModel(model)) return false;
+  if (providerId !== 'opencode') return false;
+  if (!OPENCODE_ZEN_ANONYMOUS_MODELS.has(model)) return false;
   try {
-    return ANONYMOUS_HOSTS.has(new URL(baseURL).hostname);
+    return ANONYMOUS_HOSTS.has(new URL(baseURL).hostname) && providerOffer(providerId)?.tier === 'Zen';
   } catch {
     return false;
   }
@@ -824,7 +879,7 @@ export function validate(config: ModelConfig): { ok: boolean; problem?: string; 
       hint: 'Set PLIF_BASE_URL, or pick a preset with --preset.',
     };
   }
-  if (!config.apiKey && (config.needKey ?? !keyOptional(config.baseURL, config.model))) {
+  if (!config.apiKey && (config.needKey ?? !keyOptional(config.baseURL, config.model, config.providerId))) {
     return {
       ok: false,
       problem: 'no API key for a remote endpoint',
@@ -848,7 +903,7 @@ export function describe(config: ModelConfig): Record<string, string> {
     model: config.model,
     endpoint: config.baseURL,
       key:
-      config.apiKey || (config.needKey ?? !keyOptional(config.baseURL, config.model))
+      config.apiKey || (config.needKey ?? !keyOptional(config.baseURL, config.model, config.providerId))
         ? redact(config.apiKey)
         : '(not required — free model)',
     temperature: String(config.temperature),
