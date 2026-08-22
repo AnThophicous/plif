@@ -9,11 +9,16 @@ import { LinuxBackend } from '../src/linux/backend.js';
 import { selectBackend } from '../src/index.js';
 
 const backend = new LinuxBackend();
+// Bubblewrap namespaces are available on the hosted Ubuntu runner even when
+// systemd has not delegated a cgroup subtree. Keep those capabilities
+// independently testable instead of making the namespace gate require both.
+const requireLinuxSandbox = process.env['PLIF_REQUIRE_LINUX_SANDBOX'] === '1';
+const requireLinuxCgroups = process.env['PLIF_REQUIRE_LINUX_CGROUP'] === '1';
 
 async function available(t: TestContext): Promise<boolean> {
   const report = await backend.probe();
   if (report.isolation !== 'none') {
-    if (process.env['PLIF_REQUIRE_LINUX_SANDBOX'] === '1') {
+    if (requireLinuxCgroups) {
       assert.equal(report.accounting, true, report.degradations.join('; '));
       assert.equal(report.memoryLimit, true, report.degradations.join('; '));
       assert.equal(report.processLimit, true, report.degradations.join('; '));
@@ -21,7 +26,7 @@ async function available(t: TestContext): Promise<boolean> {
     }
     return true;
   }
-  if (process.env['PLIF_REQUIRE_LINUX_SANDBOX'] === '1') {
+  if (requireLinuxSandbox) {
     assert.fail(report.degradations[0] ?? 'bubblewrap unavailable');
   }
   t.skip(report.degradations[0] ?? 'bubblewrap unavailable');
