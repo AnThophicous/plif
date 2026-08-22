@@ -9,7 +9,7 @@ jobs:
   check:
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -22,11 +22,6 @@ jobs:
 
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
-      - if: runner.os == 'Linux'
-        name: Enable Linux user namespaces for Bubblewrap
-        run: |
-          echo "kernel.apparmor_restrict_unprivileged_userns = 0" | sudo tee /etc/sysctl.d/99-plif-userns.conf
-          sudo sysctl --system
       - run: npm ci
       - if: runner.os == 'Linux'
         run: PLIF_REQUIRE_LINUX_SANDBOX=1 node --import tsx --test packages/sandbox/test/linux-backend.test.ts
