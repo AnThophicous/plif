@@ -36,7 +36,7 @@ jobs:
           if [ "$status" -ne 0 ]; then
             while IFS= read -r line; do
               case "$line" in
-                *"✖"*|*"fail"*|*"Error"*|*"error"*) echo "::error title=Linux test failure::$line" ;;
+                *"not ok"*|*"✖"*|*"Test failed"*|*"AssertionError"*|*"Error:"*|*"error"*) echo "::error title=Linux test failure::$line" ;;
               esac
             done < npm-test.log
           fi
