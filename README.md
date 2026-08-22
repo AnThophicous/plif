@@ -94,6 +94,19 @@ PLIF's pink accent identity.
 
 ## Install
 
+The current stable release is [v0.3.6](https://github.com/AnThophicous/plif/releases/tag/v0.3.6).
+For a reproducible install, pin that version explicitly:
+
+```powershell
+npm install -g @plif/cli@0.3.6
+```
+
+To follow the newest published stable release instead:
+
+```powershell
+npm install -g @plif/cli@latest
+```
+
 ```powershell
 irm https://raw.githubusercontent.com/AnThophicous/plif/main/install.ps1 | iex
 ```
@@ -105,6 +118,9 @@ would rather skip the ceremony, the two are the same thing:
 npm install -g @plif/cli
 plif
 ```
+
+After an upgrade, `plif version` reports the installed CLI version. The full
+release history is in [`CHANGELOG.md`](CHANGELOG.md).
 
 The package is scoped; the command is not. npm refuses the bare name `plif` as
 too close to `plist` and `plop`, so the package is `@plif/cli` and the binary it

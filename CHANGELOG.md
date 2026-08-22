@@ -33,6 +33,14 @@ All notable changes to plif. This project follows [Semantic Versioning](https://
 - Startup/version metadata and workspace package dependencies are aligned for
   the `0.3.6` release.
 
+### Distribution
+
+- Published as `@plif/cli@0.3.6`, with matching `@plif/core@0.3.6` and
+  `@plif/sandbox@0.3.6` packages.
+- The GitHub release is [v0.3.6](https://github.com/AnThophicous/plif/releases/tag/v0.3.6).
+- The package README now documents both reproducible version-pinned installs
+  and the `@latest` upgrade path.
+
 ## [0.3.5] — 2026-08-21
 
 ### Added
