@@ -2,6 +2,15 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Local diagnostics and generated review artifacts. These are intentionally
+# kept outside commits because they can contain paths, timings, screenshots,
+# or provider error output from a developer session.
+*.log
+/artifacts/
+/.dme-spyx/
+/HANDOFF-GOLDEN-MASTER.md
+/tmp-*
+
 # Copied into each package at pack time by scripts/prepack.mjs. The originals
 # live at the repository root.
 packages/*/LICENSE
