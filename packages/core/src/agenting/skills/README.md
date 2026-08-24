@@ -5,6 +5,11 @@ procedure that the agent loads for a matching request; it is not a second system
 
 ## Where skills live
 
+- Builtin skills shipped by Plif live in `src/agenting/skills/builtin/<name>/SKILL.md`;
+  supporting references stay beside the skill and are included in the package.
+  The loader reads their frontmatter for the startup catalogue and loads the
+  body only when that skill is selected, so builtin instructions do not need to
+  live in a TypeScript module or enter the prompt up front.
 - User skills apply in every workspace: `~/.plif/skills/<name>/SKILL.md`.
 - Project skills travel with a repository: `<workspace>/.plif/skills/<name>/SKILL.md`.
 - A project skill with the same name overrides a user skill.
@@ -18,6 +23,9 @@ name, writes the required format, and makes the skill available in the current s
 ---
 name: focused-kebab-case-name
 description: One line describing precisely when this skill should be loaded
+# Optional for builtin packages:
+# package: package-id
+# package-name: Human-readable package name
 ---
 
 # Skill title

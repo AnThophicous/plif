@@ -1,11 +1,11 @@
 /**
  * The live thinking window.
  *
- * Reasoning is shown while it is being written and folded away the moment it
- * settles. Two properties make that safe to put in the frame: the window is
- * bounded, so a model that thinks for a page cannot push the frame to terminal
- * height; and it is wrapped from the start, so rows hold still as text arrives
- * instead of reflowing on every delta.
+ * Reasoning is shown while it is being written and leaves one compact preview
+ * line once it settles. Two properties make that safe to put in the frame: the
+ * live window is bounded, and settled thoughts remain expandable through the
+ * transcript history without copying the whole reasoning block into the live
+ * frame.
  */
 
 import assert from 'node:assert/strict';
@@ -71,11 +71,17 @@ describe('the height a thinking row claims', () => {
     entry('thinking', 'Thinking', { detail, ...(status ? { status } : {}) });
 
   it('keeps breathing room once it has settled', () => {
-    assert.equal(estimateHeight(thinking('a page of reasoning '.repeat(50)), WIDTH), 3);
+    assert.equal(estimateHeight(thinking('a page of reasoning '.repeat(50)), WIDTH), 4);
   });
 
   it('keeps the thinking heading visible while active with nothing written yet', () => {
     assert.equal(estimateHeight(thinking('', 'active'), WIDTH), 3);
+  });
+
+  it('keeps one compact preview visible after a thought settles', () => {
+    const text = 'a page of reasoning '.repeat(50);
+    assert.equal(thoughtLines(text, WIDTH, 1).length, 1);
+    assert.equal(estimateHeight(thinking(text), WIDTH), 4);
   });
 
   it('accounts for the live window while active, and is bounded by it', () => {

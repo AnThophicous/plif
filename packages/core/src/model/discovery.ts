@@ -10,7 +10,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { findCatalogProvider, rankModelIds } from './catalog.js';
+import { findCatalogProvider, rankProviderModels } from './catalog.js';
 import { PRESETS, resolveConfig, type ModelConfig, type StoredConfig } from './config.js';
 import { createModelProvider } from './factory.js';
 import type { ModelSource, ProviderModel } from './provider.js';
@@ -202,8 +202,12 @@ async function refreshProvider(
         noteFailure(key);
         return failureResult(previous, result.error ?? 'unsupported');
       }
-      const ids = rankModelIds(providerId, result.models.map((model) => model.id));
-      const models = ids.map((id) => result.models.find((model) => model.id === id) ?? { id });
+      // Rank and retain the normalized rows together. The old id-first path
+      // sorted ids and then performed a linear find for every row, which made
+      // large gateways needlessly expensive and could lose provider metadata.
+      const uniqueModels = [...new Map(result.models.map((model) => [model.id, model])).values()];
+      const models = rankProviderModels(providerId, uniqueModels);
+      const ids = models.map((model) => model.id);
       const next: DiscoveredModels = {
         ids,
         models,

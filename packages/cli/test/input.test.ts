@@ -47,6 +47,17 @@ import {
 import type { PickerGroup } from '../src/components/Picker.js';
 import type { Engine } from '@plif/core';
 import { initialSession, sessionReducer } from '../src/session.js';
+import { editorDeleteAction } from '../src/editor-keys.js';
+
+describe('editor delete key normalization', () => {
+  it('treats Windows DEL as Backspace even though Ink calls it delete', () => {
+    assert.equal(editorDeleteAction({ backspace: false, delete: true }, '\x7f'), 'backward');
+  });
+
+  it('keeps the real Delete escape sequence forward-delete', () => {
+    assert.equal(editorDeleteAction({ backspace: false, delete: true }, '\x1b[3~'), 'forward');
+  });
+});
 
 describe('tokenize', () => {
   it('splits on whitespace', () => {
@@ -515,6 +526,7 @@ describe('model catalog picker', () => {
       clear: () => undefined,
       exit: () => undefined,
       cwd: process.cwd(),
+      tempDir: process.cwd(),
       model: null,
       modelProblem: 'no API key for a remote endpoint',
       switchModel: async () => undefined,

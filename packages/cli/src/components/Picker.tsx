@@ -3,13 +3,15 @@ import { Box, Text } from 'ink';
 import type { ModelSelection } from '@plif/core';
 
 import { effortSymbol, effortTone, effortVisual } from '../effort-visuals.js';
-import { color, glyph, truncate, type PaletteKey } from '../theme.js';
+import { binaryStateIndicator, color, glyph, truncate, type BinaryState, type PaletteKey } from '../theme.js';
 
 export interface PickerItem {
   readonly value: string;
   readonly label: string;
   readonly detail?: string;
   readonly current?: boolean;
+  /** Binary state rendered as a semantic check/X marker, never as ON/OFF text. */
+  readonly state?: BinaryState;
   readonly badges?: readonly string[];
   /** Optional identity mark, distinct from the keyboard selection cursor. */
   readonly symbol?: string;
@@ -19,10 +21,27 @@ export interface PickerItem {
   readonly provider?: string;
   readonly capabilities?: readonly string[];
   readonly context?: string;
+  readonly maxInput?: string;
+  readonly maxOutput?: string;
   readonly auth?: string;
   readonly reasoning?: boolean;
   readonly tools?: boolean;
   readonly cost?: string;
+  readonly pricing?: {
+    readonly inputPerMillion?: number;
+    readonly outputPerMillion?: number;
+    readonly cacheReadPerMillion?: number;
+    readonly cacheWritePerMillion?: number;
+    readonly currency?: string;
+  };
+  /** Internal model quality tier, shown only in the details pane. */
+  readonly tier?: string;
+  /** Provider plan/tier, distinct from Plif's internal quality tier. */
+  readonly providerTier?: string;
+  /** Provenance of model metadata shown in the details pane. */
+  readonly source?: string;
+  /** Honest explanation when a provider leaves metadata fields unpublished. */
+  readonly metadataNote?: string;
   /** Searchable aliases/metadata kept out of the visible row. */
   readonly searchText?: string;
   /** Flat model rows carry their provider/model pair through Enter. */
@@ -73,6 +92,19 @@ export function effortPickerItems(
     tone: effortTone(value),
     current: value === current,
   }));
+}
+
+function PickerStateMark({ state }: { readonly state: BinaryState }): React.ReactElement {
+  const indicator = binaryStateIndicator(state);
+  return (
+    <Text color={color(indicator.tone)} bold={state === 'on'}>
+      {indicator.icon}
+    </Text>
+  );
+}
+
+function pickerStateTone(item: PickerItem): PaletteKey {
+  return item.state ? binaryStateIndicator(item.state).tone : item.tone ?? 'muted';
 }
 
 /**
@@ -211,6 +243,7 @@ interface PickerProps {
   readonly selected: number;
   readonly width: number;
   readonly rows?: number;
+  readonly onFilter?: () => void;
 }
 
 export function filterItems(items: readonly PickerItem[], filter: string): PickerItem[] {
@@ -243,6 +276,7 @@ export function Picker({
   selected,
   width,
   rows = 8,
+  onFilter,
 }: PickerProps): React.ReactElement {
   const availableWidth = Math.max(1, width - 4);
   const grouped = groups !== undefined;
@@ -398,11 +432,27 @@ export function Picker({
               const itemSummary = [
                 pickerItem.symbol,
                 pickerItem.label,
-                pickerItem.current ? `${glyph.done} active model` : undefined,
+                pickerItem.current && !pickerItem.state ? `${glyph.done} active model` : undefined,
                 ...(pickerItem.badges ?? []),
                 pickerItem.detail,
               ].filter(Boolean).join(' · ');
               if (compact) {
+                if (pickerItem.state) {
+                  return (
+                    <Box key={row.id} width="100%">
+                      <Text color={active ? caretTone : color('ghost')}>
+                        {active ? glyph.caret : ' '}{' '}
+                      </Text>
+                      <PickerStateMark state={pickerItem.state} />
+                      <Text color={color(active ? pickerItem.tone ?? 'text' : pickerStateTone(pickerItem))} bold={active || (pickerItem.current === true && pickerItem.state === 'on')}>
+                        {' '}{truncate(pickerItem.label, Math.max(10, inner - 8))}
+                      </Text>
+                      {pickerItem.detail && (
+                        <Text color={color('ghost')}> · {truncate(pickerItem.detail, Math.max(10, inner - 34))}</Text>
+                      )}
+                    </Box>
+                  );
+                }
                 return (
                   <Box key={row.id} width="100%">
                     <Text color={color(active ? pickerItem.tone ?? 'text' : pickerItem.tone ?? 'muted')} bold={active}>
@@ -416,10 +466,15 @@ export function Picker({
                   <Text color={active ? caretTone : color('ghost')}>
                     {'  '}{active ? glyph.caret : ' '}{' '}
                   </Text>
-                  <Text color={color(active ? pickerItem.tone ?? 'text' : pickerItem.tone ?? 'muted')} bold={active}>
-                    {pickerItem.symbol ? `${pickerItem.symbol} ` : ''}{truncate(pickerItem.label, Math.max(10, inner - 18))}
+                  {pickerItem.state ? <PickerStateMark state={pickerItem.state} /> : pickerItem.symbol && (
+                    <Text color={color(active ? pickerItem.tone ?? 'text' : pickerItem.tone ?? 'muted')} bold={active}>
+                      {pickerItem.symbol}
+                    </Text>
+                  )}
+                  <Text color={color(active ? pickerItem.tone ?? 'text' : pickerStateTone(pickerItem))} bold={active || (pickerItem.current === true && pickerItem.state === 'on')}>
+                    {' '}{truncate(pickerItem.label, Math.max(10, inner - 18))}
                   </Text>
-                  {pickerItem.current && <Text color={color('accent')}> {glyph.done} active model</Text>}
+                  {pickerItem.current && !pickerItem.state && <Text color={color('accent')}> {glyph.done} active model</Text>}
                   {pickerItem.badges?.map((badge) => (
                     <Text key={badge} color={color(badge === 'default' ? 'accent' : 'info')}>
                       {' · '}{badge}
@@ -447,11 +502,27 @@ export function Picker({
             const itemSummary = [
               pickerItem.symbol,
               pickerItem.label,
-              pickerItem.current ? `${glyph.done} active` : undefined,
+              pickerItem.current && !pickerItem.state ? `${glyph.done} active` : undefined,
               ...(pickerItem.badges ?? []),
               pickerItem.detail,
             ].filter(Boolean).join(' · ');
             if (compact) {
+              if (pickerItem.state) {
+                return (
+                  <Box key={pickerItem.value} width="100%">
+                    <Text color={active ? caretTone : color('ghost')}>
+                      {active ? glyph.caret : ' '}{' '}
+                    </Text>
+                    <PickerStateMark state={pickerItem.state} />
+                    <Text color={color(active ? pickerItem.tone ?? 'text' : pickerStateTone(pickerItem))} bold={active || (pickerItem.current === true && pickerItem.state === 'on')}>
+                      {' '}{truncate(pickerItem.label, Math.max(10, inner - 8))}
+                    </Text>
+                    {pickerItem.detail && (
+                      <Text color={color('ghost')}> · {truncate(pickerItem.detail, Math.max(10, inner - 34))}</Text>
+                    )}
+                  </Box>
+                );
+              }
               return (
                 <Box key={pickerItem.value} width="100%">
                   <Text color={color(active ? pickerItem.tone ?? 'text' : pickerItem.tone ?? 'muted')} bold={active}>
@@ -465,10 +536,15 @@ export function Picker({
                 <Text color={active ? caretTone : color('ghost')}>
                   {active ? glyph.caret : ' '}{' '}
                 </Text>
-                <Text color={color(active ? pickerItem.tone ?? 'text' : pickerItem.tone ?? 'muted')} bold={active}>
-                  {pickerItem.symbol ? `${pickerItem.symbol} ` : ''}{truncate(pickerItem.label, Math.max(10, inner - 14))}
+                {pickerItem.state ? <PickerStateMark state={pickerItem.state} /> : pickerItem.symbol && (
+                  <Text color={color(active ? pickerItem.tone ?? 'text' : pickerItem.tone ?? 'muted')} bold={active}>
+                    {pickerItem.symbol}
+                  </Text>
+                )}
+                <Text color={color(active ? pickerItem.tone ?? 'text' : pickerStateTone(pickerItem))} bold={active || (pickerItem.current === true && pickerItem.state === 'on')}>
+                  {' '}{truncate(pickerItem.label, Math.max(10, inner - 14))}
                 </Text>
-                {pickerItem.current && <Text color={color('accent')}> {glyph.done} active</Text>}
+                {pickerItem.current && !pickerItem.state && <Text color={color('accent')}> {glyph.done} active</Text>}
                 {pickerItem.badges?.map((badge) => (
                   <Text key={badge} color={color(badge === 'default' ? 'accent' : 'info')}>
                     {' · '}{badge}
@@ -502,7 +578,7 @@ export function Picker({
 
         <Box marginTop={1} justifyContent="space-between">
           <Text color={color('muted')}>
-            {grouped ? '↑↓ move · ←→ expand · Enter select' : '↑↓ move · Enter select'} · / search
+            {grouped ? '↑↓ move · ←→ expand · Enter select' : '↑↓ move · Enter select'} · / search{onFilter ? ' · F filters' : ''}
           </Text>
           <Text color={color('ghost')}>
             <Text inverse bold> Esc </Text> close
@@ -521,17 +597,40 @@ function PickerDetails({ item, width }: { readonly item: PickerItem; readonly wi
       {item.current && <Text color={color('success')}>current</Text>}
       {item.provider && <Text color={color('muted')}>{`Provider  ${value(item.provider)}`}</Text>}
       <Text color={color('ghost')}>{`ID        ${value(item.selection?.model ?? item.value)}`}</Text>
-      <Text color={color('ghost')}>{`Context   ${value(item.context ?? 'Unknown')}`}</Text>
-      <Text color={color('ghost')}>{`Access    ${value(item.auth ?? 'Unknown')}`}</Text>
-      <Text color={color('ghost')}>{`Reasoning ${item.reasoning === undefined ? 'Unknown' : item.reasoning ? 'Yes' : 'No'}`}</Text>
-      <Text color={color('ghost')}>{`Tools     ${item.tools === undefined ? 'Unknown' : item.tools ? 'Yes' : 'No'}`}</Text>
+      {item.selection?.protocol && (
+        <Text color={color('ghost')}>{`Transport ${value(item.selection.protocol === 'openai-chat' ? 'OpenAI-compatible chat' : 'Anthropic Messages')}`}</Text>
+      )}
+      <Text color={color('ghost')}>{`Context   ${value(item.context ?? 'Not reported')}`}</Text>
+      {item.maxInput && <Text color={color('ghost')}>{`Max input  ${value(item.maxInput)}`}</Text>}
+      {item.maxOutput && <Text color={color('ghost')}>{`Max output ${value(item.maxOutput)}`}</Text>}
+      <Text color={color('ghost')}>{`Access    ${value(item.auth ?? 'Not reported')}`}</Text>
+      <Text color={color('ghost')}>
+        {'Reasoning '}
+        {item.reasoning === undefined ? 'Not reported' : <Text color={color(binaryStateIndicator(item.reasoning ? 'on' : 'off').tone)} bold>{binaryStateIndicator(item.reasoning ? 'on' : 'off').icon}</Text>}
+      </Text>
+      <Text color={color('ghost')}>
+        {'Tools     '}
+        {item.tools === undefined ? 'Not reported' : <Text color={color(binaryStateIndicator(item.tools ? 'on' : 'off').tone)} bold>{binaryStateIndicator(item.tools ? 'on' : 'off').icon}</Text>}
+      </Text>
+      {item.tier && <Text color={color('ghost')}>{`Tier      ${value(item.tier)}`}</Text>}
+      {item.providerTier && <Text color={color('ghost')}>{`Provider tier ${value(item.providerTier)}`}</Text>}
       {item.capabilities && item.capabilities.length > 0 && (
         <Text color={color('ghost')}>{`Provides  ${value(item.capabilities.join(' · '))}`}</Text>
       )}
       {item.cost && <Text color={color('ghost')}>{`Cost      ${value(item.cost)}`}</Text>}
+      <Text color={color('ghost')}>{`Pricing   ${value(formatPricing(item.pricing))}`}</Text>
+      {item.source && <Text color={color('ghost')}>{`Source    ${value(item.source)}`}</Text>}
+      {item.metadataNote && <Text color={color('faint')}>{value(item.metadataNote)}</Text>}
       {item.detail && <Text color={color('faint')}>{value(item.detail)}</Text>}
     </Box>
   );
+}
+
+function formatPricing(pricing: PickerItem['pricing']): string {
+  if (!pricing) return 'Not reported by provider';
+  const input = pricing.inputPerMillion === undefined ? 'input n/a' : `input $${pricing.inputPerMillion.toFixed(4)}/M`;
+  const output = pricing.outputPerMillion === undefined ? 'output n/a' : `output $${pricing.outputPerMillion.toFixed(4)}/M`;
+  return `${input} · ${output}`;
 }
 
 const ModelPickerRow = React.memo(function ModelPickerRow({

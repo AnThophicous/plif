@@ -31,6 +31,8 @@ export interface ComposerState {
   readonly draft: string;
   /** UTF-16 offset snapped to a complete grapheme boundary. */
   readonly cursor: number;
+  /** The terminal's select-all range, if one is active. */
+  readonly selection: { readonly start: number; readonly end: number } | null;
   readonly attachments: readonly PastedAttachment[];
   readonly queue: readonly QueuedComposerMessage[];
   readonly queuedSelection: number;
@@ -53,6 +55,7 @@ export type ComposerAction =
   | { readonly type: 'move.home' }
   | { readonly type: 'move.end' }
   | { readonly type: 'cursor.set'; readonly cursor: number }
+  | { readonly type: 'select.all' }
   | { readonly type: 'delete.backward' }
   | { readonly type: 'delete.forward' }
   | { readonly type: 'draft.set'; readonly text: string; readonly cursor?: number }
@@ -79,6 +82,7 @@ export type ComposerAction =
 export const initialComposerState: ComposerState = {
   draft: '',
   cursor: 0,
+  selection: null,
   attachments: [],
   queue: [],
   queuedSelection: 0,
@@ -88,14 +92,33 @@ export const initialComposerState: ComposerState = {
 
 function insert(state: ComposerState, text: string): ComposerState {
   if (!text) return state;
-  const draft = state.draft.slice(0, state.cursor) + text + state.draft.slice(state.cursor);
+  const start = state.selection ? Math.min(state.selection.start, state.selection.end) : state.cursor;
+  const end = state.selection ? Math.max(state.selection.start, state.selection.end) : state.cursor;
+  const draft = state.draft.slice(0, start) + text + state.draft.slice(end);
   return {
     ...state,
     draft,
-    cursor: state.cursor + text.length,
+    cursor: start + text.length,
+    selection: null,
+    attachments: attachmentsOutsideRange(state, start, end),
     completion: null,
     historySearch: null,
   };
+}
+
+/** Drop paste payloads whose visible token was deleted or replaced. */
+function attachmentsOutsideRange(
+  state: ComposerState,
+  start: number,
+  end: number,
+): readonly PastedAttachment[] {
+  if (start === end) return state.attachments;
+  return state.attachments.filter((attachment) => {
+    const at = state.draft.indexOf(attachment.token);
+    if (at < 0) return false;
+    const tokenEnd = at + attachment.token.length;
+    return tokenEnd <= start || at >= end;
+  });
 }
 
 function clampSelection(index: number, length: number): number {
@@ -109,35 +132,72 @@ export function composerReducer(state: ComposerState, action: ComposerAction): C
     case 'newline':
       return insert(state, '\n');
     case 'move.left':
-      return { ...state, cursor: stepLeft(state.draft, state.cursor) };
+      return { ...state, cursor: stepLeft(state.draft, state.cursor), selection: null };
     case 'move.right':
-      return { ...state, cursor: stepRight(state.draft, state.cursor) };
+      return { ...state, cursor: stepRight(state.draft, state.cursor), selection: null };
     case 'move.home':
-      return { ...state, cursor: 0 };
+      return { ...state, cursor: 0, selection: null };
     case 'move.end':
-      return { ...state, cursor: state.draft.length };
+      return { ...state, cursor: state.draft.length, selection: null };
     case 'cursor.set':
       return {
         ...state,
         cursor: snap(state.draft, Math.max(0, Math.min(action.cursor, state.draft.length))),
+        selection: null,
+      };
+    case 'select.all':
+      return {
+        ...state,
+        cursor: state.draft.length,
+        selection: state.draft.length > 0 ? { start: 0, end: state.draft.length } : null,
       };
     case 'delete.backward': {
+      if (state.selection) {
+        const start = Math.min(state.selection.start, state.selection.end);
+        const end = Math.max(state.selection.start, state.selection.end);
+        return {
+          ...state,
+          draft: state.draft.slice(0, start) + state.draft.slice(end),
+          cursor: start,
+          selection: null,
+          attachments: attachmentsOutsideRange(state, start, end),
+          completion: null,
+          historySearch: null,
+        };
+      }
       const from = stepLeft(state.draft, state.cursor);
       if (from === state.cursor) return state;
       return {
         ...state,
         draft: state.draft.slice(0, from) + state.draft.slice(state.cursor),
         cursor: from,
+        selection: null,
+        attachments: attachmentsOutsideRange(state, from, state.cursor),
         completion: null,
         historySearch: null,
       };
     }
     case 'delete.forward': {
+      if (state.selection) {
+        const start = Math.min(state.selection.start, state.selection.end);
+        const end = Math.max(state.selection.start, state.selection.end);
+        return {
+          ...state,
+          draft: state.draft.slice(0, start) + state.draft.slice(end),
+          cursor: start,
+          selection: null,
+          attachments: attachmentsOutsideRange(state, start, end),
+          completion: null,
+          historySearch: null,
+        };
+      }
       const to = stepRight(state.draft, state.cursor);
       if (to === state.cursor) return state;
       return {
         ...state,
         draft: state.draft.slice(0, state.cursor) + state.draft.slice(to),
+        selection: null,
+        attachments: attachmentsOutsideRange(state, state.cursor, to),
         completion: null,
         historySearch: null,
       };
@@ -147,13 +207,22 @@ export function composerReducer(state: ComposerState, action: ComposerAction): C
         action.text,
         Math.max(0, Math.min(action.cursor ?? action.text.length, action.text.length)),
       );
-      return { ...state, draft: action.text, cursor, completion: null, historySearch: null };
+      return {
+        ...state,
+        draft: action.text,
+        cursor,
+        selection: null,
+        attachments: state.attachments.filter((attachment) => action.text.includes(attachment.token)),
+        completion: null,
+        historySearch: null,
+      };
     }
     case 'reset.draft':
       return {
         ...state,
         draft: '',
         cursor: 0,
+        selection: null,
         attachments: [],
         completion: null,
         historySearch: null,

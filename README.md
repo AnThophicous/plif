@@ -1,8 +1,8 @@
 <div align="center">
 
-**Plif 0.3.6 — the stable, adaptive coding agent for your terminal.**
+**Plif 0.3.8 — the stable, adaptive coding agent for your terminal.**
 
-Bring your own model. Configure the provider yourself. Plif 0.3.6 is built for
+Bring your own model. Configure the provider yourself. Plif 0.3.8 is built for
 long coding sessions with durable memory, better adaptation to the user, a
 calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 
@@ -16,7 +16,21 @@ calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 
 ---
 
-## What's new in 0.3.6
+## What's new in 0.3.8
+
+### Isolated session scratch space
+
+Every interactive and one-shot agent session now receives a disposable
+container path at `/temp`, mounted separately from the project at `/project`.
+Use `/temp` for logs, screenshots, probes, generated intermediates and other
+scratch work; keep `/project` for files that are part of the user's requested
+deliverable. The host scratch directory is created under the operating system's
+temporary root, is never written to the project tree, and is removed when the
+session exits. Run `/temp` to see the policy and path inside PLIF.
+
+The mount is also added to default `/new` containers. A custom `/temp` mount is
+respected when one is explicitly supplied, so advanced workflows keep control
+without creating duplicate mount targets.
 
 ### `/status`
 
@@ -77,7 +91,7 @@ PLIF's pink accent identity.
 - Screen-owned keyboard handling, terminal resize coverage and narrow/wide TUI
   previews received additional regression coverage.
 
-## Why 0.3.6
+## Why 0.3.8
 
 - **Adaptive memory.** Useful facts are ranked and reused without turning the
   conversation into noise.
@@ -94,11 +108,11 @@ PLIF's pink accent identity.
 
 ## Install
 
-The current stable release is [v0.3.6](https://github.com/AnThophicous/plif/releases/tag/v0.3.6).
+The current stable release is [v0.3.8](https://github.com/AnThophicous/plif/releases/tag/v0.3.8).
 For a reproducible install, pin that version explicitly:
 
 ```powershell
-npm install -g @plif/cli@0.3.6
+npm install -g @plif/cli@0.3.8
 ```
 
 To follow the newest published stable release instead:
@@ -377,6 +391,18 @@ keeps the active selection on a usable route.
 
 Rows with distinct visible names stay concise. A provider suffix is shown only
 when two available providers would otherwise make the model name ambiguous.
+
+The built-in NexAPI entry uses `https://nexapi.ebmtg1.easypanel.host/v1` and
+the normal encrypted credential flow. Choose it from `/providers`, paste a key
+when prompted, and PLIF validates the endpoint before saving anything. Models
+are discovered live and kept stale only as a temporary fallback when a refresh
+fails; API keys are never written to the model cache or status output.
+
+`/models` opens with strongest-first ranking. Press uppercase `F` for the
+compact browser menu and choose largest context, fastest, A–Z, provider, tier,
+reasoning, tools, vision, coding, or long-context filters. Known metadata and
+declared capabilities influence the score; unknown models remain visible but
+are placed conservatively in Tier D.
 
 ## Models and vision
 

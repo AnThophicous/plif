@@ -2,6 +2,9 @@ import type { Message, ModelProvider } from '../model/provider.js';
 import { collect } from '../model/provider.js';
 import { compactionSystemPrompt } from '../agenting/compaction.js';
 import { PlifError } from '../errors.js';
+import { estimateTokens } from './context-budget.js';
+
+export { estimateTokens } from './context-budget.js';
 
 export interface CompactionOptions {
   readonly maxTokens: number;
@@ -42,6 +45,8 @@ export interface CompactionResult {
   readonly after: number;
   readonly summary: string | null;
   readonly stages: readonly string[];
+  /** False when the pass was needed but could not reduce the input. */
+  readonly progressed: boolean;
   /** A provider or capsule-validation failure and the safe fallback used, if any. */
   readonly failure: CompactionFailure | null;
 }
@@ -54,9 +59,6 @@ export interface CompactionFailure {
   readonly fallback: 'mechanical protocol-group trimming' | 'raw history preserved';
 }
 
-const CHARS_PER_TOKEN = 4;
-/** What one attached image costs, roughly, across the endpoints that take them. */
-const IMAGE_TOKENS = 1_000;
 const DEFAULT_KEEP_RECENT = 6;
 const TOOL_OUTPUT_CEILING = 2_000;
 const DEFAULT_RECENT_TOKENS = 200_000;
@@ -78,28 +80,6 @@ const REQUIRED_CAPSULE_SECTIONS = [
   'Findings and errors',
   'Pending work',
 ] as const;
-
-export function estimateTokens(messages: readonly Message[]): number {
-  let chars = 0;
-  for (const message of messages) {
-    chars += message.content.length;
-    chars += message.reasoning?.length ?? 0;
-    for (const call of message.toolCalls ?? []) {
-      chars += call.name.length + call.arguments.length;
-    }
-    // An image is not free and is not text. Endpoints bill it as a few hundred
-    // to a couple of thousand tokens depending on resolution; counting its
-    // base64 length instead would read a 2MB screenshot as half a million
-    // tokens and send the gauge to full on the first paste.
-    for (const attachment of message.attachments ?? []) {
-      chars += attachment.kind === 'text'
-        ? attachment.name.length + attachment.text.length
-        : IMAGE_TOKENS * CHARS_PER_TOKEN;
-    }
-    chars += 16;
-  }
-  return Math.ceil(chars / CHARS_PER_TOKEN);
-}
 
 export function pinnedIndices(messages: readonly Message[], keepRecent: number): Set<number> {
   const pinned = new Set<number>();
@@ -742,7 +722,15 @@ export async function compact(
   const stages: string[] = [];
 
   if (before <= options.maxTokens) {
-    return { messages: [...messages], before, after: before, summary: null, stages, failure: null };
+    return {
+      messages: [...messages],
+      before,
+      after: before,
+      summary: null,
+      stages,
+      failure: null,
+      progressed: true,
+    };
   }
 
   const steps = COMPACTION_STAGES.length;
@@ -814,5 +802,16 @@ export async function compact(
     }
   }
 
-  return { messages: working, before, after: estimateTokens(working), summary, stages, failure };
+  const after = estimateTokens(working);
+  const progressed = after < before;
+  const finalFailure = !progressed && before > options.maxTokens
+    ? failure ?? {
+        stage: 'compaction progress',
+        message: `compaction made no progress (${before} tokens remained ${after})`,
+        attempts: 0,
+        backoffMs: 0,
+        fallback: 'raw history preserved' as const,
+      }
+    : failure;
+  return { messages: working, before, after, summary, stages, failure: finalFailure, progressed };
 }

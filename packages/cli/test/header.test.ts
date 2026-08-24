@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { describe, it } from 'node:test';
 
-import { render } from 'ink';
+import { Box, render, Static } from 'ink';
 import React from 'react';
 
 import {
@@ -111,5 +111,31 @@ describe('CLI header', () => {
     assert.doesNotMatch(output, /Code workspace|claude-opus-5|0\.3\.0|Documents|Plan, work, review|Ctrl\+T/);
     assert.match(output, /╭.*╮/);
     assert.match(output, /╰.*╯/);
+  });
+
+  it('keeps the header centered when emitted as an append-only Static row', async () => {
+    const stdout = new CaptureStdout(120);
+    const app = render(
+      React.createElement(
+        Box,
+        { width: 120 },
+        React.createElement(
+          Static,
+          { items: [{ id: 'header' }] },
+          () => React.createElement(
+            Box,
+            { key: 'header', width: 120, paddingX: 2 },
+            React.createElement(Header, { width: 116 }),
+          ),
+        ),
+      ),
+      { stdout: stdout as unknown as NodeJS.WriteStream, exitOnCtrlC: false, patchConsole: false },
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    app.unmount();
+
+    const lines = stdout.output.replace(ANSI, '').replace(/\r/g, '').split('\n');
+    const outlineLine = lines.find((line) => line.includes('╭')) ?? '';
+    assert.equal(outlineLine.indexOf('╭'), (120 - HEADER_MAX_WIDTH) / 2);
   });
 });

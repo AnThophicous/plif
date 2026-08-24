@@ -82,6 +82,12 @@ describe('declared vision providers', () => {
     assert.equal(modelSupportsImages({ ...config, model: 'vision-provider/plain' }), false);
     assert.equal(modelSupportsImages({ model: 'opencode/deepseek-v4-flash-free' }), false);
   });
+
+  it('recognizes the explicit built-in vision offer without treating a text model as vision', () => {
+    const stored = { model: 'opencode-go/deepseek-v4-flash-vision-exp' };
+    assert.equal(modelSupportsImages(stored), true);
+    assert.equal(modelSupportsImages({ model: 'opencode-go/qwen3.8-max' }), false);
+  });
 });
 
 describe('agent configuration writes', () => {

@@ -8,6 +8,7 @@ import {
   BUILTIN_SKILLS,
   SkillRegistry,
   createSkillTool,
+  loadedSkillNames,
   parseSkill,
   skillTool,
   writeSkill,
@@ -17,6 +18,7 @@ import { buildSystemPrompt } from '../src/harness/prompt.js';
 import { detectShell } from '../src/harness/environment.js';
 import { DEFAULT_CAPABILITIES } from '../src/types.js';
 import type { ToolContext } from '../src/harness/tools.js';
+import type { Message } from '../src/model/provider.js';
 
 const context = {} as ToolContext;
 
@@ -54,6 +56,18 @@ describe('parseSkill', () => {
   });
 });
 
+it('can read builtin metadata without retaining the skill body', () => {
+  const skill = parseSkill(
+    '---\nname: dme-test\ndescription: test\npackage: dme-skill\npackage-name: DME Skill\n---\n\nbody',
+    '/x/dme-test/SKILL.md',
+    'builtin',
+    { loadInstructions: false },
+  );
+
+  assert.equal(skill?.instructions, '');
+  assert.deepEqual(skill?.package, { id: 'dme-skill', name: 'DME Skill' });
+});
+
 describe('SkillRegistry', () => {
   let root: string;
   let workspace: string;
@@ -85,23 +99,41 @@ describe('SkillRegistry', () => {
       assert.ok(skill.description.trim().length > 0, `${skill.name} has no description`);
       assert.equal(skill.description.includes('\n'), false, `${skill.name} description spans lines`);
       assert.ok(skill.instructions.trim().length > 0, `${skill.name} has no body`);
-      // The default prompt forbids emoji everywhere, and a builtin body is
-      // quoted straight into the model's context.
-      assert.equal(/\p{Extended_Pictographic}/u.test(skill.instructions), false, `${skill.name} has emoji`);
+      // The migrated Spynx edition must remain byte-faithful to the supplied
+      // source, so its existing glyphs are intentionally not normalized here.
+      if (!skill.name.endsWith('-spynx-edition')) {
+        assert.equal(/\p{Extended_Pictographic}/u.test(skill.instructions), false, `${skill.name} has emoji`);
+      }
     }
     assert.equal(new Set(BUILTIN_SKILLS.map((skill) => skill.name)).size, BUILTIN_SKILLS.length);
+  });
+
+  it('keeps builtin skills as individual disk-backed files', () => {
+    assert.ok(BUILTIN_SKILLS.length >= 18);
+    const frontend = BUILTIN_SKILLS.find((skill) => skill.name === 'dme-front-end-spynx-edition');
+    assert.ok(frontend);
+    assert.equal(typeof Object.getOwnPropertyDescriptor(frontend, 'instructions')?.get, 'function');
+    for (const skill of BUILTIN_SKILLS) {
+      assert.equal(path.basename(skill.file), 'SKILL.md', `${skill.name} is not file-backed`);
+      assert.match(skill.file, /agenting[\\/]skills[\\/]builtin[\\/]/);
+    }
+
+    const dmeSkills = BUILTIN_SKILLS.filter((skill) => skill.name.startsWith('dme-'));
+    assert.equal(dmeSkills.length, 7);
+    for (const skill of dmeSkills) assert.equal(skill.package, undefined);
   });
 
   it('carries the writing, design and authoring builtins', () => {
     const names = BUILTIN_SKILLS.map((skill) => skill.name);
     assert.ok(names.includes('anti-ai-slop'));
     for (const name of [
-      'dme-frontend',
-      'dme-design-system',
-      'dme-wireframe',
-      'dme-ui-options',
-      'dme-interactive-prototype',
-      'dme-visual-verification',
+      'dme-front-end-spynx-edition',
+      'dme-design-system-spynx-edition',
+      'dme-wireframe-spynx-edition',
+      'dme-ui-options-spynx-edition',
+      'dme-interactive-prototype-spynx-edition',
+      'dme-visual-verification-spynx-edition',
+      'dme-spyx-component-picker',
     ]) {
       assert.ok(names.includes(name), `${name} is missing from the DME package`);
     }
@@ -109,14 +141,37 @@ describe('SkillRegistry', () => {
     assert.ok(names.includes('deep-engineering-audit'));
   });
 
-  it('shows the DME package as active and exposes its child skills', async () => {
+  it('shows the Spynx DME skills as individual builtin entries', async () => {
     const registry = await SkillRegistry.load({ workspace, root });
     const catalogue = registry.catalogue();
 
-    assert.match(catalogue, /Package: DME Skill \[active\]/);
-    assert.match(catalogue, /  - dme-frontend:/);
-    assert.match(catalogue, /  - dme-design-system:/);
+    assert.match(catalogue, /- dme-front-end-spynx-edition:/);
+    assert.match(catalogue, /- dme-design-system-spynx-edition:/);
+    assert.match(catalogue, /- dme-ui-options-spynx-edition:/);
+    assert.match(catalogue, /- dme-spyx-component-picker:/);
     assert.equal(catalogue.includes('The failure it exists to prevent'), false);
+  });
+
+  it('ships the Spyx picker with its routed references and bridge tool', async () => {
+    const registry = await SkillRegistry.load({ workspace, root });
+    const skill = registry.get('dme-spyx-component-picker');
+    assert.ok(skill);
+    assert.match(skill.instructions, /references\/COMPONENT_DNA\.md/);
+    assert.match(skill.instructions, /references\/SPYX_BRIDGE\.md/);
+
+    const skillRoot = path.dirname(skill.file);
+    const [dna, provider, bridge, bridgeTool, manifest] = await Promise.all([
+      fs.readFile(path.join(skillRoot, 'references', 'COMPONENT_DNA.md'), 'utf8'),
+      fs.readFile(path.join(skillRoot, 'references', 'PROVIDER_ENGINE.md'), 'utf8'),
+      fs.readFile(path.join(skillRoot, 'references', 'SPYX_BRIDGE.md'), 'utf8'),
+      fs.readFile(path.join(skillRoot, 'tools', 'spyx-bridge.mjs'), 'utf8'),
+      fs.readFile(path.join(skillRoot, 'extension', '21st-unlocked', 'manifest.json'), 'utf8'),
+    ]);
+    assert.match(dna, /Transplant invariant/);
+    assert.match(provider, /Acquisition budget/);
+    assert.match(bridge, /dme-spyx-capsule\/v1/);
+    assert.match(bridgeTool, /127\.0\.0\.1/);
+    assert.match(manifest, /DME Spyx Bridge/);
   });
 
   it('loads the EDS skills from the Markdown-native agenting tree', async () => {
@@ -128,12 +183,28 @@ describe('SkillRegistry', () => {
       'deep-engineering-audit',
       'galileu',
       'office-render',
+      'plif-cybersecurity',
     ]) {
       const skill = registry.get(name);
       assert.ok(skill, `${name} is missing from the registry`);
       assert.equal(path.basename(skill.file), 'SKILL.md');
       assert.match(skill.file, new RegExp(`agenting[\\\\/]skills[\\\\/]builtin[\\\\/]${name}`));
     }
+  });
+
+  it('ships the complete PLIF cybersecurity skill with its selective reference', async () => {
+    const registry = await SkillRegistry.load({ workspace, root });
+    const skill = registry.get('plif-cybersecurity');
+    assert.ok(skill);
+    assert.match(skill.instructions, /Default mode/);
+    assert.match(skill.instructions, /Authorization boundary/);
+    assert.match(skill.instructions, /Attack Path Engine/);
+    assert.match(skill.instructions, /Release Security Gate/);
+
+    const reference = path.join(path.dirname(skill.file), 'references', 'assessment-matrix.md');
+    const referenceText = await fs.readFile(reference, 'utf8');
+    assert.match(referenceText, /Project classification/);
+    assert.match(referenceText, /AI security routing/);
   });
 
   it('writes a skill and makes it loadable in the same session', async () => {
@@ -247,15 +318,32 @@ describe('SkillRegistry', () => {
     assert.match(result.output, /do the project thing/);
   });
 
+  it('recognizes successful mandatory skill results without treating failed loads as loaded', () => {
+    const messages: Message[] = [
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [
+          { id: 'g', name: 'skill', arguments: '{"name":"galileu"}' },
+          { id: 'c', name: 'skill', arguments: '{"name":"plif-cybersecurity"}' },
+        ],
+      },
+      { role: 'tool', toolCallId: 'g', content: '# Skill: galileu\nbody' },
+      { role: 'tool', toolCallId: 'c', content: 'No skill named "plif-cybersecurity".' },
+    ];
+
+    assert.deepEqual(loadedSkillNames(messages), ['galileu']);
+  });
+
   it('loads one DME child without loading the entire package', async () => {
     const registry = await SkillRegistry.load({ workspace, root });
-    const result = await skillTool(registry).run({ name: 'dme-wireframe' }, context);
+    const result = await skillTool(registry).run({ name: 'dme-wireframe-spynx-edition' }, context);
 
     assert.equal(result.ok, true);
-    assert.match(result.output, /Skill package: DME Skill/);
-    assert.match(result.output, /Skill: dme-wireframe/);
-    assert.match(result.output, /three to five structurally different options/i);
-    assert.doesNotMatch(result.output, /Skill: dme-interactive-prototype/);
+    assert.doesNotMatch(result.output, /Skill package:/);
+    assert.match(result.output, /Skill: dme-wireframe-spynx-edition/);
+    assert.match(result.output, /Produce 3-5 options only when the user needs comparison/i);
+    assert.doesNotMatch(result.output, /Skill: dme-interactive-prototype-spynx-edition/);
   });
 
   it('lists what exists when asked for a skill that does not', async () => {

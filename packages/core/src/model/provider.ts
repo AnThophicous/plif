@@ -12,6 +12,9 @@
  * together.ai) plugs in by changing a base URL, not by writing an adapter.
  */
 
+import type { UsageInfo } from './usage.js';
+import type { CanonicalTokenUsage } from './token-usage.js';
+
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
 /**
@@ -146,9 +149,36 @@ export type FinishReason = 'stop' | 'length' | 'tool_calls' | 'cancelled' | 'err
 export interface Usage {
   readonly promptTokens: number;
   readonly completionTokens: number;
+  /** Provider-neutral accounting; legacy fields remain for compatibility. */
+  readonly tokenUsage?: CanonicalTokenUsage;
 }
 
 export const NO_USAGE: Usage = Object.freeze({ promptTokens: 0, completionTokens: 0 });
+
+export type UsageSemantics = 'openai-compatible' | 'anthropic-messages' | 'unknown';
+export type CacheSupport = 'reported' | 'explicit' | 'unknown';
+export type CacheAccounting = 'separate-if-reported' | 'combined' | 'unknown';
+export type ReasoningAccounting = 'reported' | 'unknown';
+
+/**
+ * Capabilities of the adapter, not guesses about what a remote endpoint will
+ * return on every request. Missing runtime metadata remains unknown.
+ */
+export interface ProviderCapabilities {
+  readonly usageSemantics: UsageSemantics;
+  readonly cacheSupport: CacheSupport;
+  readonly cacheAccounting: CacheAccounting;
+  readonly reasoningAccounting: ReasoningAccounting;
+}
+
+/** Provider-reported USD pricing, normalized to dollars per million tokens. */
+export interface ModelPricing {
+  readonly inputPerMillion?: number;
+  readonly outputPerMillion?: number;
+  readonly cacheReadPerMillion?: number;
+  readonly cacheWritePerMillion?: number;
+  readonly currency?: string;
+}
 
 export interface ModelInfo {
   readonly id: string;
@@ -158,6 +188,10 @@ export interface ModelInfo {
   readonly endpoint: string;
   /** Context window in tokens, if the provider reports or we know it. */
   readonly contextWindow: number | undefined;
+  /** Provider/model output ceiling, when it is explicitly configured or known. */
+  readonly maxOutputTokens?: number;
+  /** Normalized adapter capabilities used by context and accounting layers. */
+  readonly capabilities?: ProviderCapabilities;
 }
 
 /** Wire protocol selected by an explicit provider/model offer. */
@@ -178,16 +212,36 @@ export interface ModelSource {
 export interface ProviderModel {
   readonly id: string;
   readonly name?: string;
+  readonly aliases?: readonly string[];
   readonly contextWindow?: number;
+  readonly maxInputTokens?: number;
+  readonly maxOutputTokens?: number;
   readonly reasoning?: boolean;
   readonly tools?: boolean;
   readonly modalities?: readonly ('text' | 'image')[];
   readonly cost?: 'free' | 'paid' | 'unknown';
+  /** Numeric prices are present only when the provider exposes them. */
+  readonly pricing?: ModelPricing;
+  /** Explicit provider metadata used by the model ranking layer. */
+  readonly ranking?: ModelRankingHints;
   readonly provider?: string;
   readonly product?: string;
   readonly tier?: string;
   readonly protocol?: ModelProtocol;
   readonly streamSemantics?: StreamSemantics;
+  /** Provenance of capability metadata; absent means no trustworthy metadata was found. */
+  readonly metadataSource?: 'provider' | 'registry' | 'config';
+}
+
+/** Optional trustworthy signals returned by a provider's model catalog. */
+export interface ModelRankingHints {
+  readonly quality?: number;
+  readonly reasoning?: number;
+  readonly coding?: number;
+  readonly context?: number;
+  readonly speed?: number;
+  readonly cost?: number;
+  readonly popularity?: number;
 }
 
 /** Listing support is distinct from an empty successful catalog. */
@@ -208,6 +262,8 @@ export interface ModelProvider {
   list(): Promise<string[]>;
   /** Rich listing result. Older/test providers may implement only list(). */
   readonly listModels?: () => Promise<ModelListResult>;
+  /** Return only usage already exposed by the provider; never invent a quota. */
+  readonly getUsage?: () => Promise<UsageInfo>;
 }
 
 /**

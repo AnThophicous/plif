@@ -121,13 +121,14 @@ export class StreamFrameScheduler {
   }
 
   /** Flush accepted output, then open a fresh epoch for the next model cycle. */
-  flushAndComplete(): void {
-    if (this.#disposed || !this.#active) return;
+  flushAndComplete(): StreamFrame | null {
+    if (this.#disposed || !this.#active) return null;
     this.#cancelTimer();
-    this.#emit('complete', this.#clock.now());
+    const frame = this.#emit('complete', this.#clock.now());
     this.#clearData();
     this.#epoch += 1;
     this.#nextFrameAt = Number.NEGATIVE_INFINITY;
+    return frame;
   }
 
   /** Drop every byte from an abandoned attempt and invalidate scheduled work. */
@@ -166,7 +167,7 @@ export class StreamFrameScheduler {
     this.#timer = undefined;
   }
 
-  #emit(kind: StreamFrameKind, now: number): void {
+  #emit(kind: StreamFrameKind, now: number): StreamFrame {
     const lanes = Object.freeze([...this.#dirty]);
     const changes = Object.freeze([...this.#changes]);
     this.#dirty.clear();
@@ -183,6 +184,7 @@ export class StreamFrameScheduler {
       changes,
     });
     this.#onFrame(frame);
+    return frame;
   }
 
   #clearData(): void {

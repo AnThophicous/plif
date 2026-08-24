@@ -40,6 +40,9 @@ export const skillsModule = definePromptModule({
     const galileuListed = catalogue
       .split(/\r?\n/)
       .some((line) => /^\s*-\s+galileu\s*:/i.test(line));
+    const cybersecurityListed = catalogue
+      .split(/\r?\n/)
+      .some((line) => /^\s*-\s+plif-cybersecurity\s*:/i.test(line));
     const lines = [
       '# Available skills',
       '',
@@ -60,15 +63,25 @@ export const skillsModule = definePromptModule({
     ];
 
     if (context.effort === 'plif') {
+      const loaded = new Set(context.loadedSkills ?? []);
+      const mandatory = ['galileu', 'plif-cybersecurity'] as const;
+      const missing = mandatory.filter((name) => !loaded.has(name));
       lines.push(
         '',
-        '## Mandatory PLIF skill',
-        'The PLIF effort has a non-optional skill gate. Before answering, asking a question, planning, editing, running a command, or using another tool, call the `skill` tool with the exact name `{ "name": "galileu" }` and wait for a successful result.',
-        'Do not proceed when the Galileu load fails. If the `skill` tool is unavailable or Galileu is missing from the catalogue, stop and report a runtime configuration error instead of silently falling back.',
+        '## Mandatory PLIF skills and review checkpoint',
+        missing.length > 0
+          ? `The PLIF effort has a non-optional skill gate. Before answering, asking a question, planning, editing, running a command, or using another tool, call the skill tool for ${missing.map((name) => `{ "name": "${name}" }`).join(' and then ')}; ${missing.length === 2 ? 'wait for both successful results' : 'wait for the requested result to succeed'}.`
+          : 'The non-optional PLIF skills were already loaded successfully in this session. Apply their instructions from the preceding skill results; do not call the `skill` tool again unless one of those results is missing.',
+        missing.length > 0
+          ? 'Do not proceed when a requested load fails. If the `skill` tool is unavailable or a required skill is missing from the catalogue, stop and report a runtime configuration error instead of silently falling back.'
+          : 'Do not discard or reload the successful skill results: keeping one copy in the carried conversation prevents context growth and preserves the same mandatory policy.',
         galileuListed
           ? 'The `galileu` skill is available in the catalogue and must be loaded now.'
           : 'Galileu is not present in the catalogue; this PLIF session is misconfigured.',
-        'Once loaded, follow its procedure for this turn. Do not persist its decision record automatically.',
+        cybersecurityListed
+          ? 'The `plif-cybersecurity` skill is available in the catalogue and must be loaded now.'
+          : 'plif-cybersecurity is not present in the catalogue; this PLIF session is misconfigured.',
+        'Once loaded, follow both procedures for this turn. The review checkpoint is internal orchestration: perform the checks with tools, do not print gate narration or repeated audit receipts, and finish with a concise result. Do not persist a Galileu decision record automatically.',
       );
     }
 

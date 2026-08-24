@@ -89,6 +89,28 @@ describe('cycle tool classification', () => {
     );
   });
 
+  it('does not gate PLIF-owned checkpoint artifacts as user changes', () => {
+    assert.deepEqual(
+      mutationPaths('write_file', { path: '/project/.plif/plans/2026-08-23-task.md' }),
+      [],
+    );
+    assert.deepEqual(
+      mutationPaths('apply_patch', {
+        edits: [
+          { path: '/project/.plif/plans/current.md' },
+          { path: '/project/src/app.ts' },
+        ],
+      }),
+      ['/project/src/app.ts'],
+    );
+    assert.deepEqual(
+      mutationPaths('apply_patch', {
+        edits: [{ path: '/project/.plif/plans/current.md' }],
+      }),
+      [],
+    );
+  });
+
   it('puts ordinary shell writes through the same plan and review gate', () => {
     assert.equal(isShellMutation('shell_command', { script: "Set-Content -LiteralPath app.ts -Value 'x'" }), true);
     assert.equal(isShellMutation('run_command', { argv: ['git', 'apply', 'change.patch'] }), true);

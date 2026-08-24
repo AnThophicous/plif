@@ -27,13 +27,16 @@ export type {
 export { QuestionBroker } from './harness/ask.js';
 export {
   BUILTIN_SKILLS,
+  MANDATORY_PLIF_SKILLS,
   SkillRegistry,
   createSkillTool,
+  loadedSkillNames,
   parseSkill,
   skillTool,
   writeSkill,
 } from './harness/skills.js';
 export type {
+  ParseSkillOptions,
   Skill,
   SkillDraft,
   SkillPackage,
@@ -82,6 +85,56 @@ export { runLoop, runCompaction } from './harness/loop.js';
 export type { CompactionRun } from './harness/loop.js';
 export { COMPACTION_STAGES, compact, estimateTokens, pinnedIndices } from './harness/compaction.js';
 export type { CompactionFailure, CompactionOptions, CompactionResult } from './harness/compaction.js';
+export {
+  TOKEN_SPLIT_TECHNIQUE_IDS,
+  appendTokenSplitMetric,
+  appendTokenSplitSanity,
+  defaultTokenSplitConfig,
+  loadTokenSplitConfig,
+  makeTokenSplitMetric,
+  normalizeTokenSplitConfig,
+  projectTokenSplitInput,
+  readTokenSplitAudit,
+  readTokenSplitMetrics,
+  readTokenSplitSanity,
+  resetTokenSplitMetrics,
+  runTokenSplitSanity,
+  saveTokenSplitConfig,
+  spillToolOutput,
+  stateNotesHasHardFacts,
+  stateNotesPath,
+  techniqueIsOn,
+  tokenSplitConfigPath,
+  tokenSplitDefinition,
+  tokenSplitDefinitions,
+  tokenSplitMetricsPath,
+  tokenSplitSanityRate,
+  tokenSplitStorePath,
+  writeStateNotes,
+} from './harness/token-split/index.js';
+export type {
+  TokenSplitConfig,
+  TokenSplitLayer,
+  TokenSplitMetricRecord,
+  TokenSplitProjection,
+  TokenSplitSanityResult,
+  TokenSplitSanityObservation,
+  TokenSplitTechniqueConfig,
+  TokenSplitTechniqueDefinition,
+  TokenSplitTechniqueId,
+  TokenSplitTechniqueMap,
+  TokenSplitTransformation,
+} from './harness/token-split/index.js';
+export {
+  computeContextBudget,
+  stableToolSpecs,
+} from './harness/context-budget.js';
+export type {
+  ContextBreakdown,
+  ContextBudget,
+  ContextBudgetOptions,
+  ContextPressure,
+} from './harness/context-budget.js';
 export { MemoryStore, rankFacts, strategyId, strategyStatus, summariseMemory } from './harness/memory.js';
 export type { Fact, FactKind, MemorySnapshot } from './harness/memory.js';
 export { DEFAULT_CONTEXT_TOKENS, answerDanglingToolCalls } from './harness/loop.js';
@@ -210,6 +263,29 @@ export type {
   ReasoningSplit,
 } from './model/reasoning.js';
 export { collect, NO_USAGE } from './model/provider.js';
+export {
+  canonicalFromLegacyUsage,
+  estimatedTokenUsage,
+  mergeTokenUsage,
+  normalizeAnthropicUsage,
+  normalizeOpenAIUsage,
+} from './model/token-usage.js';
+export type { CanonicalTokenUsage, NormalizedTokenUsage, TokenUsageSource } from './model/token-usage.js';
+export {
+  freshUsageSnapshot,
+  providerPolicyUsage,
+  resetAtFromHeader,
+  USAGE_CACHE_TTL_MS,
+  unavailableUsage,
+  usageFromRateLimitHeaders,
+} from './model/usage.js';
+export type {
+  UsageInfo,
+  UsageSource,
+  UsageStatus,
+  UsageUnit,
+  UsageWindow,
+} from './model/usage.js';
 export { ContentDeltaNormalizer, ContentProtocolError } from './model/content.js';
 export type {
   Attachment,
@@ -225,9 +301,16 @@ export type {
   Usage,
   ModelListResult,
   ProviderModel,
+  ModelPricing,
   ModelProtocol,
   ModelSource,
   StreamSemantics,
+  ModelRankingHints,
+  ProviderCapabilities,
+  UsageSemantics,
+  CacheSupport,
+  CacheAccounting,
+  ReasoningAccounting,
 } from './model/provider.js';
 export {
   PRESETS,
@@ -277,6 +360,12 @@ export type {
 } from './model/config.js';
 export { EFFORT_LEVELS } from './model/config.js';
 export {
+  AGENT_PRESET_KEYS,
+  BUILTIN_AGENT_PRESETS,
+  agentPreset,
+} from './config/agent-presets.js';
+export type { BuiltinAgentPreset } from './config/agent-presets.js';
+export {
   MODEL_CATALOG,
   providerForModel,
   selectAvailableModels,
@@ -285,6 +374,10 @@ export {
   findCatalogProvider,
   modelVisionBadge,
   rankModelIds,
+  rankProviderModels,
+  rankAvailableModels,
+  filterAvailableModels,
+  scoreModel,
   userCatalog,
 } from './model/catalog.js';
 export type {
@@ -294,6 +387,9 @@ export type {
   ModelSelection,
   AvailableCatalogModel,
   ProviderAccess,
+  ModelTier,
+  ModelScore,
+  ModelBrowserFilter,
 } from './model/catalog.js';
 export { discoverProviderModels, forgetDiscoveredModels, scheduleProviderDiscovery } from './model/discovery.js';
 export type { DiscoveredModels, DiscoverOptions, DiscoverySource } from './model/discovery.js';

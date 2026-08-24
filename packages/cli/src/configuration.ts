@@ -2,7 +2,7 @@ import { globalConfigPath, permissionMode } from '@plif/core';
 import type { Effort, GlobalConfig, PermissionMode } from '@plif/core';
 
 import { effortDisplay } from './effort-visuals.js';
-import { shortenPath } from './theme.js';
+import { binaryStateIndicator, shortenPath, type BinaryState } from './theme.js';
 
 export type ConfigCategory = 'Interface' | 'Runtime' | 'Behavior' | 'Integrations' | 'Storage';
 export type ConfigSettingKind = 'boolean' | 'enum' | 'number' | 'action' | 'readonly';
@@ -48,6 +48,8 @@ export interface ConfigSetting {
   readonly scope: ConfigScope;
   /** Display value. It may be friendlier than the value sent to apply(). */
   readonly value: string;
+  /** Optional semantic marker for a boolean display value. */
+  readonly state?: BinaryState;
   /** Value used to initialise an editor and pass to apply(). */
   readonly inputValue: string;
   readonly options?: readonly ConfigOption[];
@@ -163,11 +165,12 @@ export function createConfigSettings(runtime: ConfigRuntime, actions: ConfigActi
       description: 'Shortcut for allowing tool actions without a confirmation prompt.',
       kind: 'boolean',
       scope: 'global',
-      value: permission === 'auto-approve' ? 'on' : 'off',
+      value: binaryStateIndicator(permission === 'auto-approve' ? 'on' : 'off').icon,
+      state: permission === 'auto-approve' ? 'on' : 'off',
       inputValue: permission === 'auto-approve' ? 'true' : 'false',
       searchableTerms: ['approval', 'permissions', 'security', 'tools', 'boolean'],
       apply: async (value) => {
-        if (value !== 'true' && value !== 'false') throw new Error('Choose on or off.');
+        if (value !== 'true' && value !== 'false') throw new Error('Enter true or false.');
         await actions.setPermissionMode(value === 'true' ? 'auto-approve' : 'ask');
       },
     },

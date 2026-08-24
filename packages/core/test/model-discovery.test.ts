@@ -49,6 +49,9 @@ async function metadataServer(): Promise<{
     response.end(JSON.stringify({ data: [{
       id: 'rich-model',
       object: 'model',
+      name: 'DeepSeek R1',
+      aliases: ['r1', 'reasoner'],
+      ranking: { quality: 88, reasoning: 97, coding: 91 },
       context_window: 131072,
       provider: 'opencode-go',
       tier: 'go',
@@ -156,6 +159,8 @@ describe('provider model discovery cache', () => {
       assert.equal(rich.models[0]?.cost, 'paid');
       assert.equal(rich.models[0]?.provider, 'opencode-go');
       assert.equal(rich.models[0]?.tier, 'go');
+      assert.deepEqual(rich.models[0]?.aliases, ['r1', 'reasoner']);
+      assert.equal(rich.models[0]?.ranking?.reasoning, 97);
     } finally {
       forgetDiscoveredModels();
       await Promise.all([server.close(), metadata.close()]);

@@ -110,15 +110,21 @@ export async function loadThemes(home = os.homedir()): Promise<ThemeCatalogue> {
 
   const themes: ThemeDefinition[] = [MINIMAL_THEME, MIDNIGHT_THEME];
   const problems: string[] = [];
-  for (const file of files) {
+  const loaded = await Promise.all(files.map(async (file) => {
     const absolute = path.join(directory, file);
     try {
       const raw = await fs.readFile(absolute, 'utf8');
       const parsed = JSON.parse(stripJsonComments(raw)) as unknown;
-      themes.push(parseTheme(parsed, file.replace(/\.theme$/i, ''), absolute));
+      return { kind: 'theme' as const, theme: parseTheme(parsed, file.replace(/\.theme$/i, ''), absolute) };
     } catch (error) {
-      problems.push(`${file}: ${error instanceof Error ? error.message : String(error)}`);
+      return { kind: 'problem' as const, problem: `${file}: ${error instanceof Error ? error.message : String(error)}` };
     }
+  }));
+  // Promise.all preserves the directory order, keeping picker ordering and
+  // diagnostics identical to the sequential loader.
+  for (const item of loaded) {
+    if (item.kind === 'theme') themes.push(item.theme);
+    else problems.push(item.problem);
   }
   return { themes, problems };
 }

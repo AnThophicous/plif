@@ -5,6 +5,7 @@ import React from 'react';
 import { test } from 'node:test';
 
 import { Picker } from '../src/components/Picker.js';
+import { binaryStateIndicator } from '../src/theme.js';
 
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
@@ -63,4 +64,30 @@ test('wide model picker keeps list and details compactly bounded', async () => {
   const detailLine = output.split('\n').find((line) => line.includes('Provider name'));
   assert.ok(detailLine);
   assert.ok(detailLine.length <= 112, `details escaped the bounded layout: ${detailLine.length}`);
+});
+
+test('binary setting rows use semantic check/X markers without ON/OFF labels', async () => {
+  const stdout = new CaptureOutput();
+  const app = render(
+    React.createElement(Picker, {
+      title: 'Agent settings',
+      items: [
+        { value: 'on', label: 'Automatic launch', state: 'on', current: true },
+        { value: 'off', label: 'Manual launch only', state: 'off' },
+      ],
+      filter: '',
+      selected: 0,
+      width: 100,
+    }),
+    { stdout: stdout as unknown as NodeJS.WriteStream, exitOnCtrlC: false, patchConsole: false },
+  );
+  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  app.unmount();
+  const output = stdout.output.replace(ANSI, '').replace(/\r/g, '');
+
+  assert.match(output, /✓ Automatic launch/);
+  assert.match(output, /× Manual launch only/);
+  assert.doesNotMatch(output, /\b(?:ON|OFF|ENABLED|DISABLED)\b/);
+  assert.deepEqual(binaryStateIndicator('on'), { icon: '✓', tone: 'success' });
+  assert.deepEqual(binaryStateIndicator('off'), { icon: '×', tone: 'danger' });
 });

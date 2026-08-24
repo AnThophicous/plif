@@ -36,9 +36,13 @@ import {
   MODEL_CATALOG,
   catalogSelection,
   findCatalogModel,
+  findCatalogProvider,
   modelVisionBadge,
   providerForModel,
   selectAvailableModels,
+  filterAvailableModels,
+  rankProviderModels,
+  scoreModel,
   rankModelIds,
   userCatalog,
 } from '../src/model/catalog.js';
@@ -48,9 +52,98 @@ import { AnthropicProvider } from '../src/model/anthropic.js';
 import { createModelProvider } from '../src/model/factory.js';
 import { OpenAIProvider } from '../src/model/openai.js';
 import { collect } from '../src/model/provider.js';
+import { normalizeProviderModel } from '../src/model/metadata.js';
+import type { ModelConfig } from '../src/model/config.js';
 import { PlifError } from '../src/errors.js';
 
 describe('config precedence', () => {
+  const metadataConfig: ModelConfig = {
+    providerId: 'bridge',
+    baseURL: 'https://bridge.example/v1',
+    model: 'opaque-model',
+    apiKey: '',
+    temperature: 0.2,
+    maxTokens: undefined,
+    contextWindow: undefined,
+    timeoutMs: 1_000,
+  };
+
+  it('normalizes provider metadata variants without guessing from the model name', () => {
+    const model = normalizeProviderModel({
+      id: 'opaque-model',
+      contextWindow: 65_536,
+      maxInputTokens: 60_000,
+      max_output_tokens: 4_096,
+      capabilities: { reasoning: true, tools: false },
+      input_modalities: ['text', 'image'],
+    }, metadataConfig);
+    assert.equal(model?.contextWindow, 65_536);
+    assert.equal(model?.maxInputTokens, 60_000);
+    assert.equal(model?.maxOutputTokens, 4_096);
+    assert.equal(model?.reasoning, true);
+    assert.equal(model?.tools, false);
+    assert.deepEqual(model?.modalities, ['text', 'image']);
+    assert.equal(model?.metadataSource, 'provider');
+  });
+
+  it('normalizes provider pricing and declared thinking/tool parameters', () => {
+    const model = normalizeProviderModel({
+      id: 'priced-model',
+      context_length: '131072',
+      supported_parameters: ['reasoning_effort', 'tools'],
+      pricing: { prompt: '0.000002', completion: 0.000006 },
+    }, metadataConfig);
+    assert.equal(model?.contextWindow, 131072);
+    assert.equal(model?.reasoning, true);
+    assert.equal(model?.tools, true);
+    assert.deepEqual(model?.pricing, {
+      inputPerMillion: 2,
+      outputPerMillion: 6,
+      currency: 'USD',
+    });
+    assert.equal(model?.cost, 'paid');
+  });
+
+  it('does not infer capabilities for an opaque id-only model', () => {
+    const model = normalizeProviderModel(
+      { id: 'reasoning-sounding-model' },
+      { ...metadataConfig, model: 'reasoning-sounding-model' },
+    );
+    assert.equal(model?.reasoning, undefined);
+    assert.equal(model?.tools, undefined);
+    assert.equal(model?.contextWindow, undefined);
+    assert.equal(model?.metadataSource, undefined);
+  });
+
+  it('registers NexAPI as a first-class OpenAI-compatible preset', () => {
+    assert.equal(PRESETS.nexapi.baseURL, 'https://nexapi.ebmtg1.easypanel.host/v1');
+    assert.equal(PRESETS.nexapi.keyEnv, 'NEXAPI_API_KEY');
+    assert.equal(credentialVariableForProvider('nexapi'), 'NEXAPI_API_KEY');
+    assert.equal(resolveConfig({ preset: 'nexapi', model: 'nexapi/anything', apiKey: 'test' }).baseURL, PRESETS.nexapi.baseURL);
+  });
+
+  it('ranks known strong models ahead of conservative unknowns', () => {
+    const ranked = rankProviderModels('nexapi', [
+      { id: 'tiny-basic', name: 'Tiny Basic' },
+      { id: 'deepseek-r1', name: 'DeepSeek R1', reasoning: true, tools: true, contextWindow: 128_000 },
+      { id: 'qwen-coder', name: 'Qwen Coder', tools: true, contextWindow: 64_000 },
+    ]);
+    assert.deepEqual(ranked.map((model) => model.id), ['deepseek-r1', 'qwen-coder', 'tiny-basic']);
+    assert.equal(scoreModel(ranked.at(-1)!).tier, 'D');
+  });
+
+  it('filters models without changing the strongest-first default', () => {
+    const provider = MODEL_CATALOG.find((entry) => entry.id === 'nexapi')!;
+    const items = [
+      { provider, access: 'configured' as const, model: { id: 'small', label: 'Small', description: '', badges: [], contextWindow: 32_000 } },
+      { provider, access: 'configured' as const, model: { id: 'reasoner', label: 'DeepSeek R1', description: '', badges: [], contextWindow: 200_000, reasoning: true } },
+    ];
+    assert.equal(filterAvailableModels(items, 'strength')[0]!.model.id, 'reasoner');
+    assert.equal(filterAvailableModels(items, 'context')[0]!.model.id, 'reasoner');
+    assert.equal(filterAvailableModels(items, 'reasoning').length, 1);
+    assert.equal(filterAvailableModels(items, 'alphabetical')[0]!.model.id, 'reasoner');
+  });
+
   it('maps Plif effort to Anthropic maximum effort', () => {
     assert.equal(anthropicWireEffort('plif'), 'max');
     assert.equal(anthropicWireEffort('ultracode'), 'max');
@@ -436,6 +529,28 @@ describe('config precedence', () => {
 });
 
 describe('the free tier needs no credential', () => {
+  it('keeps the official OpenCode Go model list discoverable without inventing capabilities', () => {
+    const model = findCatalogModel('opencode-go', 'glm-5.1');
+    assert.equal(model?.metadataSource, 'registry');
+    assert.equal(model?.provider, 'opencode-go');
+    assert.equal(model?.product, 'OpenCode');
+    assert.equal(model?.tier, 'Go');
+    assert.equal(model?.cost, 'paid');
+    assert.equal(model?.protocol, 'openai-chat');
+    assert.equal(model?.contextWindow, undefined);
+    assert.equal(model?.reasoning, undefined);
+    assert.equal(model?.tools, undefined);
+  });
+
+  it('keeps the OpenCode Go Ox Alpha Free registry metadata visible in the picker', () => {
+    const model = findCatalogModel('opencode-go', 'ox-alpha-free');
+    assert.equal(model?.label, 'Ox Alpha Free');
+    assert.equal(model?.cost, 'free');
+    assert.equal(model?.metadataSource, 'registry');
+    assert.equal(model?.protocol, 'openai-chat');
+    assert.equal(findCatalogProvider('opencode-go')?.defaultCost, 'paid');
+  });
+
   it('keeps OpenCode Go paid and selects its Messages adapter for Qwen', () => {
     const config = resolveConfig({}, {
       preset: 'opencode-go',

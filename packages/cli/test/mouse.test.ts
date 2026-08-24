@@ -1,9 +1,21 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { EMPTY_CLICK_SEQUENCE, nextClickSequence, parseSgrMouse, SgrMouseReader } from '../src/mouse.js';
+import {
+  EMPTY_CLICK_SEQUENCE,
+  needsPasteClickTracking,
+  nextClickSequence,
+  parseSgrMouse,
+  SgrMouseReader,
+} from '../src/mouse.js';
 
 describe('SGR mouse input', () => {
+  it('keeps native terminal scrolling unless a text paste needs click tracking', () => {
+    assert.equal(needsPasteClickTracking([]), false);
+    assert.equal(needsPasteClickTracking([{ kind: 'image' }]), false);
+    assert.equal(needsPasteClickTracking([{ kind: 'text' }]), true);
+  });
+
   it('parses raw and Ink-normalized primary button presses', () => {
     assert.deepEqual(parseSgrMouse('\u001b[<0;18;34M'), {
       button: 0,

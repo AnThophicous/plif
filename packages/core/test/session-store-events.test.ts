@@ -100,6 +100,20 @@ describe('versioned session event storage', () => {
     assert.equal((await session.replay()).length, 1);
   });
 
+  it('keeps the complete human history separate from compact model replay', async () => {
+    const { session, transcript } = await fixture();
+    const events: ConversationEvent[] = [
+      { version: 1, eventId: 'old-user', turnId: 'old-turn', at, kind: 'user.message', text: 'older question' },
+      { version: 1, eventId: 'old-answer', turnId: 'old-turn', at, kind: 'assistant.message', phase: 'final', text: 'older answer' },
+      { version: 1, eventId: 'compact', turnId: 'old-turn', at, kind: 'compaction.completed', summary: 'older answer', replacedEvents: 2 },
+      { version: 1, eventId: 'new-user', turnId: 'new-turn', at, kind: 'user.message', text: 'new question' },
+    ];
+    await fs.writeFile(transcript, events.map((event) => JSON.stringify(event)).join('\n') + '\n', 'utf8');
+
+    assert.deepEqual((await session.history()).map((event) => event.eventId), ['old-user', 'old-answer', 'compact', 'new-user']);
+    assert.deepEqual((await session.replay()).map((event) => event.eventId), ['compact', 'new-user']);
+  });
+
   it('renames metadata without rewriting the append-only transcript', async () => {
     const { session, store, workspace, transcript } = await fixture();
     await session.append({ kind: 'user', at, text: 'original prompt' });

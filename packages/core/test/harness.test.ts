@@ -651,7 +651,12 @@ describe('loop context budget', () => {
   it('uses the provider context window when the caller does not override it', async () => {
     const bus = new EventBus();
     const budgets: number[] = [];
+    const contextEvents: Array<{ effective: number; available: number | undefined }> = [];
     bus.on('agent.usage', (event) => budgets.push(event.budget));
+    bus.on('agent.context', (event) => contextEvents.push({
+      effective: event.effectiveInputTokens,
+      available: event.availableInputBudget,
+    }));
 
     const provider: ModelProvider = {
       info: { id: 'small-context-test', endpoint: 'test', contextWindow: 12_345 },
@@ -678,6 +683,64 @@ describe('loop context budget', () => {
 
     assert.equal(result.stop, 'complete');
     assert.deepEqual(budgets, [12_345]);
+    assert.equal(contextEvents.length, 1);
+    assert.ok(contextEvents[0]!.effective > 0);
+    assert.ok(contextEvents[0]!.available! < 12_345);
+  });
+
+  it('keeps canonical usage separate from the legacy context gauge', async () => {
+    const bus = new EventBus();
+    const usageEvents: Array<{ prompt: number; cached: number | undefined; total: number | undefined }> = [];
+    bus.on('agent.usage', (event) => usageEvents.push({
+      prompt: event.promptTokens,
+      cached: event.inputCachedTokens,
+      total: event.totalTokens,
+    }));
+    const provider: ModelProvider = {
+      info: { id: 'usage-test', endpoint: 'test', contextWindow: 10_000 },
+      async *stream(): AsyncGenerator<CompletionEvent> {
+        yield { kind: 'done', reason: 'stop', usage: {
+          promptTokens: 100,
+          completionTokens: 12,
+          tokenUsage: {
+            inputNewTokens: 20,
+            inputCachedTokens: 80,
+            outputTokens: 12,
+            totalPromptTokens: 100,
+            totalTokens: 112,
+            requestCount: 1,
+            source: 'reported',
+          },
+        } };
+      },
+      async probe() { return { ok: true, detail: 'ok' }; },
+      async list() { return []; },
+    };
+
+    const result = await runLoop([{ role: 'user', content: 'hello' }], {
+      provider,
+      container: {} as never,
+      questions: {} as never,
+      bus,
+      tools: [],
+      maxIterations: 1,
+    });
+
+    assert.equal(result.stop, 'complete');
+    assert.deepEqual(result.tokenUsage, providerUsage());
+    assert.deepEqual(usageEvents, [{ prompt: 100, cached: 80, total: 112 }]);
+
+    function providerUsage() {
+      return {
+        inputNewTokens: 20,
+        inputCachedTokens: 80,
+        outputTokens: 12,
+        totalPromptTokens: 100,
+        totalTokens: 112,
+        requestCount: 1,
+        source: 'reported' as const,
+      };
+    }
   });
 });
 
@@ -711,7 +774,7 @@ describe('Plan → Work → Review loop gate', () => {
         } else if (requests === 4) {
           yield { kind: 'text', delta: 'I changed the file.' };
         } else if (requests === 5) {
-          assert.match(lastMessage, /Review gate/);
+          assert.match(lastMessage, /PLIF review checkpoint/);
           yield toolCall('inspect', 'read_file', { path: '/workspace/app.ts' });
         } else if (requests === 6) {
           yield toolCall('validate', 'run_command', { argv: ['npm', 'test'] });
@@ -748,6 +811,7 @@ describe('Plan → Work → Review loop gate', () => {
         questions: {} as never,
         bus,
         tools: [updatePlan, write, read, command],
+        enableHarnessCycle: true,
         maxIterations: 10,
       },
     );
@@ -765,6 +829,55 @@ describe('Plan → Work → Review loop gate', () => {
     );
     assert.ok(requests >= 7);
     assert.deepEqual(phases, ['plan', 'work', 'review', 'complete']);
+  });
+
+  it('does not turn the durable internal plan mirror into a blocking revision', async () => {
+    let requests = 0;
+    const bus = new EventBus();
+    const provider: ModelProvider = {
+      info: { id: 'internal-plan-test', endpoint: 'test', contextWindow: undefined },
+      async *stream(): AsyncGenerator<CompletionEvent> {
+        requests += 1;
+        if (requests === 1) {
+          yield toolCall('plan', 'update_plan', {
+            plan: [{ step: 'Record checkpoint', status: 'in_progress' }],
+          });
+        } else if (requests === 2) {
+          yield toolCall('checkpoint-write', 'write_file', {
+            path: '/project/.plif/plans/current.md',
+            content: '# checkpoint\n',
+          });
+        } else {
+          yield { kind: 'text', delta: 'Checkpoint recorded.' };
+        }
+        yield { kind: 'done', reason: 'stop', usage: { promptTokens: 1, completionTokens: 1 } };
+      },
+      async probe() { return { ok: true, detail: 'ok' }; },
+      async list() { return []; },
+    };
+
+    const internalWrite: Tool = {
+      spec: { name: 'write_file', description: 'write', parameters: {} },
+      async run() {
+        return { output: 'checkpoint saved', ok: true, diff: '--- current.md\n+++ current.md' };
+      },
+    };
+
+    const result = await runLoop(
+      [{ role: 'user', content: 'save the current checkpoint' }],
+      {
+        provider,
+        container: {} as never,
+        questions: {} as never,
+        bus,
+        tools: [updatePlan, internalWrite],
+        enableHarnessCycle: true,
+        maxIterations: 5,
+      },
+    );
+
+    assert.equal(result.stop, 'complete', result.error?.message);
+    assert.equal(requests, 3);
   });
 });
 

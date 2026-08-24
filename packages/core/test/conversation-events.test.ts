@@ -132,4 +132,28 @@ describe('durable harness conversation events', () => {
     const failed = events[0];
     assert.match(failed?.kind === 'turn.failed' ? failed.reason : '', /endpoint unavailable/);
   });
+
+  it('persists partial streamed prose before a provider fails', async () => {
+    const bus = new EventBus();
+    const events = capture(bus);
+    const provider = scripted([]);
+    provider.stream = async function* (): AsyncGenerator<CompletionEvent> {
+      yield { kind: 'text', delta: 'partial answer' };
+      throw new Error('died after first token');
+    };
+
+    const result = await runLoop([{ role: 'user', content: 'continue' }], {
+      provider,
+      container,
+      questions: new QuestionBroker(bus, 50),
+      bus,
+      tools: [],
+      turnId: 'turn-partial-failed',
+    });
+
+    assert.equal(result.stop, 'error');
+    assert.equal(result.text, 'partial answer');
+    assert.deepEqual(events.map((event) => event.kind), ['assistant.message', 'turn.failed']);
+    assert.equal(events[0]?.kind === 'assistant.message' ? events[0].text : '', 'partial answer');
+  });
 });

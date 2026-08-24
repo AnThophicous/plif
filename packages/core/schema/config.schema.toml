@@ -68,6 +68,10 @@ aliasOf = "provider"
 type = "table"
 values = "Map of agent names to agent definitions."
 
+[fields.agentAutoLaunch]
+type = "boolean"
+description = "Allow the primary agent to launch configured named agents when their role matches a task."
+
 [fields.profiles]
 type = "table"
 
@@ -156,6 +160,10 @@ format = "provider/model"
 
 [definitions.agent.fields.description]
 type = "string"
+
+[definitions.agent.fields.instructions]
+type = "string"
+description = "Optional role instructions used when this named agent runs."
 
 [definitions.agent.fields.maxIterations]
 type = "integer"

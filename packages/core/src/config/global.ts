@@ -5,6 +5,7 @@ import path from 'node:path';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 
 import { PlifError } from '../errors.js';
+import { BUILTIN_AGENT_PRESETS } from './agent-presets.js';
 
 export type PermissionMode = 'ask' | 'auto-approve' | 'deny';
 
@@ -20,6 +21,8 @@ export interface AgentConfig {
   readonly model?: string;
   /** Shown to the main agent so it can choose between them. */
   readonly description?: string;
+  /** Optional role instructions applied only when this named agent runs. */
+  readonly instructions?: string;
   /** How many passes through the loop this agent gets. */
   readonly maxIterations?: number;
   readonly disable?: boolean;
@@ -28,6 +31,8 @@ export interface AgentConfig {
 export interface ProfileConfig {
   readonly model?: string;
   readonly name?: string;
+  /** Short human-readable purpose shown by `/persona list` and `/persona show`. */
+  readonly description?: string;
   readonly systemPrompt: string;
 }
 
@@ -51,6 +56,8 @@ export interface GlobalConfig {
    * no code change to rearrange that.
    */
   readonly agent?: Readonly<Record<string, AgentConfig>>;
+  /** Whether the primary agent may choose named agents without explicit user direction. */
+  readonly agentAutoLaunch?: boolean;
   readonly activeProfile?: string;
   /** Provider-qualified model chosen explicitly for future image delegation. */
   readonly visionModel?: string;
@@ -105,13 +112,28 @@ export function mcpServersOf(config: GlobalConfig): unknown {
 }
 
 /**
- * The agents declared for subagent spawning, disabled ones removed.
+ * The effective agents available for subagent spawning.
  *
- * Returns an empty object rather than a default set. An agent list invented
- * here would be models the developer never chose and might be billed for.
+ * Built-in roles are present by default and inherit the selected parent model.
+ * A disable marker is an explicit opt-out, so a removed built-in does not
+ * silently return on the next launch.
  */
 export function agentsOf(config: GlobalConfig): Record<string, AgentConfig> {
   const agents: Record<string, AgentConfig> = {};
+  for (const preset of BUILTIN_AGENT_PRESETS) {
+    const configured = config.agent?.[preset.name];
+    if (configured?.disable === true) continue;
+    agents[preset.name] = configured
+      ? {
+          ...configured,
+          description: configured.description ?? preset.description,
+          instructions: configured.instructions ?? preset.instructions,
+        }
+      : {
+          description: preset.description,
+          instructions: preset.instructions,
+        };
+  }
   for (const [name, entry] of Object.entries(config.agent ?? {})) {
     if (!entry || typeof entry !== 'object' || entry.disable === true) continue;
     agents[name] = entry;

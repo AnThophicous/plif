@@ -17,6 +17,7 @@ import {
 } from '../transcript/reducer.js';
 import type { TranscriptState } from '../transcript/types.js';
 import type { StreamFrame } from '../stream-frame.js';
+import { TranscriptPersistenceQueue } from '../transcript/persistence.js';
 
 export interface TranscriptControllerOptions {
   readonly engine: Engine;
@@ -30,9 +31,11 @@ export interface TranscriptController {
   readonly session: Session | null;
   readonly persistenceWarning: string | null;
   readonly appendUserTurn: (text: string) => string;
-  readonly persist: (event: ConversationEvent) => void;
+  readonly persist: (event: ConversationEvent) => Promise<void>;
+  readonly flushPersistence: () => Promise<void>;
   readonly applyStreamFrame: (frame: StreamFrame) => void;
   readonly resetStream: () => void;
+  readonly finishTurn: (turnId: string) => void;
   /** Move the live transcript pointer without remounting the Ink app. */
   readonly switchSession: (session: Session, replay: readonly ConversationEvent[]) => void;
 }
@@ -53,34 +56,36 @@ export function useTranscriptController({
   const [state, dispatch] = useReducer(transcriptReducer, replay, seedTranscript);
   const [liveSession, setLiveSession] = useState<Session | null>(session);
   const [persistenceWarning, setPersistenceWarning] = useState<string | null>(null);
-  const sessionRef = useRef<Session | null>(session);
-  const sessionCreate = useRef<Promise<Session> | null>(session ? Promise.resolve(session) : null);
   const persistenceFailed = useRef(false);
   const persisted = useRef(new Set(replay.map((event) => event.eventId)));
   const currentTurnId = useRef<string | null>(null);
+  const durableTurns = useRef(new Map<string, number | null>());
+  const frameEpochs = useRef(new Map<string, number>());
 
-  const persist = useCallback((event: ConversationEvent): void => {
-    if (persisted.current.has(event.eventId)) return;
+  const persistence = useRef<TranscriptPersistenceQueue | null>(null);
+  persistence.current ??= new TranscriptPersistenceQueue({
+    initialSession: session,
+    createSession: () => engine.sessions.create(workspace),
+    onSession: (created) => {
+      setLiveSession(created);
+    },
+    onFailure: (error: unknown) => {
+      persistenceFailed.current = true;
+      setPersistenceWarning(
+        `Conversation will continue in memory; transcript persistence failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    },
+  });
+
+  const persist = useCallback((event: ConversationEvent): Promise<void> => {
+    if (persisted.current.has(event.eventId)) return Promise.resolve();
     persisted.current.add(event.eventId);
     dispatch({ type: 'event', event });
-    if (persistenceFailed.current) return;
-
-    sessionCreate.current ??= engine.sessions.create(workspace);
-    void sessionCreate.current
-      .then(async (created) => {
-        sessionRef.current = created;
-        setLiveSession(created);
-        await created.append(event);
-      })
-      .catch((error: unknown) => {
-        persistenceFailed.current = true;
-        setPersistenceWarning(
-          `Conversation will continue in memory; transcript persistence failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      });
-  }, [engine, workspace]);
+    if (persistenceFailed.current) return Promise.resolve();
+    return persistence.current?.enqueue(event) ?? Promise.resolve();
+  }, []);
 
   const appendUserTurn = useCallback((text: string): string => {
     const turnId = randomUUID();
@@ -98,20 +103,39 @@ export function useTranscriptController({
   }, [persist]);
 
   useEffect(() => engine.bus.on('conversation.event', (event) => {
-    persist(event);
-    if (
-      event.turnId === currentTurnId.current &&
-      (event.kind === 'turn.completed' ||
-        event.kind === 'turn.interrupted' ||
-        event.kind === 'turn.failed')
-    ) {
-      currentTurnId.current = null;
+    if (event.kind === 'assistant.message') {
+      durableTurns.current.set(event.turnId, frameEpochs.current.get(event.turnId) ?? null);
     }
+    persist(event);
   }), [engine, persist]);
 
   const applyStreamFrame = useCallback((frame: StreamFrame): void => {
     const turnId = currentTurnId.current;
     if (!turnId || frame.kind === 'reset') return;
+    // The durable assistant event is emitted before the loop's terminal event.
+    // Its text is already authoritative, so a completion frame arriving after
+    // that boundary must not create a second ephemeral assistant cell. A new
+    // data frame means a later tool cycle has started and may stream normally.
+    if (frame.kind === 'data') {
+      const durableEpoch = durableTurns.current.get(turnId);
+      const previousEpoch = frameEpochs.current.get(turnId);
+      if (durableEpoch === null) {
+        durableTurns.current.set(turnId, frame.epoch);
+      } else if (
+        durableEpoch !== undefined &&
+        previousEpoch !== undefined &&
+        frame.epoch !== durableEpoch
+      ) {
+        durableTurns.current.delete(turnId);
+      }
+      frameEpochs.current.set(turnId, frame.epoch);
+    } else if (
+      (frame.kind === 'complete' || frame.kind === 'dispose') &&
+      durableTurns.current.has(turnId) &&
+      (durableTurns.current.get(turnId) === null || durableTurns.current.get(turnId) === frame.epoch)
+    ) {
+      return;
+    }
     const at = new Date().toISOString();
     if (frame.reasoning) {
       dispatch({
@@ -138,10 +162,21 @@ export function useTranscriptController({
     if (turnId) dispatch({ type: 'stream.reset', turnId });
   }, []);
 
+  const finishTurn = useCallback((turnId: string): void => {
+    durableTurns.current.delete(turnId);
+    frameEpochs.current.delete(turnId);
+    if (currentTurnId.current === turnId) currentTurnId.current = null;
+  }, []);
+
+  const flushPersistence = useCallback((): Promise<void> => {
+    return persistence.current?.flush() ?? Promise.resolve();
+  }, []);
+
   const switchSession = useCallback((nextSession: Session, nextReplay: readonly ConversationEvent[]): void => {
-    sessionRef.current = nextSession;
-    sessionCreate.current = Promise.resolve(nextSession);
+    persistence.current?.setSession(nextSession);
     persisted.current = new Set(nextReplay.map((event) => event.eventId));
+    durableTurns.current.clear();
+    frameEpochs.current.clear();
     currentTurnId.current = null;
     persistenceFailed.current = false;
     setPersistenceWarning(null);
@@ -197,8 +232,10 @@ export function useTranscriptController({
     persistenceWarning,
     appendUserTurn,
     persist,
+    flushPersistence,
     applyStreamFrame,
     resetStream,
+    finishTurn,
     switchSession,
   };
 }

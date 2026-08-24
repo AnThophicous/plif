@@ -100,19 +100,25 @@ export function reviewGate(state: HarnessCycleState): string | null {
   if (state.revision === 0) return null;
 
   const missing = state.changedPaths.filter((path) => !state.reviewedPaths.includes(path));
+  const requirements: string[] = [];
   if (missing.length > 0) {
-    return (
-      'Review gate: inspect every changed file before concluding. ' +
-      `Still to inspect: ${missing.join(', ')}.`
+    const sample = missing.slice(0, 3).join(', ');
+    const remainder = missing.length > 3 ? `, and ${missing.length - 3} more` : '';
+    requirements.push(
+      `inspect all ${missing.length} changed file${missing.length === 1 ? '' : 's'} (${sample}${remainder})`,
     );
   }
   if (state.validatedRevision !== state.revision) {
-    return (
-      'Review gate: collect fresh validation evidence after the last change. ' +
-      'Run diagnostics or the relevant tests, typecheck, build, lint, or verification command.'
-    );
+    requirements.push('collect fresh validation evidence with the relevant diagnostics or tests');
   }
-  return null;
+  if (requirements.length === 0) return null;
+
+  return [
+    'PLIF review checkpoint (internal):',
+    `${requirements.join(' and ')} before finishing.`,
+    'Use the available tools now; do not narrate this checkpoint or repeat its wording.',
+    'After the evidence is collected, return one concise completion line.',
+  ].join(' ');
 }
 
 export function isFileMutationTool(name: string): boolean {
@@ -132,17 +138,29 @@ export function mutationPaths(name: string, input: Record<string, unknown>): rea
   if (isShellMutation(name, input)) return ['*'];
   if (name === 'resolve_edit_conflict') return ['*'];
   if (name === 'write_file' || name === 'edit_file') {
-    return typeof input['path'] === 'string' && input['path'].trim() ? [input['path']] : ['*'];
+    if (typeof input['path'] !== 'string' || !input['path'].trim()) return ['*'];
+    return isInternalHarnessPath(input['path']) ? [] : [input['path']];
   }
   if (name === 'apply_patch' && Array.isArray(input['edits'])) {
     const paths = input['edits'].flatMap((value) => {
       if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
       const path = (value as Record<string, unknown>)['path'];
-      return typeof path === 'string' && path.trim() ? [path] : [];
+      return typeof path === 'string' && path.trim() && !isInternalHarnessPath(path) ? [path] : [];
     });
-    return paths.length > 0 ? paths : ['*'];
+    return paths;
   }
   return [];
+}
+
+/**
+ * PLIF writes its own checkpoint/state artifacts under `.plif` while a turn is
+ * running. Those files are operational bookkeeping, not user-product changes;
+ * sending them through the user-facing review gate creates a false request to
+ * inspect a generated plan and can terminate an otherwise successful turn.
+ */
+function isInternalHarnessPath(path: string): boolean {
+  const normalized = normalizePath(path);
+  return normalized === '.plif' || normalized.startsWith('.plif/') || normalized.includes('/.plif/');
 }
 
 export function inspectionPaths(name: string, input: Record<string, unknown>): readonly string[] {

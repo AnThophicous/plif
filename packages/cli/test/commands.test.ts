@@ -4,14 +4,22 @@ import { describe, it } from 'node:test';
 import os from 'node:os';
 import path from 'node:path';
 
+import { saveGlobalConfig, tokenSplitDefinitions } from '@plif/core';
+
 import {
   COMMANDS,
+  AGENT_SUBCOMMANDS,
+  BUILTIN_AGENT_PRESETS,
   builtInPickerProviders,
   findCommand,
+  mergeDiscoveredModel,
+  normalizeAgentAction,
   matchCommands,
   providerModelIds,
   validateEffortArgument,
 } from '../src/commands.js';
+import { findCatalogProvider } from '@plif/core';
+import type { ProviderModel } from '@plif/core';
 import type { CommandContext } from '../src/commands.js';
 import { entry } from '../src/session.js';
 import type { BrowserTab, TimelineEntry } from '../src/session.js';
@@ -21,6 +29,317 @@ const sessions = COMMANDS.find((command) => command.name === 'sessions');
 const plan = COMMANDS.find((command) => command.name === 'plan');
 const goal = COMMANDS.find((command) => command.name === 'goal');
 const effort = COMMANDS.find((command) => command.name === 'effort');
+const persona = COMMANDS.find((command) => command.name === 'persona');
+const usage = COMMANDS.find((command) => command.name === 'usage');
+const temp = COMMANDS.find((command) => command.name === 'temp');
+
+describe('/temp session scratch space', () => {
+  it('explains the isolated virtual path without exposing the host path', async () => {
+    const hostPath = path.join(os.tmpdir(), 'plif-session-private');
+    const result = await temp!.run([], { tempDir: hostPath } as unknown as CommandContext);
+    const rendered = `${result.entries[0]?.title}\n${result.entries[0]?.subtitle}\n${result.entries[0]?.detail}`;
+    assert.match(rendered, /\/temp/);
+    assert.match(rendered, /isolated from \/project/);
+    assert.doesNotMatch(rendered, new RegExp(hostPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  });
+});
+
+describe('/token-split picker', () => {
+  it('opens a navigable method picker with explicit active and inactive states', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-token-split-list-'));
+    const opened: Array<{
+      title: string;
+      hint?: string;
+      countLabel?: string;
+      items: readonly { value: string; state?: string; current?: boolean }[];
+      onPick: (value: string) => void;
+    }> = [];
+    try {
+      const result = await findCommand('token-split')!.run([], {
+        cwd: root,
+        openPicker: (request) => {
+          if ('items' in request) opened.push(request as typeof opened[number]);
+        },
+      } as unknown as CommandContext);
+      assert.equal(result.entries.length, 0);
+      assert.equal(opened[0]?.countLabel, 'methods');
+      assert.match(opened[0]?.title ?? '', /TOKEN SPLIT · ✓/);
+      assert.match(opened[0]?.hint ?? '', /Enter activate\/remove/);
+      assert.match(opened[0]?.hint ?? '', /✓ active · × inactive/);
+      assert.equal(opened[0]?.items.length, tokenSplitDefinitions().length);
+      for (const definition of tokenSplitDefinitions()) {
+        const item = opened[0]?.items.find((candidate) => candidate.value === definition.id);
+        assert.ok(item);
+        assert.equal(item.state, item.current ? 'on' : 'off');
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
+  it('keeps machine-readable list output behind --json', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-token-split-json-'));
+    try {
+      const result = await findCommand('token-split')!.run(['list', '--json'], { cwd: root } as unknown as CommandContext);
+      const listed = result.entries[0];
+      assert.ok(listed);
+      assert.equal(listed.expand, true);
+      assert.match(`${listed.title}\n${listed.detail ?? ''}`, /"techniques"/);
+      for (const definition of tokenSplitDefinitions()) {
+        assert.match(listed.detail ?? listed.title, new RegExp(`"id": "${definition.id}"`));
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
+  it('toggles a selected method and reports the result after the picker closes', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-token-split-toggle-'));
+    const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
+    const configPath = path.join(root, 'config.toml');
+    process.env['PLIF_CONFIG_PATH'] = configPath;
+    await fs.writeFile(configPath, '');
+    let onPick: ((value: string) => void) | undefined;
+    const notices: TimelineEntry[] = [];
+    try {
+      await findCommand('token-split')!.run([], {
+        openPicker: (request) => {
+          if ('items' in request) onPick = (value) => request.onPick(value);
+        },
+        notify: (notice) => notices.push(notice),
+        engine: { questions: { ask: async () => 'enable' } },
+      } as unknown as CommandContext);
+
+      onPick?.('compaction');
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+
+      const persisted = JSON.parse(await fs.readFile(path.join(root, 'token-split.json'), 'utf8')) as {
+        techniques: { compaction: { on: boolean } };
+      };
+      assert.equal(persisted.techniques.compaction.on, true);
+      assert.equal(notices[0]?.tone, 'success');
+      assert.match(notices[0]?.title ?? '', /compaction/);
+    } finally {
+      if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
+      else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+});
+
+describe('/agents command navigation', () => {
+  it('uses /agents as the canonical command and accepts the singular alias', () => {
+    assert.equal(findCommand('agents')?.name, 'agents');
+    assert.equal(findCommand('agent')?.name, 'agents');
+    assert.deepEqual(
+      findCommand('agents')?.autocomplete?.getValues?.({ argumentIndex: 0 } as never),
+      ['menu'],
+    );
+    assert.equal(
+      findCommand('agents')?.autocomplete?.getLabel?.('menu', {} as never),
+      'Abrir menu',
+    );
+    assert.deepEqual(normalizeAgentAction('a'), 'add');
+    assert.deepEqual(normalizeAgentAction('r'), 'remove');
+    assert.deepEqual(normalizeAgentAction('rn'), 'rename');
+    assert.deepEqual(normalizeAgentAction('l'), 'list');
+  });
+
+  it('keeps short tab targets for the guided menu', () => {
+    assert.deepEqual(AGENT_SUBCOMMANDS, ['add', 'remove', 'rename', 'list', 'auto']);
+    assert.deepEqual(
+      BUILTIN_AGENT_PRESETS.map((preset) => preset.name),
+      ['CEO - Pli\'ef', 'Diretor de Criação - Pli\'ef', 'The Critic - Pli\'ef', 'The Simulator - Pli\'ef'],
+    );
+    assert.ok(BUILTIN_AGENT_PRESETS.every((preset) => preset.instructions.length > 1000));
+  });
+
+  it('opens the guided action menu instead of requiring a model id', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-agents-command-'));
+    const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
+    process.env['PLIF_CONFIG_PATH'] = path.join(root, 'config.toml');
+    await fs.writeFile(process.env['PLIF_CONFIG_PATH'], '');
+    const opened: Array<{ title: string; hint?: string; items: readonly { value: string }[] }> = [];
+    const context = {
+      openPicker: (request: { title: string; hint?: string; items: readonly { value: string }[] }) => opened.push(request),
+    } as unknown as CommandContext;
+    try {
+      await findCommand('agents')!.run([], context);
+      assert.equal(opened[0]?.title, 'Agents');
+      assert.deepEqual(opened[0]?.items.map((item) => item.value), ['add', 'remove', 'rename', 'list', 'auto']);
+
+      await findCommand('agents')!.run(['a'], context);
+      assert.equal(opened[1]?.title, 'Add agent');
+      assert.deepEqual(opened[1]?.items.map((item) => item.value), ['custom']);
+      assert.match(opened[1]?.hint ?? '', /already in List/i);
+
+      await findCommand('agents')!.run(['list'], context);
+      assert.deepEqual(
+        opened[2]?.items.map((item) => item.value),
+        ['CEO - Pli\'ef', 'Diretor de Criação - Pli\'ef', 'The Critic - Pli\'ef', 'The Simulator - Pli\'ef'],
+      );
+      assert.match(opened[2]?.hint ?? '', /AUTO-LAUNCH ✓/);
+
+      const status = await findCommand('agents')!.run(['auto', 'show'], context);
+      assert.match(status.entries[0]?.title ?? '', /AUTO-LAUNCH ✓/);
+    } finally {
+      if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
+      else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+});
+
+describe('/persona persistent behavior layer', () => {
+  it('opens a creation menu instead of stopping at an empty-state message', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-persona-menu-'));
+    const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
+    process.env['PLIF_CONFIG_PATH'] = path.join(root, 'config.toml');
+    await fs.writeFile(process.env['PLIF_CONFIG_PATH'], '');
+    const opened: Array<{ title: string; hint?: string; items: readonly { value: string }[] }> = [];
+    try {
+      await persona!.run([], {
+        openPicker: (request) => {
+          if ('items' in request) opened.push(request);
+        },
+      } as unknown as CommandContext);
+      assert.equal(opened[0]?.title, 'Personas');
+      assert.deepEqual(opened[0]?.items.map((item) => item.value), ['add', 'list', 'show', 'off']);
+      assert.match(opened[0]?.hint ?? '', /no active persona/);
+    } finally {
+      if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
+      else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
+  it('creates and persists a persona through the guided add flow', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-persona-add-'));
+    const file = path.join(root, 'config.toml');
+    const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
+    process.env['PLIF_CONFIG_PATH'] = file;
+    await fs.writeFile(file, '');
+    const answers = ['reviewer', 'Correctness-focused review persona.', 'Review correctness before style.'];
+    try {
+      const result = await persona!.run(['add'], {
+        engine: { questions: { ask: async () => answers.shift() ?? null } },
+        model: { info: { id: 'deepseek-v4-flash-free' } },
+      } as unknown as CommandContext);
+      const saved = await import('@plif/core').then(({ loadGlobalConfig, profilesOf }) => loadGlobalConfig(file).then((config) => profilesOf(config)));
+      assert.equal(saved.reviewer?.description, 'Correctness-focused review persona.');
+      assert.equal(saved.reviewer?.systemPrompt, 'Review correctness before style.');
+      assert.equal(saved.reviewer?.model, 'deepseek-v4-flash-free');
+      assert.match(result.entries[0]?.title ?? '', /persona reviewer saved/);
+    } finally {
+      if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
+      else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
+  it('lists, activates, shows, and disables a saved persona without replacing PLIF identity', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-persona-command-'));
+    const file = path.join(root, 'config.toml');
+    const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
+    process.env['PLIF_CONFIG_PATH'] = file;
+    await saveGlobalConfig({
+      model: 'opencode/deepseek-v4-flash-free',
+      profiles: {
+        reviewer: {
+          name: 'Reviewer',
+          description: 'Correctness-focused review persona.',
+          model: 'opencode/deepseek-v4-flash-free',
+          systemPrompt: 'Review correctness before style.',
+        },
+      },
+      activeProfile: 'reviewer',
+    }, file);
+    const switched: string[] = [];
+    const cleared: string[] = [];
+    try {
+      const context = {
+        switchProfile: async (name: string) => { switched.push(name); },
+        clearProfile: async () => { cleared.push('off'); },
+      } as unknown as CommandContext;
+      const list = await persona!.run(['list'], context);
+      assert.match(list.entries[0]?.subtitle ?? '', /active persona: reviewer/);
+      assert.match(list.entries[0]?.title ?? '', /Correctness-focused review persona/);
+      const show = await persona!.run(['show'], context);
+      assert.match(show.entries[0]?.detail ?? '', /Review correctness/);
+      await persona!.run(['reviewer'], context);
+      await persona!.run(['off'], context);
+      assert.deepEqual(switched, ['reviewer']);
+      assert.deepEqual(cleared, ['off']);
+      await assert.rejects(persona!.run(['missing'], context), /unknown persona missing/);
+    } finally {
+      if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
+      else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+});
+
+describe('/usage provider truthfulness', () => {
+  it('renders provider limits and session consumption without inventing a quota', async () => {
+    const opened: Array<{ title: string; hint?: string; items: readonly { value: string }[]; onPick: (value: string) => void }> = [];
+    const notices: TimelineEntry[] = [];
+    const context = {
+      model: {
+        info: { providerId: 'opencode-zen', id: 'deepseek-v4-flash-free' },
+        getUsage: async () => ({
+          provider: 'opencode-zen',
+          model: 'deepseek-v4-flash-free',
+          status: 'available',
+          source: 'headers',
+          fetchedAt: new Date(0).toISOString(),
+          windows: [{
+            type: 'minute',
+            unit: 'requests',
+            limit: 60,
+            used: 4,
+            remaining: 56,
+            percentage: 7,
+            source: 'headers',
+          }],
+        }),
+      },
+      sessionStatus: () => ({
+        usage: {
+          requests: 2,
+          inputTokens: 120,
+          outputTokens: 80,
+          toolCalls: 0,
+          turns: 1,
+          subagentRuns: 0,
+          subagentTokens: 0,
+        },
+      }),
+      openPicker: (request: typeof opened[number]) => opened.push(request),
+      notify: (notice: TimelineEntry) => notices.push(notice),
+    } as unknown as CommandContext;
+
+    const result = await usage!.run([], context);
+    assert.deepEqual(result.entries, []);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(opened[0]?.title, 'Usage');
+    assert.deepEqual(opened[0]?.items.map((item) => item.value), ['overview', 'limits', 'session', 'refresh']);
+    assert.match(opened[0]?.hint ?? '', /choose a view/i);
+    opened[0]?.onPick('limits');
+    assert.match(notices[0]?.detail ?? '', /limit 60/);
+    assert.match(notices[0]?.detail ?? '', /7% used/);
+    assert.match(notices[0]?.detail ?? '', /requests 2/);
+    assert.match(notices[0]?.subtitle ?? '', /official provider metadata/);
+  });
+
+  it('states when the adapter cannot expose usage instead of showing zero', async () => {
+    const context = {
+      model: { info: { providerId: 'local', id: 'model' } },
+    } as unknown as CommandContext;
+    const result = await usage!.run(['overview'], context);
+    assert.match(result.entries[0]?.detail ?? '', /does not expose usage information/i);
+    assert.match(result.entries[0]?.subtitle ?? '', /no quota was invented/i);
+  });
+});
 
 interface Recorder {
   readonly context: CommandContext;
@@ -275,6 +594,7 @@ describe('provider model picker', () => {
       assert.equal(picker?.title, 'Select provider');
       assert.equal(picker?.countLabel, 'providers');
       assert.ok(picker?.items?.some((item) => item.value === 'nvidia'));
+      assert.ok(picker?.items?.some((item) => item.value === 'nexapi'));
     } finally {
       if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
       else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
@@ -318,6 +638,20 @@ describe('provider model picker', () => {
       providerModelIds(catalog, ['ox-alpha-free'], true, 'free', [{ id: 'ox-alpha-free', name: 'OX Alpha Free' }]),
       ['ox-alpha-free'],
     );
+  });
+
+  it('adds only registry facts to an id-only OpenCode Go discovery row', () => {
+    const source = findCatalogProvider('opencode-go');
+    assert.ok(source);
+    const merged = mergeDiscoveredModel(source, 'glm-5.1', { id: 'glm-5.1' } as ProviderModel);
+    assert.equal(merged.metadataSource, 'registry');
+    assert.equal(merged.provider, 'opencode-go');
+    assert.equal(merged.product, 'OpenCode');
+    assert.equal(merged.tier, 'Go');
+    assert.equal(merged.cost, 'paid');
+    assert.equal(merged.contextWindow, undefined);
+    assert.equal(merged.reasoning, undefined);
+    assert.equal(merged.tools, undefined);
   });
 
   it('does not duplicate a built-in provider hidden by a custom declaration', () => {

@@ -31,6 +31,13 @@ import { isLocal, keyOptional } from './config.js';
 import type { CachedEffort, EffortCapabilityCache } from './capabilities.js';
 import { redactedProviderId, streamTiming } from './stream-timing.js';
 import { modelListResult, normalizeProviderModel } from './metadata.js';
+import {
+  freshUsageSnapshot,
+  providerPolicyUsage,
+  usageFromRateLimitHeaders,
+  type UsageInfo,
+} from './usage.js';
+import { normalizeOpenAIUsage } from './token-usage.js';
 import { ContentDeltaNormalizer } from './content.js';
 import type { StreamTiming } from './stream-timing.js';
 import type { EventBus } from '../events/bus.js';
@@ -228,6 +235,8 @@ export class OpenAIProvider implements ModelProvider {
   #capabilityCache: EffortCapabilityCache | undefined;
   #onTiming: ((timing: StreamTiming) => void) | undefined;
   #capabilityLoad: Promise<void> | undefined;
+  #usageHeaders: Headers | undefined;
+  #usageSnapshot: UsageInfo | undefined;
   /** Highest Plif candidate accepted by this provider instance. */
   #plifEffortIndex = 0;
 
@@ -239,14 +248,22 @@ export class OpenAIProvider implements ModelProvider {
       : undefined);
     const anonymous = !config.apiKey && keyOptional(config.baseURL, config.model, config.providerId);
     type SdkFetch = NonNullable<ClientOptions['fetch']>;
-    const anonymousFetch = anonymous
-      ? (async (...args: Parameters<SdkFetch>): Promise<Awaited<ReturnType<SdkFetch>>> => {
-          const [input, init] = args;
-          const headers = new globalThis.Headers(init?.headers as any);
-          headers.delete('authorization');
-          return await globalThis.fetch(input as any, { ...init, headers } as any) as unknown as Awaited<ReturnType<SdkFetch>>;
-        }) as SdkFetch
-      : undefined;
+    const captureFetch = (async (...args: Parameters<SdkFetch>): Promise<Awaited<ReturnType<SdkFetch>>> => {
+      const [input, init] = args;
+      // Preserve headers carried by a Request object as well as SDK init
+      // headers. Replacing them with only init headers can silently drop
+      // provider-specific authentication when an SDK changes its fetch call
+      // shape.
+      const headers = new globalThis.Headers(
+        input instanceof globalThis.Request ? input.headers : undefined,
+      );
+      new globalThis.Headers(init?.headers as any).forEach((value, key) => headers.set(key, value));
+      if (anonymous) headers.delete('authorization');
+      const response = await globalThis.fetch(input as any, { ...init, headers } as any);
+      this.#usageHeaders = new globalThis.Headers(response.headers);
+      this.#usageSnapshot = undefined;
+      return response as unknown as Awaited<ReturnType<SdkFetch>>;
+    }) as SdkFetch;
     this.#client = new OpenAI({
       // The SDK requires a non-empty constructor key, but OpenCode's free tier
       // is genuinely anonymous. Use an internal sentinel only to satisfy the
@@ -255,7 +272,7 @@ export class OpenAIProvider implements ModelProvider {
       apiKey: config.apiKey || (anonymous ? 'plif-anonymous' : ''),
       baseURL: config.baseURL,
       timeout: config.timeoutMs,
-      ...(anonymousFetch ? { fetch: anonymousFetch } : {}),
+      fetch: captureFetch,
       // Retry belongs to this provider so attempts, waits, cancellation and
       // partial-output resets share one budget and remain visible to the UI.
       maxRetries: 0,
@@ -265,6 +282,13 @@ export class OpenAIProvider implements ModelProvider {
       ...(config.providerId ? { providerId: config.providerId } : {}),
       endpoint: config.baseURL,
       contextWindow: config.contextWindow,
+      ...(config.maxTokens === undefined ? {} : { maxOutputTokens: config.maxTokens }),
+      capabilities: {
+        usageSemantics: 'openai-compatible',
+        cacheSupport: 'reported',
+        cacheAccounting: 'separate-if-reported',
+        reasoningAccounting: 'reported',
+      },
     };
   }
 
@@ -491,10 +515,7 @@ export class OpenAIProvider implements ModelProvider {
         if (next.done) break;
         const chunk = next.value;
         if (chunk.usage) {
-          usage = {
-            promptTokens: chunk.usage.prompt_tokens ?? 0,
-            completionTokens: chunk.usage.completion_tokens ?? 0,
-          };
+          usage = normalizeOpenAIUsage(chunk.usage) ?? usage;
         }
 
         const choice = chunk.choices[0];
@@ -593,7 +614,7 @@ export class OpenAIProvider implements ModelProvider {
       request.signal?.removeEventListener('abort', onRequestAbort);
       if (iterator?.return) {
         try {
-          void Promise.resolve(iterator.return()).catch(() => undefined);
+          await Promise.resolve(iterator.return()).catch(() => undefined);
         } catch {
           // The request is already terminal; iterator cleanup cannot change it.
         }
@@ -704,6 +725,28 @@ export class OpenAIProvider implements ModelProvider {
             : 'unavailable';
       return { supported: false, models: [], error: failure };
     }
+  }
+
+  async getUsage() {
+    const cached = freshUsageSnapshot(this.#usageSnapshot);
+    if (cached) return cached;
+    const headerUsage = usageFromRateLimitHeaders(
+      this.#config.providerId ?? redactedProviderId(this.#config.baseURL),
+      this.#config.model,
+      this.#usageHeaders ?? new Headers(),
+      { plan: this.#config.providerId },
+    );
+    const policy = providerPolicyUsage(this.#config.providerId ?? '', this.#config.model, headerUsage.fetchedAt);
+    const usage = !policy || headerUsage.windows.length === 0
+      ? policy ?? headerUsage
+      : {
+      ...headerUsage,
+      plan: policy.plan,
+      windows: [...headerUsage.windows, ...policy.windows],
+      detail: `${policy.detail} Live rate-limit headers are shown above when available.`,
+      };
+    this.#usageSnapshot = usage;
+    return usage;
   }
 
   /**

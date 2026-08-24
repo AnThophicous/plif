@@ -19,7 +19,7 @@ import { createHash } from 'node:crypto';
 import { PlifError } from '../errors.js';
 import { globalConfigPath, loadGlobalConfig, saveGlobalConfig } from '../config/global.js';
 import type { StorePaths } from '../store/paths.js';
-import type { ModelProtocol, StreamSemantics } from './provider.js';
+import type { ModelPricing, ModelProtocol, ModelRankingHints, StreamSemantics } from './provider.js';
 
 export interface ModelConfig {
   /** Model id as the endpoint knows it, e.g. "gpt-4o-mini", "llama3.1:8b". */
@@ -129,6 +129,11 @@ export const PRESETS: Readonly<Record<string, { baseURL: string; keyEnv: string;
       baseURL: 'https://opencode.ai/zen/go/v1',
       keyEnv: 'OPENCODE_API_KEY',
       note: 'OpenCode Go — paid, 1M context',
+    },
+    nexapi: {
+      baseURL: 'https://nexapi.ebmtg1.easypanel.host/v1',
+      keyEnv: 'NEXAPI_API_KEY',
+      note: 'NexAPI — OpenAI-compatible model gateway',
     },
     openrouter: {
       baseURL: 'https://openrouter.ai/api/v1',
@@ -306,13 +311,18 @@ export interface StoredConfig {
 
 export interface CustomProviderModel {
   readonly name?: string;
+  readonly aliases?: readonly string[];
   readonly contextWindow?: number;
+  readonly maxInputTokens?: number;
+  readonly maxOutputTokens?: number;
   /** Explicit capability declaration; an endpoint model id is not evidence. */
   readonly modalities?: readonly ModelCapability[];
   readonly reasoning?: boolean;
   readonly tools?: boolean;
   /** Price is displayed before a vision subagent is allowed to start. */
   readonly cost?: ModelCost;
+  readonly pricing?: ModelPricing;
+  readonly ranking?: ModelRankingHints;
   readonly protocol?: ModelProtocol;
   readonly streamSemantics?: StreamSemantics;
   readonly needKey?: boolean;
@@ -337,6 +347,7 @@ export interface ProviderOffer {
 const PROVIDER_OFFERS: Readonly<Record<string, ProviderOffer>> = Object.freeze({
   opencode: { product: 'OpenCode', tier: 'Zen', cost: 'free', protocol: 'openai-chat' },
   'opencode-go': { product: 'OpenCode', tier: 'Go', cost: 'paid', protocol: 'openai-chat' },
+  nexapi: { product: 'NexAPI', tier: 'Hosted', cost: 'unknown', protocol: 'openai-chat' },
 });
 
 const OPENCODE_ZEN_ANONYMOUS_MODELS: ReadonlySet<string> = new Set([
@@ -351,6 +362,21 @@ const OPENCODE_ZEN_ANONYMOUS_MODELS: ReadonlySet<string> = new Set([
 /** Exact provider/model protocol registrations. No model-name heuristics. */
 const MODEL_PROTOCOLS: ReadonlyMap<string, ModelProtocol> = new Map([
   ['opencode-go/qwen3.8-max', 'anthropic-messages'],
+]);
+
+/** Explicitly declared built-in vision offers. Availability still follows the active provider. */
+const BUILTIN_VISION_MODELS: readonly {
+  readonly provider: string;
+  readonly model: string;
+  readonly label: string;
+  readonly cost: ModelCost;
+}[] = Object.freeze([
+  {
+    provider: 'opencode-go',
+    model: 'deepseek-v4-flash-vision-exp',
+    label: 'DeepSeek V4 Flash Vision Experimental',
+    cost: 'paid',
+  },
 ]);
 
 export function providerOffer(providerId: string | undefined): ProviderOffer | undefined {
@@ -385,19 +411,21 @@ export interface VisionCandidate {
   readonly label: string;
   readonly baseURL: string;
   readonly cost: ModelCost;
+  readonly pricing?: ModelPricing;
   readonly recommended: boolean;
 }
 
 /**
- * Models an endpoint happens to list are deliberately absent here. A model is
- * safe to offer for image inspection only when its configuration declares it.
+ * Models an endpoint happens to list are deliberately absent here unless the
+ * provider explicitly reports image support. Built-in entries below are the
+ * small set of registry declarations with the same guarantee.
  */
 export function visionCandidates(
   config: StoredConfig,
   options: Pick<ResolveOptions, 'env'> = {},
 ): readonly VisionCandidate[] {
   const providers = customProvidersOf(config);
-  return Object.entries(providers).flatMap(([provider, entry]) =>
+  const candidates = Object.entries(providers).flatMap(([provider, entry]) =>
     Object.entries(entry.models ?? {}).flatMap(([model, metadata]) => {
       if (!metadata.modalities?.includes('image')) return [];
       // Keep this display catalogue on the exact same precedence path as a
@@ -414,10 +442,47 @@ export function visionCandidates(
         label: metadata.name ?? model,
         baseURL: resolved.baseURL,
         cost: metadata.cost ?? 'unknown',
-        recommended: metadata.cost === 'free',
+        ...(metadata.pricing ? { pricing: metadata.pricing } : {}),
+        recommended: false,
       }];
     }),
   );
+  const activeProvider = providerIdForConfig(config, options);
+  const builtin = BUILTIN_VISION_MODELS
+    .filter(({ provider }) => provider === activeProvider && !(provider in providers))
+    .map((candidate) => {
+      const resolved = resolveConfig(config, {
+        model: formatModelRef(candidate.provider, candidate.model),
+        ...(options.env ? { env: options.env } : {}),
+      });
+      return {
+        ...candidate,
+        baseURL: resolved.baseURL,
+        recommended: false,
+      };
+    });
+  return recommendVisionCandidates([...candidates, ...builtin]);
+}
+
+function visionCostRank(candidate: VisionCandidate): number {
+  if (candidate.cost === 'free') return 0;
+  if (candidate.pricing) {
+    return (candidate.pricing.inputPerMillion ?? 0) + (candidate.pricing.outputPerMillion ?? 0);
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
+function recommendVisionCandidates(candidates: readonly VisionCandidate[]): readonly VisionCandidate[] {
+  return [...candidates]
+    .map((candidate, index) => ({ candidate, index }))
+    .sort((a, b) => visionCostRank(a.candidate) - visionCostRank(b.candidate) || a.index - b.index)
+    .map(({ candidate }, index) => ({
+      ...candidate,
+      // An unknown price is never presented as "cheapest". The first known
+      // free/numeric offer is the automatic route; otherwise the caller keeps
+      // the existing explicit-selection path.
+      recommended: index === 0 && (candidate.cost === 'free' || candidate.pricing !== undefined),
+    }));
 }
 
 /**
@@ -437,7 +502,8 @@ export function modelSupportsImages(
   if (!provider) return false;
   const env = options.env ?? process.env;
   const ref = parseModelRef(options.model ?? env['PLIF_MODEL'] ?? stored.model ?? '', providers);
-  return providers[provider]?.models?.[ref.model]?.modalities?.includes('image') === true;
+  if (providers[provider]?.models?.[ref.model]?.modalities?.includes('image') === true) return true;
+  return BUILTIN_VISION_MODELS.some((candidate) => candidate.provider === provider && candidate.model === ref.model);
 }
 
 export interface ResolveOptions {

@@ -35,6 +35,27 @@ import type { Container } from '../container/container.js';
 import type { QuestionBroker } from './ask.js';
 import { compact, estimateTokens } from './compaction.js';
 import type { CompactionResult } from './compaction.js';
+import { computeContextBudget, stableToolSpecs } from './context-budget.js';
+import type { ContextBudget } from './context-budget.js';
+import {
+  appendTokenSplitMetric,
+  makeTokenSplitMetric,
+  projectTokenSplitInput,
+  spillToolOutput,
+  techniqueIsOn,
+  writeStateNotes,
+} from './token-split/index.js';
+import type {
+  TokenSplitConfig,
+  TokenSplitProjection,
+  TokenSplitTransformation,
+} from './token-split/index.js';
+import {
+  canonicalFromLegacyUsage,
+  estimatedTokenUsage,
+  mergeTokenUsage,
+} from '../model/token-usage.js';
+import type { CanonicalTokenUsage } from '../model/token-usage.js';
 import type { MemoryStore } from './memory.js';
 import {
   DEFAULT_TOOLS,
@@ -80,15 +101,27 @@ export interface LoopOptions {
   readonly maxConsecutiveFailures?: number;
   /** Stop with an error instead of completing after this many unanswered review gates. */
   readonly maxReviewReminders?: number;
+  /** Enable the durable plan/review cycle for the selected effort only. */
+  readonly enableHarnessCycle?: boolean;
   readonly signal?: AbortSignal;
   readonly memory?: MemoryStore;
   readonly workspace?: string;
   readonly sessionId?: string;
   readonly contextTokens?: number;
+  /** Output reservation used by the context budget engine. */
+  readonly reservedOutputTokens?: number;
+  /** Safety margin kept below the provider's advertised context window. */
+  readonly safetyMarginTokens?: number;
   readonly tasks?: TaskManager;
   readonly lsp?: LspManager;
   readonly edits?: EditCoordinator;
   readonly agentId?: string;
+  /** Optional request projection and metrics for the Token Split engine. */
+  readonly tokenSplit?: {
+    readonly config: TokenSplitConfig;
+    readonly workspace?: string;
+    readonly sessionId?: string;
+  };
   /** Resolved once for the session and shared by tool registration and calls. */
   readonly shellDialect?: ShellDialect;
   readonly activateProfile?: (name: string) => Promise<void>;
@@ -142,7 +175,10 @@ export const AUTO_COMPACTION_TARGET_RATIO = 0.5;
 
 /** Below this, a loop pass was too quick to be a moment worth marking. */
 export const CYCLE_SEPARATOR_MIN_MS = 10_000;
-const DEFAULT_MAX_REVIEW_REMINDERS = 3;
+// One combined checkpoint plus one follow-up is enough to recover a model that
+// missed part of the evidence. A third reminder only elongates the session and
+// repeats the same instruction without improving the proof.
+const DEFAULT_MAX_REVIEW_REMINDERS = 2;
 
 export function shouldAutoCompact(used: number, contextTokens: number): boolean {
   return contextTokens > 0 && used >= Math.floor(contextTokens * AUTO_COMPACTION_TRIGGER_RATIO);
@@ -210,6 +246,8 @@ export interface LoopResult {
   readonly toolCalls: number;
   readonly promptTokens: number;
   readonly completionTokens: number;
+  readonly retries: number;
+  readonly tokenUsage?: CanonicalTokenUsage;
   readonly error?: PlifError;
 }
 
@@ -256,6 +294,8 @@ export async function runCompaction(
   run.bus.emit('agent.compacted', {
     before: result.before,
     after: result.after,
+    removedTokens: Math.max(0, result.before - result.after),
+    progressed: result.progressed,
     stages: result.stages,
     summarised: result.summary !== null,
     ...(result.failure ? { failure: result.failure } : {}),
@@ -276,10 +316,13 @@ export async function runLoop(
       : DEFAULT_TOOLS
   );
   const registry = toolRegistry(tools);
-  const specs = toolSpecs(tools);
-  const cycleEnabled = registry.has('update_plan') && [...registry.keys()].some((name) =>
-    isFileMutationTool(name) || name === 'run_command' || name === 'shell_command'
-  );
+  const specs = stableToolSpecs(toolSpecs(tools));
+  // The review cycle is a PLIF policy, not a property of having mutation tools.
+  // Keeping it opt-in prevents ordinary efforts from gaining hidden model turns.
+  const cycleEnabled = options.enableHarnessCycle === true &&
+    registry.has('update_plan') && [...registry.keys()].some((name) =>
+      isFileMutationTool(name) || name === 'run_command' || name === 'shell_command'
+    );
   // A model/tool mistake is recoverable work, not a reason to kill the task.
   // Keep an explicit cap for embedders that need one, but interactive Plif
   // sessions are uncapped and end through completion, cancellation, or a
@@ -294,7 +337,20 @@ export async function runLoop(
     options.contextTokens ?? options.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS;
 
   const messages: Message[] = [...history];
+  const tokenSplitConfig = options.tokenSplit?.config;
+  const tokenSplitTransformations: TokenSplitTransformation[] = [];
   const recentCalls: string[] = [];
+
+  const persistTokenSplitNotes = async (): Promise<void> => {
+    if (!tokenSplitConfig || !options.tokenSplit?.workspace || !options.tokenSplit.sessionId) return;
+    if (!techniqueIsOn(tokenSplitConfig, 'state-notes')) return;
+    await writeStateNotes(
+      options.tokenSplit.workspace,
+      options.tokenSplit.sessionId,
+      messages,
+      iterations,
+    ).catch(() => undefined);
+  };
 
   let text = '';
   let iterations = 0;
@@ -302,6 +358,8 @@ export async function runLoop(
   let consecutiveFailures = 0;
   let promptTokens = 0;
   let completionTokens = 0;
+  let retries = 0;
+  let tokenUsage: CanonicalTokenUsage | undefined;
   let cycle = createHarnessCycle();
   let reviewReminders = 0;
   // A failed capsule provider is disabled for the rest of this loop. Later
@@ -329,16 +387,53 @@ export async function runLoop(
     iterations += 1;
     options.bus.emit('agent.turn', { iteration: iterations, maxIterations });
 
-    if (shouldAutoCompact(estimateTokens(messages), contextTokens)) {
+    let projection: TokenSplitProjection | null = tokenSplitConfig
+      ? projectTokenSplitInput(messages, tokenSplitConfig)
+      : null;
+    let budget = computeContextBudget({
+      contextWindow: contextTokens,
+      messages: projection?.messages ?? messages,
+      tools: specs,
+      appendOnly: projection === null,
+      reservedOutputTokens: options.reservedOutputTokens ?? options.provider.info.maxOutputTokens,
+      ...(options.safetyMarginTokens === undefined ? {} : { safetyMarginTokens: options.safetyMarginTokens }),
+    });
+    emitContextBudget(budget);
+    const compactionBudget = budget.availableInputBudget ?? contextTokens;
+    if (shouldAutoCompact(budget.effectiveInputTokens, compactionBudget)) {
       const compacted = await runCompaction(messages, {
         ...(compactionProviderAvailable ? { provider: options.provider } : {}),
         bus: options.bus,
-        target: autoCompactionTarget(contextTokens),
+        target: Math.min(autoCompactionTarget(contextTokens), autoCompactionTarget(compactionBudget)),
         ...(options.signal ? { signal: options.signal } : {}),
       });
       messages.length = 0;
       messages.push(...compacted.messages);
       if (compacted.failure) compactionProviderAvailable = false;
+      const afterBudget = computeContextBudget({
+        contextWindow: contextTokens,
+        messages,
+        tools: specs,
+        appendOnly: false,
+        reservedOutputTokens: options.reservedOutputTokens ?? options.provider.info.maxOutputTokens,
+        ...(options.safetyMarginTokens === undefined ? {} : { safetyMarginTokens: options.safetyMarginTokens }),
+      });
+      projection = tokenSplitConfig ? projectTokenSplitInput(messages, tokenSplitConfig) : null;
+      budget = computeContextBudget({
+        contextWindow: contextTokens,
+        messages: projection?.messages ?? messages,
+        tools: specs,
+        appendOnly: false,
+        reservedOutputTokens: options.reservedOutputTokens ?? options.provider.info.maxOutputTokens,
+        ...(options.safetyMarginTokens === undefined ? {} : { safetyMarginTokens: options.safetyMarginTokens }),
+      });
+      if (!compacted.progressed && afterBudget.pressure === 'critical') {
+        return done('error', new PlifError(
+          'MODEL_ERROR',
+          `Context compaction made no progress (${afterBudget.effectiveInputTokens} tokens remain for a ${afterBudget.availableInputBudget ?? contextTokens}-token input budget).`,
+          { hint: 'Reduce tool output or start a fresh session.' },
+        ));
+      }
     }
 
     const turnStartedAt = Date.now();
@@ -346,6 +441,10 @@ export async function runLoop(
     // --- ask the model ---------------------------------------------------
     let turnText = '';
     let turnReasoning = '';
+    let turnPromptTokens = 0;
+    let turnCompletionTokens = 0;
+    let turnCacheHitTokens: number | undefined;
+    let turnCacheMissTokens: number | undefined;
     const requested: ToolCall[] = [];
     /** When the current thinking block opened, or null when not thinking. */
     let thinkingSince: number | null = null;
@@ -385,7 +484,7 @@ export async function runLoop(
 
     try {
       for await (const event of options.provider.stream({
-        messages,
+        messages: projection?.messages ?? messages,
         tools: specs,
         ...(options.signal ? { signal: options.signal } : {}),
       })) {
@@ -405,6 +504,7 @@ export async function runLoop(
         } else if (event.kind === 'tool') {
           requested.push(event.call);
         } else if (event.kind === 'retry') {
+          retries += 1;
           options.bus.emit('agent.retry', {
             turnId,
             attempt: event.attempt,
@@ -422,13 +522,23 @@ export async function runLoop(
           requested.length = 0;
           options.bus.emit('agent.reset', { turnId, reason: 'the endpoint failed part-way through' });
         } else {
+          turnPromptTokens += event.usage.promptTokens;
+          turnCompletionTokens += event.usage.completionTokens;
           promptTokens += event.usage.promptTokens;
           completionTokens += event.usage.completionTokens;
+          const reported = event.usage.tokenUsage?.totalPromptTokens !== undefined || event.usage.promptTokens > 0;
+          const currentUsage = event.usage.tokenUsage ?? (reported
+            ? canonicalFromLegacyUsage(event.usage.promptTokens, event.usage.completionTokens)
+            : estimatedTokenUsage(estimateTokens(messages), event.usage.completionTokens));
+          tokenUsage = mergeTokenUsage(tokenUsage, currentUsage);
+          if (currentUsage.source !== 'estimated' && currentUsage.source !== 'unknown') {
+            if (currentUsage.inputCachedTokens !== undefined) turnCacheHitTokens = (turnCacheHitTokens ?? 0) + currentUsage.inputCachedTokens;
+            if (currentUsage.inputNewTokens !== undefined) turnCacheMissTokens = (turnCacheMissTokens ?? 0) + currentUsage.inputNewTokens;
+          }
           // Not every endpoint fills in usage. Counting the messages ourselves
           // is worse than the real number and far better than a gauge that
           // reads zero for the whole session, which is indistinguishable from
           // a broken one.
-          const reported = event.usage.promptTokens > 0;
           options.bus.emit('agent.usage', {
             turnId,
             promptTokens: reported ? event.usage.promptTokens : estimateTokens(messages),
@@ -438,6 +548,13 @@ export async function runLoop(
             completionTokens,
             budget: contextTokens,
             estimated: !reported,
+            inputNewTokens: tokenUsage.inputNewTokens,
+            inputCachedTokens: tokenUsage.inputCachedTokens,
+            cacheWriteTokens: tokenUsage.cacheWriteTokens,
+            reasoningTokens: tokenUsage.reasoningTokens,
+            totalTokens: tokenUsage.totalTokens,
+            requestCount: tokenUsage.requestCount,
+            source: tokenUsage.source,
           });
           if (event.reason === 'cancelled') {
             endThinking();
@@ -447,18 +564,52 @@ export async function runLoop(
         }
       }
       endThinking();
+      if (tokenSplitConfig && projection && options.tokenSplit?.workspace) {
+        const metric = makeTokenSplitMetric(
+          iterations,
+          projection.baselineTokens,
+          projection.effectiveTokens,
+          turnCompletionTokens,
+          budget.pressure,
+          [...projection.transformations, ...tokenSplitTransformations],
+          tokenSplitConfig,
+          turnPromptTokens,
+          { hit: turnCacheHitTokens, miss: turnCacheMissTokens },
+        );
+        await appendTokenSplitMetric(
+          options.tokenSplit.workspace,
+          options.tokenSplit.sessionId ?? 'interactive',
+          metric,
+        ).catch(() => undefined);
+      }
     } catch (error) {
       endThinking();
+      // A provider can fail after delivering useful prose. Preserve that
+      // partial turn before the terminal failure event so the UI and session
+      // history never collapse a generated response into only a duration.
+      if (turnText || turnReasoning) {
+        keepTurnText();
+        options.bus.emit('conversation.event', {
+          ...eventBase('assistant.message', turnId),
+          phase: 'commentary',
+          text: turnText,
+          ...(turnReasoning ? { reasoning: turnReasoning } : {}),
+        });
+      }
       return done('error', toPlifError(error, 'MODEL_ERROR'));
     }
 
     const preToolProse = classifyPreToolProse(turnText, requested.length);
     if (preToolProse) {
+      // PLIF is the inspectable effort: intermediate prose is part of the
+      // visible reasoning record, not disposable chatter before a tool call.
+      // Other efforts retain the quieter transient/activity policy.
+      const visibility = options.enableHarnessCycle ? 'activity' : preToolProse;
       options.bus.emit('agent.pre_tool_prose', {
         turnId,
         iteration: iterations,
         text: turnText,
-        visibility: preToolProse,
+        visibility,
       });
     }
 
@@ -490,6 +641,7 @@ export async function runLoop(
       ...(sawReasoning ? { reasoning: turnReasoning } : {}),
       ...(protocolToolCalls.length > 0 ? { toolCalls: protocolToolCalls } : {}),
     });
+    await persistTokenSplitNotes();
 
     // No tools requested means the model considers itself finished.
     if (requested.length === 0) {
@@ -602,21 +754,52 @@ export async function runLoop(
           ...(item.diff ? { diff: item.diff } : {}),
         });
 
-        messages.push({ role: 'tool', content: item.output, toolCallId: item.call.id });
+        let modelToolOutput = item.output;
+        if (tokenSplitConfig && options.tokenSplit?.workspace && options.tokenSplit.sessionId && techniqueIsOn(tokenSplitConfig, 'spill')) {
+          const spillConfig = tokenSplitConfig.techniques.spill?.config ?? {};
+          const spilled = await spillToolOutput(
+            options.tokenSplit.workspace,
+            options.tokenSplit.sessionId,
+            item.call.id,
+            item.output,
+            {
+              maxInlineChars: typeof spillConfig['maxInlineChars'] === 'number' ? Math.max(1, Math.floor(spillConfig['maxInlineChars'])) : 50_000,
+              headChars: typeof spillConfig['headChars'] === 'number' ? Math.max(100, Math.floor(spillConfig['headChars'])) : 1_500,
+              tailChars: typeof spillConfig['tailChars'] === 'number' ? Math.max(40, Math.floor(spillConfig['tailChars'])) : 300,
+              dir: typeof spillConfig['dir'] === 'string' ? spillConfig['dir'] : '.plif/tmp/spill',
+            },
+          ).catch(() => null);
+          if (spilled) {
+            modelToolOutput = spilled.content;
+            tokenSplitTransformations.push({
+              technique: 'spill',
+              action: `externalized large tool output to ${spilled.path} (${spilled.bytes} bytes; sha256:${spilled.hash})`,
+              tokensAffected: Math.max(0, estimateTokens([{ role: 'tool', content: item.output }]) - estimateTokens([{ role: 'tool', content: spilled.content }])),
+              reversible: true,
+              marker: spilled.content.match(/…[^\n]+…/)?.[0],
+            });
+          }
+        }
+        // The event above is the durable, complete transcript record. The
+        // in-memory message is the model-facing context and may contain only
+        // the auditable spill pointer; this keeps large output off the wire.
+        messages.push({ role: 'tool', content: modelToolOutput, toolCallId: item.call.id });
         if (cycleEnabled && item.ok) {
           if (item.call.name === 'update_plan') {
             setCycle(observeHarnessCycle(cycle, { type: 'plan_ready' }), 'plan_ready');
           }
 
+          const reviewMutationPaths = mutationPaths(item.call.name, item.parsed);
           const actualMutation = isShellMutation(item.call.name, item.parsed) || (
             isFileMutationTool(item.call.name) &&
-            (item.call.name === 'resolve_edit_conflict' || item.diff !== undefined)
+            (item.call.name === 'resolve_edit_conflict' || item.diff !== undefined) &&
+            reviewMutationPaths.length > 0
           );
           if (actualMutation) {
             setCycle(
               observeHarnessCycle(cycle, {
                 type: 'mutation',
-                paths: mutationPaths(item.call.name, item.parsed),
+                paths: reviewMutationPaths,
               }),
               'change_applied',
             );
@@ -658,6 +841,8 @@ export async function runLoop(
       if (queued.length > 0) {
         options.bus.emit('agent.dequeued', { count: queued.length });
       }
+
+      await persistTokenSplitNotes();
 
       if (consecutiveFailures >= maxFailures) {
         messages.push({
@@ -719,8 +904,22 @@ export async function runLoop(
       toolCalls,
       promptTokens,
       completionTokens,
+      retries,
+      ...(tokenUsage ? { tokenUsage } : {}),
       ...(error ? { error } : {}),
     };
+  }
+
+  function emitContextBudget(budget: ContextBudget): void {
+    options.bus.emit('agent.context', {
+      turnId,
+      effectiveInputTokens: budget.effectiveInputTokens,
+      availableInputBudget: budget.availableInputBudget,
+      reservedOutputTokens: budget.reservedOutputTokens,
+      safetyMarginTokens: budget.safetyMarginTokens,
+      pressure: budget.pressure,
+      breakdown: budget.breakdown,
+    });
   }
 }
 

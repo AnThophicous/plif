@@ -388,7 +388,9 @@ export const listDir: Tool = {
   },
   async run(input, context) {
     const path = requireString(input, 'path');
-    const entries = await context.container.listDir(path);
+    const entries = (await context.container.listDir(path)).filter(
+      (entry) => entry.kind !== 'directory' || !DEFAULT_IGNORED_DIRECTORIES.has(entry.name.toLowerCase()),
+    );
     if (entries.length === 0) return { output: `${path} is empty`, ok: true };
     const listing = entries
       .map((entry) => (entry.kind === 'directory' ? `${entry.name}/` : entry.name))
@@ -401,35 +403,139 @@ export const listDir: Tool = {
 const MAX_DISCOVERY_ENTRIES = 10_000;
 const DEFAULT_SEARCH_RESULTS = 200;
 const MAX_SEARCH_RESULTS = 500;
+const DEFAULT_IGNORED_DIRECTORIES = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  'build',
+  'coverage',
+  '.cache',
+  '.tmp',
+  'tmp',
+  'logs',
+  'vendor',
+  '.next',
+  'out',
+  'target',
+]);
+
+interface IgnoreRule {
+  readonly matcher: RegExp;
+  readonly negated: boolean;
+  readonly directoryOnly: boolean;
+}
 
 interface WalkedFile {
   readonly absolute: string;
   readonly relative: string;
 }
 
-async function walkFiles(container: Container, root: string): Promise<WalkedFile[]> {
+async function* walkFiles(
+  container: Container,
+  root: string,
+  requestedPatterns: readonly string[] = [],
+): AsyncGenerator<WalkedFile> {
   const normalizedRoot = normalizeToolPath(root);
   const pending = [normalizedRoot];
-  const files: WalkedFile[] = [];
+  const rules = await loadIgnoreRules(container, normalizedRoot);
+  const rootName = normalizedRoot.split('/').at(-1)?.toLowerCase() ?? '';
+  const explicitlyRequestedIgnored = new Set(
+    [...DEFAULT_IGNORED_DIRECTORIES].filter((name) =>
+      normalizedRoot.toLowerCase() === `/${name}` ||
+      requestedPatterns.some((pattern) => mentionsPathSegment(pattern, name)),
+    ),
+  );
+  const explicitlyRequestedRoot = DEFAULT_IGNORED_DIRECTORIES.has(rootName);
   let visited = 0;
 
   while (pending.length > 0) {
     const directory = pending.pop()!;
     const entries = await container.listDir(directory);
     for (const entry of entries) {
+      const absolute = joinToolPath(directory, entry.name);
+      const relative = relativeToolPath(normalizedRoot, absolute);
+      if (
+        entry.kind === 'directory' &&
+        !explicitlyRequestedRoot &&
+        DEFAULT_IGNORED_DIRECTORIES.has(entry.name.toLowerCase()) &&
+        !explicitlyRequestedIgnored.has(entry.name.toLowerCase())
+      ) continue;
+      if (isIgnored(relative, entry.kind === 'directory', rules)) continue;
+
       visited += 1;
       if (visited > MAX_DISCOVERY_ENTRIES) {
         throw new PlifError('INVALID_ARGUMENT', `discovery exceeded ${MAX_DISCOVERY_ENTRIES} entries`, {
-          hint: 'Use a narrower path or pattern.',
+          hint: 'Use a narrower source path or explicitly request an ignored directory.',
         });
       }
-      const absolute = joinToolPath(directory, entry.name);
       if (entry.kind === 'directory') pending.push(absolute);
-      else files.push({ absolute, relative: relativeToolPath(normalizedRoot, absolute) });
+      else yield { absolute, relative };
     }
   }
+}
 
-  return files;
+function mentionsPathSegment(pattern: string, segment: string): boolean {
+  const normalized = pattern.replace(/\\/g, '/').toLowerCase();
+  const escaped = segment.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+  return new RegExp(`(?:^|/)${escaped}(?:/|$)`).test(normalized);
+}
+
+function ignoreRule(pattern: string): IgnoreRule | null {
+  let value = pattern.trim();
+  if (!value || value.startsWith('#')) return null;
+  let negated = false;
+  if (value.startsWith('!')) {
+    negated = true;
+    value = value.slice(1);
+  }
+  const directoryOnly = value.endsWith('/');
+  value = value.replace(/^\/+/, '').replace(/\/+$/, '');
+  if (!value) return null;
+
+  const hasSlash = value.includes('/');
+  let source = '';
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]!;
+    if (character === '*' && value[index + 1] === '*') {
+      index += 1;
+      if (value[index + 1] === '/') {
+        index += 1;
+        source += '(?:.*/)?';
+      } else {
+        source += '.*';
+      }
+    } else if (character === '*') {
+      source += '[^/]*';
+    } else if (character === '?') {
+      source += '[^/]';
+    } else {
+      source += character.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+    }
+  }
+  const prefix = hasSlash ? '^' : '^(?:.*/)?';
+  return { matcher: new RegExp(`${prefix}${source}$`), negated, directoryOnly };
+}
+
+async function loadIgnoreRules(container: Container, root: string): Promise<readonly IgnoreRule[]> {
+  const rules: IgnoreRule[] = [];
+  for (const filename of ['.gitignore', '.ignore', '.rgignore']) {
+    const content = await container.readFile(joinToolPath(root, filename)).catch(() => null);
+    if (content === null) continue;
+    for (const line of content.split(/\r?\n/)) {
+      const rule = ignoreRule(line);
+      if (rule) rules.push(rule);
+    }
+  }
+  return rules;
+}
+
+function isIgnored(relative: string, directory: boolean, rules: readonly IgnoreRule[]): boolean {
+  let ignored = false;
+  for (const rule of rules) {
+    if (rule.directoryOnly && !directory) continue;
+    if (rule.matcher.test(relative)) ignored = !rule.negated;
+  }
+  return ignored;
 }
 
 function normalizeToolPath(value: string): string {
@@ -501,11 +607,12 @@ export const globFiles: Tool = {
     const root = typeof input['path'] === 'string' ? input['path'] : '/project';
     const limit = resultLimit(input);
     const matcher = globExpression(pattern);
-    const matches = (await walkFiles(context.container, root))
-      .filter((file) => matcher.test(file.relative))
-      .map((file) => file.absolute)
-      .sort()
-      .slice(0, limit);
+    const matches: string[] = [];
+    for await (const file of walkFiles(context.container, root, [pattern])) {
+      if (matcher.test(file.relative)) matches.push(file.absolute);
+    }
+    matches.sort();
+    matches.splice(limit);
     return {
       output: clip(matches.length > 0 ? matches.join('\n') : `No files matched ${pattern} under ${root}.`),
       ok: true,
@@ -541,10 +648,11 @@ export const grepFiles: Tool = {
     } catch (error) {
       throw new PlifError('INVALID_ARGUMENT', `invalid regular expression: ${(error as Error).message}`);
     }
-    const include = typeof input['include'] === 'string' ? globExpression(input['include']) : null;
+    const includePattern = typeof input['include'] === 'string' ? input['include'] : undefined;
+    const include = includePattern ? globExpression(includePattern) : null;
     const matches: string[] = [];
 
-    for (const file of await walkFiles(context.container, root)) {
+    for await (const file of walkFiles(context.container, root, includePattern ? [includePattern] : [])) {
       if (include && !include.test(file.relative)) continue;
       const content = await context.container.readFile(file.absolute).catch(() => null);
       if (content === null || content.includes('\0')) continue;
@@ -1062,7 +1170,7 @@ export const updateConfig: Tool = {
         autoApprove: input['enabled'],
         permissionMode: input['enabled'] ? 'auto-approve' : 'ask',
       };
-      summary = `Auto Approve: ${input['enabled'] ? 'on' : 'off'}`;
+      summary = `Auto Approve: ${input['enabled'] ? '✓' : '×'}`;
     } else if (operation === 'upsert_provider') {
       const provider = requireString(input, 'provider');
       const baseURL = requireString(input, 'baseURL');

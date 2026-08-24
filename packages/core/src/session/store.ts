@@ -168,6 +168,11 @@ export class Session {
   replay(): Promise<ConversationEvent[]> {
     return this.#store.replay(this.#meta);
   }
+
+  /** Read every stored event for human-visible history, including compacted turns. */
+  history(): Promise<ConversationEvent[]> {
+    return this.#store.history(this.#meta);
+  }
 }
 
 export class SessionStore {
@@ -402,12 +407,20 @@ export class SessionStore {
    * what the model is given, never what the human can audit.
    */
   async replay(meta: SessionMeta): Promise<ConversationEvent[]> {
-    const all: ConversationEvent[] = [];
-    for await (const event of this.read(meta)) all.push(event);
-
-    const unique = dedupeConversationEvents(all);
+    const unique = await this.history(meta);
     const lastCompaction = unique.map((event) => event.kind).lastIndexOf('compaction.completed');
     return lastCompaction === -1 ? unique : unique.slice(lastCompaction);
+  }
+
+  /**
+   * Read the complete append-only transcript without applying the model's
+   * compaction boundary. The UI needs this so `/sessions` can show the whole
+   * conversation; `replay()` remains intentionally smaller for model context.
+   */
+  async history(meta: SessionMeta): Promise<ConversationEvent[]> {
+    const all: ConversationEvent[] = [];
+    for await (const event of this.read(meta)) all.push(event);
+    return dedupeConversationEvents(all);
   }
 
   async remove(meta: SessionMeta): Promise<void> {

@@ -269,6 +269,8 @@ export interface PickerState {
   readonly onPick: (value: string | ModelSelection) => void;
   /** Nested provider → model pickers return here before closing. */
   readonly onBack?: () => void;
+  /** Open a compact, picker-owned filter/sort menu. */
+  readonly onFilter?: () => void;
 }
 
 export interface SessionState {
@@ -355,6 +357,8 @@ export const initialSession: SessionState = {
 
 export type SessionAction =
   | { type: 'append'; entry: TimelineEntry }
+  /** Replace the visible scrollback with a persisted session history. */
+  | { type: 'restore'; entries: readonly TimelineEntry[] }
   | { type: 'gate'; entry: TimelineEntry }
   | { type: 'update'; id: string; patch: Partial<TimelineEntry> }
   | {
@@ -475,11 +479,12 @@ export function scrollbackCommitEnd(
   const lastInput = entries.findLastIndex((item) => item.kind === 'input');
   const lastSeparator = entries.findLastIndex((item) => item.kind === 'separator');
 
-  // A separator after the latest input closes the current turn. Keep that
-  // entire turn in the live frame: moving it to <Static> at the same moment the
-  // request finishes is what makes the answer appear to vanish from the
-  // viewport on terminals that keep the dynamic frame anchored at the bottom.
-  if (lastInput >= 0 && lastSeparator > lastInput) return 0;
+  // A separator after the latest input closes the current turn. Once the
+  // caller has confirmed that the prefix is settled, commit through that
+  // separator immediately. Keeping a completed turn in the bounded live
+  // frame makes `fitToHeight` drop it as soon as the answer grows past the
+  // viewport, which looks like the transcript was erased.
+  if (lastInput >= 0 && lastSeparator > lastInput) return lastSeparator + 1;
 
   // Once the next input arrives, everything through the previous separator is
   // an older turn and can safely enter native scrollback in one ordered batch.
@@ -522,6 +527,39 @@ function mergeAdjacentEdits(entries: readonly TimelineEntry[]): TimelineEntry[] 
 
 export function sessionReducer(state: SessionState, action: SessionAction): SessionState {
   switch (action.type) {
+    case 'restore':
+      return {
+        ...state,
+        committed: [...action.entries],
+        // Ink's Static component is append-only. A new epoch gives a resumed
+        // session a fresh scrollback owner instead of mixing it with the
+        // session that was open before the switch.
+        epoch: state.epoch + 1,
+        entries: [],
+        picker: null,
+        approval: null,
+        approvalQueue: [],
+        question: null,
+        questionQueue: [],
+        questionDraft: '',
+        questionChoice: 0,
+        questionExpanded: false,
+        compaction: null,
+        browser: null,
+        screen: null,
+        queue: [],
+        subagents: [],
+        subagentFocus: 0,
+        subagentsOpen: false,
+        discovery: { calls: [], open: false },
+        container: null,
+        containerState: null,
+        busy: false,
+        busyLabel: '',
+        busySince: null,
+        exiting: false,
+      };
+
     case 'toggleLastTool': {
       const index = [...state.entries].map((item) => item.kind).lastIndexOf('tool');
       if (index < 0) return state;

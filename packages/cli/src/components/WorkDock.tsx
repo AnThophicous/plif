@@ -4,20 +4,33 @@ import { Box, Text } from 'ink';
 import type { TaskSnapshot } from '@plif/core';
 
 import { useSpinnerFrame } from './Spinner.js';
-import type { SubagentView } from '../session.js';
+import type { SubagentView, TimelineEntry } from '../session.js';
 import { color, formatDuration, glyph, layout, truncate } from '../theme.js';
 
 export function workDockHeight(
   tasks: readonly TaskSnapshot[],
   subagents: readonly SubagentView[],
   expanded: boolean,
+  entries: readonly TimelineEntry[] = [],
 ): number {
+  const operations = operationalEntries(entries);
+  if (operations.length > 0) return expanded ? 1 + Math.min(operations.length, 5) : 1;
   if (tasks.length === 0 && subagents.length === 0) return 0;
   if (!expanded) return 1;
   return 1 + Math.min(tasks.length, 4) + Math.min(subagents.length, 3) +
     (tasks.length > 4 ? 1 : 0) +
     (subagents.length > 3 ? 1 : 0) +
     (subagents.length > 0 ? 1 : 0);
+}
+
+/** Keep the dock to real inputs and commands from the latest turn. */
+export function operationalEntries(entries: readonly TimelineEntry[]): readonly TimelineEntry[] {
+  const start = entries.findLastIndex((item) => item.kind === 'input');
+  if (start < 0) return [];
+  return entries
+    .slice(start)
+    .filter((item) => item.kind === 'input' || item.kind === 'tool')
+    .slice(-5);
 }
 
 export const WorkDock = React.memo(function WorkDock({
@@ -27,6 +40,7 @@ export const WorkDock = React.memo(function WorkDock({
   expanded,
   width,
   now,
+  entries,
 }: {
   readonly tasks: readonly TaskSnapshot[];
   readonly subagents: readonly SubagentView[];
@@ -34,12 +48,39 @@ export const WorkDock = React.memo(function WorkDock({
   readonly expanded: boolean;
   readonly width: number;
   readonly now: number;
+  readonly entries: readonly TimelineEntry[];
 }): React.ReactElement | null {
+  const operations = operationalEntries(entries);
   const active = tasks.filter((task) => task.status === 'running' || task.status === 'awaiting_approval').length;
-  const hasWork = tasks.length > 0 || subagents.length > 0;
+  const hasWork = operations.length > 0 || tasks.length > 0 || subagents.length > 0;
   const running = active > 0 || subagents.some((agent) => agent.status === 'running');
-  const spinner = useSpinnerFrame(80, hasWork && running);
+  const operationsRunning = operations.some((item) => item.status === 'active' || item.status === 'pending');
+  const spinner = useSpinnerFrame(220, hasWork && (running || operationsRunning));
   if (!hasWork) return null;
+
+  if (operations.length > 0) {
+    const panelWidth = Math.max(18, Math.min(72, width - layout.gutter * 2));
+    return (
+      <Box width="100%" justifyContent="flex-end" paddingX={layout.gutter}>
+        <Box
+          width={panelWidth}
+          flexDirection="column"
+          borderStyle="round"
+          borderColor={color('faint')}
+          paddingX={1}
+        >
+          <Box justifyContent="space-between">
+            <Text color={color('muted')} bold>ACTIVITY</Text>
+            <Text color={color('ghost')}>commands · inputs</Text>
+          </Box>
+          {expanded && operations.map((item) => (
+            <OperationalLine key={item.id} item={item} spinner={spinner} width={Math.max(10, panelWidth - 4)} />
+          ))}
+          {!expanded && <Text color={color('ghost')}>{glyph.pending} Ctrl+S to expand</Text>}
+        </Box>
+      </Box>
+    );
+  }
   const label = trayLabel(tasks.length, subagents.length);
   const inner = Math.max(18, width - layout.gutter * 2);
 
@@ -83,6 +124,30 @@ export const WorkDock = React.memo(function WorkDock({
 });
 
 WorkDock.displayName = 'WorkDock';
+
+function OperationalLine({
+  item,
+  spinner,
+  width,
+}: {
+  readonly item: TimelineEntry;
+  readonly spinner: string;
+  readonly width: number;
+}): React.ReactElement {
+  const running = item.status === 'active' || item.status === 'pending';
+  const tone = item.status === 'failed' ? 'danger' : running ? 'accent' : 'muted';
+  const marker = running ? spinner : item.status === 'failed' ? glyph.failed : glyph.done;
+  const target = item.toolTarget ? ` ${glyph.divider} ${item.toolTarget}` : '';
+  const label = item.kind === 'input' ? `input ${item.title}` : `${item.title}${target}`;
+  return (
+    <Box width="100%">
+      <Text color={color(tone)}>{marker} </Text>
+      <Text color={color(running ? 'text' : 'muted')} wrap="truncate">
+        {truncate(label, Math.max(12, width))}
+      </Text>
+    </Box>
+  );
+}
 
 function TaskLine({
   task,

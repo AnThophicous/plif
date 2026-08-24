@@ -22,6 +22,8 @@ describe('Ink frame hierarchy', () => {
     assert.doesNotMatch(source, /InfinityMark/);
     assert.match(source, /import \{ Header(?:, headerHeight)? \} from '\.\/components\/Header\.js'/);
     assert.equal(source.match(/^\s*<Header\b/gm)?.length, 1);
+    assert.match(source, /const liveSurfaceHeight = pastedTextPopup \? surface\.canvasHeight : surface\.panelHeight/);
+    assert.match(source, /<Box flexDirection="column" width=\{width\} height=\{liveSurfaceHeight\}>/);
     assert.match(source, /paddingX=\{surface\.panelPaddingX\}/);
     assert.doesNotMatch(source, /<TerminalSurface\b/);
     assert.match(source, /<Box flexGrow=\{1\} \/>/);

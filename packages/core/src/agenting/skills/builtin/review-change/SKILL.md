@@ -1,0 +1,19 @@
+---
+name: review-change
+description: Review a diff for correctness, not style
+---
+
+Read the change for what it does, not for how it looks.
+
+Order to work in:
+1. What is this change trying to do? Get that from the code, not the message.
+2. Does it do that? Trace the actual path, including the error path.
+3. What breaks that used to work? Look for callers, not just the edited file.
+4. What input makes this wrong? Boundaries, empty, null, concurrent, very large.
+5. Is anything now unreachable, unused, or duplicated?
+
+Report only what you can demonstrate with a concrete failing case: the inputs,
+and what goes wrong. "This could be clearer" is not a finding. Formatting is
+never a finding.
+
+If the change is correct, say so plainly and stop.

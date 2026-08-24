@@ -36,7 +36,12 @@ export function focusRule(
   effort?: string,
   idleBreath = 0,
 ): readonly FocusCell[] {
-  const size = Math.max(2, Math.floor(width));
+  // Never grow a frame past the width its parent reserved. The old minimum of
+  // eight cells made a narrow terminal clip the first/last corner, which was
+  // visible as a missing painted segment on the left edge. A one-cell frame
+  // is handled as a single structural cell below; it is better to be
+  // complete than to overflow into the neighbouring terminal column.
+  const size = Math.max(1, Math.floor(width));
   const span = size - 2;
   void elapsedMs;
   const borderEffort = effort ?? (plif ? 'plif' : undefined);
@@ -51,6 +56,13 @@ export function focusRule(
   const endpoint = active
     ? activeColor
     : idle;
+  if (size === 1) {
+    return [{
+      text: edge === 'top' ? glyphs.horizontal : glyphs.horizontal,
+      color: endpoint,
+    }];
+  }
+
   const cells: FocusCell[] = [{
     text: edge === 'top' ? glyphs.topLeft : glyphs.bottomLeft,
     color: endpoint,
@@ -149,8 +161,47 @@ export function FocusFrame({
   /** Let an idle frame inhale slowly instead of sitting flat. */
   readonly breathing?: boolean;
 }): React.ReactElement {
-  const frameWidth = Math.max(8, width);
+  const frameWidth = Math.max(1, Math.floor(width));
   const contentWidth = Math.max(1, frameWidth - 2);
+
+  // There is no room for the normal padded body below nine columns. Keep all
+  // three structural rows inside the parent instead of letting Ink wrap the
+  // middle row and cut one of the rounded corners off-screen. The compact
+  // body is intentionally one line: a terminal this narrow cannot present a
+  // usable multiline editor, but it can still show a complete frame.
+  if (frameWidth < 9) {
+    const compact = (edge: Edge): React.ReactElement => (
+      <Text>
+        {focusRule(frameWidth, 0, active, edge, plif, effort).map((cell, index) => (
+          <Text key={index} color={cell.color}>{cell.text}</Text>
+        ))}
+      </Text>
+    );
+    const vertical = color('faint');
+    if (frameWidth < 4) {
+      return (
+        <Box flexDirection="column" width={frameWidth} flexShrink={0}>
+          {compact('top')}
+          <Text color={vertical}>{glyphs.vertical.repeat(frameWidth)}</Text>
+          {compact('bottom')}
+        </Box>
+      );
+    }
+
+    return (
+      <Box flexDirection="column" width={frameWidth} flexShrink={0}>
+        {compact('top')}
+        <Box width={frameWidth} height={1} flexShrink={0} overflow="hidden">
+          <Text color={vertical}>{glyphs.vertical}</Text>
+          <Box width={frameWidth - 2} height={1} flexShrink={0} overflow="hidden">
+            <Box width="100%" height={1} flexShrink={0} overflow="hidden">{children}</Box>
+          </Box>
+          <Text color={vertical}>{glyphs.vertical}</Text>
+        </Box>
+        {compact('bottom')}
+      </Box>
+    );
+  }
 
   return (
     <Box
@@ -166,7 +217,7 @@ export function FocusFrame({
         plif={plif}
         effort={effort}
       />
-      <Box width={frameWidth} flexShrink={0}>
+      <Box width={frameWidth} flexShrink={0} overflow="hidden">
         <Text color={color('faint')}>{glyphs.vertical}</Text>
         <Box flexDirection="column" width={contentWidth} paddingX={layout.gutter} paddingY={0}>
           <Box width="100%">{children}</Box>

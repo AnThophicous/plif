@@ -8,6 +8,11 @@ import { BLOOM_MARK, useSpinnerFrame } from './Spinner.js';
 import { activityGlyphAt, activityKindForLabel, activityVisual, GradientText } from '../activity-visuals.js';
 import { ANIMATION_INTERVAL_MS, useAnimationFrame } from '../hooks/useAnimationClock.js';
 import type { EntryStatus, TimelineEntry } from '../session.js';
+import {
+  allTranscriptCells,
+  initialTranscriptState,
+  transcriptReducer,
+} from '../transcript/reducer.js';
 import type { TranscriptCell } from '../transcript/types.js';
 import { toneBetween } from '../pulse.js';
 import { color, formatDuration, formatWorkedDuration, glyph, layout, truncate } from '../theme.js';
@@ -103,7 +108,7 @@ export function TranscriptCells({
   );
 }
 
-function TranscriptCellRow({
+const TranscriptCellRow = React.memo(function TranscriptCellRow({
   cell,
   width,
   expanded,
@@ -116,9 +121,11 @@ function TranscriptCellRow({
     return <ActivityCellRow cell={cell} expanded={expanded} />;
   }
   return <TimelineRow entry={entryFromTranscriptCell(cell, expanded)} width={width} />;
-}
+});
 
-function ActivityCellRow({
+TranscriptCellRow.displayName = 'TranscriptCellRow';
+
+const ActivityCellRow = React.memo(function ActivityCellRow({
   cell,
   expanded,
 }: {
@@ -146,7 +153,9 @@ function ActivityCellRow({
       ))}
     </Box>
   );
-}
+});
+
+ActivityCellRow.displayName = 'ActivityCellRow';
 
 export function cellSpacing({
   previousTurnId,
@@ -272,7 +281,7 @@ function fitToHeight(
   let first = entries.length;
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const item = entries[index]!;
-    const height = estimateHeight(item, width);
+    const height = estimateHeight(item, width, Math.max(0, budget - used));
     const keepRunning = first === entries.length && inFlight(item);
     if (used + height > budget && !keepRunning) break;
     used += height;
@@ -287,23 +296,129 @@ function wrappedHeight(line: string, width: number): number {
 }
 
 /**
+ * Convert the durable transcript projection into the same rows used by the
+ * live timeline. This is deliberately kept beside TimelineRow so resumed
+ * sessions cannot drift into a second, subtly different history renderer.
+ */
+export function timelineEntriesFromTranscriptCells(
+  cells: readonly TranscriptCell[],
+): readonly TimelineEntry[] {
+  return cells.map((cell) => {
+    if (cell.kind !== 'activity') return entryFromTranscriptCell(cell);
+
+    const reads = cell.items.filter((item) => item.name === 'read_file' || item.name === 'list_dir').length;
+    const running = cell.items.some((item) => item.status === 'running');
+    const title = reads === cell.items.length
+      ? `${running ? 'Reading' : 'Read'} ${reads} ${reads === 1 ? 'location' : 'locations'}`
+      : `${running ? 'Running' : 'Ran'} ${cell.items.length} ${cell.items.length === 1 ? 'tool' : 'tools'}`;
+    const detail = cell.items.map((item) => {
+      const state = item.status === 'running' ? 'running' : 'done';
+      const duration = item.durationMs === undefined ? '' : ` · ${formatDuration(item.durationMs)}`;
+      const output = item.output?.trim();
+      return `${state} ${item.name}${duration}${output ? `\n${output}` : ''}`;
+    }).join('\n');
+
+    return {
+      id: cell.id,
+      kind: 'tool',
+      title,
+      ...(detail ? { detail } : {}),
+      status: running ? 'active' : 'done',
+      toolSummary: `${cell.items.length} ${cell.items.length === 1 ? 'operation' : 'operations'}`,
+      at: Date.parse(cell.at) || 0,
+    };
+  });
+}
+
+/** Reconstruct normal terminal rows from persisted events without mutating them. */
+export function timelineEntriesFromEvents(
+  events: readonly import('@plif/core').ConversationEvent[],
+): readonly TimelineEntry[] {
+  const transcript = transcriptReducer(initialTranscriptState, { type: 'replace', events });
+  const cells = allTranscriptCells(transcript);
+  const rows: TimelineEntry[] = [];
+  const finishedTurns = new Map<string, { readonly durationMs?: number }>();
+  for (const event of events) {
+    if (event.kind === 'turn.completed') {
+      finishedTurns.set(event.turnId, { durationMs: event.durationMs });
+    } else if (event.kind === 'turn.interrupted' || event.kind === 'turn.failed') {
+      finishedTurns.set(event.turnId, {});
+    }
+  }
+
+  for (let index = 0; index < cells.length; index += 1) {
+    const cell = cells[index]!;
+    rows.push(...timelineEntriesFromTranscriptCells([cell]));
+    const next = cells[index + 1];
+    const finished = finishedTurns.get(cell.turnId);
+    if (finished && (!next || next.turnId !== cell.turnId)) {
+      rows.push({
+        id: `history:worked:${cell.turnId}`,
+        kind: 'separator',
+        title: 'Worked',
+        tone: 'faint',
+        ...(finished.durationMs === undefined ? {} : { durationMs: finished.durationMs }),
+        at: Date.parse(cell.at) || 0,
+      });
+    }
+  }
+  return rows;
+}
+
+/** Count wrapped rows without allocating the complete line array. */
+function wrappedTextHeight(text: string, width: number, ceiling = Number.MAX_SAFE_INTEGER): number {
+  const columns = Math.max(8, width);
+  let total = 0;
+  let start = 0;
+  while (true) {
+    const end = text.indexOf('\n', start);
+    const length = (end === -1 ? text.length : end) - start;
+    total += Math.max(1, Math.ceil(length / columns));
+    if (total >= ceiling || end === -1) return total;
+    start = end + 1;
+  }
+}
+
+/**
  * The last `budget` wrapped lines of a block of text.
  *
- * Whole source lines only. Cutting mid-paragraph would leave a sentence
- * beginning nowhere, and the paragraph that gets dropped is one the developer
- * can still scroll to the moment the answer settles.
+ * Preserve complete source lines when they fit. If a single streamed source
+ * line is wider than the viewport budget, clip its leading portion so the
+ * live viewport stays bounded and the terminal does not reprocess the entire
+ * cumulative paragraph on every frame.
  */
 export function tail(text: string, width: number, budget: number): string {
+  if (budget <= 0 || !text) return '';
+  const columns = Math.max(8, width);
+  // A provider commonly streams one paragraph without newlines. This avoids
+  // allocating an array containing the entire cumulative answer in that case.
+  if (text.lastIndexOf('\n') === -1) return tailLine(text, columns * budget);
   const lines = text.split('\n');
+  const kept: string[] = [];
   let used = 0;
-  let first = lines.length;
   for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const height = wrappedHeight(lines[index]!, width);
-    if (used + height > budget && first < lines.length) break;
+    const line = lines[index]!;
+    const height = wrappedHeight(line, columns);
+    if (used + height > budget) {
+      const remaining = budget - used;
+      if (remaining > 0) kept.unshift(tailLine(line, columns * remaining));
+      break;
+    }
     used += height;
-    first = index;
+    kept.unshift(line);
   }
-  return lines.slice(first).join('\n');
+  return kept.join('\n');
+}
+
+/** Keep a bounded suffix without parsing a complete streaming paragraph. */
+function tailLine(line: string, maxColumns: number): string {
+  if (line.length <= maxColumns) return line;
+  // Slicing from the end is O(maxColumns), unlike scanning the whole
+  // cumulative paragraph to prove it is ASCII. Avoid leaving a low surrogate
+  // at the beginning when a Unicode glyph straddles the clipping boundary.
+  const suffix = line.slice(-maxColumns);
+  const first = suffix.charCodeAt(0);
+  return first >= 0xdc00 && first <= 0xdfff ? suffix.slice(1) : suffix;
 }
 
 export const LIVE_THOUGHT_LINES = 3;
@@ -378,7 +493,11 @@ export function wrappedThoughtLines(
  * of screen, too low lets the frame reach the terminal height and triggers the
  * full-repaint branch this whole mechanism exists to avoid.
  */
-export function estimateHeight(entry: TimelineEntry, width: number): number {
+export function estimateHeight(
+  entry: TimelineEntry,
+  width: number,
+  ceiling = Number.MAX_SAFE_INTEGER,
+): number {
   const wrap = (text: string, column = width): number =>
     text.split('\n').reduce((total, line) => total + wrappedHeight(line, column), 0);
 
@@ -393,29 +512,29 @@ export function estimateHeight(entry: TimelineEntry, width: number): number {
     // the cheap approximation of all of it. The answer gutter narrows the text
     // column, so the same prose wraps onto more rows than the raw width says.
     const column = Math.max(8, width - ANSWER_GUTTER);
-    return (
-      [entry.title, entry.detail]
-        .filter(Boolean)
-        .join('\n')
-        .split('\n')
-        .reduce((total, line) => total + wrappedHeight(line, column), 0) + 3
-    );
+    let height = 3;
+    for (const text of [entry.title, entry.detail]) {
+      if (!text) continue;
+      height += wrappedTextHeight(text, column, Math.max(1, ceiling - height));
+      if (height > ceiling) return height;
+    }
+    return height;
   }
 
   const detailLines = entry.detail
     ? entry.detail.replace(/\s+$/, '').split('\n').filter((line) => line.length > 0).length
     : 0;
 
-  // Collapsed by default and worth exactly one line when it is. Reasoning is
-  // usually the longest thing in the turn and almost never the thing being
-  // read, so it may not claim height until asked for — apart from the few rows
-  // of live tail an open thinking row draws while the thought is forming.
+  // Settled reasoning stays compact rather than disappearing into a bare
+  // duration. One tail line keeps the user's thought visible in the chat; the
+  // full block remains available through Ctrl+R without making every turn
+  // consume the whole live frame.
   if (entry.kind === 'thinking') {
     if (entry.status === 'active') {
       const liveLines = thoughtLines(entry.detail ?? '', width - 4);
       return 3 + (liveLines.length > 0 ? liveLines.length + 1 : 0);
     }
-    if (!entry.expand) return 3;
+    if (!entry.expand) return entry.detail?.trim() ? 4 : 3;
     return 4 + wrap(entry.detail ?? '', width - 4);
   }
 
@@ -459,7 +578,7 @@ export function estimateHeight(entry: TimelineEntry, width: number): number {
   return 1 + shown + (shown > 0 ? 1 : 0);
 }
 
-export function TimelineRow({
+export const TimelineRow = React.memo(function TimelineRow({
   entry,
   width,
   maxLines,
@@ -478,17 +597,17 @@ export function TimelineRow({
   if (entry.kind === 'separator') return <CycleSeparator entry={entry} width={width} />;
   if (entry.kind === 'tool') return <ToolRow entry={entry} width={width} />;
   return <PlainRow entry={entry} width={width} />;
-}
+});
+
+TimelineRow.displayName = 'TimelineRow';
 
 /**
  * A block of model reasoning.
  *
  * While it is being written it shows its own tail — a few rows of the thought
  * as it forms, in the accent family, because reasoning is where a wrong turn
- * becomes visible before the answer hides it. The moment it settles the block
- * folds back to one grey line, since it is also several times longer than the
- * answer and a timeline that keeps it open is a timeline nobody can read. The
- * text is held, not discarded: Ctrl+R brings it back.
+ * becomes visible before the answer hides it. Once settled, one quiet preview
+ * line remains in the chat and the full block stays available through Ctrl+R.
  */
 function ThinkingIndicator({
   thinking,
@@ -547,6 +666,7 @@ function ThinkingRow({
   const live = thinking ? thoughtLines(body, width - 4) : [];
   const clipped =
     entry.expand && maxLines !== undefined ? tail(body, width - 4, Math.max(3, maxLines - 2)) : body;
+  const preview = !thinking && !entry.expand ? thoughtLines(body, width - 4, 1) : [];
   const expandedLines = entry.expand && body.trim()
     ? wrappedThoughtLines(clipped, width - 4, maxLines === undefined ? undefined : Math.max(1, maxLines - 2))
     : [];
@@ -580,6 +700,13 @@ function ThinkingRow({
               </Box>
             );
           })}
+        </Box>
+      )}
+
+      {preview.length > 0 && (
+        <Box marginTop={1}>
+          <Text color={color('ghost')}>{`  ${glyph.branch} `}</Text>
+          <Text color={color('muted')}>{preview[0]}</Text>
         </Box>
       )}
 

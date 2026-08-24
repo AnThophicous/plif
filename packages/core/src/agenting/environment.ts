@@ -13,6 +13,7 @@ export const environmentModule = definePromptModule({
       `- host workspace: ${context.workspace}`,
       `- Plif container: ${context.containerName}, ${context.isolation} isolation`,
       `- project working directory inside the container: ${context.workdir}`,
+      `- disposable session scratch directory: ${context.tempWorkdir ?? '/temp'}`,
       `- allowed capabilities: ${grants(context)}`,
       `- unavailable capabilities: ${denials(context)}`,
     ];
@@ -26,6 +27,8 @@ export const environmentModule = definePromptModule({
         'Plif exposes two path spaces. Do not mix them:',
         `- ${consumers} take absolute container paths such as ${context.workdir}/src/index.ts.`,
         '- Never pass those tools a host path or an unresolved relative path.',
+        `- Keep transient files, logs, screenshots, probes, and intermediate output in ${context.tempWorkdir ?? '/temp'}, not in ${context.workdir}.`,
+        `- Write to ${context.workdir} only when the file is part of the user's requested project deliverable.`,
       );
     }
 

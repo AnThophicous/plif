@@ -82,7 +82,8 @@ export class TaskMonitor {
 
     const controller = new AbortController();
     const onAbort = (): void => controller.abort();
-    options.signal?.addEventListener('abort', onAbort, { once: true });
+    if (options.signal?.aborted) controller.abort();
+    else options.signal?.addEventListener('abort', onAbort, { once: true });
     const startedAt = (options.now ?? Date.now)();
     const debug = options.debug ?? (() => undefined);
     debug({ type: 'created', id: task.id, kind: task.kind, sessionId: task.sessionId });

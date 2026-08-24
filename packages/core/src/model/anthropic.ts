@@ -15,6 +15,7 @@
  */
 
 import Anthropic, { APIConnectionTimeoutError, APIError, APIUserAbortError } from '@anthropic-ai/sdk';
+import type { ClientOptions } from '@anthropic-ai/sdk';
 
 import { PlifError } from '../errors.js';
 import type { Effort, ModelConfig } from './config.js';
@@ -31,6 +32,13 @@ import type {
 } from './provider.js';
 import { NO_USAGE, safeToolCallArguments } from './provider.js';
 import { modelListResult, normalizeProviderModel } from './metadata.js';
+import {
+  freshUsageSnapshot,
+  providerPolicyUsage,
+  usageFromRateLimitHeaders,
+  type UsageInfo,
+} from './usage.js';
+import { normalizeAnthropicUsage } from './token-usage.js';
 
 /** Anthropic requires an output ceiling; Plif's config leaves it optional. */
 const DEFAULT_MAX_TOKENS = 32_000;
@@ -46,23 +54,38 @@ export class AnthropicProvider implements ModelProvider {
   readonly info: ModelInfo;
   #client: Anthropic;
   #config: ModelConfig;
+  #usageHeaders: Headers | undefined;
+  #usageSnapshot: UsageInfo | undefined;
   /** Verbatim thinking blocks, keyed by the tool-call id of their turn. */
   #thinking = new Map<string, readonly Block[]>();
 
   constructor(config: ModelConfig, options: AnthropicProviderOptions = {}) {
     this.#config = config;
-    this.#client =
-      options.client ??
-      new Anthropic({
-        apiKey: config.apiKey,
-        baseURL: config.baseURL.replace(/\/v1\/?$/, ''),
-        timeout: config.timeoutMs,
-      });
+    type SdkFetch = NonNullable<ClientOptions['fetch']>;
+    const captureFetch = (async (...args: Parameters<SdkFetch>): Promise<Awaited<ReturnType<SdkFetch>>> => {
+      const response = await globalThis.fetch(...args as Parameters<typeof globalThis.fetch>);
+      this.#usageHeaders = new globalThis.Headers(response.headers);
+      this.#usageSnapshot = undefined;
+      return response as unknown as Awaited<ReturnType<SdkFetch>>;
+    }) as SdkFetch;
+    this.#client = options.client ?? new Anthropic({
+      apiKey: config.apiKey,
+      baseURL: config.baseURL.replace(/\/v1\/?$/, ''),
+      timeout: config.timeoutMs,
+      fetch: captureFetch,
+    });
     this.info = {
       id: config.model,
       ...(config.providerId ? { providerId: config.providerId } : {}),
       endpoint: config.baseURL,
       contextWindow: config.contextWindow,
+      ...(config.maxTokens === undefined ? {} : { maxOutputTokens: config.maxTokens }),
+      capabilities: {
+        usageSemantics: 'anthropic-messages',
+        cacheSupport: 'reported',
+        cacheAccounting: 'separate-if-reported',
+        reasoningAccounting: 'reported',
+      },
     };
   }
 
@@ -185,6 +208,28 @@ export class AnthropicProvider implements ModelProvider {
             : 'unavailable';
       return { supported: false, models: [], error: failure };
     }
+  }
+
+  async getUsage() {
+    const cached = freshUsageSnapshot(this.#usageSnapshot);
+    if (cached) return cached;
+    const headerUsage = usageFromRateLimitHeaders(
+      this.#config.providerId ?? 'anthropic',
+      this.#config.model,
+      this.#usageHeaders ?? new Headers(),
+      { plan: this.#config.providerId },
+    );
+    const policy = providerPolicyUsage(this.#config.providerId ?? '', this.#config.model, headerUsage.fetchedAt);
+    const usage = !policy || headerUsage.windows.length === 0
+      ? policy ?? headerUsage
+      : {
+      ...headerUsage,
+      plan: policy.plan,
+      windows: [...headerUsage.windows, ...policy.windows],
+      detail: `${policy.detail} Live rate-limit headers are shown above when available.`,
+      };
+    this.#usageSnapshot = usage;
+    return usage;
   }
 
   /**
@@ -320,12 +365,14 @@ function finishReason(reason: string | null): FinishReason {
   }
 }
 
-function usageOf(usage: { input_tokens?: number; output_tokens?: number } | undefined): Usage {
+function usageOf(usage: {
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+} | undefined): Usage {
   if (!usage) return NO_USAGE;
-  return {
-    promptTokens: usage.input_tokens ?? 0,
-    completionTokens: usage.output_tokens ?? 0,
-  };
+  return normalizeAnthropicUsage(usage) ?? NO_USAGE;
 }
 
 function messageOf(error: unknown, host: string): string {

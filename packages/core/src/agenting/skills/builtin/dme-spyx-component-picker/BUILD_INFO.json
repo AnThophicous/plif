@@ -1,0 +1,12 @@
+{
+  "skill_files": [
+    "SKILL.md",
+    "README.md",
+    "references/COMPONENT_DNA.md",
+    "references/PROVIDER_ENGINE.md",
+    "references/SPYX_BRIDGE.md"
+  ],
+  "extension_bridge": true,
+  "bridge_port": 17321,
+  "capsule_schema": "dme-spyx-capsule/v1"
+}

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>21st∞</title>
+<style>
+  body { width: 300px; margin: 0; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f1f5f9; }
+  .wrap { padding: 16px; }
+  h1 { font-size: 16px; margin: 0 0 2px; display: flex; align-items: center; gap: 6px; }
+  .sub { color: #94a3b8; font-size: 12px; margin-bottom: 14px; }
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 12px; margin-bottom: 10px; font-size: 13px; }
+  .card .lbl { color: #94a3b8; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+  .row { display: flex; justify-content: space-between; padding: 3px 0; }
+  .row b { color: #38bdf8; }
+  .btn { width: 100%; cursor: pointer; border: none; border-radius: 8px; padding: 9px 12px; font-size: 13px; font-weight: 600; background: #38bdf8; color: #0f172a; margin-bottom: 8px; }
+  .btn.ghost { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; font-weight: 500; }
+  .hint { font-size: 11px; color: #64748b; line-height: 1.5; }
+  #log { max-height: 120px; overflow-y: auto; font-size: 11px; color: #94a3b8; }
+  #log div { padding: 2px 0; border-bottom: 1px solid #1e293b; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>∞ 21st∞ Prompt Unlocked</h1>
+  <div class="sub">Prompt local, sem API, sem limite — em qualquer página de componente do 21st.dev.</div>
+
+  <div class="card">
+    <div class="lbl">Plano oficial (status público)</div>
+    <div id="plan">carregando…</div>
+  </div>
+
+  <div class="card">
+    <div class="lbl">Como usar</div>
+    <div class="hint">
+      1. Abra qualquer componente em 21st.dev (ex.: /@user/components/slug).<br />
+      2. Clique no botão <b>∞ prompt</b> (canto inferior direito).<br />
+      3. <b>Copiar prompt (∞)</b> — monta o prompt com descrição + estrutura renderizada exata do preview e copia pro clipboard. Ilimitado.<br />
+      4. <b>Copiar HTML do preview</b> — cola junto no agente pra fidelidade total.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="lbl">Últimos copiados (local)</div>
+    <div id="log">nenhum ainda</div>
+  </div>
+</div>
+<script src="popup.js"></script>
+</body>
+</html>

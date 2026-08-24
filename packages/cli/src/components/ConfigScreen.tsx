@@ -3,7 +3,7 @@ import { Box, Text } from 'ink';
 
 import type { ConfigSetting } from '../configuration.js';
 import type { ConfigEditState } from '../session.js';
-import { color, glyph, layout, truncate } from '../theme.js';
+import { binaryStateIndicator, color, glyph, layout, truncate } from '../theme.js';
 
 export interface ConfigScreenProps {
   readonly settings: readonly ConfigSetting[];
@@ -113,7 +113,11 @@ export function ConfigScreen({
                       {truncate(setting.label, Math.max(1, labelWidth - 2))}
                     </Text>
                   </Box>
-                  <Text color={color(active ? 'text' : 'muted')} wrap="truncate">
+                  <Text
+                    color={setting.state ? color(binaryStateIndicator(setting.state).tone) : color(active ? 'text' : 'muted')}
+                    bold={Boolean(setting.state && (active || setting.state === 'on'))}
+                    wrap="truncate"
+                  >
                     {'  '}{truncate(setting.value, Math.max(1, contentWidth - labelWidth - 2))}
                   </Text>
                 </Box>

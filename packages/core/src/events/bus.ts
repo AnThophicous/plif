@@ -18,6 +18,8 @@ import type { McpAuthEvent } from '../auth/mcp-oauth.js';
 import type { ConversationEvent } from '../session/events.js';
 import type { StreamTiming } from '../model/stream-timing.js';
 import type { CompactionFailure } from '../harness/compaction.js';
+import type { ContextBreakdown, ContextPressure } from '../harness/context-budget.js';
+import type { TokenUsageSource } from '../model/token-usage.js';
 
 export interface QuestionOption {
   /** Text submitted when this row is selected. */
@@ -235,6 +237,23 @@ export interface PlifEvents {
     /** The point at which the loop compacts, or 0 when compaction is off. */
     budget: number;
     estimated: boolean;
+    inputNewTokens?: number;
+    inputCachedTokens?: number;
+    cacheWriteTokens?: number;
+    reasoningTokens?: number;
+    totalTokens?: number;
+    requestCount?: number;
+    source?: TokenUsageSource;
+  };
+  /** Provider-agnostic context diagnostics; consumers may keep this off-screen. */
+  'agent.context': {
+    turnId: string;
+    effectiveInputTokens: number;
+    availableInputBudget: number | undefined;
+    reservedOutputTokens: number;
+    safetyMarginTokens: number;
+    pressure: ContextPressure;
+    breakdown: ContextBreakdown;
   };
   /**
    * How far along a delegated investigation is.
@@ -313,6 +332,8 @@ export interface PlifEvents {
   'agent.compacted': {
     before: number;
     after: number;
+    removedTokens: number;
+    progressed: boolean;
     stages: readonly string[];
     summarised: boolean;
     /** Present when capsule generation failed, including the safe fallback used. */

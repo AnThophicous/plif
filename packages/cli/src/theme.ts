@@ -267,6 +267,24 @@ export const glyph: Record<GlyphKey, string> = Object.fromEntries(
 const defaultGlyph = { ...glyph };
 
 /**
+ * The one visual contract for binary settings across the CLI.
+ *
+ * Keep the marker free of words so a setting can be understood at a glance;
+ * the surrounding label explains what is being switched. The semantic tone
+ * is deliberately shared by pickers and notices instead of being re-created
+ * by each command.
+ */
+export type BinaryState = 'on' | 'off';
+export function binaryStateIndicator(state: BinaryState): {
+  readonly icon: string;
+  readonly tone: 'success' | 'danger';
+} {
+  return state === 'on'
+    ? { icon: glyph.done, tone: 'success' }
+    : { icon: glyph.failed, tone: 'danger' };
+}
+
+/**
  * Layout constants.
  *
  * Two of these carry most of the visual identity. `gutter` is the left margin

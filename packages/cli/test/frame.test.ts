@@ -15,7 +15,8 @@ import { describe, it } from 'node:test';
 
 import { entry, initialSession, scrollbackCommitEnd, sessionReducer } from '../src/session.js';
 import type { SessionState, TimelineEntry } from '../src/session.js';
-import { estimateHeight, tail } from '../src/components/Timeline.js';
+import { estimateHeight, tail, timelineEntriesFromEvents } from '../src/components/Timeline.js';
+import type { ConversationEvent } from '@plif/core';
 import {
   detachImmediateInkResize,
   nextTerminalSize,
@@ -33,7 +34,65 @@ function withEntries(items: readonly TimelineEntry[]): SessionState {
 }
 
 describe('committing rows to scrollback', () => {
-  it('keeps the completed current turn in the live frame until the next turn starts', () => {
+  it('restores persisted events as ordinary timeline rows', () => {
+    const events: ConversationEvent[] = [
+      {
+        version: 1,
+        eventId: 'event-user',
+        turnId: 'turn-1',
+        at: '2026-08-23T12:00:00.000Z',
+        kind: 'user.message',
+        text: 'inspect the project',
+      },
+      {
+        version: 1,
+        eventId: 'event-thinking',
+        turnId: 'turn-1',
+        at: '2026-08-23T12:00:01.000Z',
+        kind: 'assistant.message',
+        phase: 'commentary',
+        text: '',
+        reasoning: 'I will inspect the project structure first.',
+      },
+      {
+        version: 1,
+        eventId: 'event-answer',
+        turnId: 'turn-1',
+        at: '2026-08-23T12:00:02.000Z',
+        kind: 'assistant.message',
+        phase: 'final',
+        text: 'The project is ready for review.',
+      },
+      {
+        version: 1,
+        eventId: 'event-done',
+        turnId: 'turn-1',
+        at: '2026-08-23T12:00:03.000Z',
+        kind: 'turn.completed',
+        durationMs: 3000,
+      },
+    ];
+
+    const rows = timelineEntriesFromEvents(events);
+    assert.deepEqual(rows.map((row) => row.kind), ['input', 'thinking', 'answer', 'separator']);
+    assert.equal(rows[0]?.title, 'inspect the project');
+    assert.equal(rows[1]?.detail, 'I will inspect the project structure first.');
+    assert.equal(rows[2]?.title, 'The project is ready for review.');
+  });
+
+  it('replaces the current Static epoch when a session is restored', () => {
+    const current = withEntries([entry('input', 'current session')]);
+    const restored = sessionReducer(current, {
+      type: 'restore',
+      entries: [entry('input', 'resumed session')],
+    });
+
+    assert.deepEqual(restored.committed.map((row) => row.title), ['resumed session']);
+    assert.deepEqual(restored.entries, []);
+    assert.equal(restored.epoch, current.epoch + 1);
+  });
+
+  it('commits a completed current turn so long output cannot disappear', () => {
     const entries = [
       entry('input', 'the current request'),
       entry('thinking', 'Plif Thinking', { detail: 'reasoning', status: 'done' }),
@@ -49,14 +108,10 @@ describe('committing rows to scrollback', () => {
       entry('notice', 'the tail is longer than eight rows', { status: 'done' }),
     ];
 
-    assert.equal(
-      scrollbackCommitEnd(entries),
-      0,
-      'finishing a long turn must not move its visible content above the viewport',
-    );
+    assert.equal(scrollbackCommitEnd(entries), 8);
   });
 
-  it('commits the previous turn only after a new input establishes the boundary', () => {
+  it('commits only the previous turn when a new input establishes the boundary', () => {
     const entries = [
       entry('input', 'previous request'),
       entry('answer', 'previous answer', { status: 'done' }),
@@ -279,9 +334,11 @@ describe('clipping an answer that is still streaming', () => {
     assert.equal(tail(body, 80, 2), 'second\nthird');
   });
 
-  it('keeps at least one line when even that does not fit', () => {
+  it('keeps a bounded suffix when one source line does not fit', () => {
     const huge = 'x'.repeat(4000);
-    assert.equal(tail(huge, 80, 3), huge);
+    const clipped = tail(huge, 80, 3);
+    assert.equal(clipped.length, 240);
+    assert.ok(clipped.endsWith('x'));
   });
 });
 

@@ -49,6 +49,35 @@ describe('composer state', () => {
     assert.equal(before.queue.length, 1);
     assert.equal(after.queue.length, 0);
   });
+
+  it('submits only the current draft after select-all, delete, and replacement', () => {
+    let state = composerReducer(initialComposerState, { type: 'insert', text: 'create landing page' });
+    state = composerReducer(state, { type: 'select.all' });
+    state = composerReducer(state, { type: 'delete.backward' });
+    state = composerReducer(state, { type: 'insert', text: 'hello' });
+
+    assert.deepEqual(submissionFromComposer(state), { text: 'hello', attachments: [] });
+  });
+
+  it('removes pasted content from the canonical draft before submission', () => {
+    const attachment = { kind: 'text' as const, token: '[paste-1]', text: 'large prompt' };
+    let state = composerReducer(initialComposerState, { type: 'attachment.paste', attachment });
+    state = composerReducer(state, { type: 'select.all' });
+    state = composerReducer(state, { type: 'delete.forward' });
+    state = composerReducer(state, { type: 'insert', text: 'test' });
+
+    assert.deepEqual(submissionFromComposer(state), { text: 'test', attachments: [] });
+  });
+
+  it('deletes successive characters from the current reducer state', () => {
+    let state = composerReducer(initialComposerState, { type: 'insert', text: 'abc' });
+    state = composerReducer(state, { type: 'delete.backward' });
+    state = composerReducer(state, { type: 'delete.backward' });
+    state = composerReducer(state, { type: 'delete.backward' });
+
+    assert.equal(state.draft, '');
+    assert.equal(state.cursor, 0);
+  });
 });
 
 describe('composer history', () => {

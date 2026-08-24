@@ -127,6 +127,17 @@ describe('StreamFrameScheduler', () => {
     assert.deepEqual(frames.map((frame) => frame.revision), revisions);
   });
 
+  it('returns the canonical final snapshot when completion races the last paint', () => {
+    const { frames, stream } = harness();
+    stream.append('answer', 'fast ');
+    stream.append('answer', 'answer');
+    const finalFrame = stream.flushAndComplete();
+
+    assert.equal(finalFrame?.kind, 'complete');
+    assert.equal(finalFrame?.answer, 'fast answer');
+    assert.equal(frames.at(-1)?.answer, 'fast answer');
+  });
+
   it('flushes pending accepted output before disposal and rejects later appends', () => {
     const { clock, frames, stream } = harness();
     stream.append('reasoning', 'a');

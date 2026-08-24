@@ -47,6 +47,13 @@ export interface SgrMouseRead {
   readonly text?: string;
 }
 
+/** Only text paste tokens expose the triple-click popup action. */
+export function needsPasteClickTracking(
+  attachments: readonly { readonly kind: string }[],
+): boolean {
+  return attachments.some((attachment) => attachment.kind === 'text');
+}
+
 /**
  * Stateful boundary reader for terminals that split one mouse report across
  * stdin reads. While a possible SGR prefix is incomplete, `handled` is true so

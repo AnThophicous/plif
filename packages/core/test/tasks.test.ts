@@ -51,6 +51,25 @@ describe('TaskManager shell safety', () => {
 });
 
 describe('TaskMonitor', () => {
+  it('does not run a check for an already-aborted wait', async () => {
+    const monitor = new TaskMonitor();
+    const controller = new AbortController();
+    controller.abort();
+    let checks = 0;
+    const result = await monitor.watch({
+      id: 'pre-aborted-task',
+      kind: 'test',
+      sessionId: 'session-a',
+      check: async () => {
+        checks += 1;
+        return { state: 'completed' as const, result: 'unexpected' };
+      },
+    }, { signal: controller.signal });
+
+    assert.equal(result.status, 'cancelled');
+    assert.equal(checks, 0);
+  });
+
   it('wakes from a native event without polling repeatedly', async () => {
     const monitor = new TaskMonitor();
     let checks = 0;

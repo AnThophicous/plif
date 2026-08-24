@@ -135,6 +135,28 @@ describe('vision endpoint routing', () => {
     );
     assert.equal(builtInCandidate.baseURL, 'https://custom-openai.example.test/v1');
   });
+
+  it('recommends the lowest explicitly known vision cost without guessing unknown prices', () => {
+    const candidates = visionCandidates({
+      provider: {
+        custom: {
+          options: { baseURL: 'https://vision.example.test/v1' },
+          models: {
+            unknown: { modalities: ['text', 'image'] as const },
+            paid: {
+              modalities: ['text', 'image'] as const,
+              pricing: { inputPerMillion: 0.4, outputPerMillion: 0.8 },
+            },
+            free: { modalities: ['text', 'image'] as const, cost: 'free' as const },
+          },
+        },
+      },
+    });
+    assert.deepEqual(candidates.map((candidate) => candidate.model), ['free', 'paid', 'unknown']);
+    assert.equal(candidates[0]?.recommended, true);
+    assert.equal(candidates[1]?.recommended, false);
+    assert.equal(candidates[2]?.recommended, false);
+  });
 });
 
 describe('vision consent', () => {

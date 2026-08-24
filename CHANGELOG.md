@@ -2,6 +2,38 @@
 
 All notable changes to plif. This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8] — 2026-08-23
+
+### Added
+
+- **Isolated `/temp` workspace.** Every interactive and one-shot agent session
+  now receives a dedicated scratch directory mounted at `/temp`, separate from
+  the project mount at `/project`.
+- **Visible temp policy.** `/temp` explains the intended split: transient
+  artifacts stay disposable, while `/project` is reserved for requested
+  deliverables. The command is keyboard-friendly and safe to run while the
+  agent is working.
+- **Default container coverage.** Containers created by the agent and by
+  `/new` inherit the isolated scratch mount. An explicitly supplied `/temp`
+  mount remains authoritative instead of being duplicated.
+
+### Security
+
+- Scratch directories are created with the operating system's unique temporary
+  directory primitive, validated to remain under the system temp root, and
+  cleaned idempotently at session shutdown.
+- Cleanup refuses to follow a replaced symlink or remove a path outside the
+  session's validated temp boundary.
+- The physical host scratch path is not written to the transcript or exposed to
+  the model; the model receives only the stable virtual path `/temp`.
+- The system prompt now distinguishes `/project` from `/temp` and directs logs,
+  screenshots, probes and intermediate output away from the user's repository.
+
+### Validation
+
+- Full Windows validation: **1,096 tests passed, 0 failed, 20 platform skips**.
+- Typecheck and targeted `/temp` mount/cleanup tests pass.
+
 ## [0.3.6] — 2026-08-22
 
 ### Added
@@ -196,6 +228,7 @@ npm install -g @plif/cli@latest
 
 First release.
 
+[0.3.8]: https://github.com/AnThophicous/plif/compare/v0.3.7...v0.3.8
 [0.3.6]: https://github.com/AnThophicous/plif/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/AnThophicous/plif/compare/v0.3.0...v0.3.5
 [0.3.0]: https://github.com/AnThophicous/plif/compare/v0.2.0...v0.3.0

@@ -67,12 +67,21 @@ function costDisclosure(cost: VisionCandidate['cost']): string {
   return 'Cost: unknown; the provider may charge for this request.';
 }
 
+function pricingDisclosure(candidate: VisionCandidate): string {
+  const pricing = candidate.pricing;
+  if (!pricing) return 'Price: not reported by the provider.';
+  const input = pricing.inputPerMillion === undefined ? 'n/a' : `$${pricing.inputPerMillion.toFixed(4)}/M input`;
+  const output = pricing.outputPerMillion === undefined ? 'n/a' : `$${pricing.outputPerMillion.toFixed(4)}/M output`;
+  return `Price: ${input}; ${output}.`;
+}
+
 function describeCandidate(candidate: VisionCandidate): string {
   return [
     `Model: ${candidate.model}`,
     `Provider: ${candidate.provider}`,
     `Endpoint: ${displayEndpoint(candidate.baseURL)}`,
     costDisclosure(candidate.cost),
+    pricingDisclosure(candidate),
     'Recipient: the image and question leave Plif and may be sent to this third-party provider.',
   ].join('\n');
 }

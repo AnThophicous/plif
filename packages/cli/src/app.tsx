@@ -2,7 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
+import { Box, Static, Text, useApp, useInput, useStdin, useStdout } from 'ink';
 import type { Key } from 'ink';
 
 import {
@@ -29,6 +29,7 @@ import {
   resolveServerConfigs,
   runCompaction,
   runLoop,
+  stableToolSpecs,
   skillTool,
   subagentTool,
   SubagentCoordinator,
@@ -55,6 +56,8 @@ import {
   sourceUrl,
   globalConfigPath,
   loadGlobalConfig,
+  loadTokenSplitConfig,
+  loadedSkillNames,
   saveGlobalConfig,
   scheduleProviderDiscovery,
   summariseMemory,
@@ -107,9 +110,13 @@ import { PlifActivation, PLIF_ACTIVATION_DURATION_MS } from './components/PlifAc
 import { terminalSurfaceLayout } from './components/TerminalSurface.js';
 import { LoadingStatus } from './components/LoadingStatus.js';
 import { visibleTasks } from './components/TaskIndicator.js';
-import { WorkDock, workDockHeight } from './components/WorkDock.js';
-import { Timeline, TimelineRow } from './components/Timeline.js';
-import { measureTranscriptCells } from './components/Timeline.js';
+import { WorkDock, operationalEntries, workDockHeight } from './components/WorkDock.js';
+import {
+  Timeline,
+  TimelineRow,
+  measureTranscriptCells,
+  timelineEntriesFromEvents,
+} from './components/Timeline.js';
 import { TranscriptOverlay } from './components/TranscriptOverlay.js';
 import { ThinkingOverlay, thinkingBodyHeight } from './components/ThinkingOverlay.js';
 import {
@@ -156,11 +163,12 @@ import { AnimationClockProvider } from './hooks/useAnimationClock.js';
 import { useTranscriptController } from './hooks/useTranscriptController.js';
 import { withoutReasoning } from './conversation.js';
 import { entry, initialSession, scrollbackCommitEnd, sessionReducer } from './session.js';
-import type { BrowserRow, BrowserState, QueuedMessage, TimelineEntry } from './session.js';
+import type { BrowserRow, BrowserState, QueuedMessage, SessionState, TimelineEntry } from './session.js';
 import { ComposerHistory } from './composer/history.js';
-import { composerReducer, initialComposerState } from './composer/state.js';
+import { composerReducer, initialComposerState, submissionFromComposer } from './composer/state.js';
 import type { PastedAttachment } from './composer/state.js';
 import { materializePastedLine } from './composer/paste.js';
+import { editorDeleteAction } from './editor-keys.js';
 import { attachmentsForPrimaryModel, hasImageAttachments } from './attachments.js';
 import { allTranscriptCells } from './transcript/reducer.js';
 import { initialViewport, viewportReducer } from './transcript/scroll.js';
@@ -185,12 +193,12 @@ import {
   reconcileCompletionUsage,
 } from './interaction-metrics.js';
 import type { CompletionMeter } from './interaction-metrics.js';
-import { preToolProseAction } from './pre-tool-prose.js';
+import { compactPlifReviewCheckpoint, preToolProseAction } from './pre-tool-prose.js';
 import { applyEffortPalette, color, formatCount, formatDuration, glyph, layout } from './theme.js';
-import { containerMount, containerWorkdir } from './container-paths.js';
+import { containerMount, containerTempMount, containerWorkdir } from './container-paths.js';
 import { authNotice } from './auth.js';
 import { completedTitle, titleForWorking, writeTerminalTitle } from './terminal-title.js';
-import { sessionFrameHeight, terminalFrameRows } from './terminal-resize.js';
+import { terminalFrameRows } from './terminal-resize.js';
 import { activateTheme } from './themes.js';
 import type { ThemeCatalogue } from './themes.js';
 import { formatSessionExport, sessionExportFileName } from './session-export.js';
@@ -203,6 +211,7 @@ import {
 } from './loading-state.js';
 import {
   EMPTY_CLICK_SEQUENCE,
+  needsPasteClickTracking,
   nextClickSequence,
   SgrMouseReader,
 } from './mouse.js';
@@ -211,10 +220,14 @@ export interface AppProps {
   readonly engine: Engine;
   readonly report: SandboxCapabilityReport;
   readonly cwd: string;
+  /** Host path for the isolated session scratch mount exposed as /temp. */
+  readonly tempDir: string;
   /** The conversation this run belongs to. Null only if sessions are disabled. */
   readonly session: Session | null;
-  /** Prior turns to replay on screen, from the last compaction boundary on. */
+  /** Complete prior history to render on screen, including compacted turns. */
   readonly replay: readonly ConversationEvent[];
+  /** Compact prior context sent to the model after the compaction boundary. */
+  readonly contextReplay?: readonly ConversationEvent[];
   readonly version: string;
   /** Null when no model is configured; the agent then refuses politely. */
   readonly provider: ModelProvider | null;
@@ -241,6 +254,22 @@ export interface AppProps {
   readonly themeCatalogue: ThemeCatalogue;
 }
 
+function initialSessionState({
+  replay,
+  contextMax,
+}: {
+  readonly replay: readonly ConversationEvent[];
+  readonly contextMax: number;
+}): SessionState {
+  const committed = timelineEntriesFromEvents(replay);
+  return {
+    ...initialSession,
+    committed,
+    epoch: committed.length > 0 ? 1 : 0,
+    contextMax,
+  };
+}
+
 /** How often command output is flushed into the timeline. */
 const STREAM_FLUSH_MS = 90;
 /**
@@ -250,6 +279,7 @@ const STREAM_FLUSH_MS = 90;
  * ordinary paint window.
  */
 const SEMANTIC_STREAM_FRAME_MS = 33;
+const EMPTY_TRANSCRIPT_CELLS: readonly import('./transcript/types.js').TranscriptCell[] = [];
 /** Window in which a second Ctrl+C means "really quit". */
 const DOUBLE_INTERRUPT_MS = 1500;
 /** Short prompt-frame transition after an explicit model/effort change. */
@@ -338,6 +368,13 @@ function verticalCursor(text: string, cursor: number, delta: -1 | 1): number | n
 }
 
 export const BANNER_ROW_ID = 'plif:banner';
+
+/**
+ * The startup identity is append-only terminal chrome, not live conversation
+ * state. Keeping a stable item in Ink's Static list prevents Ink from
+ * printing the header again every time a settled turn moves into scrollback.
+ */
+const STATIC_HEADER_ITEM = { id: 'plif:header', kind: 'header' } as const;
 
 /** A missing startup credential owns the keyboard before its question mounts. */
 export function needsCredentialPrompt(problem: string | null): boolean {
@@ -446,8 +483,10 @@ export function App({
   engine,
   report,
   cwd,
+  tempDir,
   session,
   replay,
+  contextReplay = replay,
   version,
   provider,
   capabilityCache,
@@ -467,27 +506,37 @@ export function App({
   credentials,
   themeCatalogue,
 }: AppProps): React.ReactElement {
-  const [state, dispatch] = useReducer(sessionReducer, {
-    ...initialSession,
-    contextMax: provider?.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
-  });
+  const [state, dispatch] = useReducer(
+    sessionReducer,
+    {
+      replay,
+      contextMax: provider?.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+    },
+    initialSessionState,
+  );
   const [composer, composerDispatch] = useReducer(composerReducer, initialComposerState);
+  // Keyboard callbacks can run before React has committed the render that
+  // contains the latest reducer result. Keep the reducer state itself as the
+  // submission seam so Enter cannot send a previous render's draft.
+  const composerRef = useRef(composer);
+  composerRef.current = composer;
   const [pastedTextPopup, setPastedTextPopup] = useState<PastedTextPopup | null>(null);
   const input = composer.draft;
   const cursor = composer.cursor;
   const pasted = composer.attachments;
+  const hasTextPasteAttachment = needsPasteClickTracking(pasted);
   const completionIndex = composer.completion?.selected ?? 0;
   const queuedIndex = composer.queuedSelection;
   const setInput = (next: React.SetStateAction<string>): void => {
-    const text = typeof next === 'function' ? next(composer.draft) : next;
+    const text = typeof next === 'function' ? next(composerRef.current.draft) : next;
     composerDispatch({ type: 'draft.set', text });
   };
   const setCursor = (next: React.SetStateAction<number>): void => {
-    const value = typeof next === 'function' ? next(composer.cursor) : next;
+    const value = typeof next === 'function' ? next(composerRef.current.cursor) : next;
     composerDispatch({ type: 'cursor.set', cursor: value });
   };
   const setPasted = (next: React.SetStateAction<PastedAttachment[]>): void => {
-    const attachments = typeof next === 'function' ? next([...composer.attachments]) : next;
+    const attachments = typeof next === 'function' ? next([...composerRef.current.attachments]) : next;
     composerDispatch({ type: 'attachments.set', attachments });
   };
   const setCompletionIndex = (next: React.SetStateAction<number>): void => {
@@ -557,6 +606,26 @@ export function App({
   // must not reconcile the whole Ink tree just to update one number.
   const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
   const [tasksOpen, setTasksOpen] = useState(false);
+  const taskOutputRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshTasks = useCallback((): void => {
+    setTasks(visibleTasks(taskManager.current?.list() ?? []));
+  }, []);
+  const scheduleTaskOutputRefresh = useCallback((): void => {
+    if (taskOutputRefreshTimer.current !== null) return;
+    const timer = setTimeout(() => {
+      taskOutputRefreshTimer.current = null;
+      refreshTasks();
+    }, STREAM_FLUSH_MS);
+    timer.unref?.();
+    taskOutputRefreshTimer.current = timer;
+  }, [refreshTasks]);
+  const flushTaskOutputRefresh = useCallback((): void => {
+    if (taskOutputRefreshTimer.current !== null) {
+      clearTimeout(taskOutputRefreshTimer.current);
+      taskOutputRefreshTimer.current = null;
+    }
+    refreshTasks();
+  }, [refreshTasks]);
   /**
    * A once-a-second clock for the panels with elapsed counters on them.
    *
@@ -575,6 +644,10 @@ export function App({
     rows,
     headerHeight(headerAvailableWidth),
   );
+  // The header is an append-only Static item now. It occupies real terminal
+  // rows before Ink's live canvas, so the dynamic surface must use the panel
+  // height that remains below it instead of claiming the whole terminal again.
+  const liveSurfaceHeight = pastedTextPopup ? surface.canvasHeight : surface.panelHeight;
   const transcript = useTranscriptController({ engine, workspace: cwd, session, replay });
   const [transcriptViewport, dispatchTranscriptViewport] = useReducer(
     viewportReducer,
@@ -665,6 +738,20 @@ export function App({
     text: '',
     dirty: false,
   });
+  /** One-shot drain: idle sessions must not keep a polling timer alive. */
+  const streamFlushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleStreamFlush = useCallback((): void => {
+    if (streamFlushTimer.current !== null) return;
+    const timer = setTimeout(() => {
+      streamFlushTimer.current = null;
+      const live = stream.current;
+      if (!live.dirty || !live.rowId) return;
+      live.dirty = false;
+      dispatch({ type: 'update', id: live.rowId, patch: { detail: live.text } });
+    }, STREAM_FLUSH_MS);
+    timer.unref?.();
+    streamFlushTimer.current = timer;
+  }, []);
   /** Row waiting to be bound to an execId by the next `exec.start`. */
   const pendingRow = useRef<string | null>(null);
   /**
@@ -812,10 +899,13 @@ export function App({
    * and so the stream buffer stops pointing at a row nothing will write to.
    */
   const closeAnswer = useCallback(() => {
-    semanticFrames.current?.flushAndComplete();
+    const finalFrame = semanticFrames.current?.flushAndComplete();
     const id = agentRow.current;
     if (!id) return;
-    const text = agentText.current.trim();
+    // The scheduler owns the complete output, including bytes that have not
+    // reached a paint yet. Prefer its frozen completion snapshot over the last
+    // React-visible frame so a fast provider cannot lose its tail.
+    const text = (finalFrame?.answer ?? agentText.current).trim();
     agentRow.current = null;
     agentText.current = '';
     stream.current = { rowId: null, text: '', dirty: false };
@@ -836,7 +926,15 @@ export function App({
     agentRow.current = null;
     agentText.current = '';
     stream.current = { rowId: null, text: '', dirty: false };
-    dispatch(preToolProseAction(id, event.text, event.visibility));
+    const compactReview = effortRef.current === 'plif'
+      ? compactPlifReviewCheckpoint(event.text)
+      : null;
+    dispatch(preToolProseAction(
+      id,
+      compactReview ?? event.text,
+      event.visibility,
+      compactReview ? 'Review' : 'Preparing',
+    ));
   }, []);
 
   /**
@@ -893,26 +991,22 @@ export function App({
   }, []);
 
   /**
-   * Seed the timeline from a resumed session.
-   *
-   * Replayed rows are visually dimmed and tagged, so it is never ambiguous
-   * which part of the screen happened now and which is history being shown
-   * back. A resume that looks identical to a live turn invites the developer to
-   * believe a command just ran when it ran yesterday.
+   * Restore model context and leave a small resume marker after the durable
+   * rows already seeded into Ink's normal scrollback by the reducer initializer.
    */
   useEffect(() => {
     if (replay.length === 0) return;
 
-    conversation.current = conversationFromTranscript(replay);
+    conversation.current = conversationFromTranscript(contextReplay);
     const restored = estimateTokens(conversation.current);
     dispatch({ type: 'context', used: restored });
     push(
-      entry('notice', `resumed ${session?.id ?? ''} — ${replay.length} earlier events`, {
+      entry('notice', `resumed ${session?.id ?? ''} — ${replay.length} stored events`, {
         tone: 'accent',
-        subtitle: `${conversation.current.length} messages back in context · ~${formatCount(restored)} tokens`,
+        subtitle: `${conversation.current.length} recent messages in context · ${replay.length} events visible · ~${formatCount(restored)} tokens`,
       }),
     );
-  }, [replay, push, session]);
+  }, [contextReplay, replay, push, session]);
 
   useEffect(() => {
     if (!transcript.persistenceWarning) return;
@@ -1151,7 +1245,7 @@ export function App({
             ? 'compaction capsule rejected; raw history preserved'
             : 'compaction model failed; mechanical fallback applied', {
             tone: 'warn',
-            subtitle: `${event.failure.message} (${event.failure.attempts} attempts; provider disabled for this turn)`,
+            subtitle: `${event.failure.message} (${event.failure.attempts} attempts; provider ${glyph.failed} unavailable for this turn)`,
           }));
         }
         // Only worth a row when it actually did something. A pass that ran the
@@ -1459,6 +1553,7 @@ export function App({
         if (!stream.current.rowId) return;
         stream.current.text += event.chunk;
         stream.current.dirty = true;
+        scheduleStreamFlush();
       }),
 
       engine.bus.on('container.state', (event) => {
@@ -1513,18 +1608,16 @@ export function App({
         });
       }),
       engine.bus.on('task.created', () => {
-        const next = visibleTasks(taskManager.current?.list() ?? []);
-        setTasks(next);
+        refreshTasks();
         setTasksOpen(true);
       }),
       engine.bus.on('task.started', () => {
-        const next = visibleTasks(taskManager.current?.list() ?? []);
-        setTasks(next);
+        refreshTasks();
         setTasksOpen(true);
       }),
-      engine.bus.on('task.output', () => setTasks(visibleTasks(taskManager.current?.list() ?? []))),
-      engine.bus.on('task.finished', () => setTasks(visibleTasks(taskManager.current?.list() ?? []))),
-      engine.bus.on('task.blocked', () => setTasks(visibleTasks(taskManager.current?.list() ?? []))),
+      engine.bus.on('task.output', scheduleTaskOutputRefresh),
+      engine.bus.on('task.finished', flushTaskOutputRefresh),
+      engine.bus.on('task.blocked', flushTaskOutputRefresh),
     ];
     return () => offs.forEach((off) => off());
   }, [
@@ -1536,6 +1629,9 @@ export function App({
     settlePreToolProse,
     isCurrentLoadingTurn,
     updateLoadingPhase,
+    flushTaskOutputRefresh,
+    refreshTasks,
+    scheduleTaskOutputRefresh,
   ]);
 
   /**
@@ -1753,15 +1849,16 @@ export function App({
   }, [tasks.length]);
 
   useEffect(() => {
-    if (!stdout.isTTY) return;
-    // SGR click reporting is scoped to the session and is disabled again on
-    // unmount. We only ask for button press/release; wheel, drag and motion stay
-    // with the terminal so selecting text remains predictable.
+    // Mouse tracking also captures wheel reports (button 64/65). Keeping it
+    // enabled for the whole session made the parser discard the wheel bytes
+    // before the terminal could scroll. Only a text paste has a triple-click
+    // action, so ordinary sessions leave the wheel entirely native.
+    if (!stdout.isTTY || !hasTextPasteAttachment) return;
     stdout.write('\u001B[?1002l\u001B[?1003l\u001B[?1000h\u001B[?1006h');
     return () => {
       stdout.write('\u001B[?1000l\u001B[?1006l');
     };
-  }, [stdout]);
+  }, [hasTextPasteAttachment, stdout]);
 
   // Mirror the queue into a ref so the running turn's drain callback sees the
   // current list rather than the one that existed when it started.
@@ -1915,10 +2012,10 @@ export function App({
    *
    * A row can still change while it is the newest thing on screen — output
    * streams into it, its status resolves, an approval is inserted above it — so
-   * the whole current turn stays in the live frame until the next input marks a
-   * new turn. At that boundary the previous settled prefix can move to
-   * `<Static>` in one ordered batch. This avoids the terminal viewport jumping
-   * away from the answer at the exact moment the request finishes.
+   * only unsettled work remains in the live frame. Once the Worked separator
+   * exists and every row before it is settled, promote that complete turn to
+   * `<Static>` in one ordered batch. This prevents the bounded live viewport
+   * from dropping finished answers as they grow beyond the terminal height.
    */
   useEffect(() => {
     // Committing prints settled rows to native terminal scrollback. Plif does
@@ -1941,16 +2038,15 @@ export function App({
     }
   }, [state.entries]);
 
-  /** Drain accumulated command output into its active row on a fixed cadence. */
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const live = stream.current;
-      if (!live.dirty || !live.rowId) return;
-      live.dirty = false;
-      dispatch({ type: 'update', id: live.rowId, patch: { detail: live.text } });
-    }, STREAM_FLUSH_MS);
-    timer.unref?.();
-    return () => clearInterval(timer);
+  useEffect(() => () => {
+    if (streamFlushTimer.current !== null) {
+      clearTimeout(streamFlushTimer.current);
+      streamFlushTimer.current = null;
+    }
+    if (taskOutputRefreshTimer.current !== null) {
+      clearTimeout(taskOutputRefreshTimer.current);
+      taskOutputRefreshTimer.current = null;
+    }
   }, []);
 
   const requestModelKey = useCallback(async (modelName: string, hint?: string): Promise<string | null> => {
@@ -2005,7 +2101,7 @@ export function App({
       model,
       preset,
       ...(persisted.apiKey ? { apiKey: persisted.apiKey } : {}),
-    }));
+    }), { capabilityCache, bus: engine.bus });
     dispatch({
       type: 'context',
       max: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
@@ -2017,7 +2113,7 @@ export function App({
         : 'Secure persistence failed; retry after fixing the credential store.',
     }));
     return true;
-  }, [engine, push, requestModelKey]);
+  }, [capabilityCache, engine, push, requestModelKey]);
 
   // ---- command execution -------------------------------------------------
 
@@ -2044,6 +2140,7 @@ export function App({
       void engine.shutdown('user exit').finally(() => exit());
     },
     cwd,
+    tempDir,
     model: providerRef.current,
     modelProblem: providerProblem,
     credentials,
@@ -2153,7 +2250,7 @@ export function App({
       }
 
       const previousPreset = providerIdForConfig(stored) ?? '';
-      providerRef.current = createModelProvider(config);
+      providerRef.current = createModelProvider(config, { capabilityCache, bus: engine.bus });
       const previousEffort = effortRef.current;
       const normalizedEffort = config.effort;
       if (normalizedEffort !== previousEffort) {
@@ -2214,7 +2311,7 @@ export function App({
           hint: `Supported: ${availableEfforts.join(', ')}`,
         });
       }
-      providerRef.current = createModelProvider(config);
+      providerRef.current = createModelProvider(config, { capabilityCache, bus: engine.bus });
       await saveStoredConfig(engine.paths, next);
       dispatch({
         type: 'context',
@@ -2283,7 +2380,7 @@ export function App({
       });
       const check = validateModelConfig(config);
       if (!check.ok) throw new Error(check.problem ?? 'profile model is not usable');
-      providerRef.current = createModelProvider(config);
+      providerRef.current = createModelProvider(config, { capabilityCache, bus: engine.bus });
       await saveStoredConfig(engine.paths, { ...stored, activeProfile: name });
       if (stored.activeProfile !== name) {
         conversation.current = withoutReasoning(conversation.current);
@@ -2301,6 +2398,23 @@ export function App({
         used: estimateTokens(conversation.current),
         max: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
       });
+    },
+    clearProfile: async () => {
+      const loaded = await loadStoredConfig(engine.paths);
+      const stored = credentials
+        ? await migrateCredentialsForWrite(loaded, credentials)
+        : Object.keys(storedProviderCredentials(loaded, providerIdForConfig(loaded) ?? '')).length > 0
+          ? undefined
+          : loaded;
+      if (!stored) throw new Error('persona was not disabled because credential migration failed');
+      if (stored.activeProfile === undefined) return;
+      const { activeProfile: _activeProfile, ...withoutProfile } = stored;
+      await saveStoredConfig(engine.paths, withoutProfile);
+      conversation.current = withoutReasoning(conversation.current);
+      push(entry('notice', 'base PLIF identity restored', {
+        tone: 'accent',
+        subtitle: 'the selected model and provider were preserved',
+      }));
     },
     /**
      * `/compact`, over the conversation this component holds.
@@ -2337,6 +2451,7 @@ export function App({
     loginMcp,
     mcpNames: mcpStatuses.map((server) => server.name),
     openPicker: (picker) => dispatch({ type: 'picker.open', picker }),
+    notify: (notice) => push(notice),
     copySession: async () => {
       try {
         const text = formatSessionExport({
@@ -2519,7 +2634,7 @@ export function App({
 
       // Claim the pasted images for this message and clear the tray, so a
       // second message does not re-send the first one's screenshot.
-      const carried = suppliedAttachments ?? pasted;
+      const carried = suppliedAttachments ?? composerRef.current.attachments;
       if (suppliedAttachments === undefined) setPasted([]);
       const materialized = materializePastedLine(visibleLine, carried);
       const trimmed = materialized.text.trim();
@@ -2587,7 +2702,7 @@ export function App({
         dispatch({ type: 'busy', busy: false });
       }
     },
-    [credentialPromptPending, pasted, push, transcript],
+    [credentialPromptPending, push, transcript],
   );
 
   /**
@@ -2683,7 +2798,7 @@ export function App({
   ): Promise<void> {
     const durableTurnId = turnId ?? transcript.appendUserTurn(text);
     if (!providerRef.current) {
-      transcript.persist({
+      await transcript.persist({
         ...eventBase('turn.failed', durableTurnId),
         reason: providerProblem ?? 'no model provider is configured',
       });
@@ -2697,6 +2812,7 @@ export function App({
             '\nOr run a command directly with a leading "!", e.g. !npm test',
         }),
       );
+      transcript.finishTurn(durableTurnId);
       return;
     }
 
@@ -2714,7 +2830,7 @@ export function App({
           const image = await engine.ensureBaseImage();
           return await engine.run({
             image: image.reference,
-            mounts: [containerMount(cwd)],
+            mounts: [containerMount(cwd), containerTempMount(tempDir)],
             workdir: containerWorkdir(cwd),
             // Network is granted at the ceiling and gated per host by policy,
             // which falls through to "ask". It costs a permission prompt the
@@ -2810,6 +2926,7 @@ export function App({
       resolveCredential: async (providerId: string, childStored: GlobalConfig) =>
         await providerCredential(credentials, providerId, childStored),
       agents: agentsOf(storedConfig),
+      agentAutoLaunch: storedConfig.agentAutoLaunch !== false,
       extraTools: [
         ...(skillRegistry ? [skillTool(skillRegistry)] : []),
         ...lspForAgent,
@@ -2840,6 +2957,9 @@ export function App({
 
     const loadingOperationId = beginLoading(durableTurnId);
     let loadingResult: 'done' | 'error' | 'cancelled' = 'done';
+    // Token Split configuration is read once at turn start. A command can
+    // change it safely for the next turn, never halfway through this request.
+    const tokenSplitConfig = await loadTokenSplitConfig();
 
     try {
       const result = await runLoop(
@@ -2850,11 +2970,13 @@ export function App({
               workspace: cwd,
               containerName: container.name,
               workdir: container.workdir,
+              tempWorkdir: '/temp',
               capabilities: container.capabilities,
               isolation: report.isolation,
               contextTokens: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
-              tools: agentTools.map((tool) => tool.spec),
+              tools: stableToolSpecs(agentTools.map((tool) => tool.spec)),
               skills: skillRegistry?.catalogue() ?? skillCatalogue,
+              loadedSkills: loadedSkillNames(carried),
               mcpServers: mcpRegistry ? mcpRegistry.catalogue() : mcpCatalogue,
               guidance: snapshot.guidance,
               memory: summariseMemory(snapshot),
@@ -2863,7 +2985,15 @@ export function App({
               effort: effortRef.current,
               ...(turnInstructions ? { agentInstructions: turnInstructions } : {}),
               ...(planOnly ? { mode: 'explore' as const } : {}),
-              ...(activeProfile ? { profile: { name: activeProfile.name ?? activeProfileName!, systemPrompt: activeProfile.systemPrompt } } : {}),
+              ...(activeProfile
+                ? {
+                    profile: {
+                      name: activeProfile.name ?? activeProfileName!,
+                      ...(activeProfile.description ? { description: activeProfile.description } : {}),
+                      systemPrompt: activeProfile.systemPrompt,
+                    },
+                  }
+                : {}),
             }),
           },
           ...outgoing,
@@ -2880,6 +3010,12 @@ export function App({
           workspace: cwd,
           sessionId: transcript.session?.id ?? 'interactive',
           contextTokens: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+          tokenSplit: {
+            config: tokenSplitConfig,
+            workspace: cwd,
+            sessionId: transcript.session?.id ?? 'interactive',
+          },
+          enableHarnessCycle: effortRef.current === 'plif',
           ...(attachments.length ? { attachments } : {}),
           ...(taskManager.current ? { tasks: taskManager.current } : {}),
           ...(lspManager.current ? { lsp: lspManager.current } : {}),
@@ -2964,6 +3100,10 @@ export function App({
       if (result.stop === 'cancelled') loadingResult = 'cancelled';
       else if (result.stop !== 'complete' || result.error) loadingResult = 'error';
 
+      // conversation.event is emitted synchronously by the loop, but the
+      // session append is real asynchronous I/O. Commit it before closing the
+      // live stream; no sleep is needed because this waits on the actual write.
+      await transcript.flushPersistence();
       const streamed = agentRow.current !== null;
       closeAnswer();
       // Only as a fallback. A provider that streams has already put every word
@@ -3016,11 +3156,16 @@ export function App({
         loadingOperationRef.current = null;
         setAgentTurnStartedAt(null);
       }
+      // The final assistant event may still be on the persistence queue on an
+      // error or cancellation path. Await that queue before any stream cleanup
+      // and only then release the turn pointer.
+      await transcript.flushPersistence();
       // Also on the error and cancel paths: whatever the model managed to say
       // before it broke is worth keeping on screen, and a row left `active`
       // would spin forever and never reach scrollback.
       closeAnswer();
       closeThinking();
+      transcript.finishTurn(durableTurnId);
       // Still open here means the turn ended without the endpoint ever
       // answering — the retry budget ran out or the endpoint failed permanently.
       settleRetry('gave up');
@@ -3300,6 +3445,21 @@ export function App({
   // ---- keyboard ----------------------------------------------------------
 
   const pasteStream = useRef<PasteState>(IDLE_PASTE);
+  const { internal_eventEmitter: inputEvents } = useStdin();
+  const rawInputRef = useRef<string | null>(null);
+
+  // Ink 5 exposes both the DEL byte (the normal Windows Backspace) and the
+  // actual Delete escape sequence as key.delete. Capture the raw event before
+  // Ink normalizes it so the editor can keep both directions correct.
+  useEffect(() => {
+    const captureRawInput = (data: unknown): void => {
+      rawInputRef.current = typeof data === 'string' ? data : String(data);
+    };
+    inputEvents.on('input', captureRawInput);
+    return () => {
+      inputEvents.removeListener('input', captureRawInput);
+    };
+  }, [inputEvents]);
 
   function receivePastedText(raw: string): void {
     const text = sanitizePastedText(raw);
@@ -3327,16 +3487,25 @@ export function App({
   }
 
   const workDockOpen = tasksOpen || state.subagentsOpen;
-  const transcriptCells = allTranscriptCells(transcript.state);
-  const transcriptBodyHeight = Math.max(1, terminalFrameRows(rows) - 2);
-  const transcriptContentLines = measureTranscriptCells(transcriptCells, width);
+  const transcriptOverlayOpen = transcriptViewport.open || thinkingViewport.open;
+  // Stream frames still update the canonical transcript for Ctrl+R and the
+  // transcript overlay, but the normal shell does not need to measure every
+  // transcript cell while those overlays are closed. That projection used to
+  // run for every 33 ms stream frame even though it could not affect the view.
+  const transcriptCells = transcriptOverlayOpen
+    ? allTranscriptCells(transcript.state)
+    : EMPTY_TRANSCRIPT_CELLS;
+  const transcriptBodyHeight = Math.max(1, surface.panelHeight - 2);
+  const transcriptContentLines = transcriptOverlayOpen
+    ? measureTranscriptCells(transcriptCells, width)
+    : 0;
   const thinkingDoc = useMemo(
     () => thinkingViewport.open
       ? thinkingDocument(thoughtBlocks(transcriptCells), Math.max(16, width - 6))
       : emptyThinkingDocument,
     [thinkingViewport.open, transcriptCells, width],
   );
-  const thinkingRows = thinkingBodyHeight(terminalFrameRows(rows));
+  const thinkingRows = thinkingBodyHeight(surface.panelHeight);
   const thinkingLines = thinkingDoc.lines.length;
 
   useEffect(() => {
@@ -3384,7 +3553,7 @@ export function App({
     });
     // The prompt is bottom-anchored inside the panel. Coordinates are one-based
     // in SGR, and the first body row follows the frame's top rule.
-    const promptTop = surface.canvasHeight - surface.panelPaddingY - footerRows - framePromptHeight + 1;
+    const promptTop = surface.panelHeight - surface.panelPaddingY - footerRows - framePromptHeight + 1;
     const row = bodyRows[mouse.row - promptTop - 1];
     if (!row) return null;
 
@@ -3445,6 +3614,9 @@ export function App({
 
   function handleKey(char: string, key: Key): void {
     if (state.exiting) return;
+    const rawInput = rawInputRef.current;
+    rawInputRef.current = null;
+    const deleteAction = editorDeleteAction(key, rawInput);
 
     if (pastedTextPopup) {
       if (key.escape || (key.ctrl && char === 'c')) setPastedTextPopup(null);
@@ -3650,6 +3822,15 @@ export function App({
       return;
     }
 
+    // Ctrl+A is an editor operation, not a terminal command. Keeping the
+    // selection in the composer reducer makes Ctrl+A + Backspace and typing a
+    // replacement mutate the same canonical draft that Enter will submit.
+    if (key.ctrl && char === 'a') {
+      composerDispatch({ type: 'select.all' });
+      setCompletionIndex(0);
+      return;
+    }
+
     /*
       Working is not a reason to stop listening.
 
@@ -3705,12 +3886,7 @@ export function App({
             return;
           }
         }
-        const line = expandShortcodes(input);
-        if (typedCommandRunsNow) {
-          runSlashNow(line);
-          return;
-        }
-        sendLine(line);
+        submitCurrentComposer();
         return;
       }
       if ((key.upArrow || key.downArrow) && state.queue.length > 0) {
@@ -3741,12 +3917,7 @@ export function App({
             return;
           }
         }
-        const line = expandShortcodes(input);
-        if (line.trim().startsWith('/')) {
-          runSlashNow(line);
-          return;
-        }
-        sendLine(line);
+        submitCurrentComposer();
         return;
       }
 
@@ -3801,14 +3972,21 @@ export function App({
       setCompletionIndex(0);
       return;
     }
-    if (key.backspace || key.delete) {
-      if (cursor === 0) return;
-      // Delete the whole character. Removing one code unit left the other half
-      // of an emoji in the buffer, which then rendered as a replacement box the
-      // developer had to press backspace a second time to clear.
-      const from = stepLeft(input, cursor);
-      setInput(input.slice(0, from) + input.slice(cursor));
-      setCursor(from);
+    if (deleteAction === 'backward') {
+      const current = composerRef.current;
+      if (current.cursor === 0 && current.selection === null) return;
+      // Read and mutate the reducer state as one operation. Computing the
+      // deletion from render-local input/cursor values makes repeated
+      // Backspace events reuse the previous render and stall after one key.
+      composerDispatch({ type: 'delete.backward' });
+      setCompletionIndex(0);
+      setEmojiIndex(0);
+      return;
+    }
+    if (deleteAction === 'forward') {
+      const current = composerRef.current;
+      if (current.cursor >= current.draft.length && current.selection === null) return;
+      composerDispatch({ type: 'delete.forward' });
       setCompletionIndex(0);
       setEmojiIndex(0);
       return;
@@ -3856,17 +4034,35 @@ export function App({
     });
   }
 
-  function sendLine(line: string): void {
+  function submitCurrentComposer(): void {
+    const current = composerRef.current;
+    const submission = submissionFromComposer(current);
+    if (!submission) return;
+    const line = expandShortcodes(submission.text);
+    const commandName = commandPrefix(line);
+    const command = commandName === null ? '' : tokenize(line.slice(1))[0] ?? '';
+    if (state.busy && runsWhileWorking(command)) {
+      runSlashNow(line);
+      return;
+    }
+    if (!state.busy && line.trim().startsWith('/')) {
+      runSlashNow(line);
+      return;
+    }
+    sendLine(line, submission.attachments);
+  }
+
+  function sendLine(line: string, attachments = composerRef.current.attachments): void {
     if (!state.busy && line.trim().startsWith('/')) {
       runSlashNow(line);
       return;
     }
     if (state.busy) {
       const queued = line.trim();
-      if (!queued && pasted.length === 0) return;
+      if (!queued && attachments.length === 0) return;
       dispatch({
         type: 'queue.push',
-        message: { id: `q${Date.now()}`, text: queued, attachments: pasted },
+        message: { id: `q${Date.now()}`, text: queued, attachments: [...attachments] },
       });
       setPasted([]);
       setInput('');
@@ -3876,7 +4072,7 @@ export function App({
     }
     setInput('');
     setCursor(0);
-    void submit(line);
+    void submit(line, attachments);
   }
 
   async function resumeBrowserSession(id: string): Promise<void> {
@@ -3887,19 +4083,22 @@ export function App({
     try {
       const next = await engine.sessions.resolve(cwd, id);
       if (!next) throw new PlifError('INVALID_ARGUMENT', `session "${id}" was not found`);
-      const replay = await next.replay();
-      transcript.switchSession(next, replay);
-      conversation.current = conversationFromTranscript(replay);
-      dispatch({ type: 'clear' });
+      const [history, contextReplay] = await Promise.all([next.history(), next.replay()]);
+      transcript.switchSession(next, history);
+      conversation.current = conversationFromTranscript(contextReplay);
+      // Rebuild the ordinary Ink scrollback, not a transcript dialog. The
+      // reducer bumps Static's epoch so the newly selected session is printed
+      // as a fresh terminal history, exactly like rows produced live.
+      dispatch({ type: 'restore', entries: timelineEntriesFromEvents(history) });
       dispatch({ type: 'context', used: estimateTokens(conversation.current) });
-      setTurn(countAgentTurns(replay));
+      setTurn(countAgentTurns(history));
       setAgentTurnStartedAt(null);
       usage.current = emptySessionUsage;
       sessionStartedAt.current = Date.now();
       dispatch({ type: 'browser.close' });
       push(entry('notice', `resumed ${next.id}`, {
         tone: 'success',
-        subtitle: `${replay.length} stored events · ${conversation.current.length} messages in context`,
+        subtitle: `${history.length} stored events visible · ${conversation.current.length} recent messages in context`,
       }));
     } catch (error) {
       const { title, detail } = formatError(error);
@@ -4309,6 +4508,12 @@ export function App({
       dispatch({ type: 'picker.close' });
       return;
     }
+    // Upper-case F is reserved for the compact model filter menu; lower-case
+    // input remains ordinary picker search text.
+    if (char === 'F' && picker.onFilter && !key.ctrl && !key.meta) {
+      picker.onFilter();
+      return;
+    }
     if (key.upArrow) {
       dispatch({ type: picker.groups ? 'picker.moveVisible' : 'picker.move', delta: -1 });
       return;
@@ -4546,7 +4751,7 @@ export function App({
           model: selection.model,
           ...(persisted.apiKey ? { apiKey: persisted.apiKey } : {}),
         });
-        providerRef.current = createModelProvider(ready);
+        providerRef.current = createModelProvider(ready, { capabilityCache, bus: engine.bus });
         dispatch({
           type: 'context',
           used: 0,
@@ -4712,7 +4917,17 @@ export function App({
   // Compaction takes it over too: both are "the agent is busy", but only one of
   // them can say what it is busy *with* and how far along it is, so the vaguer
   // one steps aside rather than the two stacking.
-  const workRows = workDockHeight(tasks, state.subagents, workDockOpen);
+  const operational = useMemo(
+    () => operationalEntries([...state.committed, ...state.entries]),
+    [state.committed, state.entries],
+  );
+  const activityOpen = operational.length > 0;
+  const workRows = workDockHeight(
+    tasks,
+    state.subagents,
+    workDockOpen || activityOpen,
+    [...state.committed, ...state.entries],
+  );
   const discoveryRows = discoveryHeight(state.discovery.calls, state.discovery.open);
 
   // How many rows a list-style dialog may use. Shrinks with the window so the
@@ -4769,7 +4984,10 @@ export function App({
   // duplicating the session is the wrong trade.
   const timelineBudget = Math.max(0, surface.contentHeight - chrome);
   const scrollback = useMemo(
-    (): readonly TimelineEntry[] => state.committed,
+    (): (TimelineEntry | typeof STATIC_HEADER_ITEM)[] => [
+      STATIC_HEADER_ITEM,
+      ...state.committed,
+    ],
     [state.committed],
   );
   const animationActive = !state.screen && animationClockActive({
@@ -4832,37 +5050,40 @@ export function App({
       fastActive={plifActivation}
       plif={effort === 'plif'}
     >
-    <Box flexDirection="column" width={width} height={surface.canvasHeight}>
+    <Box flexDirection="column" width={width} height={liveSurfaceHeight}>
       {pastedTextPopup ? (
         <PastedTextDialog text={pastedTextPopup.text} width={width} height={surface.canvasHeight} />
       ) : (
         <>
           {!state.screen && (
-            <>
-              <Box paddingX={layout.gutter} flexShrink={0}>
-                <Header
-                  width={headerAvailableWidth}
-                />
-              </Box>
-              <PlifActivation
-                active={plifActivation}
-                width={surface.contentWidth}
-                height={surface.canvasHeight}
-              />
-            </>
+            <PlifActivation
+              active={plifActivation}
+              width={surface.contentWidth}
+              height={liveSurfaceHeight}
+            />
           )}
           {/*
             Scrollback. Ink prints each item once, above the frame, and never again
             — which is both why history survives here and why the array behind it
             must only ever grow. The key is what makes /clear safe: a new key is a
             new component with a fresh count, rather than the same one being handed
-            a shorter list it will misread.
+            a shorter list it will misread. Static rows do not inherit the
+            viewport width, so the header row supplies it explicitly; otherwise
+            the header's centering box collapses to the card's intrinsic width.
           */}
-          <Static key={state.epoch} items={scrollback as TimelineEntry[]}>
+          <Static key={state.epoch} items={scrollback}>
             {(item) => (
-              <Box key={item.id} paddingX={layout.gutter}>
-                <TimelineRow entry={item} width={width - layout.gutter * 2} />
-              </Box>
+              item.kind === 'header'
+                ? (
+                  <Box key={item.id} width={width} paddingX={layout.gutter} flexShrink={0}>
+                    <Header width={headerAvailableWidth} />
+                  </Box>
+                )
+                : (
+                  <Box key={item.id} paddingX={layout.gutter}>
+                    <TimelineRow entry={item} width={width - layout.gutter * 2} />
+                  </Box>
+                )
             )}
           </Static>
 
@@ -4871,7 +5092,7 @@ export function App({
           document={thinkingDoc}
           viewport={thinkingViewport}
           width={width}
-          height={terminalFrameRows(rows)}
+          height={surface.panelHeight}
         />
       ) : transcriptViewport.open ? (
         <TranscriptOverlay
@@ -4879,12 +5100,12 @@ export function App({
           active={transcript.state.active}
           viewport={transcriptViewport}
           width={width}
-          height={terminalFrameRows(rows)}
+          height={surface.panelHeight}
         />
       ) : state.screen ? (
         <Box
           flexDirection="column"
-          {...{ height: sessionFrameHeight(rows, 'screen'), overflowY: 'hidden' as const }}
+          {...{ height: surface.panelHeight, overflowY: 'hidden' as const }}
         >
           {state.screen.kind === 'status' && screenStatus ? (
             <StatusScreen
@@ -4921,7 +5142,7 @@ export function App({
         */
         <Box
           flexDirection="column"
-          {...{ height: sessionFrameHeight(rows, 'browser'), overflowY: 'hidden' as const }}
+          {...{ height: surface.panelHeight, overflowY: 'hidden' as const }}
         >
           <Browser
             state={browserView!}
@@ -4945,9 +5166,10 @@ export function App({
               tasks={tasks}
               subagents={state.subagents}
               subagentFocus={state.subagentFocus}
-              expanded={workDockOpen}
+              expanded={workDockOpen || activityOpen}
               width={surface.contentWidth}
               now={now}
+              entries={[...state.committed, ...state.entries]}
             />
 
             <Box flexDirection="column">
@@ -4969,6 +5191,7 @@ export function App({
                     : { items: filterItems(state.picker.items ?? [], state.picker.filter) })}
                   filter={state.picker.filter}
                   selected={state.picker.selected}
+                  onFilter={state.picker.onFilter}
                   width={Math.max(1, surface.contentWidth - 2)}
                   rows={pickerRows}
                 />

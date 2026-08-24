@@ -50,6 +50,7 @@ import {
   DEFAULT_CONTEXT_TOKENS,
   eventBase,
   runLoop,
+  stableToolSpecs,
   subagentTool,
   WEB_TOOLS,
   skillTool,
@@ -58,6 +59,7 @@ import {
   validateModelConfig,
   isAutoApproveEnabled,
   loadGlobalConfig,
+  loadTokenSplitConfig,
   permissionMode,
   TaskManager,
   LspManager,
@@ -78,13 +80,14 @@ import { HELP_TOPICS, USAGE, parseArgv } from './argv.js';
 import type { GlobalFlags, Invocation } from './argv.js';
 import { formatDuration, formatRelative, plain } from './print.js';
 import { color, workedSeparator } from './theme.js';
-import { containerMount, containerWorkdir } from './container-paths.js';
+import { containerMount, containerTempMount, containerWorkdir } from './container-paths.js';
 import { activateTheme, loadThemes } from './themes.js';
 import { detachImmediateInkResize } from './terminal-resize.js';
 import { disableBracketedPaste, enableBracketedPaste } from './paste.js';
 import { startInteractiveSurface } from './startup.js';
 import { createTerminalSurfaceStream } from './terminal-surface-output.js';
 import { VERSION, VERSION_LABEL } from './version.js';
+import { createSessionTempWorkspace } from './temp-workspace.js';
 
 function buildEngine(flags: GlobalFlags): Engine {
   return new Engine({
@@ -489,16 +492,21 @@ async function buildProvider(
 async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): Promise<void> {
   const engine = buildEngine(invocation.flags);
   const report = await engine.start();
-  await configureGlobalApprovals(engine);
-  const themeCatalogue = await loadThemes();
+  const [appearance, themeCatalogue] = await Promise.all([
+    loadGlobalConfig(),
+    loadThemes(),
+  ]);
+  await configureGlobalApprovals(engine, appearance);
   for (const problem of themeCatalogue.problems) process.stderr.write(`plif theme: ${problem}\n`);
-  const appearance = await loadGlobalConfig();
   const initialTheme = themeCatalogue.themes.find((theme) => theme.id === appearance.theme)
     ?? themeCatalogue.themes[0]!;
   activateTheme(
     initialTheme,
   );
   const done = installTeardown(engine);
+  const tempWorkspace = await createSessionTempWorkspace();
+
+  try {
 
   const capabilityCache = new ProviderCapabilityCache({
     file: path.join(engine.paths.root, 'model-capabilities.json'),
@@ -545,6 +553,7 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
     image: image.reference,
     mounts: [
       { ...containerMount(invocation.flags.workspace), mode: invocation.flags.write ? 'rw' : 'ro' },
+      containerTempMount(tempWorkspace.hostPath),
     ],
     workdir: containerWorkdir(invocation.flags.workspace),
     // Network is a ceiling, not a licence: policy still asks per host, and in
@@ -658,6 +667,7 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
     resolveCredential: async (providerId: string, childStored: StoredConfig) =>
       await lookupProviderCredential(credentials, providerId, childStored),
     agents: agentsOf(stored),
+    agentAutoLaunch: stored.agentAutoLaunch !== false,
     extraTools: [skillTool(skills), ...lspForAgent, ...WEB_TOOLS],
     skillCatalogue: skills.catalogue(),
     edits,
@@ -672,18 +682,20 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
   ];
 
   try {
+    const tokenSplitConfig = await loadTokenSplitConfig();
     const result = await runLoop(
       [
         {
           role: 'system',
-          content: buildSystemPrompt({
+            content: buildSystemPrompt({
             workspace: invocation.flags.workspace,
             containerName: container.name,
             workdir: container.workdir,
+            tempWorkdir: '/temp',
             capabilities: container.capabilities,
             isolation: engine.sandboxReport.isolation,
             contextTokens: provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
-            tools: agentTools.map((tool) => tool.spec),
+            tools: stableToolSpecs(agentTools.map((tool) => tool.spec)),
             skills: skills.catalogue(),
             mcpServers: mcp.catalogue(),
             guidance: snapshot.guidance,
@@ -693,7 +705,13 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
             effort: promptConfig.effort,
             ...(agentInstructions ? { agentInstructions } : {}),
             ...(activeProfile
-              ? { profile: { name: activeProfile.name ?? activeProfileName!, systemPrompt: activeProfile.systemPrompt } }
+              ? {
+                  profile: {
+                    name: activeProfile.name ?? activeProfileName!,
+                    ...(activeProfile.description ? { description: activeProfile.description } : {}),
+                    systemPrompt: activeProfile.systemPrompt,
+                  },
+                }
               : {}),
           }),
         },
@@ -710,6 +728,12 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
         workspace: invocation.flags.workspace,
         sessionId: session.id,
         contextTokens: provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+        tokenSplit: {
+          config: tokenSplitConfig,
+          workspace: invocation.flags.workspace,
+          sessionId: session.id,
+        },
+        enableHarnessCycle: promptConfig.effort === 'plif',
         tools: agentTools,
         tasks,
         lsp,
@@ -738,6 +762,9 @@ async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): P
     await mcp.close();
     await session.close();
     await done();
+  }
+  } finally {
+    await tempWorkspace.cleanup();
   }
 }
 
@@ -858,19 +885,23 @@ async function runInteractive(
   const startedAt = Date.now();
   const engine = buildEngine(invocation.flags);
   const report = await engine.start();
-  await configureGlobalApprovals(engine);
-  const themeCatalogue = await loadThemes();
+  const [appearance, themeCatalogue] = await Promise.all([
+    loadGlobalConfig(),
+    loadThemes(),
+  ]);
+  await configureGlobalApprovals(engine, appearance);
   for (const problem of themeCatalogue.problems) process.stderr.write(`plif theme: ${problem}\n`);
-  const appearance = await loadGlobalConfig();
   const initialTheme = themeCatalogue.themes.find((theme) => theme.id === appearance.theme)
     ?? themeCatalogue.themes[0]!;
   activateTheme(initialTheme);
   const done = installTeardown(engine);
+  const tempWorkspace = await createSessionTempWorkspace();
   // Ink's erase sequence can briefly expose the terminal's default (usually
   // black) on the reserved row below the live frame. Paint that row with the
   // active panel colour after every frame without changing Ink's line count.
   const surfaceStdout = createTerminalSurfaceStream(process.stdout, () => color('panel'));
 
+  try {
   let session: Session | null = null;
 
   if (invocation.kind === 'continue') {
@@ -944,7 +975,9 @@ async function runInteractive(
   // The value comes back through the broker's promise and is written to the
   // encrypted store. It is never put on the bus, so no subscriber — timeline,
   // transcript, audit log — is in a position to leak it.
-  const replay = session ? await session.replay() : [];
+  const [replay, history] = session
+    ? await Promise.all([session.replay(), session.history()])
+    : [[], []] as const;
 
   const resizeListenersBefore = new Set(
     process.stdout.listeners('resize') as Array<(...args: unknown[]) => void>,
@@ -956,9 +989,11 @@ async function runInteractive(
       report={report}
       cwd={invocation.flags.workspace}
       session={session}
-      replay={replay}
+      replay={history}
+      contextReplay={replay}
       version={VERSION}
       provider={provider}
+      tempDir={tempWorkspace.hostPath}
       capabilityCache={capabilityCache}
       providerProblem={providerProblem}
       effort={appearance.effort}
@@ -990,10 +1025,13 @@ async function runInteractive(
     await latest.close();
   }
   await done();
+  } finally {
+    await tempWorkspace.cleanup();
+  }
 }
 
-async function configureGlobalApprovals(engine: Engine): Promise<void> {
-  const config = await loadGlobalConfig();
+async function configureGlobalApprovals(engine: Engine, loaded?: GlobalConfig): Promise<void> {
+  const config = loaded ?? await loadGlobalConfig();
   engine.approvals.setPermissionMode(permissionMode(config));
 }
 

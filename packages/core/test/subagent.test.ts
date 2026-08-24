@@ -82,7 +82,7 @@ describe('subagent credential routing', () => {
     assert.match(result.output, /delegated result/);
   });
 
-  it('propagates the PLIF skill gate and Galileu tool to subagents', async () => {
+  it('propagates the PLIF skill gate and required skills to subagents', async () => {
     let request: CompletionRequest | undefined;
     const childProvider: ModelProvider = {
       ...provider('parent'),
@@ -110,7 +110,10 @@ describe('subagent credential routing', () => {
       provider: childProvider,
       isolation: 'test',
       stored: { model: 'parent', effort: 'plif' },
-      skillCatalogue: '- galileu: Socratic decision review',
+       skillCatalogue: [
+         '- galileu: Socratic decision review',
+         '- plif-cybersecurity: Principal security engineering',
+       ].join('\n'),
       extraTools: [skill],
       maxIterations: 2,
     });
@@ -135,9 +138,74 @@ describe('subagent credential routing', () => {
     assert.ok(request);
     const systemPrompt = request.messages[0]?.content;
     assert.equal(typeof systemPrompt, 'string');
-    assert.match(systemPrompt as string, /## Mandatory PLIF skill/);
-    assert.match(systemPrompt as string, /^- galileu: Socratic decision review$/m);
+     assert.match(systemPrompt as string, /## Mandatory PLIF skills and review checkpoint/);
+     assert.match(systemPrompt as string, /^- galileu: Socratic decision review$/m);
+     assert.match(systemPrompt as string, /^- plif-cybersecurity: Principal security engineering$/m);
     assert.doesNotMatch(systemPrompt as string, /session is misconfigured/i);
     assert.ok(request.tools?.some((candidate) => candidate.name === 'skill'));
+  });
+
+  it('requires explicit intent when named-agent auto-use is disabled and preserves the role prompt', async () => {
+    let request: CompletionRequest | undefined;
+    const childProvider: ModelProvider = {
+      ...provider('parent'),
+      async *stream(input) {
+        request = input;
+        yield { kind: 'text', delta: 'delegated result' };
+        yield {
+          kind: 'done',
+          reason: 'stop',
+          usage: { promptTokens: 1, completionTokens: 1 },
+        };
+      },
+    };
+    const tool = subagentTool({
+      provider: childProvider,
+      isolation: 'test',
+      stored: { model: 'opencode/deepseek-v4-flash-free' },
+      agents: {
+        "CEO - Pli'ef": {
+          model: 'opencode/deepseek-v4-flash-free',
+          description: 'Executive project orchestrator',
+          instructions: '# CEO role\nOwn the project result and verify the delivery.',
+        },
+      },
+      agentAutoLaunch: false,
+      createProvider: () => childProvider,
+      maxIterations: 2,
+    });
+    const context = {
+      container: {
+        name: 'test-container',
+        workdir: '/workspace',
+        capabilities: DEFAULT_CAPABILITIES,
+        authorizeModel: async () => undefined,
+      },
+      questions: {},
+      signal: undefined,
+      bus: new EventBus(),
+      callId: 'agent-policy-test',
+      workspace: 'C:/workspace',
+    } as unknown as ToolContext;
+
+    const blocked = await tool.run({
+      title: 'Choose an executive',
+      task: 'Return the result.',
+      model: "CEO - Pli'ef",
+    }, context);
+    assert.equal(blocked.ok, false);
+    assert.match(blocked.output, /automatic launch.*disabled/i);
+
+    const explicit = await tool.run({
+      title: 'Choose an executive',
+      task: 'Return the result.',
+      model: "CEO - Pli'ef",
+      explicit: true,
+    }, context);
+    assert.equal(explicit.ok, true);
+    const systemPrompt = request?.messages[0]?.content;
+    assert.equal(typeof systemPrompt, 'string');
+    assert.match(systemPrompt as string, /# Active profile: CEO - Pli'ef/);
+    assert.match(systemPrompt as string, /# CEO role/);
   });
 });

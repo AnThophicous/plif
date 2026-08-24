@@ -11,7 +11,7 @@ interface MarkdownProps {
   readonly dim?: boolean;
 }
 
-export function Markdown({ source, width, dim = false }: MarkdownProps): React.ReactElement {
+export const Markdown = React.memo(function Markdown({ source, width, dim = false }: MarkdownProps): React.ReactElement {
   const blocks = parseMarkdown(source);
 
   return (
@@ -21,7 +21,9 @@ export function Markdown({ source, width, dim = false }: MarkdownProps): React.R
       ))}
     </Box>
   );
-}
+});
+
+Markdown.displayName = 'Markdown';
 
 function Block({
   block,

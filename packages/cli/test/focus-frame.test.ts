@@ -10,7 +10,7 @@ import React from 'react';
 import { FocusFrame, focusRule, infinityCells, infinityFrame } from '../src/components/FocusFrame.js';
 import { PlifDock, plifDockHeight } from '../src/components/PlifDock.js';
 import { plifGlowCells } from '../src/components/PlifGlow.js';
-import { workDockHeight } from '../src/components/WorkDock.js';
+import { operationalEntries, workDockHeight } from '../src/components/WorkDock.js';
 import type { SubagentView } from '../src/session.js';
 import { displayWidth } from '../src/text.js';
 import { applyEffortPalette } from '../src/theme.js';
@@ -95,6 +95,29 @@ async function renderCompactDock(width: number): Promise<string> {
   return stdout.output.replace(ANSI, '').replace(/\r/g, '');
 }
 
+async function renderNarrowFrame(width: number): Promise<string[]> {
+  const stdout = new CaptureStdout(width, 12);
+  const app = render(
+    React.createElement(
+      FocusFrame,
+      { width, active: true },
+      React.createElement(Text, null, 'typed command'),
+    ),
+    {
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      exitOnCtrlC: false,
+      patchConsole: false,
+    },
+  );
+  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  app.unmount();
+  return stdout.output
+    .replace(ANSI, '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .filter(Boolean);
+}
+
 async function renderDock(width: number, model: string): Promise<string> {
   const stdout = new CaptureStdout(width, 4);
   const app = render(
@@ -177,6 +200,16 @@ describe('Plif focus frame', () => {
   it('keeps the typed row visible when command suggestions consume the spare height', async () => {
     const frame = await renderConstrainedPrompt();
     assert.match(frame, /╭─+╮[\s\S]*│ typed command\s+│[\s\S]*╰─+╯/);
+  });
+
+  it('keeps every narrow frame row inside the requested width', async () => {
+    for (const width of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      const lines = await renderNarrowFrame(width);
+      assert.equal(lines.length, 3, `width ${width} should stay three rows`);
+      assert.ok(lines.every((line) => displayWidth(line) <= width), `width ${width} overflowed`);
+      assert.equal(displayWidth(lines[0] ?? ''), width);
+      assert.equal(displayWidth(lines[2] ?? ''), width);
+    }
   });
 
   it('fills a focused rule to the requested terminal width', () => {
@@ -272,5 +305,17 @@ describe('upper work dock', () => {
     assert.ok(workDockHeight([task], [subagent], true) > workDockHeight([task], [subagent], false));
     // Header, task row, agent row, and the navigation hint row.
     assert.equal(workDockHeight([task], [subagent], true), 4);
+  });
+
+  it('keeps the operational dock to real inputs and commands from the latest turn', () => {
+    const entries = [
+      { id: 'old', kind: 'input', title: 'old', at: 1 },
+      { id: 'old-tool', kind: 'tool', title: 'old command', status: 'done', at: 2 },
+      { id: 'new', kind: 'input', title: 'new', at: 3 },
+      { id: 'thinking', kind: 'thinking', title: 'plan text', status: 'done', at: 4 },
+      { id: 'new-tool', kind: 'tool', title: 'run command', status: 'active', at: 5 },
+    ] as const;
+    assert.deepEqual(operationalEntries(entries).map((item) => item.title), ['new', 'run command']);
+    assert.equal(workDockHeight([], [], true, entries), 3);
   });
 });

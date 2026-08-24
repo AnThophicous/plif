@@ -10,6 +10,8 @@ export interface PromptContext {
   readonly workspace: string;
   readonly containerName: string;
   readonly workdir: string;
+  /** Disposable session scratch path, normally /temp, separate from /project. */
+  readonly tempWorkdir?: string;
   readonly capabilities: CapabilitySet;
   readonly isolation: string;
   readonly mode?: PromptMode;
@@ -18,6 +20,8 @@ export interface PromptContext {
   readonly contextTokens?: number;
   readonly tools?: readonly ToolSpec[];
   readonly skills?: string;
+  /** Skills already loaded into the carried conversation for this session. */
+  readonly loadedSkills?: readonly string[];
   readonly mcpServers?: string;
   readonly guidance?: Guidance;
   readonly memory?: string;
@@ -25,7 +29,7 @@ export interface PromptContext {
   readonly platform?: string;
   readonly shell?: ShellReport;
   readonly sandboxGaps?: readonly string[];
-  readonly profile?: { readonly name: string; readonly systemPrompt: string };
+  readonly profile?: { readonly name: string; readonly description?: string; readonly systemPrompt: string };
   readonly agentInstructions?: string;
 }
 

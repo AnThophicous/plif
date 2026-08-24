@@ -14,6 +14,7 @@ import type { StoredConfig } from '../model/config.js';
 import { createModelProvider } from '../model/factory.js';
 import type { Message, ModelProvider } from '../model/provider.js';
 import { DEFAULT_CONTEXT_TOKENS, runLoop } from './loop.js';
+import { stableToolSpecs } from './context-budget.js';
 import { buildSystemPrompt } from './prompt.js';
 import {
   applyPatch,
@@ -43,6 +44,8 @@ export interface SubagentOptions {
   readonly createProvider?: (config: ReturnType<typeof resolveConfig>) => ModelProvider;
   /** Named agents from `agent: {}` in the config. */
   readonly agents?: Readonly<Record<string, AgentConfig>>;
+  /** When false, a configured named agent requires an explicit user request. */
+  readonly agentAutoLaunch?: boolean;
   readonly maxIterations?: number;
   /** Passed through to the child — the LSP and web tools, in practice. */
   readonly extraTools?: readonly Tool[];
@@ -157,6 +160,8 @@ interface Resolved {
   readonly provider: ModelProvider;
   readonly free: boolean;
   readonly maxIterations: number | undefined;
+  readonly agentName?: string;
+  readonly instructions?: string;
 }
 
 export function subagentTool(options: SubagentOptions): Tool {
@@ -185,6 +190,18 @@ export function subagentTool(options: SubagentOptions): Tool {
     }
 
     const agent = agents[requested];
+    // Built-in roles are prompt profiles, not model ids. When no model was
+    // configured, keep the parent's provider/model and only add role prompts.
+    if (agent && !agent.model) {
+      return {
+        ref: options.provider.info.id,
+        provider: options.provider,
+        free: true,
+        maxIterations: agent.maxIterations,
+        agentName: requested,
+        ...(agent.instructions ? { instructions: agent.instructions } : {}),
+      };
+    }
     const ref = agent?.model ?? requested;
     const parsed = parseModelRef(ref, customProvidersOf(options.stored));
 
@@ -218,9 +235,11 @@ export function subagentTool(options: SubagentOptions): Tool {
       provider: (options.createProvider ?? createModelProvider)(config),
       free: keyOptional(config.baseURL, config.model, config.providerId),
       maxIterations: agent?.maxIterations,
+      ...(agent ? { agentName: requested, ...(agent.instructions ? { instructions: agent.instructions } : {}) } : {}),
     };
   }
 
+  const autoLaunch = options.agentAutoLaunch !== false;
   const catalogue = named.length
     ? ` Configured agents you can pass as "model": ${named
         .map(([name, entry]) =>
@@ -250,7 +269,10 @@ export function subagentTool(options: SubagentOptions): Tool {
         'ask the human, or start subagents. It may edit through the coordinated write ' +
         'tool, and conflicts are returned to the principal for arbitration. Give it one clear question ' +
         'and say what a good answer contains. Issue several calls in one message to ' +
-        'investigate in parallel.' +
+        'investigate in parallel. ' +
+        (autoLaunch
+          ? 'Named agents may be selected automatically when they clearly fit the task.'
+          : 'Automatic named-agent launch is disabled. Use a named agent only when the user explicitly asks for it and set "explicit": true.') +
         catalogue,
       parameters: {
         type: 'object',
@@ -276,6 +298,10 @@ export function subagentTool(options: SubagentOptions): Tool {
             type: 'boolean',
             description: 'Pass the current pasted attachments to this subagent. Use only when its task requires them.',
           },
+          explicit: {
+            type: 'boolean',
+            description: 'Set true only when the user explicitly requested the named agent or subagent.',
+          },
         },
         required: ['title', 'task'],
         additionalProperties: false,
@@ -290,6 +316,15 @@ export function subagentTool(options: SubagentOptions): Tool {
       }
 
       const requested = typeof input['model'] === 'string' ? input['model'].trim() : '';
+      const namedAgent = requested ? agents[requested] : undefined;
+      if (namedAgent && options.agentAutoLaunch === false && input['explicit'] !== true) {
+        return {
+          output:
+            `Automatic launch for named agent "${requested}" is disabled. ` +
+            'Ask the user to explicitly request this agent, or delegate without a named agent.',
+          ok: false,
+        };
+      }
       const resolved = await resolve(requested || undefined);
       if (typeof resolved === 'string') return { output: resolved, ok: false };
 
@@ -409,14 +444,18 @@ export function subagentTool(options: SubagentOptions): Tool {
             workspace: context.workspace ?? context.container.workdir,
             containerName: context.container.name,
             workdir: context.container.workdir,
+            tempWorkdir: '/temp',
             capabilities: context.container.capabilities,
             isolation: options.isolation,
             mode: 'subagent',
             effort: options.stored.effort,
             contextTokens: resolved.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
-            tools: tools.map((tool) => tool.spec),
+            tools: stableToolSpecs(tools.map((tool) => tool.spec)),
             ...(options.skillCatalogue ? { skills: options.skillCatalogue } : {}),
             ...(options.agentInstructions ? { agentInstructions: options.agentInstructions } : {}),
+            ...(resolved.instructions && resolved.agentName
+              ? { profile: { name: resolved.agentName, systemPrompt: resolved.instructions } }
+              : {}),
           }),
         },
         {
@@ -437,6 +476,7 @@ export function subagentTool(options: SubagentOptions): Tool {
         maxIterations:
           resolved.maxIterations ?? options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
         contextTokens: resolved.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+        enableHarnessCycle: options.stored.effort === 'plif',
         signal: childAbort.signal,
         ...(context.workspace ? { workspace: context.workspace } : {}),
         ...(context.lsp ? { lsp: context.lsp } : {}),
