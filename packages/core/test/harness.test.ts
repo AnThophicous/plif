@@ -817,6 +817,102 @@ describe('loop context budget', () => {
   });
 });
 
+describe('tool repetition guard', () => {
+  it('reuses a successful read instead of turning an unchanged repeat into an error', async () => {
+    let requests = 0;
+    let executions = 0;
+    const bus = new EventBus();
+    const command: Tool = {
+      spec: { name: 'run_command', description: 'run', parameters: {} },
+      async run() {
+        executions += 1;
+        return { output: 'Orbe/index.html\nOrbe/styles.css', ok: true };
+      },
+    };
+    const provider: ModelProvider = {
+      info: { id: 'repeat-read-test', endpoint: 'test', contextWindow: 10_000 },
+      async *stream(request): AsyncGenerator<CompletionEvent> {
+        requests += 1;
+        if (requests <= 2) {
+          yield toolCall(`read-${requests}`, 'run_command', {
+            argv: ['powershell', '-NoProfile', '-Command', 'Get-ChildItem -Path C:\\Orbe -Recurse -File'],
+          });
+        } else {
+          const lastTool = [...request.messages].reverse().find((message) => message.role === 'tool')?.content ?? '';
+          assert.match(lastTool, /Reused the previous result/);
+          yield { kind: 'text', delta: 'Finished with the existing directory result.' };
+        }
+        yield { kind: 'done', reason: 'stop', usage: { promptTokens: 1, completionTokens: 1 } };
+      },
+      async probe() { return { ok: true, detail: 'ok' }; },
+      async list() { return []; },
+    };
+
+    const result = await runLoop([{ role: 'user', content: 'inspect the Orbe folder' }], {
+      provider,
+      container: {} as never,
+      questions: {} as never,
+      bus,
+      tools: [command],
+      maxIterations: 4,
+    });
+
+    assert.equal(result.stop, 'complete', result.error?.message);
+    assert.equal(executions, 1);
+    assert.ok(result.messages.some((message) => message.role === 'tool' && /Reused the previous result/.test(message.content)));
+  });
+
+  it('invalidates a cached read after a successful workspace mutation', async () => {
+    let requests = 0;
+    let reads = 0;
+    const bus = new EventBus();
+    const read: Tool = {
+      spec: { name: 'run_command', description: 'run', parameters: {} },
+      async run() {
+        reads += 1;
+        return { output: `listing-${reads}`, ok: true };
+      },
+    };
+    const write: Tool = {
+      spec: { name: 'write_file', description: 'write', parameters: {} },
+      async run() {
+        return { output: 'updated', ok: true, diff: '--- file\n+++ file' };
+      },
+    };
+    const provider: ModelProvider = {
+      info: { id: 'repeat-invalidation-test', endpoint: 'test', contextWindow: 10_000 },
+      async *stream(): AsyncGenerator<CompletionEvent> {
+        requests += 1;
+        if (requests === 1 || requests === 3) {
+          yield toolCall(`read-${requests}`, 'run_command', {
+            argv: ['powershell', '-NoProfile', '-Command', 'Get-ChildItem -Path C:\\Orbe -Recurse -File'],
+          });
+        } else if (requests === 2) {
+          yield toolCall('write', 'write_file', { path: '/project/marker.txt', content: 'updated' });
+        } else {
+          yield { kind: 'text', delta: 'Finished with fresh evidence.' };
+        }
+        yield { kind: 'done', reason: 'stop', usage: { promptTokens: 1, completionTokens: 1 } };
+      },
+      async probe() { return { ok: true, detail: 'ok' }; },
+      async list() { return []; },
+    };
+
+    const result = await runLoop([{ role: 'user', content: 'inspect, update, and inspect again' }], {
+      provider,
+      container: {} as never,
+      questions: {} as never,
+      bus,
+      tools: [read, write],
+      maxIterations: 5,
+    });
+
+    assert.equal(result.stop, 'complete', result.error?.message);
+    assert.equal(reads, 2);
+    assert.ok(result.messages.some((message) => message.role === 'tool' && message.content === 'listing-2'));
+  });
+});
+
 describe('Plan → Work → Review loop gate', () => {
   it('blocks unplanned edits and does not finish before reviewing the latest revision', async () => {
     const phases: string[] = [];

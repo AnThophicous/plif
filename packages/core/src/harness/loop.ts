@@ -461,7 +461,7 @@ export async function runLoop(
   const messages: Message[] = [...history];
   const tokenSplitConfig = options.tokenSplit?.config;
   const tokenSplitTransformations: TokenSplitTransformation[] = [];
-  const recentCalls: string[] = [];
+  const recentCalls: RecentCall[] = [];
 
   const persistTokenSplitNotes = async (): Promise<void> => {
     if (!tokenSplitConfig || !options.tokenSplit?.workspace || !options.tokenSplit.sessionId) return;
@@ -823,7 +823,7 @@ export async function runLoop(
           const gate = mutates ? mutationGate(cycle) : null;
           if (gate === null) return item;
           const signature = callSignature(item.call);
-          const recorded = recentCalls.lastIndexOf(signature);
+          const recorded = recentCalls.findLastIndex((entry) => entry.signature === signature);
           if (recorded >= 0) recentCalls.splice(recorded, 1);
           return { ...item, refusal: gate };
         });
@@ -848,7 +848,9 @@ export async function runLoop(
           });
           const started = Date.now();
           const result =
-            item.refusal !== null
+            item.replay !== null
+              ? item.replay
+              : item.refusal !== null
               ? { output: item.refusal, ok: false }
               : await executeCall({
                   call: item.call,
@@ -867,6 +869,21 @@ export async function runLoop(
         else consecutiveFailures += 1;
 
         await recordStrategy(options, item.call, item.parsed, item.ok, item.durationMs);
+
+        if (item.replay === null && item.refusal === null && item.parseError === null) {
+          rememberCallResult(recentCalls, item.call, {
+            output: item.output,
+            ok: item.ok,
+            ...(item.diff ? { diff: item.diff } : {}),
+            ...(item.display ? { display: item.display } : {}),
+            ...(item.toolCallCount ? { toolCallCount: item.toolCallCount } : {}),
+          });
+        }
+        // A successful mutation changes the evidence available to later reads.
+        // Do not replay a pre-change directory listing or file contents.
+        if (item.ok && (isFileMutationTool(item.call.name) || isShellMutation(item.call.name, item.parsed))) {
+          recentCalls.length = 0;
+        }
 
         options.bus.emit('agent.tool', {
           turnId,
@@ -1097,6 +1114,46 @@ export function answerDanglingToolCalls(
 /** How many recent calls the repetition detector remembers. */
 const REPEAT_WINDOW = 6;
 
+type ReplayedToolResult = Pick<ToolResult, 'output' | 'ok' | 'diff' | 'display' | 'toolCallCount'>;
+
+interface RecentCall {
+  readonly signature: string;
+  result?: ReplayedToolResult;
+}
+
+/**
+ * A repeated read is often the model asking for the same evidence again after
+ * it lost focus in a long turn. Re-running it wastes a round trip; treating it
+ * as an error is worse because the model then tries to recover from a failure
+ * that never happened. Only read-like calls are eligible for replay. Commands
+ * that can mutate the workspace keep the hard repetition guard.
+ */
+function canReplayUnchangedCall(
+  call: ToolCall,
+  parsed: Record<string, unknown>,
+  registry: Map<string, Tool>,
+): boolean {
+  if (call.name === 'run_command' || call.name === 'shell_command') {
+    return !isShellMutation(call.name, parsed);
+  }
+  return registry.get(call.name)?.parallelSafe === true;
+}
+
+function rememberCallResult(
+  recentCalls: RecentCall[],
+  call: ToolCall,
+  result: ReplayedToolResult,
+): void {
+  const signature = callSignature(call);
+  const record = [...recentCalls].reverse().find((item) => item.signature === signature);
+  if (record) {
+    record.result = result;
+    return;
+  }
+  recentCalls.push({ signature, result });
+  if (recentCalls.length > REPEAT_WINDOW) recentCalls.shift();
+}
+
 /**
  * Group the requested calls into rounds that may run together.
  *
@@ -1135,6 +1192,8 @@ interface PreparedCall {
   readonly parseError: string | null;
   /** Set when the repetition guard is refusing this call outright. */
   readonly refusal: string | null;
+  /** Set when an unchanged read can reuse a completed result. */
+  readonly replay: ReplayedToolResult | null;
 }
 
 /**
@@ -1146,7 +1205,7 @@ interface PreparedCall {
  */
 function prepare(
   call: ToolCall,
-  recentCalls: string[],
+  recentCalls: RecentCall[],
   registry: Map<string, Tool>,
 ): PreparedCall {
   let parsed: Record<string, unknown> = {};
@@ -1161,14 +1220,43 @@ function prepare(
     parseError = `arguments were not valid JSON: ${call.arguments}`;
   }
 
-  if (parseError) return { call, parsed, parseError, refusal: null };
+  if (parseError) return { call, parsed, parseError, refusal: null, replay: null };
 
   // A tool that declares itself repeatable is exempt. Polling is the whole
   // reason: `task_status` on a running job is meant to be asked again, and
   // refusing it left the model unable to watch a task it had just started.
   const repeatable = registry.get(call.name)?.repeatable === true;
   const signature = callSignature(call);
-  if (!repeatable && recentCalls.includes(signature)) {
+  const previous = !repeatable
+    ? [...recentCalls].reverse().find((item) => item.signature === signature)
+    : undefined;
+  if (previous && canReplayUnchangedCall(call, parsed, registry)) {
+    if (!previous.result) {
+      return {
+        call,
+        parsed,
+        parseError,
+        refusal: null,
+        replay: {
+          output: '[PLIF] This exact read is already queued in this turn. Use its result when it arrives; do not queue it again.',
+          ok: true,
+        },
+      };
+    }
+    return {
+      call,
+      parsed,
+      parseError,
+      refusal: null,
+      replay: {
+        ...previous.result,
+        output:
+          `${previous.result.output}\n\n` +
+          '[PLIF] Reused the previous result for this unchanged read. Do not repeat this call unless the inputs or workspace changed.',
+      },
+    };
+  }
+  if (previous) {
     return {
       call,
       parsed,
@@ -1177,15 +1265,16 @@ function prepare(
         `Error: you already called ${call.name} with exactly these arguments in this turn, ` +
         'and the result has not changed. Repeating it will not help. Either use what the ' +
         'previous result told you, or try a materially different approach.',
+      replay: null,
     };
   }
 
   if (!repeatable) {
-    recentCalls.push(signature);
+    recentCalls.push({ signature });
     if (recentCalls.length > REPEAT_WINDOW) recentCalls.shift();
   }
 
-  return { call, parsed, parseError, refusal: null };
+  return { call, parsed, parseError, refusal: null, replay: null };
 }
 
 /**
