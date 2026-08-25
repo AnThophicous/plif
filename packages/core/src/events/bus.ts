@@ -245,6 +245,17 @@ export interface PlifEvents {
     requestCount?: number;
     source?: TokenUsageSource;
   };
+  /** Emitted once when accumulated reasoning time crosses the turn budget. */
+  'agent.reasoning_budget': {
+    turnId: string;
+    totalMs: number;
+  };
+  /** Plif-only telemetry for the final handoff; consumers may keep it off-screen. */
+  'agent.mode': {
+    mode: 'plif';
+    reviewPasses: number;
+    skillsLoaded: readonly string[];
+  };
   /** Provider-agnostic context diagnostics; consumers may keep this off-screen. */
   'agent.context': {
     turnId: string;

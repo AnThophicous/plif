@@ -22,6 +22,8 @@ import {
   PRESETS,
   adoptProvider,
   credentialVariableForProvider,
+  defaultMaxTokensForEffort,
+  subagentEffortFor,
   describe as describeConfig,
   isFreeModel,
   keyOptional,
@@ -57,6 +59,28 @@ import type { ModelConfig } from '../src/model/config.js';
 import { PlifError } from '../src/errors.js';
 
 describe('config precedence', () => {
+  it('uses bounded output defaults only for low, medium, and high effort', () => {
+    assert.equal(defaultMaxTokensForEffort('low'), 8_000);
+    assert.equal(defaultMaxTokensForEffort('medium'), 8_000);
+    assert.equal(defaultMaxTokensForEffort('high'), 16_000);
+    assert.equal(defaultMaxTokensForEffort('max'), undefined);
+    assert.equal(defaultMaxTokensForEffort('plif'), undefined);
+  });
+
+  it('lowers subagent effort without overriding an explicit agent effort', () => {
+    assert.equal(subagentEffortFor('plif'), 'high');
+    assert.equal(subagentEffortFor('high'), 'medium');
+    assert.equal(subagentEffortFor('medium'), 'low');
+    assert.equal(subagentEffortFor('low'), 'low');
+    assert.equal(subagentEffortFor('plif', 'max'), 'max');
+  });
+
+  it('preserves explicit and stored max-token values over effort defaults', () => {
+    assert.equal(resolveConfig({ effort: 'high' }, { env: {} }).maxTokens, 16_000);
+    assert.equal(resolveConfig({ effort: 'high', maxTokens: 32_000 }, { env: {} }).maxTokens, 32_000);
+    assert.equal(resolveConfig({ effort: 'high', maxTokens: 32_000 }, { env: { PLIF_MAX_TOKENS: '12' } }).maxTokens, 12);
+  });
+
   const metadataConfig: ModelConfig = {
     providerId: 'bridge',
     baseURL: 'https://bridge.example/v1',
@@ -771,10 +795,17 @@ describe('model catalog', () => {
     for (const id of ['groq', 'nvidia', 'deepseek', 'zai', 'ollama', 'lmstudio', 'opencode']) {
       assert.ok(MODEL_CATALOG.some((provider) => provider.id === id), `${id} is missing`);
     }
-    // Every provider must resolve to a real endpoint, or the picker offers a
-    // row that cannot possibly work.
+    // Every HTTP provider must resolve to a real endpoint, or the picker offers
+    // a row that cannot possibly work. Codex is intentionally the exception:
+    // its documented local app-server URI is handled by the official Codex
+    // CLI, which owns the ChatGPT session and token refresh.
     for (const provider of MODEL_CATALOG) {
-      assert.ok(provider.endpoint.startsWith('http'), `${provider.id} has no endpoint`);
+      assert.ok(
+        provider.auth === 'codex'
+          ? provider.endpoint === 'codex://app-server'
+          : provider.endpoint.startsWith('http'),
+        `${provider.id} has no endpoint`,
+      );
     }
   });
 

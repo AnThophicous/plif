@@ -35,6 +35,8 @@ export interface ModelConfig {
   readonly streamSemantics?: StreamSemantics;
   /** Explicit credential requirement; also true for ordinary paid remotes. */
   readonly needKey?: boolean;
+  /** Authentication owned by a local provider bridge rather than an API key. */
+  readonly authMode?: 'codex';
   readonly temperature: number;
   readonly maxTokens: number | undefined;
   /** Declared model capacity, when the custom catalogue knows it. */
@@ -45,6 +47,32 @@ export interface ModelConfig {
 }
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | 'ultracode' | 'plif';
+
+/** Conservative output ceilings for the ordinary reasoning levels. */
+export function defaultMaxTokensForEffort(effort: Effort | undefined): number | undefined {
+  if (effort === 'low' || effort === 'medium') return 8_000;
+  if (effort === 'high') return 16_000;
+  return undefined;
+}
+
+/** Keep delegated work below the parent's effort unless it is explicitly configured. */
+export function subagentEffortFor(parent: Effort | undefined, explicit?: Effort): Effort | undefined {
+  if (explicit !== undefined) return explicit;
+  switch (parent) {
+    case 'max':
+    case 'plif':
+    case 'ultracode':
+    case 'ultra':
+      return 'high';
+    case 'high':
+      return 'medium';
+    case 'medium':
+    case 'low':
+      return 'low';
+    default:
+      return undefined;
+  }
+}
 
 /** Structural identity used when deciding which premium effort modes exist. */
 export interface EffortModelIdentity {
@@ -99,8 +127,17 @@ export function normalizeEffort(
  * with one flag instead of a URL nobody remembers. Anything missing still works
  * via `--base-url`; that is the whole benefit of a standard wire format.
  */
-export const PRESETS: Readonly<Record<string, { baseURL: string; keyEnv: string; note: string }>> =
+export const PRESETS: Readonly<Record<string, { baseURL: string; keyEnv: string; note: string; authMode?: 'codex' }>> =
   Object.freeze({
+    codex: {
+      // This is an adapter identity, not an HTTP endpoint. Requests are sent
+      // to the official local Codex app-server, which owns ChatGPT login and
+      // token refresh. PLIF never reads the Codex auth file or private tokens.
+      baseURL: 'codex://app-server',
+      keyEnv: 'CODEX_LOGIN',
+      note: 'OpenAI Codex — sign in with your ChatGPT account',
+      authMode: 'codex',
+    },
     openai: {
       baseURL: 'https://api.openai.com/v1',
       keyEnv: 'OPENAI_API_KEY',
@@ -345,6 +382,7 @@ export interface ProviderOffer {
  * endpoint tier; model names never decide whether an offer is free or paid.
  */
 const PROVIDER_OFFERS: Readonly<Record<string, ProviderOffer>> = Object.freeze({
+  codex: { product: 'OpenAI', tier: 'Codex / ChatGPT', cost: 'unknown', protocol: 'openai-chat' },
   opencode: { product: 'OpenCode', tier: 'Zen', cost: 'free', protocol: 'openai-chat' },
   'opencode-go': { product: 'OpenCode', tier: 'Go', cost: 'paid', protocol: 'openai-chat' },
   nexapi: { product: 'NexAPI', tier: 'Hosted', cost: 'unknown', protocol: 'openai-chat' },
@@ -619,6 +657,8 @@ export function resolveConfig(
 
   const model = ref.model;
   const providerId = presetName;
+  const authMode = preset?.authMode;
+  const usesCodexAuth = authMode === 'codex';
   const modelMetadata = custom?.models?.[model];
   const configuredNeedKey = firstBoolean(
     ...(rootFieldsApply ? [stored.NeedKey, stored.needKey] : []),
@@ -631,7 +671,9 @@ export function resolveConfig(
   // A stale NeedKey from a paid model must not override the provider's live
   // anonymous contract when the user switches to a newly discovered `-free`
   // offer. Keep explicit NeedKey behavior for local/custom endpoints.
-  const needKey = anonymousRemote ? false : configuredNeedKey ?? !keyOptional(baseURL, model, providerId);
+  const needKey = usesCodexAuth
+    ? false
+    : anonymousRemote ? false : configuredNeedKey ?? !keyOptional(baseURL, model, providerId);
   const protocol = options.protocol ?? modelMetadata?.protocol ?? protocolForModel(providerId, model) ?? providerOffer(providerId)?.protocol;
 
   // Try the preset's own key variable before the generic one, so switching
@@ -640,39 +682,43 @@ export function resolveConfig(
   // reason `rootFieldsApply` exists: a credential with no provider attached is
   // a guess, and guessing wrong means posting somebody's key to a host it was
   // never issued for.
-  const apiKey =
-    options.apiKey ??
-    (preset ? env[preset.keyEnv] : undefined) ??
-    (custom && presetName ? env[credentialVariableForProvider(presetName, stored)] : undefined) ??
-    custom?.options?.apiKey ??
-    (presetName && !customCollision ? asStringRecord(stored.providerKeys)[presetName] : undefined) ??
-    env['PLIF_API_KEY'] ??
-    // The generic variable is the right fallback for an endpoint that needs a
-    // credential, and exactly the wrong one for an endpoint that does not: an
-    // OpenAI key sent to Zen's free tier is not ignored, it is *rejected*. A
-    // developer who happens to have OPENAI_API_KEY exported would otherwise
-    // find the free models broken for a reason nothing on screen explains.
-    (keyOptional(baseURL, model, providerId) || custom ? undefined : env['OPENAI_API_KEY']) ??
-    (rootFieldsApply && !customCollision ? stored.apiKey : undefined) ??
-    // Local servers ignore the value but the SDK refuses an empty one.
-    (isLocal(baseURL) && !needKey ? 'local' : '');
+  const apiKey = usesCodexAuth
+    ? ''
+    : options.apiKey ??
+      (preset ? env[preset.keyEnv] : undefined) ??
+      (custom && presetName ? env[credentialVariableForProvider(presetName, stored)] : undefined) ??
+      custom?.options?.apiKey ??
+      (presetName && !customCollision ? asStringRecord(stored.providerKeys)[presetName] : undefined) ??
+      env['PLIF_API_KEY'] ??
+      // The generic variable is the right fallback for an endpoint that needs a
+      // credential, and exactly the wrong one for an endpoint that does not: an
+      // OpenAI key sent to Zen's free tier is not ignored, it is *rejected*. A
+      // developer who happens to have OPENAI_API_KEY exported would otherwise
+      // find the free models broken for a reason nothing on screen explains.
+      (keyOptional(baseURL, model, providerId) || custom ? undefined : env['OPENAI_API_KEY']) ??
+      (rootFieldsApply && !customCollision ? stored.apiKey : undefined) ??
+      // Local servers ignore the value but the SDK refuses an empty one.
+      (isLocal(baseURL) && !needKey ? 'local' : '');
+
+  const effort = normalizeEffort(
+    stored.effort,
+    supportedEfforts(baseURL, model, { providerId }),
+  );
 
   return {
     model,
     baseURL,
     apiKey,
     ...(providerId ? { providerId } : {}),
+    ...(authMode ? { authMode } : {}),
     ...(protocol ? { protocol } : {}),
     ...(options.streamSemantics ? { streamSemantics: options.streamSemantics } : {}),
     needKey,
     temperature: numberFrom(env['PLIF_TEMPERATURE']) ?? stored.temperature ?? DEFAULTS.temperature,
-    maxTokens: numberFrom(env['PLIF_MAX_TOKENS']) ?? stored.maxTokens,
+    maxTokens: numberFrom(env['PLIF_MAX_TOKENS']) ?? stored.maxTokens ?? defaultMaxTokensForEffort(effort),
     contextWindow: modelMetadata?.contextWindow,
     timeoutMs: numberFrom(env['PLIF_TIMEOUT_MS']) ?? stored.timeoutMs ?? DEFAULTS.timeoutMs,
-    effort: normalizeEffort(
-      stored.effort,
-      supportedEfforts(baseURL, model, { providerId }),
-    ),
+    effort,
   };
 }
 
@@ -942,6 +988,7 @@ export function discoveredModelCost(
  * a 401 three seconds into the first turn.
  */
 export function keyOptional(baseURL: string, model: string, providerId?: string): boolean {
+  if (providerId === 'codex') return true;
   if (isLocal(baseURL)) return true;
   if (providerId !== 'opencode') return false;
   const normalizedModel = model.toLowerCase();
@@ -990,6 +1037,7 @@ export function validate(config: ModelConfig): { ok: boolean; problem?: string; 
       hint: 'Set PLIF_BASE_URL, or pick a preset with --preset.',
     };
   }
+  if (config.authMode === 'codex') return { ok: true };
   if (!config.apiKey && (config.needKey ?? !keyOptional(config.baseURL, config.model, config.providerId))) {
     return {
       ok: false,
@@ -1013,8 +1061,9 @@ export function describe(config: ModelConfig): Record<string, string> {
   return {
     model: config.model,
     endpoint: config.baseURL,
-      key:
-      config.apiKey || (config.needKey ?? !keyOptional(config.baseURL, config.model, config.providerId))
+    key: config.authMode === 'codex'
+      ? '(ChatGPT session via PLIF)'
+      : config.apiKey || (config.needKey ?? !keyOptional(config.baseURL, config.model, config.providerId))
         ? redact(config.apiKey)
         : '(not required — free model)',
     temperature: String(config.temperature),

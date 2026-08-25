@@ -116,6 +116,9 @@ export function reviewGate(state: HarnessCycleState): string | null {
   return [
     'PLIF review checkpoint (internal):',
     `${requirements.join(' and ')} before finishing.`,
+    'Prove every acceptance criterion with a command or observation; if a skill',
+    'covered this work, state which one and how you followed it; list the diff',
+    'files you reviewed and any finding you fixed.',
     'Use the available tools now; do not narrate this checkpoint or repeat its wording.',
     'After the evidence is collected, return one concise completion line.',
   ].join(' ');

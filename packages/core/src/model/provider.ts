@@ -100,12 +100,50 @@ export interface ToolSpec {
   readonly parameters: Record<string, unknown>;
 }
 
+/** Permission policy shared by PLIF and providers that run a local agent. */
+export type ModelPermissionMode = 'ask' | 'auto-approve' | 'deny';
+
+/** A choice rendered by PLIF's inline question surface. */
+export interface ModelQuestionOption {
+  readonly value: string;
+  readonly label: string;
+  readonly description?: string;
+}
+
+/** A question must be rendered by the host UI, never printed as blocking prose. */
+export interface ModelQuestion {
+  readonly text: string;
+  readonly options?: readonly ModelQuestionOption[];
+  readonly context?: string;
+  readonly secret?: boolean;
+}
+
+export interface ModelApprovalRequest {
+  readonly kind: 'execute' | 'write' | 'permissions';
+  readonly target: string;
+  readonly argv?: readonly string[];
+  readonly reason?: string;
+  /** True when a permissions request is asking for network access. */
+  readonly network?: boolean;
+}
+
+/** Host capabilities exposed to a local provider such as Codex app-server. */
+export interface ModelExecutionContext {
+  readonly cwd?: string;
+  readonly workspaceRoots?: readonly string[];
+  readonly permissionMode?: ModelPermissionMode;
+  readonly ask?: (question: ModelQuestion) => Promise<string | null>;
+  readonly approve?: (request: ModelApprovalRequest) => Promise<'allow' | 'deny' | 'cancel'>;
+}
+
 export interface CompletionRequest {
   readonly messages: readonly Message[];
   readonly tools?: readonly ToolSpec[];
   readonly temperature?: number;
   readonly maxTokens?: number;
   readonly signal?: AbortSignal;
+  /** Optional host execution policy; omitted providers retain their defaults. */
+  readonly execution?: ModelExecutionContext;
 }
 
 /**
@@ -264,6 +302,8 @@ export interface ModelProvider {
   readonly listModels?: () => Promise<ModelListResult>;
   /** Return only usage already exposed by the provider; never invent a quota. */
   readonly getUsage?: () => Promise<UsageInfo>;
+  /** Create a sibling provider with the same route and a different effort. */
+  readonly withEffort?: (effort: import('./config.js').Effort) => ModelProvider;
 }
 
 /**

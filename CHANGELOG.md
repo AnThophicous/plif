@@ -2,7 +2,7 @@
 
 All notable changes to plif. This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.8] — 2026-08-23
+## [0.3.8] — 2026-08-24
 
 ### Added
 
@@ -28,10 +28,25 @@ All notable changes to plif. This project follows [Semantic Versioning](https://
   the model; the model receives only the stable virtual path `/temp`.
 - The system prompt now distinguishes `/project` from `/temp` and directs logs,
   screenshots, probes and intermediate output away from the user's repository.
+- **Shared Codex permission boundary.** Codex now receives the active PLIF
+  workspace root and permission mode instead of using an independent hard-coded
+  read-only policy. Commands, file changes and network access return through the
+  same PLIF approval broker, while paths outside the active workspace remain
+  denied.
+
+### Interaction
+
+- **Inline decisions.** Model questions are routed into the active PLIF input as
+  selectable choices instead of ending the turn with a prose clarification.
+  Codex app-server `requestUserInput` messages use the same UI and resume the
+  current turn after the answer.
+- **Node compatibility.** The workspace and all published packages keep the
+  `Node.js >=20.11` contract; CI validates with Node.js 22, and the release was
+  checked locally on Node.js 24.19.0.
 
 ### Validation
 
-- Full Windows validation: **1,096 tests passed, 0 failed, 20 platform skips**.
+- Full Windows validation: **1,135 tests passed, 0 failed, 20 platform skips**.
 - Typecheck and targeted `/temp` mount/cleanup tests pass.
 
 ## [0.3.6] — 2026-08-22

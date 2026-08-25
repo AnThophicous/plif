@@ -1,145 +1,167 @@
-# DME Spyx — Browser Bridge Contract
+# DME Spyx — Browser Bridge Contract vNext
 
-The included browser extension is an authorized 21st.dev capture helper.
+The bridge connects an explicit browser selection to the coding agent without treating browser DOM as production source.
 
-The DME integration adds an explicit local handoff without requiring native
-messaging.
+External behavior is intentionally preserved:
 
-## Architecture
+- bind host: `127.0.0.1`;
+- default port: `17321`;
+- POST endpoint: `/dme-spyx/ingest`;
+- capsule schema: `dme-spyx-capsule/v1`;
+- inbox: `.dme-spyx/inbox/`;
+- latest capsule: `.dme-spyx/inbox/latest.json`.
+
+---
+
+## 1. Trust boundary
+
+The extension is user-driven.
+
+A capsule is sent only from the extension action or imported manually.
+
+The bridge accepts:
+- requests with no `Origin` header for local CLI/manual tooling;
+- Chromium extension origins;
+- optionally a specific extension id when bridge is started with a restriction.
+
+It rejects browser `Origin: null` and non-extension web origins by default.
+
+Binding to loopback is mandatory.
+
+---
+
+## 2. Capsule semantics
+
+Expected top-level schema:
 
 ```text
-21st.dev page
-    |
-    | content.js
-    | identifies component + captures preview DOM
-    v
-21st∞ extension
-    |
-    | chrome.runtime message
-    v
-background.js
-    |
-    | POST JSON to localhost
-    v
-127.0.0.1:17321/dme-spyx/ingest
-    |
-    v
-tools/spyx-bridge.mjs
-    |
-    v
-.dme-spyx/inbox/<timestamp>-<slug>.json
+schema: dme-spyx-capsule/v1
+capturedAt
+source
+component
+preview
+registry
+handoff
 ```
 
-The receiver binds to loopback only.
+Important distinction:
 
-If the local bridge is not running, the extension falls back to downloading the
-capsule JSON so it can be imported manually.
+- `preview.dom` = rendered evidence;
+- `registry.files` = candidate source snapshot when available;
+- absence of registry source does not make preview DOM source code;
+- `handoff.doNotAutoInstall` must be respected.
 
-## Start
+The agent must re-run normal provider hard gates.
 
-From the project root:
+---
+
+## 3. Storage
+
+Bridge writes:
+- timestamped capsule file;
+- `latest.json`.
+
+vNext bridge writes atomically to reduce partial-file races.
+
+The capsule controls no filesystem path.
+
+Filename is derived through a sanitized slug.
+
+Keep `.dme-spyx/` out of version control unless design-decision artifacts are intentionally committed.
+
+---
+
+## 4. Payload limits
+
+Default max payload remains 5 MiB unless changed by bridge argument.
+
+The bridge:
+- rejects oversized `Content-Length` early;
+- stops oversized streaming bodies;
+- returns explicit 413 where possible.
+
+Large preview/bundle data should not be used to bypass repository/provider acquisition.
+
+---
+
+## 5. Security properties
+
+- loopback-only listener;
+- origin policy;
+- fixed endpoint;
+- schema validation;
+- sanitized filename;
+- no capsule-supplied output path;
+- no executable evaluation;
+- no automatic install;
+- no cacheable HTTP response;
+- atomic writes;
+- optional exact extension-origin restriction.
+
+This is a local handoff receiver, not an internet service.
+
+Do not expose it on `0.0.0.0`.
+
+---
+
+## 6. Start
+
+Typical:
 
 ```bash
-node /path/to/dme-spyx-component-picker/tools/spyx-bridge.mjs
+node tools/spyx-bridge.mjs
 ```
 
-Optional:
+Options:
 
-```bash
-node tools/spyx-bridge.mjs --port 17321 --dir .dme-spyx/inbox
+```text
+--port <number>
+--dir <inbox>
+--max-bytes <number>
+--extension-id <chromium-extension-id>
 ```
 
-Keep the receiver running only while selecting components.
+If extension id is specified, only that `chrome-extension://<id>` origin is allowed in addition to origin-less local tooling.
 
-## Capsule schema
+---
 
-Current schema:
-
-`dme-spyx-capsule/v1`
-
-Important fields:
-
-```json
-{
-  "schema": "dme-spyx-capsule/v1",
-  "capturedAt": "...",
-  "source": {
-    "provider": "21st.dev",
-    "pageUrl": "...",
-    "previewParam": "..."
-  },
-  "component": {
-    "name": "...",
-    "description": "...",
-    "username": "...",
-    "slug": "...",
-    "tags": []
-  },
-  "preview": {
-    "dom": "...",
-    "bundleHtmlUrl": "...",
-    "previewUrl": "..."
-  },
-  "registry": {
-    "available": true,
-    "files": []
-  }
-}
-```
-
-`registry.files` is included only when the user's browser session is authorized
-to read the component registry source and the payload is within the safety size
-budget.
-
-## Security properties
-
-The receiver:
-
-- binds to `127.0.0.1`;
-- accepts only the DME ingest route;
-- limits request size;
-- validates the schema shape;
-- writes to a fixed inbox directory;
-- never uses paths supplied by the capsule as filesystem paths;
-- does not execute received code;
-- rejects ordinary http/https browser origins.
-
-A capsule contains untrusted third-party code/HTML.
-
-The coding agent must inspect it before integration.
-
-## Failure modes
+## 7. Failure modes
 
 ### Bridge offline
-Extension downloads the capsule JSON.
+Extension downloads `.dme-spyx.json`; agent imports manually.
+
+### Origin denied
+Confirm request comes from authorized extension or local CLI.
+
+### Capsule too large
+Acquire source through provider tooling; avoid treating giant preview DOM as source.
+
+### Invalid schema
+Do not guess. Reject and inspect capsule producer/version.
 
 ### Preview DOM absent
-Use metadata/source when available. Ask the user to let the preview finish
-rendering only when that missing evidence blocks selection.
+Use metadata/registry source if available.
 
 ### Registry source unavailable
-Use the capsule as visual/structural evidence, then acquire through an authorized
-provider path.
-
-### Large source payload
-Registry source is omitted from the capsule and the acquisition step happens
-after selection.
+Preview remains design evidence; source must be acquired elsewhere or implemented natively.
 
 ### Shader
-The extension's standalone shader output is a visual/runtime artifact, not
-automatically a React component. Treat it as a separate integration problem.
+Treat standalone shader output as effect evidence requiring product/performance/accessibility gates.
 
-## Agent consumption
+---
 
-When a new capsule arrives:
+## 8. Agent consumption
 
-1. verify schema;
-2. identify candidate;
-3. inspect preview DOM and source snapshot separately;
-4. run stack/dependency hard gates;
-5. add candidate to the current Picker Board;
-6. do not auto-install unless the request is already specific.
+When a fresh capsule exists:
 
-The browser is the visual selector.
+1. validate schema;
+2. inspect component/source identity;
+3. separate preview from source;
+4. add/refresh candidate in Picker Board;
+5. hard-gate compatibility/provenance;
+6. do not install if request is exploratory;
+7. acquire selected source through authorized path;
+8. transplant into host product;
+9. render/verify.
 
-DME Spyx is the integration brain.
+The bridge reduces handoff friction. It does not reduce engineering standards.

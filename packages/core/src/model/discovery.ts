@@ -236,7 +236,11 @@ async function refreshProvider(
 async function probeProvider(config: ModelConfig, providerId: string): Promise<ProbeResult> {
   const preset = PRESETS[providerId as keyof typeof PRESETS];
   const anonymous = findCatalogProvider(providerId)?.anonymous ?? false;
-  if (preset && !anonymous && !config.apiKey) return { supported: false, models: [] };
+  // Codex authentication belongs to the official local CLI session. It does
+  // not use an API key and must still be discoverable in the picker.
+  if (preset && config.authMode !== 'codex' && !anonymous && !config.apiKey) {
+    return { supported: false, models: [] };
+  }
   const provider = createModelProvider(config);
   if (provider.listModels) {
     const result = await withTimeout(provider.listModels(), Math.min(

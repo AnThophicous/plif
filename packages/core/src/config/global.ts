@@ -25,7 +25,19 @@ export interface AgentConfig {
   readonly instructions?: string;
   /** How many passes through the loop this agent gets. */
   readonly maxIterations?: number;
+  /** Explicit child effort; when absent, the engine derives one below the parent. */
+  readonly effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | 'ultracode' | 'plif';
   readonly disable?: boolean;
+}
+
+export interface PlifModeConfig {
+  readonly reviewPasses?: 1 | 2 | 3;
+  readonly adversarialReview?: boolean;
+  readonly skillHarvest?: boolean;
+  readonly maxReviewReminders?: number;
+  readonly maxGoalRounds?: number;
+  readonly runScriptMaxSteps?: number;
+  readonly continuableSubagents?: boolean;
 }
 
 export interface ProfileConfig {
@@ -58,6 +70,7 @@ export interface GlobalConfig {
   readonly agent?: Readonly<Record<string, AgentConfig>>;
   /** Whether the primary agent may choose named agents without explicit user direction. */
   readonly agentAutoLaunch?: boolean;
+  readonly plif?: PlifModeConfig;
   readonly activeProfile?: string;
   /** Provider-qualified model chosen explicitly for future image delegation. */
   readonly visionModel?: string;
@@ -93,6 +106,12 @@ export function profilesOf(config: GlobalConfig): Record<string, ProfileConfig> 
     profiles[name] = profile;
   }
   return profiles;
+}
+
+export function plifModeOf(config: GlobalConfig): PlifModeConfig {
+  const value = (config as Record<string, unknown>)['plif'];
+  if (!value || typeof value !== 'object') return {};
+  return value as PlifModeConfig;
 }
 
 export const CONFIG_SCHEMA_URL =

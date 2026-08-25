@@ -1,3 +1,7 @@
+import { randomUUID } from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
 import type { AgentConfig } from '../config/global.js';
 import { EventBus } from '../events/bus.js';
 import type { PlifEvents } from '../events/bus.js';
@@ -8,14 +12,18 @@ import {
   parseModelRef,
   providerIdForConfig,
   resolveConfig,
+  subagentEffortFor,
   validate,
 } from '../model/config.js';
-import type { StoredConfig } from '../model/config.js';
+import type { Effort, StoredConfig } from '../model/config.js';
 import { createModelProvider } from '../model/factory.js';
 import type { Message, ModelProvider } from '../model/provider.js';
 import { DEFAULT_CONTEXT_TOKENS, runLoop } from './loop.js';
 import { stableToolSpecs } from './context-budget.js';
 import { buildSystemPrompt } from './prompt.js';
+import { conversationFromTranscript } from '../session/resume.js';
+import { eventBase } from '../session/events.js';
+import type { Session, SessionStore } from '../session/store.js';
 import {
   applyPatch,
   editFile,
@@ -56,13 +64,29 @@ export interface SubagentOptions {
   readonly skillCatalogue?: string;
   /** Inherited from the parent session; subagents never resolve a new dialect. */
   readonly shellDialect?: ShellDialect;
+  /** Persist children and expose send_message when true and a store exists. */
+  readonly continuable?: boolean;
+  readonly sessions?: SessionStore;
+}
+
+export interface SubagentRecord {
+  readonly subagentId: string;
+  readonly sessionId: string;
+  readonly workspace: string;
+  readonly modelRef: string;
+  readonly title: string;
+  readonly provider: ModelProvider;
+  readonly maxIterations: number;
+  readonly effort?: Effort;
 }
 
 export class SubagentCoordinator {
   #running = new Map<string, AbortController>();
+  #records = new Map<string, SubagentRecord>();
 
-  register(taskId: string, controller: AbortController): void {
+  register(taskId: string, controller: AbortController, record?: SubagentRecord): void {
     this.#running.set(taskId, controller);
+    if (record) this.#records.set(record.subagentId, record);
   }
 
   finish(taskId: string): void {
@@ -74,6 +98,10 @@ export class SubagentCoordinator {
     if (!controller) return false;
     controller.abort();
     return true;
+  }
+
+  get(subagentId: string): SubagentRecord | undefined {
+    return this.#records.get(subagentId);
   }
 }
 
@@ -126,6 +154,8 @@ export function subagentTools(
     'list_tasks',
     'task_status',
     'cancel_task',
+    'send_message',
+    'run_script',
   ]);
   const names = new Set(tools.map((tool) => tool.spec.name));
   for (const tool of extra) {
@@ -160,8 +190,55 @@ interface Resolved {
   readonly provider: ModelProvider;
   readonly free: boolean;
   readonly maxIterations: number | undefined;
+  readonly effort: Effort | undefined;
   readonly agentName?: string;
   readonly instructions?: string;
+}
+
+interface SubagentManifest {
+  readonly subagentId: string;
+  readonly sessionId: string;
+  readonly workspace: string;
+  readonly modelRef: string;
+  readonly title: string;
+  readonly maxIterations: number;
+  readonly effort?: Effort;
+}
+
+function manifestPath(sessions: SessionStore, sessionId: string): string {
+  return path.join(sessions.root, 'subagents', `${sessionId}.json`);
+}
+
+async function saveManifest(sessions: SessionStore, manifest: SubagentManifest): Promise<void> {
+  const target = manifestPath(sessions, manifest.sessionId);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  const temp = `${target}.${randomUUID()}.tmp`;
+  await fs.writeFile(temp, JSON.stringify(manifest, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
+  try {
+    await fs.rename(temp, target);
+  } catch (error) {
+    await fs.rm(target, { force: true });
+    await fs.rename(temp, target).catch(() => { throw error; });
+  }
+}
+
+async function loadManifest(sessions: SessionStore, sessionId: string): Promise<SubagentManifest | null> {
+  try {
+    const value = JSON.parse(await fs.readFile(manifestPath(sessions, sessionId), 'utf8')) as SubagentManifest;
+    return value && value.sessionId === sessionId && typeof value.subagentId === 'string' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function continuationId(session: Session): string {
+  return `subagent:${session.id}`;
+}
+
+function clipContinuation(text: string): string {
+  const limit = 3_000;
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit)}\n…[${text.length - limit} characters omitted]`;
 }
 
 export function subagentTool(options: SubagentOptions): Tool {
@@ -179,13 +256,17 @@ export function subagentTool(options: SubagentOptions): Tool {
    */
   async function resolve(requested: string | undefined): Promise<Resolved | string> {
     if (!requested) {
+      const childEffort = subagentEffortFor(options.stored.effort);
       return {
         ref: options.provider.info.id,
-        provider: options.provider,
+        provider: childEffort && options.provider.withEffort
+          ? options.provider.withEffort(childEffort)
+          : options.provider,
         // The parent is already running, so whatever it costs is being spent
         // either way. Delegating to the same model asks nothing new.
         free: true,
         maxIterations: undefined,
+        effort: childEffort,
       };
     }
 
@@ -193,11 +274,15 @@ export function subagentTool(options: SubagentOptions): Tool {
     // Built-in roles are prompt profiles, not model ids. When no model was
     // configured, keep the parent's provider/model and only add role prompts.
     if (agent && !agent.model) {
+      const childEffort = subagentEffortFor(options.stored.effort, agent.effort);
       return {
         ref: options.provider.info.id,
-        provider: options.provider,
+        provider: childEffort && options.provider.withEffort
+          ? options.provider.withEffort(childEffort)
+          : options.provider,
         free: true,
         maxIterations: agent.maxIterations,
+        effort: childEffort,
         agentName: requested,
         ...(agent.instructions ? { instructions: agent.instructions } : {}),
       };
@@ -221,7 +306,9 @@ export function subagentTool(options: SubagentOptions): Tool {
       ...(apiKey ? { apiKey } : {}),
     });
 
-    const check = validate(config);
+    const childEffort = subagentEffortFor(options.stored.effort, agent?.effort);
+    const childConfig = childEffort === undefined ? config : { ...config, effort: childEffort };
+    const check = validate(childConfig);
     if (!check.ok) {
       return (
         `Error: "${ref}" is not usable — ${check.problem}. ` +
@@ -232,9 +319,10 @@ export function subagentTool(options: SubagentOptions): Tool {
 
     return {
       ref: formatModelRef(parsed.preset, parsed.model),
-      provider: (options.createProvider ?? createModelProvider)(config),
-      free: keyOptional(config.baseURL, config.model, config.providerId),
+      provider: (options.createProvider ?? createModelProvider)(childConfig),
+      free: keyOptional(childConfig.baseURL, childConfig.model, childConfig.providerId),
       maxIterations: agent?.maxIterations,
+      effort: childEffort,
       ...(agent ? { agentName: requested, ...(agent.instructions ? { instructions: agent.instructions } : {}) } : {}),
     };
   }
@@ -346,7 +434,42 @@ export function subagentTool(options: SubagentOptions): Tool {
       const childAbort = new AbortController();
       const abortChild = (): void => childAbort.abort();
       context.signal?.addEventListener('abort', abortChild, { once: true });
-      options.coordinator?.register(taskId, childAbort);
+      let childSession: Session | null = null;
+      const continuable = options.continuable !== false && options.sessions !== undefined && context.workspace !== undefined;
+      if (continuable) {
+        try {
+          childSession = await options.sessions!.create(context.workspace!, { container: context.container.name });
+          await childSession.rename(`sub: ${title}`);
+          const subagentId = continuationId(childSession);
+          await saveManifest(options.sessions!, {
+            subagentId,
+            sessionId: childSession.id,
+            workspace: context.workspace!,
+            modelRef: resolved.ref,
+            title,
+            maxIterations: resolved.maxIterations ?? options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+            ...(resolved.effort ? { effort: resolved.effort } : {}),
+          });
+        } catch {
+          // Persistence is an enhancement. An unavailable store keeps the
+          // existing one-shot delegation behavior intact.
+          childSession = null;
+        }
+      }
+      const subagentId = childSession ? continuationId(childSession) : undefined;
+      const record: SubagentRecord | undefined = childSession && context.workspace && subagentId
+        ? {
+            subagentId,
+            sessionId: childSession.id,
+            workspace: context.workspace,
+            modelRef: resolved.ref,
+            title,
+            provider: resolved.provider,
+            maxIterations: resolved.maxIterations ?? options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+            ...(resolved.effort ? { effort: resolved.effort } : {}),
+          }
+        : undefined;
+      options.coordinator?.register(taskId, childAbort, record);
       parent?.emit('subagent.started', {
         taskId,
         callId,
@@ -365,6 +488,18 @@ export function subagentTool(options: SubagentOptions): Tool {
       // part of the conversation; both exist so a two-minute investigation
       // looks like work rather than a hang.
       const inner = new EventBus();
+      let childPersistence = Promise.resolve();
+      const persistChild = (event: PlifEvents['conversation.event']): void => {
+        if (!childSession) return;
+        childPersistence = childPersistence.then(() => childSession!.append(event));
+      };
+      if (childSession) {
+        persistChild({
+          ...eventBase('user.message', 'subagent:' + childSession.id + ':initial'),
+          text: task,
+        });
+        inner.on('conversation.event', persistChild);
+      }
       let calls = 0;
       const relay = (event: PlifEvents['subagent.activity']): void =>
         parent?.emit('subagent.activity', event);
@@ -448,6 +583,8 @@ export function subagentTool(options: SubagentOptions): Tool {
             capabilities: context.container.capabilities,
             isolation: options.isolation,
             mode: 'subagent',
+            // The worker inherits the parent's PLIF operating mode and skill
+            // gate, while its provider wire uses the reduced `resolved.effort`.
             effort: options.stored.effort,
             contextTokens: resolved.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
             tools: stableToolSpecs(tools.map((tool) => tool.spec)),
@@ -482,6 +619,7 @@ export function subagentTool(options: SubagentOptions): Tool {
         ...(context.lsp ? { lsp: context.lsp } : {}),
         ...(context.edits ? { edits: context.edits } : {}),
         ...(options.shellDialect ? { shellDialect: options.shellDialect } : {}),
+        ...(options.sessions && !childSession ? { sessions: options.sessions } : {}),
         agentId: `subagent:${callId ?? title}:${Date.now()}`,
       }).catch((error: unknown) => {
         parent?.emit('subagent.finished', {
@@ -496,6 +634,8 @@ export function subagentTool(options: SubagentOptions): Tool {
         context.signal?.removeEventListener('abort', abortChild);
         options.coordinator?.finish(taskId);
       });
+
+      await childPersistence;
 
       const answer = result.text.trim();
       const ok = result.stop === 'complete' && answer.length > 0;
@@ -525,7 +665,151 @@ export function subagentTool(options: SubagentOptions): Tool {
         ? ''
         : `\n\n[incomplete: the subagent stopped because of ${result.stop}. Treat this as partial.]`;
 
-      return { output: `[${resolved.ref}]\n${answer}${caveat}`, ok };
+      return {
+        output: `[${resolved.ref}]${subagentId ? `\n[subagent_id: ${subagentId}]` : ''}\n${answer}${caveat}`,
+        ok,
+      };
+    },
+  };
+}
+
+/** Continue a persisted child without spawning a second child or a goal round. */
+export function sendMessageTool(options: SubagentOptions): Tool {
+  const tools = subagentTools(options.shellDialect ?? null, options.extraTools ?? []);
+
+  async function providerFromManifest(manifest: SubagentManifest): Promise<ModelProvider | null> {
+    // A same-process restart may still have the exact provider instance that
+    // created the child. Reuse it when the persisted model id matches; this
+    // also keeps custom/local providers resumable without requiring a second
+    // credential/config round-trip. Preserve the child effort when supported.
+    if (manifest.modelRef === options.provider.info.id) {
+      return manifest.effort && options.provider.withEffort
+        ? options.provider.withEffort(manifest.effort)
+        : options.provider;
+    }
+    const parsed = parseModelRef(manifest.modelRef, customProvidersOf(options.stored));
+    const providerId = parsed.preset ?? providerIdForConfig(options.stored, { model: parsed.model });
+    const apiKey = providerId && options.resolveCredential
+      ? await options.resolveCredential(providerId, options.stored)
+      : undefined;
+    const config = resolveConfig(options.stored, {
+      model: parsed.model,
+      ...(parsed.preset ? { preset: parsed.preset } : {}),
+      ...(apiKey ? { apiKey } : {}),
+    });
+    if (!validate(config).ok) return null;
+    return (options.createProvider ?? createModelProvider)(config);
+  }
+
+  return {
+    spec: {
+      name: 'send_message',
+      description:
+        'Send a follow-up message to a previous subagent, continuing its persisted conversation. ' +
+        'Use this to correct, extend, or ask for details instead of starting a new subagent.',
+      parameters: {
+        type: 'object',
+        properties: {
+          subagent_id: { type: 'string', description: 'The subagent_id returned by subagent.' },
+          message: { type: 'string', description: 'Follow-up instruction for the same child.' },
+        },
+        required: ['subagent_id', 'message'],
+        additionalProperties: false,
+      },
+    },
+    async run(input, context) {
+      if (!options.sessions || !context.workspace) {
+        return { output: 'Continuable subagents are not available in this run.', ok: false };
+      }
+      const subagentId = typeof input['subagent_id'] === 'string' ? input['subagent_id'].trim() : '';
+      const message = typeof input['message'] === 'string' ? input['message'].trim() : '';
+      if (!subagentId || !message) return { output: 'send_message requires subagent_id and message.', ok: false };
+
+      const live = options.coordinator?.get(subagentId);
+      let session: Session | null = null;
+      let provider: ModelProvider | null = live?.provider ?? null;
+      let maxIterations = live?.maxIterations ?? options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+      let workspace = live?.workspace ?? context.workspace;
+      let modelRef = live?.modelRef ?? '';
+      if (live) {
+        session = await options.sessions.resolve(live.workspace, live.sessionId);
+      } else if (subagentId.startsWith('subagent:')) {
+        const sessionId = subagentId.slice('subagent:'.length);
+        const manifest = await loadManifest(options.sessions, sessionId);
+        if (manifest) {
+          session = await options.sessions.resolve(manifest.workspace, manifest.sessionId);
+          provider = await providerFromManifest(manifest);
+          maxIterations = manifest.maxIterations;
+          workspace = manifest.workspace;
+          modelRef = manifest.modelRef;
+        }
+      }
+      if (!session || !provider) {
+        return {
+          output: `No subagent with id ${subagentId} — its persisted session or model is unavailable; start a new one.`,
+          ok: false,
+        };
+      }
+
+      const inner = new EventBus();
+      let persistence = Promise.resolve();
+      inner.on('conversation.event', (event) => {
+        persistence = persistence.then(() => session!.append(event));
+      });
+      const turnId = randomUUID();
+      persistence = persistence.then(() => session!.append({
+        ...eventBase('user.message', turnId),
+        text: message,
+      }));
+      const transcript = await session.replay();
+      const carried = conversationFromTranscript(transcript);
+      const messages: Message[] = [
+        {
+          role: 'system',
+          content: buildSystemPrompt({
+            workspace,
+            containerName: context.container.name,
+            workdir: context.container.workdir,
+            tempWorkdir: '/temp',
+            capabilities: context.container.capabilities,
+            isolation: options.isolation,
+            mode: 'subagent',
+            effort: options.stored.effort,
+            contextTokens: provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+            tools: stableToolSpecs(tools.map((tool) => tool.spec)),
+            ...(options.skillCatalogue ? { skills: options.skillCatalogue } : {}),
+            ...(options.agentInstructions ? { agentInstructions: options.agentInstructions } : {}),
+          }),
+        },
+        ...carried,
+        { role: 'user', content: message },
+      ];
+      const abort = new AbortController();
+      const abortChild = (): void => abort.abort();
+      context.signal?.addEventListener('abort', abortChild, { once: true });
+      try {
+        const result = await runLoop(messages, {
+          provider,
+          container: context.container,
+          questions: context.questions,
+          bus: inner,
+          tools,
+          maxIterations,
+          contextTokens: provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+          signal: abort.signal,
+          workspace,
+          ...(context.lsp ? { lsp: context.lsp } : {}),
+          ...(context.edits ? { edits: context.edits } : {}),
+          ...(options.shellDialect ? { shellDialect: options.shellDialect } : {}),
+          agentId: `subagent:continue:${subagentId}`,
+        });
+        await persistence;
+        const answer = clipContinuation(result.text.trim());
+        return { output: `[${modelRef || provider.info.id}]\n${answer || `stopped: ${result.stop}`}`, ok: result.stop === 'complete' && answer.length > 0 };
+      } finally {
+        context.signal?.removeEventListener('abort', abortChild);
+        await persistence;
+      }
     },
   };
 }

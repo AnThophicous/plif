@@ -81,7 +81,7 @@ export {
 export type { McpOAuthStore, OAuthCredentialScope, StoredMcpOAuthState, SystemdCredsRunner } from './auth/store.js';
 export type { Question, QuestionChoice } from './harness/ask.js';
 export type { QuestionOption } from './events/bus.js';
-export { runLoop, runCompaction } from './harness/loop.js';
+export { runLoop, runCompaction, RUN_SCRIPT_SPEC } from './harness/loop.js';
 export type { CompactionRun } from './harness/loop.js';
 export { COMPACTION_STAGES, compact, estimateTokens, pinnedIndices } from './harness/compaction.js';
 export type { CompactionFailure, CompactionOptions, CompactionResult } from './harness/compaction.js';
@@ -139,6 +139,8 @@ export { MemoryStore, rankFacts, strategyId, strategyStatus, summariseMemory } f
 export type { Fact, FactKind, MemorySnapshot } from './harness/memory.js';
 export { DEFAULT_CONTEXT_TOKENS, answerDanglingToolCalls } from './harness/loop.js';
 export type { LoopOptions, LoopResult, LoopStop } from './harness/loop.js';
+export { GoalController } from './harness/goals.js';
+export type { GoalState, GoalStatus } from './harness/goals.js';
 export {
   createHarnessCycle,
   inspectionPaths,
@@ -170,6 +172,10 @@ export {
   readFile,
   remember,
   setGoal,
+  getGoal,
+  completeGoal,
+  blockGoal,
+  sessionSearch,
   runCommand,
   shellCommand,
   toolsForEnvironment,
@@ -293,8 +299,13 @@ export type {
   CompletionRequest,
   FinishReason,
   Message,
+  ModelApprovalRequest,
+  ModelExecutionContext,
   ModelInfo,
+  ModelPermissionMode,
   ModelProvider,
+  ModelQuestion,
+  ModelQuestionOption,
   Role,
   ToolCall,
   ToolSpec,
@@ -335,6 +346,8 @@ export {
   protocolForModel,
   redact,
   resolveConfig,
+  defaultMaxTokensForEffort,
+  subagentEffortFor,
   saveStoredConfig,
   storedProviderCredentials,
   stripStoredCredentials,
@@ -394,6 +407,8 @@ export type {
 export { discoverProviderModels, forgetDiscoveredModels, scheduleProviderDiscovery } from './model/discovery.js';
 export type { DiscoveredModels, DiscoverOptions, DiscoverySource } from './model/discovery.js';
 export { AnthropicProvider } from './model/anthropic.js';
+export { CodexProvider, startCodexLogin } from './model/codex.js';
+export type { CodexLoginFlow, CodexLoginResult, CodexProviderOptions } from './model/codex.js';
 export { createModelProvider, isAnthropicEndpoint } from './model/factory.js';
 
 export { Session, SessionStore, workspaceKey } from './session/store.js';
@@ -446,9 +461,10 @@ export {
   setPermissionMode,
   setAutoApprove,
   profilesOf,
+  plifModeOf,
 } from './config/global.js';
 export { stripJsonComments } from './config/global.js';
-export type { AgentConfig, GlobalConfig, PermissionMode, ProfileConfig } from './config/global.js';
+export type { AgentConfig, GlobalConfig, PermissionMode, ProfileConfig, PlifModeConfig } from './config/global.js';
 
 export {
   DEVELOPER_POLICY,
@@ -491,8 +507,8 @@ export type {
   PluginSource,
 } from './marketplace/catalog.js';
 
-export { SubagentCoordinator, subagentTool, subagentTools } from './harness/subagent.js';
-export type { SubagentOptions } from './harness/subagent.js';
+export { SubagentCoordinator, sendMessageTool, subagentTool, subagentTools } from './harness/subagent.js';
+export type { SubagentOptions, SubagentRecord } from './harness/subagent.js';
 export { readAgentInstructions } from './harness/prompt.js';
 export { routeVision, visionModelRef, visionTools } from './harness/vision.js';
 export type { VisionRoute } from './harness/vision.js';

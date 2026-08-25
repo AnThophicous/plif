@@ -1,259 +1,306 @@
 ---
 name: dme-visual-verification-spynx-edition
-description: Adversarially audit a rendered frontend across representative viewports, states, interactions, accessibility conditions, and runtime signals; classify defects, fix the correct owner, and rerender until material issues stop appearing.
+description: Adversarially verify a real rendered frontend across representative viewports, states, interactions, accessibility conditions, and runtime signals; classify defects by owner, fix root causes, and rerender until material issues stop appearing.
 ---
 
-# DME Visual Verification | Spynx Edition — Rendered Evidence or It Did Not Happen
-
-Use this after implementation or when the user asks for a visual/frontend quality audit.
+# DME Visual Verification | Spynx Edition — Rendered Evidence vNext
 
 Source inspection, tests, and build success are evidence.
 
 They are not substitutes for seeing the interface.
 
-Do not call an interface polished, production-ready, visually correct, or pixel-accurate if you did not render the relevant surface.
+When available, load `../../shared/CORE_CONTRACT.md` once.
 
-## 1. Establish the verification target
+Do not call an interface polished, production-ready, visually correct, accessible, pixel-accurate, or regression-free if the evidence does not support that exact claim.
+
+---
+
+## 1. Entry gate
+
+Use:
+- after substantive UI implementation;
+- for visual/frontend audits;
+- after external component transplant;
+- after systemic design-system changes;
+- when a reference must be compared to implementation;
+- when responsive/state defects are suspected.
+
+Do not audit the whole product when the change is local unless evidence shows systemic impact.
+
+---
+
+## 2. Establish verification target
 
 Identify:
-
 - changed surface;
 - expected product behavior;
 - primary action;
-- design direction or reference;
+- selected Design DNA/reference;
 - affected states;
 - supported themes;
 - relevant viewports;
 - critical invariants;
-- known risks.
+- known risks;
+- downstream consumers if systemic tokens/primitives changed.
 
-Do not audit the entire product when the change is local unless evidence shows systemic impact.
+This defines the evidence matrix.
 
-## 2. Start the real product
+---
 
-Prefer the repository's documented runtime and existing preview flow.
+## 3. Run the real product
+
+Prefer the repository's documented runtime/preview.
 
 Do not create a fake standalone rendering that bypasses:
-
 - app shell;
 - theme;
 - fonts;
 - routing;
 - data providers;
 - global styles;
-- responsive container;
+- responsive containers;
 - actual component dependencies.
 
-If the real environment cannot run, state the limitation.
+If the real environment cannot run:
+- use the strongest available preview;
+- state the limitation;
+- lower visual confidence.
 
-## 3. Build the evidence matrix
+---
 
-Use representative combinations, not a Cartesian explosion.
+## 4. Evidence matrix
 
-Choose states/viewports that maximize defect discovery.
+Use representative combinations, not Cartesian explosion.
 
 ### Viewports
-Prefer project breakpoints and stress points:
-
-- narrowest supported;
-- intermediate width where layouts often become awkward;
+Choose:
+- narrowest supported/stress width;
+- one intermediate width where composition might fail;
 - representative desktop/wide.
 
-Add other widths only when the component has a known transformation there.
+Add another only when a component transforms there.
 
 ### States
-Use those reachable by the changed surface:
-
-- initial;
+Choose reachable high-value states:
+- populated/primary;
 - loading;
-- populated;
 - empty;
 - long content;
-- partial data;
-- validation error;
-- system error;
+- partial;
+- validation/system error;
 - success;
-- disabled;
-- selected;
+- disabled/selected;
 - open overlay;
 - destructive confirmation;
-- supported themes.
+- changed themes.
 
 ### Interaction conditions
 Where relevant:
-
 - keyboard only;
 - pointer;
 - touch emulation;
 - reduced motion;
 - zoom;
-- localization/long labels.
+- localization/long labels;
+- reduced transparency or opaque fallback for glass-heavy surfaces.
 
-## 4. Inspect in perceptual order
+Choose cases that maximize expected defect discovery.
 
-Do not begin with 1px details while hierarchy is wrong.
+---
+
+## 5. Inspect in perceptual order
+
+Do not begin with 1px tuning while hierarchy is wrong.
 
 ### Pass A — Product clarity
-
 Ask:
+- Is the primary action obvious?
+- Is current state obvious?
+- Is the scan/reading path clear?
+- Are comparison/grouping relationships visible?
+- Does anything compete unnecessarily?
+- Does the surface communicate the intended product thesis?
 
-- is the primary action obvious;
-- is current state obvious;
-- is the reading/scan path clear;
-- are important relationships visible;
-- does anything compete unnecessarily;
-- does the screen communicate the intended product thesis.
-
-### Pass B — Composition
-
+### Pass B — Macro composition
 Check:
-
 - balance;
-- alignment;
 - visual anchors;
-- spacing rhythm;
-- group separation;
-- accidental dead space;
+- alignment;
+- dead space;
 - density;
-- section transitions;
-- container behavior.
+- section rhythm;
+- container behavior;
+- width constraints;
+- repeated rectangle monotony.
 
-### Pass C — Typography
-
+### Pass C — Typography/content
 Check:
-
 - hierarchy;
 - line length;
-- wrapping;
-- truncation;
-- orphan/widow-like visual awkwardness where meaningful;
+- wrapping/truncation;
+- awkward single-word lines where material;
 - label/data contrast;
 - numerical alignment;
-- font loading;
-- fallback shifts.
+- fallback/font-loading shifts;
+- realistic content length.
 
 ### Pass D — Responsive mechanics
-
 Check:
-
 - reordering;
-- collapse behavior;
-- control transformation;
+- collapse;
 - overflow ownership;
-- sticky elements;
-- table behavior;
-- touch reach;
-- clipping;
-- accidental horizontal page scroll.
+- drawer/sheet behavior;
+- sticky offsets;
+- table adaptation;
+- safe areas;
+- keyboard overlap;
+- horizontal overflow;
+- focus order after reflow.
 
 ### Pass E — Interaction states
-
 Check:
-
-- hover;
+- hover where applicable;
 - focus-visible;
-- pressed;
-- selected;
+- pressed/selected;
 - disabled;
-- validation;
 - loading;
-- optimistic/pending;
+- validation/error;
+- success;
 - overlays;
-- feedback after action.
+- retry/cancel;
+- back behavior.
 
 ### Pass F — Accessibility signals
-
 Check:
-
-- semantic control choice;
-- accessible names;
-- focus order;
-- visible focus;
-- overlay focus behavior;
+- semantic controls/labels;
+- focus visibility;
+- focus not hidden by sticky overlays;
+- keyboard reach;
+- target usability;
 - contrast;
 - non-color state communication;
 - reduced motion;
-- usable target sizes.
+- zoom/reflow;
+- screen-reader announcements where relevant.
 
 ### Pass G — Runtime health
-
-Inspect:
-
+Check:
 - console errors;
 - hydration warnings;
-- failed assets;
-- missing fonts;
-- layout shifts;
-- repeated network failures;
-- visibly slow interactions;
-- expensive decorative effects.
+- broken assets;
+- layout shift;
+- slow interaction;
+- jank from filters/animations;
+- network failures;
+- obvious bundle/runtime regressions if tooling exposes them.
 
 ### Pass H — Identity
+Check:
+- Design DNA coherence;
+- component-library/provider leakage;
+- generic AI patterns;
+- signature move restraint;
+- product-specific character.
 
-Run the logo-off test:
+---
 
-- does the product still feel specific;
-- is the signature move visible but not overused;
-- did framework defaults leak through;
-- are generic AI patterns reappearing.
+## 6. Perceptual stress tests
 
-## 5. Defect record
+### Squint test
+Blur mental detail. Major zones, primary action, and hierarchy should remain legible.
+
+### Grayscale test
+Hierarchy should survive through luminance, size, weight, placement, spacing, border, and depth.
+
+### Silhouette test
+Ignore text/color. Geometry should feel deliberate rather than like repeated identical rectangles.
+
+### Density test
+Ask whether ~20% of visible containers could disappear with grouping still understandable.
+
+### Logo-off test
+Remove logo/name/accent mentally. Does the interface still feel product-specific?
+
+### Decoration budget
+Count strong effects:
+- blur;
+- glow;
+- gradient;
+- heavy shadow;
+- texture;
+- 3D;
+- shader/video;
+- animated background.
+
+If several compete, identify which one actually earns its cost.
+
+---
+
+## 7. Defect record
 
 Record defects as:
 
-`viewport/state → symptom → user impact → likely owner → severity`
+`viewport/state → observable symptom → user impact → likely owner → severity → evidence`
 
 Example:
 
-`768px + filter open → primary table compressed to unreadable columns → blocks comparison → layout/filter container → high`
+`768px + filters open → table columns compress below useful comparison width → comparison task degrades → layout/filter container → high → reproduced twice`
 
 Avoid:
+- “spacing feels off”;
+- “not premium enough”;
+- “looks weird.”
 
-`spacing feels off`
+Make defects falsifiable.
 
-Prefer observable descriptions.
+---
 
-## 6. Severity
+## 8. Severity
 
 ### Critical
-Blocks task, breaks data/behavior, creates inaccessible core interaction, or causes major runtime failure.
+Blocks task, corrupts behavior/data, creates inaccessible core interaction, or causes major runtime failure.
 
 ### High
-Strongly harms hierarchy, comprehension, responsive usability, or key interaction.
+Strongly harms hierarchy, comprehension, responsive usability, navigation, or key interaction.
 
 ### Medium
-Noticeable coherence, accessibility, or interaction defect with a viable path remaining.
+Noticeable coherence/accessibility/interaction defect with viable task path remaining.
 
 ### Low
-Optical/polish issue that does not materially impede use.
+Optical/polish issue with little user impact.
 
-Fix critical/high first.
+Fix critical/high before low.
 
-Do not spend time tuning shadows while the mobile action disappears.
+Do not tune shadows while the mobile action is unreachable.
 
-## 7. Find the correct owner
+---
 
-Classify the root layer:
+## 9. Root-owner classification
+
+Classify the highest correct owner:
 
 - token;
 - primitive;
 - component;
-- layout;
+- composition/layout;
 - state model;
 - content;
 - asset;
 - runtime/data behavior.
 
-Fix the highest correct owner.
+Examples:
 
-If seven cards have wrong padding because one token is wrong, change the token.
+Seven controls share wrong focus → primitive/token.  
+One marketing hero needs unique asymmetric spacing → local composition.  
+Mobile modal repeatedly overflows → interaction/layout architecture, not six media-query patches.
 
-If one exceptional composition requires different spacing, do not corrupt the global token to avoid a local rule.
+Fix the owner, not every symptom.
 
-## 8. Reference-fidelity mode
+---
 
-When an approved reference exists, compare principles and measurable relationships:
+## 10. Reference-fidelity mode
 
+When an approved reference exists, compare:
 - geometry;
 - alignment;
 - proportions;
@@ -262,41 +309,56 @@ When an approved reference exists, compare principles and measurable relationshi
 - crop;
 - color relationships;
 - hierarchy;
-- interaction state.
+- interaction;
+- responsive transformation.
 
-Do not copy accidental artifacts or inaccessible behavior from the reference.
+If exact fidelity is required and pixel-diff tooling exists, use it only for stable comparable states.
 
-If exact pixel-diff tooling exists, use it only when exact fidelity is actually required.
+Do not copy:
+- inaccessible behavior;
+- proprietary branding/copy;
+- accidental defects;
+- reference-specific implementation that violates host architecture.
 
-Visual similarity is not permission to break product semantics.
+Visual similarity never overrides product semantics.
 
-## 9. Iteration loop
+---
+
+## 11. Iteration loop
 
 Use:
 
 `OBSERVE → CLASSIFY → FIX ROOT → RENDER SAME CASE → CHECK ADJACENT CASES`
 
-After fixing a systemic owner, inspect representative consumers that could regress.
+After systemic changes, inspect representative downstream consumers.
 
-Do not make multiple unrelated visual tweaks between renders when you need to know which change helped.
+Avoid making five unrelated tweaks between renders when causality matters.
 
-## 10. Accessibility/runtime escalation
+A first render is a draft.
 
-If visual review reveals a deeper problem:
+A final render with no material findings is evidence.
 
-- repeated focus failure → inspect primitive/interaction architecture;
-- layout shift → inspect media/font dimensions and rendering path;
-- slow modal → inspect render/effect cost;
-- mobile collapse → revisit responsive structure;
-- repeated contrast failures → revisit semantic colors;
-- inconsistent states → revisit component contract.
+---
 
-Escalate to architecture rather than patching symptoms indefinitely.
+## 12. Accessibility/runtime escalation
 
-## 11. Technical verification after visual edits
+If review reveals a repeated deeper pattern:
 
-After the last meaningful edit, run the appropriate repository checks:
+- repeated focus failure → inspect primitive/interaction model;
+- contrast failures across components → semantic color system;
+- layout shift → media/font dimensions/render path;
+- slow overlay → render/effect/state cost;
+- mobile collapse → structural responsive model;
+- inconsistent loading/error → component/state contract;
+- glass unreadability → material/token fallback strategy.
 
+Escalate to the correct specialist/owner rather than patching indefinitely.
+
+---
+
+## 13. Technical verification after visual edits
+
+After the last meaningful edit, run appropriate:
 - affected tests;
 - typecheck;
 - lint;
@@ -304,33 +366,59 @@ After the last meaningful edit, run the appropriate repository checks:
 - build;
 - smoke/e2e where justified.
 
-Do not assume a visual-only edit cannot break runtime behavior.
+A visual-only edit can still break runtime behavior.
 
-## 12. Confidence statement
+For performance-related changes, measure or use explicit proxies.
 
-At handoff, distinguish:
+---
 
-- **verified** — directly observed/tested;
-- **inferred** — supported by code but not rendered/tested;
-- **unverified** — could not be checked.
+## 14. Confidence statement
 
-If no browser/rendering capability exists, state exactly what was not visually verified.
+At handoff distinguish:
+
+- **verified** — directly rendered/operated/tested;
+- **inferred** — supported by code/evidence but not directly observed;
+- **unverified** — not available or not checked.
+
+Examples:
+
+`verified: desktop + 390px mobile, keyboard nav, build`  
+`inferred: 1280–1600 width should remain stable from fluid grid`  
+`unverified: iOS Safari safe-area behavior; no device/browser capability`
 
 Never convert absence of evidence into confidence.
 
-## 13. Stop condition
+---
+
+## 15. Stop condition
 
 Stop when:
-
-- critical and high defects are resolved;
+- critical/high defects are resolved;
 - changed states render coherently;
 - representative widths work;
 - primary interaction is operable;
 - relevant accessibility checks pass;
 - runtime is clean enough for the changed surface;
-- technical validation passes at the appropriate level;
+- technical validation is appropriate to risk;
 - a new visual pass reveals no material correction.
 
-A first render is a draft.
+Do not chase invisible polish after the expected value becomes low.
 
-A final render with no material findings is evidence.
+---
+
+## 16. Handoff
+
+Report:
+- surfaces/states/viewports actually verified;
+- material defects fixed;
+- technical checks passed/failed;
+- remaining medium/low issues if material;
+- inferred/unverified areas.
+
+Do not say “pixel-perfect” unless exact comparison evidence exists.
+
+---
+
+## Standalone core capsule
+
+If shared core is unavailable: verify the real surface; choose representative states/viewports; inspect hierarchy before polish; record observable defects; classify owner/severity; fix root; rerender same case; run relevant technical checks; distinguish verified/inferred/unverified; stop when another pass reveals no material issue.

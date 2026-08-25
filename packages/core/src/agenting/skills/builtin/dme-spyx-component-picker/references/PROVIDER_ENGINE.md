@@ -1,193 +1,243 @@
-# DME Spyx — Provider Engine
+# DME Spyx — Provider Engine vNext
 
-Provider choice is a technical/product decision, not a ranking of favorite sites.
+Provider tooling is dynamic.
 
-Capabilities change over time. Detect what is actually available in the current
-environment before assuming commands, tokens, quotas, or registry names.
+This file encodes **capabilities and decision rules**, not a permanent command list.
+
+Always inspect live tool help/config before costly acquisition.
+
+---
 
 ## 1. Search order
 
-Use:
+Default order:
 
-`project-native → compatible registry/source search → shortlist → acquisition`
+1. project-native components;
+2. team/private registry already configured;
+3. existing shadcn-compatible registries/config;
+4. live 21st.dev CLI/MCP or authorized browser-capture path when available;
+5. other configured component registries/providers such as Magic UI, Aceternity, or v0;
+6. project-native bespoke implementation when external candidates do not improve the outcome.
 
-Do not search externally before checking whether the repository already contains
-a strong component or primitive.
+This order is a heuristic.
+
+User-selected source or stronger product fit can change it.
+
+---
 
 ## 2. Project-native
 
-Prefer when:
+Prefer existing code when it:
+- already satisfies behavior/accessibility;
+- can be adapted with low cost;
+- preserves coherent product language;
+- avoids provider/dependency overhead.
 
-- existing component is close;
-- current design system is mature;
-- external candidate would add more cost than value;
-- behavioral integration dominates visual novelty.
+Search neighboring/unused primitives before external catalogues.
 
-A local component can still be redesigned using an external candidate as a
-reference.
+Do not rebuild a strong internal component because an external screenshot is shinier.
 
-## 3. shadcn/ui and registries
+---
 
-Good for:
+## 3. Team/private registries
 
-- primitives;
-- accessible foundations;
-- common application components;
-- registry-distributed blocks;
-- components intended to become owned source.
+Treat internal registries as high-value because they often encode:
+- team conventions;
+- vetted dependencies;
+- known accessibility behavior;
+- brand/product grammar.
 
-When the installed/current CLI supports them, use discovery and inspection
-capabilities such as:
+Still inspect:
+- current version;
+- files written;
+- migration compatibility;
+- ownership/deprecation.
 
-- registry search/list;
-- dry-run;
-- diff/view;
-- configured namespaces.
+“Internal” does not mean “automatically correct.”
 
-Inspect before overwrite.
+---
 
-A registry item may include files, dependencies, CSS, and configuration. Treat it
-as a code change, not a paste.
+## 4. shadcn-compatible ecosystem
 
-Community registry presence does not prove quality. Run hard gates.
+Modern shadcn registries may distribute more than UI components.
 
-## 4. 21st.dev official tooling
+Before applying an item inspect:
+- registry item metadata;
+- files;
+- `registryDependencies`;
+- package dependencies;
+- CSS variables/styles;
+- config/rules/hooks/utilities;
+- destination paths.
 
-Good for:
+Configured registries may be discovered through project config or MCP/CLI tools.
 
-- searching polished community/product components;
-- blocks where visual direction matters;
-- candidate discovery by description;
-- generating variants when the current authorized tools expose that capability.
+Prefer search/inspection before installation.
 
-Detect the current official CLI/MCP/tool surface.
+Third-party registry code requires normal source review.
 
-Do not assume an old package name or invocation when the environment can verify
-the current one.
+---
 
-Use official search/preview capabilities before consuming an install/download
-budget.
+## 5. 21st.dev live capability
 
-## 5. DME Spyx authorized browser capture
+As of the 2026 ecosystem, 21st exposes CLI/MCP flows for search, code acquisition, generation, and component work. Exact commands, plans, quotas, and tool names can change.
+
+Therefore:
+
+1. detect installed/configured CLI or MCP;
+2. inspect live help/tool schema;
+3. prefer search/preview before install;
+4. identify acquisition quota/cost when it affects strategy;
+5. acquire only the selected candidate;
+6. run normal hard gates even when the provider is trusted.
+
+The included Spyx browser bridge is an optional human-selection handoff, not a replacement for official source acquisition.
+
+---
+
+## 6. Authorized browser capture
 
 Use when:
+- user evaluated a component in the browser;
+- extension explicitly sends/downloads a capsule;
+- preview evidence is useful before acquisition.
 
-- the user is browsing 21st.dev visually;
-- the exact candidate is easier to choose in the browser;
-- preview DOM/metadata materially improves ranking;
-- official acquisition budget should not be spent before selection;
-- an authorized registry/source snapshot is available through the user's browser
-  session.
+Capsule may contain:
+- metadata;
+- preview DOM;
+- source/registry snapshot when available.
 
-The extension can send a DME capsule to the local receiver.
+Trust levels:
+- metadata → discovery evidence;
+- preview DOM → structural/visual evidence;
+- registry/source snapshot → code candidate requiring review.
 
-A capsule is evidence.
+Never treat preview DOM as framework production source.
 
-It does not bypass stack compatibility or DME adaptation.
+---
 
-## 6. Magic UI
+## 7. Other public providers
 
-Good for:
+For Magic UI, Aceternity, v0, or other registries:
+- use only when live/configured/accessible;
+- inspect license/provenance;
+- inspect dependencies;
+- inspect server/client assumptions;
+- adapt to host design system;
+- avoid importing an entire visual language for one component.
 
-- focused motion/effect primitives;
-- marquee/dock/beam/shimmer-like visual mechanisms;
-- registry-compatible effects when they support the selected design thesis.
+Provider brand never outranks product fit.
 
-Do not choose an effect provider for basic structural UI.
+---
 
-Treat effect cost as optional until proven valuable.
-
-## 7. Aceternity UI
-
-Good for:
-
-- showcase/expressive blocks;
-- distinctive backgrounds and motion;
-- visually strong reference implementations.
-
-Manual-copy sources require extra attention to:
-
-- peer dependencies;
-- global CSS;
-- animation runtime;
-- icon system;
-- client-only boundaries.
-
-Port deliberately.
-
-## 8. v0
-
-Use when configured and the task benefits from generated bespoke composition
-rather than selecting an existing catalog component.
-
-v0 is a generator, not evidence that a result fits the product.
-
-Run candidates through the same DNA/hard-gate/adaptation process.
-
-## 9. Provider selection heuristics
+## 8. Provider selection heuristics
 
 ### Primitive/control
-Prefer project-native or shadcn-compatible primitive.
+Prefer project-native or design-system primitive.
 
 ### Header/footer/hero/marketing block
-Prefer catalog/block search: project registries, 21st, verified shadcn registries,
-Magic/Aceternity when their visual language fits.
+Catalogue search can be valuable because visual/structural diversity matters.
 
 ### Complex product interaction
-Prefer strong primitives plus product-native composition. Do not force a marketing
-block library into application architecture.
+Prefer proven accessible primitives and source review over visual novelty.
+
+### Data visualization
+Prefer project chart stack or a library that matches data/interaction requirements; a decorative catalogue block is rarely enough.
 
 ### Visual effect
-Use effect provider only if Signature DNA calls for it.
+Treat as progressive enhancement with explicit performance/accessibility gate.
 
-### Exact browser-found 21st candidate
-Use Spyx capture to transfer identity/preview/source snapshot when authorized,
-then adapt in repo.
+### Exact browser-found candidate
+Use capsule to identify it, then acquire source through an authorized path.
 
-## 10. Acquisition budget
+---
 
-Do not install every finalist.
+## 9. Acquisition budget
 
-For each candidate:
+Model separate costs:
+- search;
+- preview;
+- get-source;
+- install;
+- generation;
+- paid credits;
+- dependency/runtime cost.
 
-1. search;
-2. inspect metadata/preview/source diff;
-3. reject incompatible;
-4. present finalist;
-5. acquire winner.
+When install/code-copy quota is limited:
+- search broadly;
+- shortlist;
+- inspect metadata/preview;
+- acquire only winner.
 
-If an official provider limits installs, this workflow protects the quota.
+Do not burn quota to create a comparison gallery.
+
+---
+
+## 10. Blast-radius inspection
+
+Before install ask:
+
+- Which files will be created/replaced?
+- Does it alter global CSS?
+- Does it mutate Tailwind/framework config?
+- Does it add environment variables?
+- Does it include scripts or server code?
+- What packages/peers enter?
+- Does it add another icon/motion primitive?
+- Does it assume auth/data/routes?
+- Does it cross server/client boundary?
+- Does it import remote assets or telemetry?
+
+Unexpected blast radius is a rejection/approval gate.
+
+---
 
 ## 11. Source trust
 
-Before adopting third-party code inspect:
+Classify:
 
-- provenance;
-- declared license/usage terms when relevant;
-- dependencies;
-- network calls;
-- embedded secrets/tokens;
-- analytics;
-- remote assets;
-- dynamic script injection;
-- global styles;
-- unsafe HTML;
-- framework assumptions.
+### High confidence
+Project-owned/internal reviewed source with known contract.
 
-Do not treat a pretty preview as a trust signal.
+### Medium
+Public registry/provider with clear source/metadata and reasonable review path.
+
+### Low
+Preview-only DOM, opaque generated artifact, unclear provenance, unexpected executable setup.
+
+Confidence changes autonomy.
+
+Low-confidence source should not be installed automatically.
+
+---
 
 ## 12. Mixing providers
 
-You may source from several providers across a product.
+Mix only when each source has a clear role and host design system normalizes them.
 
-Normalize:
+Reject:
+- three icon systems;
+- parallel button primitives;
+- multiple motion runtimes for cosmetic reasons;
+- incompatible CSS conventions;
+- provider-specific tokens leaking across app.
 
-- tokens;
-- icons;
-- focus;
-- motion runtime;
-- primitive APIs;
-- semantic state;
-- dependency duplication.
+The host product owns the final visual language.
 
-Do not leave visible provider boundaries in the finished product.
+---
+
+## 13. Failure routing
+
+Provider search fails:
+→ one meaningful retry if transient → alternate provider/project-native.
+
+Candidate source unavailable:
+→ use preview as evidence → authorized source path or project-native derivation.
+
+Install mutates too much:
+→ revert isolated changes → reject or manually port only necessary source after review.
+
+Dependency conflict:
+→ find compatible variant/candidate before upgrading core framework.
+
+Do not keep trying commands whose failure mode has not changed.

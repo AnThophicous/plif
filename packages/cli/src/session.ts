@@ -288,6 +288,8 @@ export interface SessionState {
   readonly epoch: number;
   /** Rows still able to change, rendered into the live frame. */
   readonly entries: readonly TimelineEntry[];
+  /** A committed tool whose details are being shown in the live expansion panel. */
+  readonly expandedToolId: string | null;
   readonly picker: PickerState | null;
   readonly approval: PendingApproval | null;
   /** Approvals queued behind the one on screen. */
@@ -328,6 +330,7 @@ export const initialSession: SessionState = {
   committed: [],
   epoch: 0,
   entries: [],
+  expandedToolId: null,
   picker: null,
   approval: null,
   approvalQueue: [],
@@ -479,12 +482,11 @@ export function scrollbackCommitEnd(
   const lastInput = entries.findLastIndex((item) => item.kind === 'input');
   const lastSeparator = entries.findLastIndex((item) => item.kind === 'separator');
 
-  // A separator after the latest input closes the current turn. Once the
-  // caller has confirmed that the prefix is settled, commit through that
-  // separator immediately. Keeping a completed turn in the bounded live
-  // frame makes `fitToHeight` drop it as soon as the answer grows past the
-  // viewport, which looks like the transcript was erased.
-  if (lastInput >= 0 && lastSeparator > lastInput) return lastSeparator + 1;
+  // A separator after the latest input closes the current turn, but keep that
+  // turn live until the next input. Moving the final answer into `<Static>`
+  // at the exact moment it finishes forces Ink to print a new scrollback batch
+  // and visibly jumps the developer to the bottom.
+  if (lastInput >= 0 && lastSeparator > lastInput) return 0;
 
   // Once the next input arrives, everything through the previous separator is
   // an older turn and can safely enter native scrollback in one ordered batch.
@@ -536,6 +538,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         // session that was open before the switch.
         epoch: state.epoch + 1,
         entries: [],
+        expandedToolId: null,
         picker: null,
         approval: null,
         approvalQueue: [],
@@ -561,9 +564,28 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       };
 
     case 'toggleLastTool': {
-      const index = [...state.entries].map((item) => item.kind).lastIndexOf('tool');
-      if (index < 0) return state;
-      return { ...state, entries: state.entries.map((item, itemIndex) => itemIndex === index ? { ...item, expand: !item.expand } : item) };
+      if (state.expandedToolId !== null) {
+        return { ...state, expandedToolId: null };
+      }
+      const index = state.entries.findLastIndex(
+        (item) => item.kind === 'tool' && hasExpandableToolContent(item),
+      );
+      if (index >= 0) {
+        return {
+          ...state,
+          expandedToolId: null,
+          entries: state.entries.map((item, itemIndex) => itemIndex === index ? { ...item, expand: !item.expand } : item),
+        };
+      }
+      const committedIndex = state.committed.findLastIndex(
+        (item) => item.kind === 'tool' && hasExpandableToolContent(item),
+      );
+      const committed = committedIndex >= 0 ? state.committed[committedIndex] : undefined;
+      if (!committed) return state;
+      return {
+        ...state,
+        expandedToolId: state.expandedToolId === committed.id ? null : committed.id,
+      };
     }
     case 'toggleLastThinking': {
       const index = [...state.entries].map((item) => item.kind).lastIndexOf('thinking');
@@ -598,7 +620,11 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       }
       const entries = [...state.entries, action.entry];
       const trimmed = entries.length > MAX_ENTRIES ? entries.slice(-MAX_ENTRIES) : entries;
-      return { ...state, entries: trimmed };
+      return {
+        ...state,
+        expandedToolId: action.entry.kind === 'input' ? null : state.expandedToolId,
+        entries: trimmed,
+      };
     }
 
     /**
@@ -668,6 +694,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         ...state,
         entries: [],
         committed: [],
+        expandedToolId: null,
         epoch: state.epoch + 1,
         subagents: [],
         subagentFocus: 0,
@@ -1199,6 +1226,23 @@ export function entry(
   extra: Partial<Omit<TimelineEntry, 'id' | 'kind' | 'title' | 'at'>> = {},
 ): TimelineEntry {
   return { id: `e${++counter}`, kind, title, at: Date.now(), ...extra };
+}
+
+/**
+ * Ctrl+E is useful only when the selected tool has something hidden to show.
+ * A final housekeeping/tool marker can be the newest row without carrying
+ * output, a diff, or a grouped result; selecting that row made the shortcut
+ * look broken even though the key event was handled correctly.
+ */
+function hasExpandableToolContent(item: TimelineEntry): boolean {
+  return Boolean(
+    item.detail?.trim() ||
+    item.diff?.trim() ||
+    item.edits?.length ||
+    item.planItems?.length ||
+    item.searchResults?.length ||
+    item.executions?.length,
+  );
 }
 
 export function decisionTone(decision: Decision): TimelineEntry['tone'] {

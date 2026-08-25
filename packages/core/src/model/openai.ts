@@ -698,6 +698,13 @@ export class OpenAIProvider implements ModelProvider {
     return result.models.map((model) => model.id).sort();
   }
 
+  withEffort(effort: import('./config.js').Effort): ModelProvider {
+    return new OpenAIProvider({ ...this.#config, effort }, {
+      ...(this.#capabilityCache ? { capabilityCache: this.#capabilityCache } : {}),
+      ...(this.#onTiming ? { onTiming: this.#onTiming } : {}),
+    });
+  }
+
   async listModels(): Promise<ModelListResult> {
     try {
       // PagePromise is async-iterable. Consume the provider's complete result

@@ -36,6 +36,8 @@ export function useTerminalSize(): TerminalSize {
     };
 
     const apply = (next: TerminalSize): void => {
+      const previous = applied.current;
+      if (next.columns === previous.columns && next.rows === previous.rows) return;
       applied.current = next;
       setSize((previous) =>
         next.columns === previous.columns && next.rows === previous.rows ? previous : next,

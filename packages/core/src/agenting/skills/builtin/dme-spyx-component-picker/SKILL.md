@@ -1,1144 +1,678 @@
 ---
 name: dme-spyx-component-picker
 description: >
-  DME Spyx | Component Picker. Discover, compare, acquire, adapt, swap, and
-  verify real frontend components from the current project, 21st.dev, shadcn
-  registries, Magic UI, Aceternity, v0, or an authorized Spyx browser capture.
-  Optimized for rapid header/footer/hero/CTA replacement without losing the
-  product's design DNA, behavior, accessibility, or repository conventions.
+  Discover, compare, acquire, adapt, swap, and verify real frontend components
+  from the current project, team/private registries, shadcn-compatible registries,
+  21st.dev tooling/authorized browser capture, and other configured providers
+  without losing product DNA, behavior, accessibility, responsiveness, provenance,
+  or repository conventions.
 ---
 
-# DME Spyx | Component Picker
-
-You are the DME component intelligence layer.
-
-Do not start by installing a component.
-
-Start by understanding the **slot**, the **product**, and the **current visual DNA**.
-Then discover candidates, eliminate bad fits, let the user choose when choice is
-valuable, and integrate the winner so completely that it feels native to the
-product.
-
-The goal is not:
-
-> "find a cool header."
-
-The goal is:
-
-> "find or derive the strongest header for this product, prove why it fits,
-> let the user switch directions cheaply, then transplant it without losing
-> behavior, design-system coherence, accessibility, responsiveness, or runtime
-> quality."
+# DME Spyx | Component Picker — Component Intelligence Layer vNext
 
 A component is raw material.
 
 The product is the source of truth.
 
+Do not start by installing what looks attractive.
+
+When available, load:
+- `../../shared/CORE_CONTRACT.md`;
+- `references/COMPONENT_DNA.md`;
+- `references/PROVIDER_ENGINE.md` only when provider discovery is needed;
+- `references/SPYX_BRIDGE.md` only when browser-captured capsules are involved.
+
 ---
 
-# 1. Core behavior
+## 1. Core modes
 
-This skill has two modes.
-
-## FAST LANE
-
-Use for high-frequency shell and section swaps:
-
-- header;
-- navbar;
+### FAST LANE
+For high-frequency shell/section swaps:
+- header/navbar;
 - footer;
 - hero;
 - CTA;
-- pricing section;
-- testimonial/proof section;
-- command/search surface;
+- pricing/proof block;
 - sidebar;
+- command/search;
 - auth shell.
 
-When the request is open:
+Open request:
+`inspect slot → extract Slot DNA → discover → hard-gate → shortlist 2–4 → choose → acquire winner → transplant → render → verify`
 
-`inspect current slot → extract Slot DNA → discover → shortlist 2–4 → user chooses → adapt → swap → render → verify`
+Specific request/candidate:
+`inspect → hard-gate candidate → acquire → transplant → render → verify`
 
-When the request is specific:
+Local tweak:
+`inspect local owner → edit → targeted verification`
 
-`inspect → verify compatibility → acquire → adapt → swap → render → verify`
+Do not run the picker for “make header 4px shorter.”
 
-Do not force a choice when the user already chose.
+### DEEP PICKER
+Use when component choice materially affects:
+- state architecture;
+- complex forms/data;
+- nested navigation;
+- accessibility model;
+- server/client boundary;
+- animation runtime;
+- WebGL/shaders;
+- large dependency graph;
+- performance budget;
+- shared design-system primitives.
 
-## DEEP PICKER
-
-Use for:
-
-- unusual components;
-- interaction-heavy surfaces;
-- large blocks;
-- dashboards;
-- data visualization;
-- complex forms;
-- animated experiences;
-- WebGL/shader treatments;
-- components whose source architecture materially affects the app.
-
-Add deeper source inspection, state modeling, dependency analysis, performance
-risk, and DME specialist routing.
+Add deeper source inspection, behavior modeling, and specialist routing.
 
 ---
 
-# 2. DME affinity contract
+## 2. DME affinity
 
-This skill is not a competing frontend brain. It is a specialist inside the DME
-system.
+This skill is a specialist, not a competing frontend brain.
 
-Honor decisions already established by other DME skills.
-
-## `dme-frontend`
-
-Treat as the parent kernel.
-
-Inherit when available:
-
-- product frame;
-- primary action;
-- Product Gravity;
-- Signature DNA;
-- counter-default;
-- existing invariants;
-- responsive expectations;
+Inherit settled:
+- Product Frame;
+- IA Contract;
+- Visual Direction / Design DNA;
+- design-system authority;
+- invariants;
+- responsive behavior;
 - accessibility constraints.
 
-Do not rediscover settled decisions unless new component evidence contradicts them.
+Route when component selection exposes another unresolved problem:
 
-## `dme-wireframe`
+- information architecture/navigation unsettled → `dme-wireframe-spynx-edition`;
+- visual thesis genuinely open → `dme-ui-options-spynx-edition`;
+- shared token/primitive conflict → `dme-design-system-spynx-edition`;
+- behavior must be tested before transplant → `dme-interactive-prototype-spynx-edition`;
+- final rendered QA → `dme-visual-verification-spynx-edition`.
 
-Use when the component choice would alter:
-
-- information architecture;
-- navigation model;
-- hierarchy;
-- progressive disclosure;
-- task sequence.
-
-A header picker should not silently redesign navigation architecture.
-
-If navigation itself is unsettled, settle structure first.
-
-## `dme-ui-options`
-
-Use when visual direction is genuinely open and candidate comparison is part of
-the design decision.
-
-Spyx supplies real component candidates.
-
-UI Options evaluates design theses.
-
-Do not create five options when the user asked for one direct replacement.
-
-## `dme-design-system`
-
-Use when the candidate introduces or reveals a shared decision involving:
-
-- tokens;
-- typography;
-- radius;
-- color semantics;
-- motion semantics;
-- primitives;
-- component variants;
-- theming.
-
-Do not build a second local design system around an imported component.
-
-## `dme-interactive-prototype`
-
-Use when a candidate's value depends on a product behavior that must be tested
-before production integration.
-
-Examples:
-
-- command navigation;
-- multi-level mobile menu;
-- predictive search;
-- unusual gesture;
-- interaction-heavy product tour.
-
-## `dme-visual-verification`
-
-Use after substantive integration.
-
-A component is not integrated because it compiles.
-
-It is integrated when it renders correctly inside the real product.
+Do not rediscover decisions that are already settled.
 
 ---
 
-# 3. Decision precedence
+## 3. Decision precedence
 
-When instructions conflict:
+For component work:
 
-1. explicit user request, chosen candidate, and reference;
-2. behavior and external contracts that must survive;
-3. accessibility, security, data integrity, and platform constraints;
-4. established DME product/design decisions;
-5. repository-native architecture and design system;
-6. Slot DNA extracted from the current surface;
-7. component candidate's original design;
+1. explicit user choice/reference;
+2. external behavior and product contracts;
+3. accessibility/security/data integrity/platform constraints;
+4. settled product/design decisions;
+5. repository-native architecture/design system;
+6. Slot DNA;
+7. candidate signature;
 8. provider defaults.
 
 The imported component is never the highest authority.
 
 ---
 
-# 4. Autonomy
+## 4. Slot reconnaissance
 
-Use bounded autonomy.
+Before discovery map the slot.
 
-Act directly when:
-
-- request is specific;
-- candidate is compatible;
-- change is reversible;
-- external behavior is understood;
-- evidence is strong.
-
-Offer a shortlist when:
-
-- the user asks for options;
-- visual direction is open;
-- several materially different candidates fit;
-- choosing changes product character.
-
-Escalate into wider refactoring only when the current shell/primitive/state model
-is the root cause preventing a correct integration.
-
-Do not redesign unrelated product surfaces to make one downloaded component fit.
-
----
-
-# 5. Slot reconnaissance
-
-Before searching externally, inspect the target slot.
-
-For a header/footer or other existing component, identify:
-
-- implementation file;
-- public export;
-- call sites;
-- route/layout owner;
-- props and data inputs;
-- auth/session dependencies;
-- navigation source;
-- feature flags;
-- theme dependencies;
-- mobile behavior;
-- sticky/fixed behavior;
-- scroll effects;
-- focus/keyboard behavior;
-- overlays/drawers;
-- asset dependencies;
-- tests;
-- neighboring components.
-
-Prefer keeping the public slot contract stable.
-
-For a global header, a strong replacement often means:
-
-`same export + same business inputs + new internal composition`
-
-not:
-
-`rewrite every layout and caller`.
-
-Record invariants before swapping.
-
-Example:
-
-```text
-HEADER INVARIANTS
-- current route highlighting survives
-- authenticated account menu survives
-- mobile navigation remains keyboard-operable
-- logo target remains home
-- primary CTA semantics remain unchanged
-- header height may change; content must not jump under sticky positioning
-```
-
----
-
-# 6. Slot DNA
-
-Extract a compact description of what the existing surface is doing.
-
-Read `references/COMPONENT_DNA.md` when the request involves a reference site,
-header/footer replacement, or visual matching.
-
-Capture only dimensions that affect the pick.
-
-## Structural DNA
-
-- horizontal / stacked / split / overlay;
-- full-width / constrained;
-- sticky / fixed / static;
-- single-row / multi-row;
-- primary nav model;
-- CTA placement;
-- utility/action placement;
+### Structural
+- container/full-bleed;
+- horizontal/stacked/split/overlay;
+- sticky/fixed/static;
+- one-row/multi-row;
+- primary/secondary regions;
 - mobile transformation;
 - content density.
 
-## Visual DNA
-
-- typography voice;
-- dominant surface;
-- border/divider language;
-- radius language;
-- spacing rhythm;
-- icon style;
-- contrast;
-- transparency/elevation;
-- signature accent;
-- motion character.
-
-## Behavioral DNA
-
-- scroll response;
-- menu behavior;
+### Behavioral
+- routes;
 - active state;
-- mega-menu/dropdown;
+- auth/session;
+- menu/dropdown/sheet;
 - search;
-- auth/account;
-- locale/theme controls;
-- reveal/hide;
-- keyboard semantics.
+- locale/theme;
+- keyboard;
+- scroll behavior;
+- analytics/flags;
+- state ownership.
 
-## Product DNA
+### Visual
+- typography;
+- spacing rhythm;
+- surface/border/radius;
+- icon family;
+- contrast;
+- material/elevation;
+- motion character;
+- signature accent.
 
-- primary job;
+### Product
+- job;
+- primary action;
 - expertise;
 - trust level;
 - frequency;
-- dominant device;
-- primary conversion/action.
+- dominant device.
 
-Do not require candidates to match every DNA dimension.
+Identify:
+- **must preserve**;
+- **safe to adapt**;
+- **opportunity for improvement**;
+- **forbidden regression**.
 
-Use DNA to identify what must be preserved and what can become more distinctive.
-
----
-
-# 7. Reference-site mode
-
-When the user says:
-
-- "use that site's header as a base";
-- "make it like this";
-- "I want the footer from this reference";
-- "same vibe, but for my app";
-
-inspect the reference when tools allow.
-
-Extract:
-
-`structure → hierarchy → behavior → responsive transformation → signature move`
-
-Do not mechanically transplant:
-
-- brand identity;
-- copy;
-- proprietary business data;
-- broken accessibility;
-- framework-specific implementation;
-- accidental spacing bugs.
-
-Default behavior:
-
-**derive and adapt**.
-
-If the user explicitly requests high fidelity and the use is authorized, increase
-visual/behavioral fidelity while still preserving the target project's contracts.
-
-A reference is evidence, not a replacement for product reasoning.
+Do not require a candidate to match every current detail. DNA tells you what matters and what can improve.
 
 ---
 
-# 8. Provider discovery engine
+## 5. Project-native first
 
-Before external discovery, check whether the project already contains a viable
-component.
+Before external search inspect:
+- existing primitives;
+- unused/adjacent components;
+- internal/team registry;
+- existing installed provider components.
 
-A project-native component wins when it can satisfy the outcome with a smaller,
-safer adaptation.
+Project-native wins when it satisfies the outcome with low adaptation cost and preserves product coherence.
 
-Use external sources when they materially improve:
+Search externally only when it can materially improve:
+- behavior;
+- accessibility;
+- design quality;
+- speed;
+- maintainability;
+- distinctive product character.
 
-- visual direction;
-- interaction quality;
-- implementation speed;
-- accessibility foundation;
-- complexity;
-- maintenance;
-- product distinctiveness.
-
-Read `references/PROVIDER_ENGINE.md` before provider-heavy work.
-
-Supported provider classes:
-
-- project-native components;
-- shadcn/ui;
-- configured shadcn registries;
-- 21st.dev official CLI/tools;
-- 21st.dev MCP tools when exposed;
-- authorized DME Spyx browser capture;
-- Magic UI;
-- Aceternity UI;
-- v0 when configured;
-- other verified registries already present in the repository.
-
-Never invent a component or registry identity.
-
-Never claim a candidate exists until evidence confirms it.
+Do not use provider search as ritual.
 
 ---
 
-# 9. Provider budget intelligence
+## 6. Provider capability detection
 
-Search and preview are not the same as acquisition.
+Providers and commands change.
 
-Do not burn an install/download quota just to inspect candidates.
+Detect the live surface instead of assuming:
+- configured MCP servers/tools;
+- `components.json` or equivalent registry config;
+- shadcn CLI/tool availability;
+- 21st CLI/MCP availability;
+- authorized Spyx browser bridge/capsule;
+- team/private registry;
+- Magic UI / Aceternity / other shadcn-compatible registries;
+- configured v0 or other generation provider.
 
-Use this order:
+Use provider capability, provenance, and fit — not brand preference.
 
-`SEARCH → INSPECT/PREVIEW → HARD-GATE → SHORTLIST → CHOOSE → ACQUIRE`
-
-If a provider has limited installs/downloads:
-
-- search broadly before consuming quota;
-- use metadata, preview, dry-run, diff, source inspection, or Spyx capture first;
-- acquire only the selected candidate;
-- cache session metadata so the same candidate is not rediscovered repeatedly.
-
-The authorized Spyx extension exists specifically as an additional browser-side
-capture/inspection channel for 21st.dev.
-
-Treat it as a provider bridge, not as permission to skip compatibility checks.
+Do not make one provider a hard dependency for the suite.
 
 ---
 
-# 10. Spyx browser bridge
+## 7. Acquisition budget
 
-Read `references/SPYX_BRIDGE.md`.
+Separate:
 
-When the extension and local bridge are available:
+`search/discovery → preview/source inspection → acquisition/install → adaptation`
 
-1. start the local receiver;
-2. user opens a 21st.dev component;
-3. user clicks **Send to DME Spyx**;
-4. extension captures a structured capsule;
-5. receiver stores it under `.dme-spyx/inbox/`;
-6. inspect the newest capsule;
-7. add it to the current picker board.
+Do not consume install/download quotas just to compare visuals if preview/search is enough.
 
-A Spyx capsule may contain:
+Maintain session memory:
+- provider capabilities already checked;
+- candidate IDs;
+- source locations;
+- acquisition status;
+- rejected reason;
+- selected transplant invariant.
 
-- component identity;
-- source URL;
-- author/slug;
-- description;
-- rendered preview DOM;
-- bundle/preview references;
-- authorized registry source snapshot when available;
-- capture timestamp.
-
-Do not confuse preview DOM with production source.
-
-Do not convert arbitrary rendered HTML directly into app code when a verified
-source package exists.
-
-For shader/visual captures, treat standalone output as an effect reference unless
-the target app architecture can integrate it safely.
+Do not reacquire the same candidate unless source changed.
 
 ---
 
-# 11. Candidate hard gates
+## 8. External-code blast-radius gate
 
-Reject candidates before aesthetic ranking if they fail a material hard gate.
+Before installation, inspect what the registry/provider item can change.
 
 Check:
-
-## Stack
-
-- framework;
-- React major where relevant;
-- rendering model;
-- Tailwind major/config model;
-- CSS assumptions;
+- provenance/author/source;
+- license when relevant;
+- all files written/replaced;
+- registry dependencies;
+- package dependencies/peer dependencies;
+- install/postinstall scripts;
+- config/global CSS changes;
+- environment variables;
+- server/client boundary;
+- framework/runtime version;
 - path aliases;
-- client/server boundary;
-- TypeScript expectations.
+- Tailwind/CSS assumptions;
+- security-sensitive code;
+- network calls;
+- analytics/telemetry;
+- data/auth assumptions.
 
-## Dependencies
+Modern registries may distribute components, hooks, utilities, configuration, rules, or other files. Do not treat a registry item as “one TSX file” without inspection.
 
-- peer dependencies;
+Reject, sandbox, or require explicit approval when blast radius is disproportionate.
+
+---
+
+## 9. Candidate hard gates
+
+A candidate does not enter aesthetic ranking until it passes or has an explicit repair plan for:
+
+### Stack
+- framework;
+- runtime/version;
+- SSR/RSC/client boundary;
+- TypeScript;
+- styling system;
+- package manager;
+- path aliases.
+
+### Dependencies
+- peer compatibility;
 - animation runtime;
 - icon system;
-- utility functions;
+- utility packages;
 - CSS/keyframes;
-- package conflicts;
-- bundle implications.
+- bundle/runtime implications.
 
-## Behavior
+### Behavior
+- required routes/state;
+- auth;
+- keyboard;
+- mobile transformation;
+- active/selected state;
+- loading/error where relevant.
 
-- required product states;
-- navigation semantics;
-- auth/data hooks;
-- routing;
-- responsive behavior;
-- keyboard behavior.
-
-## Accessibility
-
-Reject or budget explicit repair for:
-
+### Accessibility
+Reject or budget repair for:
 - inaccessible core navigation;
 - missing focus model;
 - incorrect semantic controls;
-- modal/menu patterns that cannot be corrected cheaply;
-- interaction dependent only on hover.
+- hover-only essential actions;
+- broken dialog/menu semantics that require extensive rewrite.
 
-## Integration risk
+### Provenance/security
+Reject or isolate when:
+- source/provenance is unclear;
+- unexpected scripts/network behavior exists;
+- item modifies unrelated configs/files;
+- secrets or unsafe assumptions appear.
 
-Reject when the component would require disproportionate:
-
+### Integration risk
+Reject when it requires disproportionate:
 - framework migration;
-- styling-system replacement;
 - global CSS corruption;
 - state rewrite;
-- incompatible rendering boundary.
+- rendering-boundary rewrite;
+- second design system.
 
-Do not fall in love with a candidate before the hard gates.
-
----
-
-# 12. Candidate ranking
-
-After hard gates, rank by consequence.
-
-Use these dimensions:
-
-### Product Fit
-Does it reinforce the user's actual job and primary action?
-
-### DNA Affinity
-Can it inherit the site's visual language without losing what makes the candidate
-interesting?
-
-### Behavior Fit
-Does its interaction model match required navigation/state?
-
-### Adaptation Cost
-How much must be rewritten before it belongs here?
-
-### Dependency Cost
-What runtime, CSS, package, and maintenance cost enters the project?
-
-### Responsive Fit
-Does its structural transformation match target device pressure?
-
-### Accessibility Repair
-How much corrective work is required?
-
-### Distinctiveness
-Does it strengthen product identity rather than importing generic UI?
-
-Do not flatten this into a fake precision score when one factor is clearly
-dominant.
-
-If useful, score 1–5 per dimension to compare close candidates.
-
-Hard gates always outrank the aggregate score.
+A visually perfect but incompatible candidate loses.
 
 ---
 
-# 13. The Picker Board
+## 10. Candidate ranking
 
-For an open choice, present only 2–4 finalists.
+After hard gates, rank by consequence:
 
-Use stable IDs.
+- **Product Fit** — supports the actual user job/primary action;
+- **DNA Affinity** — can feel native without erasing its value;
+- **Behavior Fit** — required interaction/state matches;
+- **Responsive Fit**;
+- **Accessibility Repair Cost**;
+- **Adaptation Cost**;
+- **Dependency/Runtime Cost**;
+- **Provenance Confidence**;
+- **Distinctiveness** — strengthens identity instead of importing generic provider UI.
 
-Headers:
+Use 1–5 scores only when close candidates benefit from explicit comparison.
 
-`H1`, `H2`, `H3`
+Hard gates outrank totals.
 
-Footers:
-
-`F1`, `F2`, `F3`
-
-Heroes:
-
-`R1`, `R2`, `R3`
-
-Generic components:
-
-`C1`, `C2`, `C3`
-
-Never recycle an ID for a different candidate in the same task.
-
-Each candidate should expose only decision-relevant information:
-
-```text
-H2 — Split Signal Header
-Source: 21st / @author/component
-Why it fits: preserves compact app density but gives the primary CTA stronger ownership
-Signature: asymmetric nav/CTA split
-Would change: header height + mobile menu treatment
-Keeps: routes, auth menu, logo behavior
-Cost: +1 dependency already present / no new global CSS
-Risk: medium — sticky offset must be revalidated
-```
-
-Do not dump provider marketing copy.
-
-The user should be able to reply:
-
-`H2`
-
-or:
-
-`H2, but shorter and no glass`
-
-and the task can continue without rediscovery.
+Do not confuse provider polish with product fit.
 
 ---
 
-# 14. Gallery mode
+## 11. Picker Board
 
-When browser/render tools exist and visual choice is important:
+When user choice is valuable, return 2–4 stable IDs.
 
-create a temporary comparison surface using the **real project content and tokens**.
+For each candidate store:
+- ID (`H1`, `H2`, `F1`, ...);
+- provider/source;
+- thesis/signature;
+- product-fit note;
+- behavior note;
+- adaptation cost;
+- dependency/blast-radius note;
+- risk;
+- acquisition status.
 
-Show finalists at comparable:
+Candidates must be meaningfully different.
 
-- viewport;
-- content;
-- state;
-- completeness.
+Do not install all candidates to create the board.
 
-Prefer existing:
-
-- Storybook;
-- component playground;
-- local preview route;
-- dev-only harness.
-
-If none exists, create the smallest temporary harness.
-
-Do not ship the gallery into production.
-
-After selection:
-
-- remove temporary comparison code unless explicitly useful;
-- preserve the candidate IDs and selected thesis in session state.
-
-A visual picker is better than prose when the decision is visual.
+If the user already selected a candidate, skip the board.
 
 ---
 
-# 15. Selection memory
+## 12. Reference-site mode
 
-Maintain a compact session board under `.dme-spyx/` when filesystem access exists.
+When the user provides a reference, extract:
 
-Suggested state:
+`structure → hierarchy → behavior → responsive transformation → signature move`
 
-```json
-{
-  "slot": "header",
-  "current": "ExistingHeader",
-  "invariants": [],
-  "candidates": [],
-  "selected": "H2"
-}
-```
+Also inspect:
+- typography relationship;
+- material;
+- density;
+- animation/spatial behavior when visible.
 
-This is operational memory, not product code.
+Do not mechanically transplant:
+- branding;
+- copy;
+- proprietary data;
+- inaccessible behavior;
+- framework-specific internals;
+- accidental layout defects.
 
-Use it so:
+Default: derive and adapt.
 
-- `switch to H1` works;
-- `make H2 denser` modifies the selected thesis;
-- rejected candidates are not rediscovered;
-- tool calls are not repeated.
-
-Do not commit `.dme-spyx/` unless the user explicitly wants design-decision
-artifacts in version control.
+Increase fidelity only when explicitly requested/authorized.
 
 ---
 
-# 16. Acquisition
+## 13. Browser-capsule trust model
 
-Acquire only the chosen candidate.
+A Spyx capsule is **evidence**, not automatically trusted production source.
 
-Prefer the provider's supported installation/source path.
+For `dme-spyx-capsule/v1`:
+- validate schema;
+- inspect provider/page URL;
+- separate `preview.dom` from registry/source snapshot;
+- treat preview DOM as visual/structural evidence;
+- prefer authorized registry/source files for production code;
+- honor `handoff.doNotAutoInstall`;
+- run normal hard gates before acquisition/integration.
 
-Before writing files:
+Never equate captured DOM with framework source.
 
-- inspect/dry-run when available;
-- identify files that will be overwritten;
-- inspect dependencies;
-- preserve user modifications;
-- note global CSS changes.
+If source is unavailable:
+- use preview as evidence;
+- acquire through another authorized route;
+- or implement a project-native interpretation.
 
-For shadcn-compatible sources, prefer registry tooling over copy-pasting because
-the registry can declare files and dependencies.
-
-Do not run overwrite flags blindly.
-
-When source is obtained through an authorized Spyx capture:
-
-- distinguish source files from preview DOM and bundle HTML;
-- preserve provenance in working notes;
-- port source into repository conventions;
-- do not ship browser-extension artifacts into the app.
+Label what was captured versus acquired.
 
 ---
 
-# 17. Adaptation protocol
+## 14. Candidate acquisition
 
-Never drop an external component into production untouched unless it already
-matches the project by coincidence.
+Acquire only after:
+- user selection; or
+- evidence strongly establishes one winner and autonomy/risk rules permit direct action.
 
-Adapt in this order.
+Before applying:
+- inspect diff/manifest where tooling permits;
+- confirm files/dependencies;
+- isolate unexpected changes;
+- reject provider demo data/config not needed by host.
 
-## 17.1 Content
-
-Replace demo:
-
-- logo/name;
-- nav items;
-- CTA;
-- account actions;
-- social links;
-- legal links;
-- fake statistics;
-- placeholder copy.
-
-Use real project data and routes.
-
-## 17.2 Behavior
-
-Reconnect:
-
-- routing;
-- auth/session state;
-- active-route state;
-- menus;
-- search;
-- theme/locale;
-- analytics hooks if they already exist;
-- feature flags;
-- responsive interaction.
-
-## 17.3 Tokens
-
-Map external styling to:
-
-- typography;
-- colors;
-- spacing;
-- radius;
-- borders;
-- surfaces;
-- motion.
-
-Preserve the candidate's **signature move**, not its arbitrary raw values.
-
-## 17.4 Architecture
-
-Fit repository:
-
-- component boundaries;
-- aliases;
-- utilities;
-- server/client split;
-- state ownership;
-- test conventions.
-
-## 17.5 Accessibility
-
-Repair semantics and interaction before polish.
-
-## 17.6 Performance
-
-Remove decorative or runtime cost that does not pay for product value.
-
-The finished component should feel designed for the host product.
+Never run opaque install commands blindly just because they are official examples.
 
 ---
 
-# 18. Signature preservation
+## 15. Transplant invariant
 
-When adapting a candidate, identify what made it worth selecting.
-
-Call this the **transplant invariant**.
+Before adaptation, name what made the candidate worth choosing.
 
 Example:
 
 ```text
-CANDIDATE H2 TRANSPLANT INVARIANT
-preserve the asymmetric nav/CTA tension and compact floating action zone
+TRANSPLANT INVARIANT
+preserve the compact asymmetric nav/CTA tension and the fast mobile command transition
 ```
 
 You may change:
-
-- exact colors;
-- fonts;
+- exact color;
+- font;
 - copy;
 - spacing;
 - radius;
+- icon family;
 - implementation library;
-- icon set;
-- responsive breakpoint.
+- breakpoint;
+- internal component structure.
 
-Do not adapt so aggressively that every candidate collapses into the same house
-component.
+Do not adapt so aggressively that all candidates collapse into the same house component.
 
 Product coherence and candidate identity must coexist.
 
 ---
 
-# 19. Header swap protocol
+## 16. Transplant protocol
 
-Headers are high-risk because they combine brand, navigation, layout, responsive
-behavior, and application state.
+### Content
+Replace demo:
+- branding;
+- links;
+- CTA;
+- account actions;
+- fake metrics/testimonials;
+- placeholder text.
 
-Before swap, map:
+Use real routes/data/content.
 
-- logo/home action;
+### Behavior
+Reconnect:
+- routing;
+- auth/session;
+- active route;
+- menus/search;
+- locale/theme;
+- analytics hooks/flags when already present;
+- responsive interaction.
+
+### Design system
+Map to host:
+- typography;
+- semantic colors;
+- spacing;
+- radius;
+- borders/surfaces;
+- icons;
+- motion.
+
+Preserve signature; discard provider boilerplate.
+
+### Architecture
+Fit:
+- component boundaries;
+- aliases;
+- server/client split;
+- state ownership;
+- utilities;
+- test conventions.
+
+### Accessibility
+Repair semantics/focus/keyboard before visual polish.
+
+### Performance
+Remove runtime/decorative cost that does not pay for product value.
+
+---
+
+## 17. Header/navigation swap protocol
+
+Headers are high-risk.
+
+Map before swap:
+- home/logo action;
 - nav source;
 - active route;
 - primary CTA;
-- account/auth state;
-- utility controls;
+- account/auth;
+- locale/theme;
 - mobile navigation;
-- sticky/fixed offset;
+- sticky/fixed offsets;
 - scroll behavior;
 - overlay focus;
-- z-index relationships.
+- z-index;
+- keyboard path.
 
-Prefer preserving the public header export.
+Prefer preserving public header export/API.
 
-If candidate expects different props, create a local adapter rather than leaking
-provider-specific API across the app.
+Use a local adapter when provider props differ instead of leaking provider API across the app.
 
-Test:
-
+After swap verify:
 - desktop;
-- intermediate width;
 - narrow/mobile;
-- long nav labels;
-- authenticated/anonymous state if relevant;
-- keyboard-only menu;
-- current-route state;
-- sticky transition.
-
-Do not ship a header that only works in the screenshot state.
-
----
-
-# 20. Footer swap protocol
-
-Before swap, identify:
-
-- navigation groups;
-- legal links;
-- locale;
-- social links;
-- newsletter/form behavior;
-- product/status links;
-- dynamic year/content;
-- trust/compliance content;
-- mobile collapse behavior.
-
-Footers often become meaningless grids of links.
-
-Use hierarchy:
-
-`product continuation → useful navigation → trust/legal closure`
-
-Do not invent links to make a candidate layout look full.
-
-If the project has little footer content, choose a footer whose composition works
-with little content.
+- intermediate awkward width;
+- active route;
+- auth/account state;
+- sticky offset;
+- keyboard + escape/focus restore;
+- build/runtime.
 
 ---
 
-# 21. Any-component protocol
+## 18. Interaction-heavy candidate gate
 
-For generic components, classify before search:
+For command palettes, predictive search, mega-menus, drag/drop, animated navigation, or unusual gesture:
 
-- primitive;
-- navigation;
-- data display;
-- input/form;
-- overlay;
-- feedback;
-- marketing block;
-- media;
-- interaction/effect;
-- layout/shell.
+- model state/transition behavior;
+- inspect keyboard semantics;
+- inspect cancellation/back;
+- inspect loading/error;
+- prototype first when uncertainty is meaningful.
 
-The category changes provider preference and verification depth.
-
-Do not search "cool component".
-
-Search by product intent:
-
-- `compact B2B header with account menu and primary create action`;
-- `dense filter command bar for keyboard-heavy analytics`;
-- `low-content footer with legal trust emphasis`;
-- `comparison table with sticky first column and mobile overflow`.
-
-Intent-rich search produces better candidates.
+Appearance alone cannot validate behavior-heavy components.
 
 ---
 
-# 22. Provider mixing
+## 19. Shader / WebGL / heavy-effect gate
 
-Do not confuse "multiple sources" with "multiple design systems."
+Before integrating:
+- identify product value;
+- measure/estimate runtime/GPU cost;
+- inspect mobile fallback;
+- protect text readability;
+- respect reduced motion;
+- avoid hydration/server-boundary mistakes;
+- provide non-WebGL fallback where product still needs to function.
 
-It is acceptable to acquire components from different providers when they are
-ported into one coherent host system.
-
-It is not acceptable to leave:
-
-- three radius languages;
-- multiple icon families;
-- duplicated button primitives;
-- competing animation runtimes;
-- inconsistent focus behavior;
-- incompatible color semantics.
-
-Normalize infrastructure.
-
-Preserve useful visual character.
+A visually impressive shader is not automatically a good component.
 
 ---
 
-# 23. Dependency gate
+## 20. Switching and iteration
 
-Before adding a dependency ask:
+Stable candidate IDs are session contracts.
 
-1. Is it already installed?
-2. Does the project have an equivalent?
-3. Is it required for the component's real value?
-4. Can the effect be removed without damaging the selected thesis?
-5. What is the runtime/bundle/maintenance cost?
-6. Does it conflict with SSR/RSC/build constraints?
+If user says:
+- “H2 but no glass” → modify H2 along that dimension;
+- “back to H1” → switch using stored candidate/session info;
+- “make H2 shorter” → preserve H2 identity and reverify affected layout.
 
-A component that requires six packages to achieve a decorative hover should
-probably lose the hover.
+Do not rediscover providers every time.
 
-A mature accessible primitive library may be worth the dependency.
+Do not use destructive git reset to switch variants.
 
----
-
-# 24. Visual effects and shaders
-
-Treat visual effects as performance-sensitive components.
-
-Check:
-
-- main-thread cost;
-- WebGL/GPU assumptions;
-- fallback behavior;
-- mobile behavior;
-- reduced motion;
-- battery impact;
-- contrast/readability;
-- interaction latency;
-- SSR/hydration boundary.
-
-A shader or particle field should not own the page merely because it is
-technically impressive.
-
-When the authorized extension exports a shader standalone:
-
-- use it first as visual evidence;
-- integrate only if the target architecture has an intentional WebGL strategy;
-- preserve a static/reduced-motion fallback when appropriate.
+Preserve unrelated edits.
 
 ---
 
-# 25. Verification ladder
+## 21. Failure recovery
 
-After acquisition but before integration:
-- inspect source;
-- resolve imports;
-- inspect declared/global CSS;
-- inspect dependency changes.
+### Candidate does not fit visually
+Revisit DNA/signature; do not accumulate endless CSS overrides.
 
-After adaptation:
-- targeted typecheck/test;
-- render in real host;
-- interaction check;
-- responsive check;
-- accessibility check;
-- broader build when risk justifies it.
+### Candidate breaks behavior
+Identify missing product contract; adapt narrowly or reject.
 
-For header/footer:
-- render at representative narrow/intermediate/desktop widths;
-- verify navigation;
-- verify keyboard;
-- inspect console;
-- inspect layout offset;
-- verify supported themes.
+### Too many dependencies
+Find lower-cost candidate or remove nonessential effects.
 
-Route to `dme-visual-verification` for substantive swaps.
+### Desktop works, mobile fails repeatedly
+Revisit structural responsive model, not breakpoint patch count.
 
-A successful install is not a successful component transplant.
+### Provider unavailable
+One meaningful retry if transient, then use another provider/project-native path.
 
----
+### Bridge offline
+Use downloaded capsule/manual import. Do not block the whole workflow.
 
-# 26. Rollback and switching
+### Preview exists, source absent
+Treat preview as evidence, not source.
 
-Component choice should remain cheap until the user commits.
+### Build fails after install
+Classify stack/dependency/import/CSS mismatch, revert unsafe partial integration, update candidate model, choose a new strategy.
 
-Before a major swap:
-
-- understand current diff;
-- avoid overwriting unrelated edits;
-- keep old implementation recoverable through version control or a temporary
-  local copy when git state is unsafe.
-
-When user says:
-
-`switch to H1`
-
-do not restart discovery.
-
-Use the stored candidate contract and reapply.
-
-When user says:
-
-`go back`
-
-restore the last known-good component without undoing unrelated work.
-
-Do not use destructive git reset.
+Do not blindly repeat install.
 
 ---
 
-# 27. Failure recovery
+## 22. Verification
 
-Classify failure.
+A component is not integrated because it compiles.
 
-## Candidate does not fit visually
-Revisit DNA affinity/signature. Do not pile on CSS overrides indefinitely.
+For substantive swaps verify:
+- source acquisition status;
+- integration status;
+- targeted tests/typecheck/lint as relevant;
+- build/runtime;
+- representative widths;
+- required states;
+- keyboard/focus;
+- responsive transformation;
+- host token/design coherence;
+- console/runtime errors;
+- performance risk when effect-heavy.
 
-## Candidate breaks behavior
-Identify missing product contract. Reject candidate or add a narrow adapter.
+Use `dme-visual-verification-spynx-edition` for deep rendered QA.
 
-## Candidate needs too many dependencies
-Find a lower-cost candidate or remove nonessential effects.
+Distinguish:
+- source acquired;
+- source integrated;
+- build passing;
+- rendered verified.
 
-## Component works desktop but not mobile
-Revisit its structural responsive model. Do not add breakpoint patches forever.
-
-## Provider unavailable
-Use another verified provider or project-native composition.
-
-## Spyx bridge unavailable
-Use capsule download/manual import. Do not block the entire task.
-
-## Source unavailable but preview exists
-Use preview as reference and locate a legally/technically available implementation.
-Do not pretend preview DOM is equivalent to source.
-
-## Build fails after install
-Classify stack/dependency/import/CSS mismatch, revert unsafe partial integration,
-update the candidate model, then choose a new strategy.
-
-Do not repeat the same install blindly.
+They are different claims.
 
 ---
 
-# 28. Stop conditions
+## 23. Stop conditions
 
 Stop when:
-
-- user-selected or evidence-selected candidate is integrated;
-- transplant invariant is preserved;
+- selected/evidence-selected candidate is integrated;
+- transplant invariant survives;
 - product behavior survives;
-- project design language is coherent;
-- no unjustified provider styling leaks remain;
-- relevant responsive states work;
-- accessibility is acceptable for the changed surface;
-- dependencies are justified;
+- host design language is coherent;
+- provider boilerplate does not leak without reason;
+- responsive states work;
+- accessibility is acceptable for changed surface;
+- dependencies/blast radius are justified;
 - relevant technical checks pass;
-- rendered verification was performed when tooling exists;
+- rendered verification exists when tooling permits;
 - no known material regression remains.
 
-Do not continue searching after a strong candidate is successfully integrated
-unless the user asks for more options.
+Do not keep searching after a strong candidate is successfully integrated unless user asks for more.
 
 ---
 
-# 29. Communication contract
+## 24. Communication contract
 
-For open selection, show the Picker Board.
+For open selection show the Picker Board.
 
-For direct implementation, do not force the user through a catalog.
+For direct implementation, do not force a catalog.
 
-After implementation report only:
-
+After integration report:
 - selected component/source;
 - what was preserved;
 - what was adapted;
-- dependencies added/removed;
-- verification actually performed;
-- any remaining limitation.
+- dependencies/files added or changed materially;
+- verification performed;
+- remaining limitation.
 
-Do not narrate every search or install attempt.
+Do not narrate every search/install attempt.
 
 ---
 
-# 30. Golden behavior
+## Standalone core capsule
 
-The user should be able to interact with this skill like this:
-
-> "Me mostra 3 headers que combinem com esse site."
-
-Spyx:
-
-- understands the current header;
-- extracts its product and visual DNA;
-- searches without wasting acquisition budget;
-- returns H1/H2/H3 with meaningful differences;
-- previews them when possible.
-
-User:
-
-> "H2, mas mais baixo e sem glass."
-
-Spyx:
-
-- keeps H2's structural/signature identity;
-- adapts height/surface;
-- installs only what is needed;
-- preserves routes/auth/mobile behavior;
-- swaps behind the existing header contract;
-- renders and verifies.
-
-User:
-
-> "Prefiro H1."
-
-Spyx:
-
-- switches using session memory;
-- does not rediscover the catalog;
-- revalidates the affected surface.
-
-That is the standard.
-
-DME Spyx is not a component downloader.
-
-It is a **component selection, transplantation, and verification engine**.
+If shared core is unavailable: inspect slot/product before providers; prefer project-native; detect live provider capabilities; hard-gate compatibility/provenance/blast radius before ranking; acquire only selected candidate; preserve a transplant invariant; reconnect real behavior/content/tokens; render and verify; recover by changing strategy rather than reinstalling blindly.

@@ -182,6 +182,11 @@ export class SessionStore {
     this.#paths = paths;
   }
 
+  /** Root of the global store, for auxiliary metadata kept outside sessions. */
+  get root(): string {
+    return this.#paths.root;
+  }
+
   #dir(workspace: string): string {
     return path.join(this.#paths.sessions, workspaceKey(workspace));
   }

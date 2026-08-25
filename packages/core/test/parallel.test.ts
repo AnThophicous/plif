@@ -35,13 +35,13 @@ describe('batching parallel-safe calls', () => {
     assert.deepEqual(names(batches), [['read_file', 'read_file', 'list_dir']]);
   });
 
-  it('caps a long run of safe calls at three per batch', () => {
+  it('caps a long run of safe calls at five per batch', () => {
     const batches = scheduleBatches(
       Array.from({ length: 7 }, () => call('read_file')),
       registry,
     );
-    assert.equal(MAX_PARALLEL_SAFE_CALLS, 3);
-    assert.deepEqual(batches.map((batch) => batch.length), [3, 3, 1]);
+    assert.equal(MAX_PARALLEL_SAFE_CALLS, 5);
+    assert.deepEqual(batches.map((batch) => batch.length), [5, 2]);
   });
 
   it('keeps a write between the reads that surround it', () => {

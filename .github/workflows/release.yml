@@ -16,7 +16,7 @@ on:
       release_ref:
         description: 'Existing tag to publish'
         required: true
-        default: 'v0.3.6'
+        default: 'v0.3.8'
         type: string
 
 permissions:
@@ -24,10 +24,48 @@ permissions:
   id-token: write
 
 jobs:
+  validate:
+    name: Validate (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      - name: Install Linux sandbox dependency
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+
+      - run: npm ci
+      - name: Test Linux sandbox backend
+        if: runner.os == 'Linux'
+        run: node --import tsx --test packages/sandbox/test/linux-backend.test.ts
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Smoke-test the TTY surface
+        run: node packages/cli/dev/smoke-tui.mjs
+      - run: npm pack --workspace @plif/cli --dry-run
+
   release:
-    # Windows, because that is where plif's isolation actually applies: job
-    # objects, DPAPI, the OEM console decoder. Testing elsewhere would prove
-    # the build works on a platform nobody is installing it on.
+    needs: validate
+    # Publish only after both supported operating-system validations pass.
+    # The release job remains Windows because npm provenance and the existing
+    # release path are already exercised there; the matrix above proves the
+    # package/build and Linux sandbox path independently before publishing.
     runs-on: windows-latest
 
     steps:
@@ -42,8 +80,6 @@ jobs:
           cache: npm
 
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
       - run: npm run build
 
       - name: Check the tag matches the version

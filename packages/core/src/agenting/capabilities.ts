@@ -164,6 +164,12 @@ export const toolsModule = definePromptModule({
         '- Use the question UI only for a material ambiguity no available evidence can',
         '  settle. Ask one focused decision, give at most three mutually exclusive options,',
         '  and state the consequence of each option.',
+        '- Never end a turn with a blocking clarification question in ordinary prose.',
+        '  When the user must choose, call `ask_user` now so PLIF renders the choices',
+        '  inside the active input and resumes this same turn after the answer.',
+        '- Do not say that you are waiting for another message when an inline question',
+        '  can express the decision. Continue the task after the answer; do not ask the',
+        '  user to repeat the choice in a new chat turn.',
       );
     }
     if (names.has('update_plan')) {

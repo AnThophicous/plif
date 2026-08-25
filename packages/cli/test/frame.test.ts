@@ -92,7 +92,7 @@ describe('committing rows to scrollback', () => {
     assert.equal(restored.epoch, current.epoch + 1);
   });
 
-  it('commits a completed current turn so long output cannot disappear', () => {
+  it('keeps the completed current turn live until the next input', () => {
     const entries = [
       entry('input', 'the current request'),
       entry('thinking', 'Plif Thinking', { detail: 'reasoning', status: 'done' }),
@@ -108,7 +108,7 @@ describe('committing rows to scrollback', () => {
       entry('notice', 'the tail is longer than eight rows', { status: 'done' }),
     ];
 
-    assert.equal(scrollbackCommitEnd(entries), 8);
+    assert.equal(scrollbackCommitEnd(entries), 0);
   });
 
   it('commits only the previous turn when a new input establishes the boundary', () => {
@@ -339,6 +339,35 @@ describe('clipping an answer that is still streaming', () => {
     const clipped = tail(huge, 80, 3);
     assert.equal(clipped.length, 240);
     assert.ok(clipped.endsWith('x'));
+  });
+
+  it('lets Ctrl+E target a tool after its turn was committed', () => {
+    const tool = entry('tool', 'Read', { status: 'done', detail: 'hidden output' });
+    let state = withEntries([
+      entry('input', 'inspect'),
+      tool,
+      entry('answer', 'done', { status: 'done' }),
+    ]);
+    state = sessionReducer(state, { type: 'commit', upTo: 3 });
+
+    const expanded = sessionReducer(state, { type: 'toggleLastTool' });
+    assert.equal(expanded.expandedToolId, tool.id);
+    assert.deepEqual(expanded.entries, []);
+
+    const collapsed = sessionReducer(expanded, { type: 'toggleLastTool' });
+    assert.equal(collapsed.expandedToolId, null);
+  });
+
+  it('skips a newer tool that has no expandable payload', () => {
+    const expandable = entry('tool', 'Read', { status: 'done', detail: 'hidden output' });
+    const marker = entry('tool', 'Done', { status: 'done' });
+    const state = sessionReducer(
+      withEntries([expandable, marker]),
+      { type: 'toggleLastTool' },
+    );
+
+    assert.equal(state.entries.find((item) => item.id === expandable.id)?.expand, true);
+    assert.equal(state.entries.find((item) => item.id === marker.id)?.expand, undefined);
   });
 });
 

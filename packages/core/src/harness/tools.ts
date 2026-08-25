@@ -44,6 +44,9 @@ import type { GlobalConfig } from '../config/global.js';
 import { parseModelRef, resolveConfig, validate as validateModel } from '../model/config.js';
 import type { StoredConfig } from '../model/config.js';
 import type { Attachment } from '../model/provider.js';
+import type { GoalController } from './goals.js';
+import type { SessionStore } from '../session/store.js';
+import type { ConversationEvent } from '../session/events.js';
 
 export interface ToolContext {
   readonly container: Container;
@@ -75,6 +78,10 @@ export interface ToolContext {
   readonly activateProfile?: (name: string) => Promise<void>;
   /** Set the interactive session's user-facing final objective. */
   readonly setGoal?: (condition: string) => Promise<void>;
+  /** Durable goal state; model calls never arm autonomous rounds. */
+  readonly goal?: GoalController;
+  /** Read-only access to persisted sessions in the current workspace. */
+  readonly sessions?: SessionStore;
   /** Attachments from the user message that caused this tool call. */
   readonly attachments?: readonly Attachment[];
 }
@@ -95,6 +102,8 @@ export interface ToolResult {
   readonly diff?: string;
   /** Full terminal-facing transcript when the model-facing output is compacted. */
   readonly display?: string;
+  /** Internal accounting for composite runtime tools such as run_script. */
+  readonly toolCallCount?: number;
 }
 
 export interface ToolEnvelope {
@@ -1356,13 +1365,207 @@ export const setGoal: Tool = {
     },
   },
   async run(input, context) {
-    if (!context.setGoal) return { output: 'Session goals are not available in this run.', ok: false };
+    if (!context.goal && !context.setGoal) return { output: 'Session goals are not available in this run.', ok: false };
     const condition = requireString(input, 'condition').trim();
     if (condition.length > 2000) {
       throw new PlifError('INVALID_ARGUMENT', 'goal condition must be 2000 characters or fewer');
     }
-    await context.setGoal(condition);
-    return { output: 'Session goal recorded. It will guide future turns without starting work by itself.', ok: true };
+    if (context.goal) await context.goal.setModelGoal(condition);
+    else await context.setGoal?.(condition);
+    return {
+      output: 'Session goal recorded (not armed) without starting work. It will guide future turns without starting autonomous rounds.',
+      ok: true,
+    };
+  },
+};
+
+export const getGoal: Tool = {
+  parallelSafe: true,
+  spec: {
+    name: 'get_goal',
+    description: 'Read the durable workspace goal, including status, exact revision, rounds, and whether autonomous rounds are armed.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  async run(_input, context) {
+    const state = context.goal?.get();
+    return state
+      ? { output: JSON.stringify({
+          condition: state.condition,
+          status: state.status,
+          revision: state.revision,
+          rounds: state.rounds,
+          maxRounds: state.maxRounds,
+          armed: state.armed,
+          blockedReason: state.blockedReason,
+        }), ok: true }
+      : { output: 'No goal is configured for this workspace.', ok: true };
+  },
+};
+
+function goalRevision(input: Record<string, unknown>): number {
+  const value = input['revision'];
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new PlifError('INVALID_ARGUMENT', 'goal mutation requires the exact integer "revision" from get_goal');
+  }
+  return value;
+}
+
+export const completeGoal: Tool = {
+  spec: {
+    name: 'complete_goal',
+    description: 'Mark the active durable goal complete after it is genuinely achieved. Requires exact revision and concrete evidence.',
+    parameters: {
+      type: 'object',
+      properties: {
+        revision: { type: 'integer', description: 'Exact revision returned by get_goal.' },
+        evidence: { type: 'string', description: 'Commands, tests, or other evidence proving completion.' },
+      },
+      required: ['revision', 'evidence'],
+      additionalProperties: false,
+    },
+  },
+  async run(input, context) {
+    if (!context.goal) return { output: 'Durable goals are not available in this run.', ok: false };
+    const evidence = requireString(input, 'evidence');
+    const state = await context.goal.complete(goalRevision(input), evidence);
+    return { output: `Goal completed at revision ${state.revision}. Evidence recorded.`, ok: true };
+  },
+};
+
+export const blockGoal: Tool = {
+  spec: {
+    name: 'block_goal',
+    description: 'Block an active goal only when the same concrete blocker persisted across at least 3 rounds. Requires exact revision.',
+    parameters: {
+      type: 'object',
+      properties: {
+        revision: { type: 'integer', description: 'Exact revision returned by get_goal.' },
+        reason: { type: 'string', description: 'Concrete blocker and what dependency is missing.' },
+      },
+      required: ['revision', 'reason'],
+      additionalProperties: false,
+    },
+  },
+  async run(input, context) {
+    if (!context.goal) return { output: 'Durable goals are not available in this run.', ok: false };
+    const state = await context.goal.block(goalRevision(input), requireString(input, 'reason'));
+    return { output: `Goal blocked at revision ${state.revision}: ${state.blockedReason ?? 'unspecified blocker'}`, ok: true };
+  },
+};
+
+interface SessionSearchHit {
+  readonly sessionId: string;
+  readonly title: string;
+  readonly updatedAt: string;
+  readonly score: number;
+  readonly excerpts: string[];
+}
+
+function eventSearchText(event: ConversationEvent): string {
+  switch (event.kind) {
+    case 'user.message':
+    case 'assistant.message':
+      return event.text;
+    case 'tool.completed':
+      return event.output.slice(0, 500);
+    default:
+      return '';
+  }
+}
+
+function excerptsFor(text: string, query: string): string[] {
+  const lower = text.toLocaleLowerCase();
+  const needle = query.toLocaleLowerCase();
+  const results: string[] = [];
+  let from = 0;
+  while (results.length < 3) {
+    const found = lower.indexOf(needle, from);
+    if (found < 0) break;
+    const start = Math.max(0, found - 60);
+    const end = Math.min(text.length, found + query.length + 60);
+    results.push(`${start > 0 ? '…' : ''}${text.slice(start, end).replace(/\s+/g, ' ')}${end < text.length ? '…' : ''}`);
+    from = found + Math.max(1, needle.length);
+  }
+  return results;
+}
+
+function searchPayload(hits: SessionSearchHit[]): string {
+  let current = hits.map((hit) => ({
+    ...hit,
+    title: hit.title.slice(0, 160),
+    excerpts: hit.excerpts.map((excerpt) => excerpt.slice(0, 500)),
+  }));
+  let serialized = JSON.stringify(current);
+  while (serialized.length > 5_000 && current.length > 0) {
+    const last = current[current.length - 1]!;
+    const excerpt = last.excerpts.at(-1);
+    if (last.excerpts.length > 1) last.excerpts.pop();
+    else if (excerpt && excerpt.length > 100) {
+      last.excerpts[last.excerpts.length - 1] = `${excerpt.slice(0, Math.max(80, excerpt.length - 100))}…`;
+    } else current.pop();
+    serialized = JSON.stringify(current);
+  }
+  if (serialized.length <= 5_000) return serialized;
+  // Keep the contract valid JSON even when a future metadata field grows.
+  return JSON.stringify(current.map((hit) => ({
+    ...hit,
+    title: hit.title.slice(0, 80),
+    excerpts: hit.excerpts.map((excerpt) => excerpt.slice(0, 80)),
+  })));
+}
+
+export const sessionSearch: Tool = {
+  parallelSafe: true,
+  spec: {
+    name: 'session_search',
+    description:
+      'Search the 20 most recent sessions in this workspace for a case-insensitive query. ' +
+      'Returns ranked sessions with matching excerpts. This is read-only and never searches other workspaces.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search terms; case-insensitive substring.' },
+        limit: { type: 'integer', description: 'Maximum sessions to return, default 3, maximum 5.' },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    },
+  },
+  async run(input, context) {
+    if (!context.sessions || !context.workspace) return { output: 'Session search is not available in this run.', ok: false };
+    const query = requireString(input, 'query').trim();
+    if (!query) throw new PlifError('INVALID_ARGUMENT', 'session_search requires a non-empty query');
+    if (query.length > 500) throw new PlifError('INVALID_ARGUMENT', 'session_search query must be 500 characters or fewer');
+    const limit = typeof input['limit'] === 'number' && Number.isFinite(input['limit'])
+      ? Math.min(5, Math.max(1, Math.floor(input['limit'])))
+      : 3;
+    const metas = (await context.sessions.list(context.workspace)).slice(0, 20);
+    const ranked: SessionSearchHit[] = [];
+    for (let index = 0; index < metas.length; index += 1) {
+      const meta = metas[index] as (typeof metas)[number];
+      const session = await context.sessions.resolve(context.workspace, meta.id);
+      if (!session) continue;
+      const chunks: string[] = [];
+      for (const event of await session.history()) {
+        const text = eventSearchText(event);
+        if (text) chunks.push(text);
+      }
+      const combined = chunks.join('\n');
+      const matches = excerptsFor(combined, query);
+      if (matches.length === 0) continue;
+      const occurrences = combined.toLocaleLowerCase().split(query.toLocaleLowerCase()).length - 1;
+      const recencyBonus = metas.length <= 1 ? 0.1 : 0.1 * ((metas.length - index) / metas.length);
+      ranked.push({
+        sessionId: meta.id,
+        title: meta.title || '(untitled session)',
+        updatedAt: meta.updatedAt,
+        score: Number((occurrences * (1 + recencyBonus)).toFixed(3)),
+        excerpts: matches,
+      });
+    }
+    ranked.sort((left, right) => right.score - left.score || right.updatedAt.localeCompare(left.updatedAt));
+    if (ranked.length === 0) return { output: 'No matching sessions.', ok: true };
+    return { output: searchPayload(ranked.slice(0, limit)), ok: true };
   },
 };
 
@@ -1651,6 +1854,10 @@ export const DEFAULT_TOOLS: readonly Tool[] = [
   updatePlan,
   remember,
   setGoal,
+  getGoal,
+  completeGoal,
+  blockGoal,
+  sessionSearch,
   startTask,
   listTasks,
   taskStatus,

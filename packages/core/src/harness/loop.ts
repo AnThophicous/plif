@@ -29,7 +29,7 @@ import { randomUUID } from 'node:crypto';
 import { PlifError, toPlifError } from '../errors.js';
 import type { EventBus } from '../events/bus.js';
 import { safeToolCallArguments } from '../model/provider.js';
-import type { Message, ModelProvider, ToolCall } from '../model/provider.js';
+import type { Message, ModelExecutionContext, ModelProvider, ToolCall } from '../model/provider.js';
 import type { Attachment } from '../model/provider.js';
 import type { Container } from '../container/container.js';
 import type { QuestionBroker } from './ask.js';
@@ -68,7 +68,9 @@ import type { ShellDialect } from '../execution/shell-dialects.js';
 import type { TaskManager } from '../tasks/manager.js';
 import type { LspManager } from '../lsp/manager.js';
 import type { EditCoordinator } from './edits.js';
+import type { GoalController } from './goals.js';
 import { eventBase } from '../session/events.js';
+import type { SessionStore } from '../session/store.js';
 import {
   createHarnessCycle,
   inspectionPaths,
@@ -103,9 +105,15 @@ export interface LoopOptions {
   readonly maxReviewReminders?: number;
   /** Enable the durable plan/review cycle for the selected effort only. */
   readonly enableHarnessCycle?: boolean;
+  readonly plifTelemetry?: {
+    readonly reviewPasses?: number;
+    readonly skillsLoaded?: readonly string[];
+  };
   readonly signal?: AbortSignal;
   readonly memory?: MemoryStore;
   readonly workspace?: string;
+  /** Permission context inherited from the interactive PLIF host. */
+  readonly execution?: ModelExecutionContext;
   readonly sessionId?: string;
   readonly contextTokens?: number;
   /** Output reservation used by the context budget engine. */
@@ -126,6 +134,11 @@ export interface LoopOptions {
   readonly shellDialect?: ShellDialect;
   readonly activateProfile?: (name: string) => Promise<void>;
   readonly setGoal?: (condition: string) => Promise<void>;
+  readonly goal?: GoalController;
+  readonly sessions?: SessionStore;
+  /** Enable the in-turn sequential script tool. Defaults to true. */
+  readonly runScript?: boolean;
+  readonly runScriptMaxSteps?: number;
   readonly attachments?: readonly Attachment[];
   /**
    * Anything the human typed since the turn started, taken and cleared.
@@ -173,12 +186,62 @@ export const DEFAULT_CONTEXT_TOKENS = 1_000_000;
 export const AUTO_COMPACTION_TRIGGER_RATIO = 0.9;
 export const AUTO_COMPACTION_TARGET_RATIO = 0.5;
 
+/** Public so prompt builders can advertise the runtime tool before the loop starts. */
+export const RUN_SCRIPT_SPEC = {
+  name: 'run_script',
+  description:
+    'Execute a SEQUENCE of tool calls in ONE model turn, without waiting for the model ' +
+    'between steps. Use for 3+ calls that would otherwise each cost a round trip ' +
+    '(batch reads, edit-then-verify, apply the same change to several files). ' +
+    'Steps run strictly in order. If a step fails, execution stops and you receive the ' +
+    'failing step error plus outputs from steps before it.',
+  parameters: {
+    type: 'object',
+    properties: {
+      steps: {
+        type: 'array',
+        minItems: 1,
+        items: {
+          type: 'object',
+          properties: {
+            tool: { type: 'string', description: 'Exact tool name, for example read_file.' },
+            args: { type: 'object', description: 'Arguments object for that tool.' },
+          },
+          required: ['tool', 'args'],
+          additionalProperties: false,
+        },
+        description: 'Ordered tool calls. Maximum is configured by runScriptMaxSteps (default 10).',
+      },
+    },
+    required: ['steps'],
+    additionalProperties: false,
+  },
+} as const;
+
+function runScriptLimit(value: number | undefined): number {
+  return Number.isFinite(value) && value !== undefined ? Math.min(10, Math.max(1, Math.floor(value))) : 10;
+}
+
+function curateStepOutput(output: string): string {
+  const head = 1_500;
+  const tail = 300;
+  if (output.length <= head + tail) return output;
+  const omitted = output.length - head - tail;
+  return `${output.slice(0, head)}\n…[${omitted} omitted]…\n${output.slice(-tail)}`;
+}
+
 /** Below this, a loop pass was too quick to be a moment worth marking. */
 export const CYCLE_SEPARATOR_MIN_MS = 10_000;
 // One combined checkpoint plus one follow-up is enough to recover a model that
 // missed part of the evidence. A third reminder only elongates the session and
 // repeats the same instruction without improving the proof.
 const DEFAULT_MAX_REVIEW_REMINDERS = 2;
+const DEFAULT_REASONING_BUDGET_MS = 8 * 60 * 1_000;
+
+function reasoningBudgetMs(): number {
+  const raw = Number(process.env['PLIF_REASONING_BUDGET_MS']);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_REASONING_BUDGET_MS;
+}
 
 export function shouldAutoCompact(used: number, contextTokens: number): boolean {
   return contextTokens > 0 && used >= Math.floor(contextTokens * AUTO_COMPACTION_TRIGGER_RATIO);
@@ -276,9 +339,10 @@ export async function runCompaction(
   messages: readonly Message[],
   run: CompactionRun,
 ): Promise<CompactionResult> {
+  const compactionProvider = run.provider?.withEffort?.('medium') ?? run.provider;
   const result = await compact(messages, {
     maxTokens: run.target,
-    ...(run.provider ? { provider: run.provider } : {}),
+    ...(compactionProvider ? { provider: compactionProvider } : {}),
     ...(run.signal ? { signal: run.signal } : {}),
     onStage: (stage, step, steps) => {
       run.bus.emit('agent.compacting', {
@@ -310,12 +374,70 @@ export async function runLoop(
 ): Promise<LoopResult> {
   const turnId = options.turnId ?? randomUUID();
   const loopStartedAt = Date.now();
-  const tools = options.tools ?? (
+  const baseTools = options.tools ?? (
     options.shellDialect
       ? toolsForEnvironment({ dialect: options.shellDialect, reason: null })
       : DEFAULT_TOOLS
   );
-  const registry = toolRegistry(tools);
+  // The script is a runtime closure on purpose: it must share this turn's
+  // registry, abort signal and tool context, while still appearing as one
+  // ordinary tool to the model and transcript.
+  let registry: Map<string, Tool>;
+  const maxScriptSteps = runScriptLimit(options.runScriptMaxSteps);
+  const runScriptTool: Tool = {
+    spec: RUN_SCRIPT_SPEC,
+    async run(input, context) {
+      const raw = input['steps'];
+      if (!Array.isArray(raw) || raw.length === 0) {
+        throw new PlifError('INVALID_ARGUMENT', 'run_script requires at least one step');
+      }
+      if (raw.length > maxScriptSteps) {
+        throw new PlifError('INVALID_ARGUMENT', `run_script supports at most ${maxScriptSteps} steps per call`);
+      }
+      const results: string[] = [];
+      for (let index = 0; index < raw.length; index += 1) {
+        if (options.signal?.aborted) {
+          return { output: `${results.join('\n')}${results.length ? '\n' : ''}script cancelled at step ${index + 1}`, ok: false, toolCallCount: index };
+        }
+        const step = raw[index];
+        if (!step || typeof step !== 'object' || Array.isArray(step)) {
+          throw new PlifError('INVALID_ARGUMENT', `step ${index + 1} must be an object`);
+        }
+        const record = step as Record<string, unknown>;
+        const name = typeof record['tool'] === 'string' ? record['tool'].trim() : '';
+        if (!name) throw new PlifError('INVALID_ARGUMENT', `step ${index + 1} is missing "tool"`);
+        if (name === 'run_script') throw new PlifError('INVALID_ARGUMENT', 'run_script cannot call itself');
+        const args = record['args'] === undefined ? {} : record['args'];
+        if (!args || typeof args !== 'object' || Array.isArray(args)) {
+          throw new PlifError('INVALID_ARGUMENT', `step ${index + 1} args must be an object`);
+        }
+        const out = await executeCall({
+          call: {
+            id: `script-${context.callId ?? turnId}-${index + 1}`,
+            name,
+            arguments: JSON.stringify(args),
+          },
+          parsed: args as Record<string, unknown>,
+          parseError: null,
+          registry,
+          options,
+        });
+        const label = `step ${index + 1}: ${name}`;
+        if (!out.ok) {
+          return {
+            output: `${results.join('\n')}${results.length ? '\n' : ''}${label} FAILED: ${curateStepOutput(out.output)}\n` +
+              '(script stopped — fix the failing step and retry the whole script)',
+            ok: false,
+            toolCallCount: index + 1,
+          };
+        }
+        results.push(`${label}: ${curateStepOutput(out.output)}`);
+      }
+      return { output: results.join('\n'), ok: true, toolCallCount: raw.length };
+    },
+  };
+  const tools = options.runScript === false ? baseTools : [...baseTools, runScriptTool];
+  registry = toolRegistry(tools);
   const specs = stableToolSpecs(toolSpecs(tools));
   // The review cycle is a PLIF policy, not a property of having mutation tools.
   // Keeping it opt-in prevents ordinary efforts from gaining hidden model turns.
@@ -331,7 +453,7 @@ export async function runLoop(
   const maxFailures = options.maxConsecutiveFailures ?? 4;
   const maxReviewReminders = Math.max(
     0,
-    options.maxReviewReminders ?? DEFAULT_MAX_REVIEW_REMINDERS,
+    options.maxReviewReminders ?? (options.enableHarnessCycle ? 3 : DEFAULT_MAX_REVIEW_REMINDERS),
   );
   const contextTokens =
     options.contextTokens ?? options.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS;
@@ -349,6 +471,9 @@ export async function runLoop(
       options.tokenSplit.sessionId,
       messages,
       iterations,
+      options.enableHarnessCycle
+        ? `Plano atual: .plif/plans/current.md · Checkpoint: ${cycle.phase}`
+        : undefined,
     ).catch(() => undefined);
   };
 
@@ -368,6 +493,9 @@ export async function runLoop(
   let compactionProviderAvailable = true;
   /** Sticky: thinking mode, once entered, applies to the whole conversation. */
   let sawReasoning = false;
+  let totalReasoningMs = 0;
+  let reasoningBudgetEmitted = false;
+  let modeTelemetryEmitted = false;
 
   const setCycle = (
     next: typeof cycle,
@@ -474,11 +602,17 @@ export async function runLoop(
      */
     const endThinking = (): void => {
       if (thinkingSince === null) return;
+      const durationMs = Math.max(0, Date.now() - thinkingSince);
+      totalReasoningMs += durationMs;
       options.bus.emit('agent.thinking', {
         turnId,
         phase: 'end',
-        durationMs: Date.now() - thinkingSince,
+        durationMs,
       });
+      if (!reasoningBudgetEmitted && totalReasoningMs >= reasoningBudgetMs()) {
+        reasoningBudgetEmitted = true;
+        options.bus.emit('agent.reasoning_budget', { turnId, totalMs: totalReasoningMs });
+      }
       thinkingSince = null;
     };
 
@@ -487,6 +621,7 @@ export async function runLoop(
         messages: projection?.messages ?? messages,
         tools: specs,
         ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.execution ? { execution: options.execution } : {}),
       })) {
         if (event.kind === 'text') {
           endThinking();
@@ -692,8 +827,6 @@ export async function runLoop(
           if (recorded >= 0) recentCalls.splice(recorded, 1);
           return { ...item, refusal: gate };
         });
-      toolCalls += prepared.length;
-
       for (const item of prepared) {
         options.bus.emit('agent.tool', {
           turnId,
@@ -729,6 +862,7 @@ export async function runLoop(
       );
 
       for (const item of settled) {
+        toolCalls += item.toolCallCount ?? 1;
         if (item.ok) consecutiveFailures = 0;
         else consecutiveFailures += 1;
 
@@ -880,6 +1014,17 @@ export async function runLoop(
   return done('max_iterations');
 
   function done(stop: LoopStop, error?: PlifError): LoopResult {
+    if (options.enableHarnessCycle && !modeTelemetryEmitted) {
+      modeTelemetryEmitted = true;
+      const reviewPasses = options.plifTelemetry?.reviewPasses ?? 3;
+      const skillsLoaded = options.plifTelemetry?.skillsLoaded ?? [];
+      options.bus.emit('agent.mode', { mode: 'plif', reviewPasses, skillsLoaded });
+      options.bus.emit('log', {
+        level: 'info',
+        message: 'plif mode completed',
+        detail: { mode: 'plif', reviewPasses, skillsLoaded },
+      });
+    }
     if (stop === 'complete') {
       options.bus.emit('conversation.event', {
         ...eventBase('turn.completed', turnId),
@@ -961,7 +1106,7 @@ const REPEAT_WINDOW = 6;
  * `[read]` — three round trips instead of four, with the write still landing
  * between the reads that surround it.
  */
-export const MAX_PARALLEL_SAFE_CALLS = 3;
+export const MAX_PARALLEL_SAFE_CALLS = 5;
 
 export function scheduleBatches(
   calls: readonly ToolCall[],
@@ -1117,7 +1262,7 @@ async function executeCall(input: {
   parseError: string | null;
   registry: Map<string, Tool>;
   options: LoopOptions;
-}): Promise<{ output: string; ok: boolean; diff?: string; display?: string }> {
+}): Promise<{ output: string; ok: boolean; diff?: string; display?: string; toolCallCount?: number }> {
   const { call, parsed, parseError, registry, options } = input;
 
   if (parseError) return { output: `Error: ${parseError}`, ok: false };
@@ -1146,6 +1291,8 @@ async function executeCall(input: {
       ...(options.shellDialect ? { shellDialect: options.shellDialect } : {}),
       ...(options.activateProfile ? { activateProfile: options.activateProfile } : {}),
       ...(options.setGoal ? { setGoal: options.setGoal } : {}),
+      ...(options.goal ? { goal: options.goal } : {}),
+      ...(options.sessions ? { sessions: options.sessions } : {}),
       ...(options.attachments?.length ? { attachments: options.attachments } : {}),
     });
   } catch (error) {

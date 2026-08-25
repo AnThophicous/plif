@@ -1,65 +1,83 @@
 ---
 name: dme-interactive-prototype-spynx-edition
-description: Build a deterministic, realistic interactive frontend prototype that answers explicit product questions through real state transitions, validation, responsive behavior, and honest simulation boundaries.
+description: Build deterministic, realistic interactive frontend prototypes that answer explicit product questions through state machines, honest simulation boundaries, accessible interactions, responsive behavior, observability, and scenario evidence.
 ---
 
-# DME Interactive Prototype | Spynx Edition — Behavior Before Backend
+# DME Interactive Prototype | Spynx Edition — Executable Product Hypothesis vNext
 
-A prototype is an executable hypothesis.
+A prototype is an **executable hypothesis**.
 
-Its job is not to look like production. Its job is to make uncertain product behavior testable without lying about what is real.
+Its job is not to look production-ready. Its job is to make uncertain behavior testable without lying about what is real.
 
-Use this for:
+When available, load `../../shared/CORE_CONTRACT.md` once.
 
-- clickable prototypes;
+---
+
+## 1. Entry gate
+
+Use for:
 - interaction studies;
-- high-fidelity product demos;
-- validation of multi-step flows;
-- testing navigation/state concepts;
-- stakeholder evaluation before backend integration.
+- clickable/high-fidelity prototypes;
+- multi-step flow validation;
+- navigation/state concepts;
+- gestures;
+- optimistic interactions;
+- stakeholder evaluation before backend commitment;
+- behavior-heavy component candidates.
 
-Do not add random hover effects to a static mockup and call it a prototype.
+Do not call a static mock with random hover effects a prototype.
 
-## 1. State the question
+If there is no behavior question:
+- implementation → `dme-front-end-spynx-edition`;
+- visual direction → `dme-ui-options-spynx-edition`;
+- information architecture → `dme-wireframe-spynx-edition`.
 
-Before implementation, define what the prototype must answer.
+---
+
+## 2. State the product question
+
+Before coding, express the uncertainty as something the prototype can answer.
 
 Examples:
+- Can users compare three objects without losing selection context?
+- Does inline edit remain understandable after server rejection?
+- Is mobile checkout manageable when the keyboard is open?
+- Does optimistic reorder feel trustworthy when save fails?
+- Can nested keyboard navigation remain learnable?
 
-- can users understand how to add and compare three items;
-- does the inline-edit model remain clear after validation failure;
-- is the mobile checkout flow manageable without losing order context;
-- does optimistic reordering feel trustworthy.
+If the question cannot be falsified by interacting with the prototype, it is too vague.
 
-If no product question exists, use `dme-front-end-spynx-edition` for implementation or `dme-ui-options-spynx-edition` for visual exploration.
+---
 
-## 2. Define the scenario contract
+## 3. Scenario contract
 
-Specify:
+Define:
 
-- start state;
 - actor/user;
+- start state;
 - goal;
 - completion state;
 - alternate/invalid path;
 - recovery path;
-- screens or regions involved;
+- screens/regions involved;
 - data that must persist;
+- data intentionally reset;
 - states that must be represented;
-- boundaries intentionally simulated.
+- boundaries intentionally simulated;
+- viewport/input modes that matter;
+- evidence needed to answer the question.
 
-Only simulate what helps answer the question.
+Simulate only what helps answer the question.
 
-## 3. Model the state machine
+---
 
-For non-trivial flows, define states and transitions explicitly.
+## 4. Model the state machine
 
-Think:
+For non-trivial flows use:
 
 `state + event → next state + side effect`
 
-Include relevant:
-
+Represent relevant states explicitly:
 - idle;
 - editing;
 - validating;
@@ -71,84 +89,99 @@ Include relevant:
 - cancellation;
 - empty;
 - permission-limited;
-- interrupted.
+- interrupted;
+- stale/background refresh.
 
-Avoid boolean soup when several booleans can create impossible combinations.
+Avoid boolean soup that permits impossible combinations.
 
-The prototype should make impossible states impossible where practical.
+When ordering matters, model transitions rather than layering ad-hoc loading flags.
 
-## 4. Preserve deterministic behavior
+For complex flows track:
+- source of truth;
+- derived state;
+- persistence boundary;
+- async request identity;
+- cancellation/stale response behavior.
 
-Use:
+---
 
-- stable fixtures;
-- stable ids;
-- predictable latency;
-- explicit mock outcomes;
-- inspectable state.
+## 5. Honest simulation boundary
 
-Do not use randomness unless randomness itself is being tested.
+Mock backend behavior behind a narrow adapter.
 
-A reviewer should be able to reproduce the same path twice.
+Good boundary:
+`UI → domain action → adapter → deterministic simulated response`
 
-If multiple outcomes are needed, expose a deliberate simulation control or deterministic fixture mode rather than hidden chance.
-
-## 5. Build an honest simulation boundary
-
-Mock server behavior behind a narrow adapter.
-
-Keep UI logic unaware of whether the adapter is real or simulated when that helps future integration.
-
-Make simulation explicit in code and handoff.
+Keep presentational components unaware of fake transport details when practical.
 
 Never:
-
 - include real credentials;
 - perform destructive production calls;
 - process real payments;
 - claim persistence that does not exist;
-- show misleading success after a simulated operation;
-- bury mock data inside presentational components.
+- fake a successful server write as if production succeeded;
+- hide mock data inside random UI components.
 
-## 6. Fidelity budget
+Make simulation status explicit in code and handoff.
 
-Spend fidelity where it answers the product question.
+---
+
+## 6. Deterministic fixtures
+
+Use:
+- stable IDs;
+- stable content;
+- predictable latency;
+- explicit success/failure modes;
+- inspectable state.
+
+Do not use randomness unless randomness itself is under test.
+
+If several outcomes are needed, expose deliberate simulation controls or fixtures.
+
+A reviewer should reproduce the same scenario twice.
+
+---
+
+## 7. Fidelity budget
+
+Spend fidelity where it changes the product answer.
 
 High fidelity may be justified for:
-
-- complex validation;
+- validation;
 - gestures;
-- animation timing;
+- timing;
 - spatial continuity;
-- dense information;
+- dense data;
 - mobile ergonomics;
-- realistic content.
+- realistic content;
+- focus behavior.
 
-Keep fidelity low for unrelated areas.
+Keep unrelated surfaces simple.
 
-Do not build a full settings system to test one onboarding transition.
+Do not build a full settings architecture to test one onboarding transition.
 
-## 7. Repository integration
+---
+
+## 8. Repository integration
 
 When prototyping inside an existing product:
-
 - use its framework;
-- use existing design primitives;
-- preserve routing conventions;
-- reuse assets;
-- respect existing accessibility patterns;
-- avoid introducing a parallel mini-stack.
+- use existing primitives/tokens;
+- preserve route conventions;
+- reuse real assets/content where safe;
+- respect accessibility patterns;
+- avoid a parallel mini-stack.
 
-For a standalone prototype, choose the smallest runtime that supports required interactions.
+For standalone prototypes:
+- choose the smallest runtime that supports the required interaction;
+- do not add a framework just to look “production-like.”
 
-Do not add dependencies by reflex.
+---
 
-## 8. Interaction quality
+## 9. Interaction contract
 
-Implement the path using actual interaction semantics.
-
-Where relevant:
-
+Where relevant support:
 - keyboard;
 - pointer;
 - touch;
@@ -158,108 +191,209 @@ Where relevant:
 - overlays;
 - escape/cancel;
 - back behavior;
-- reduced motion;
 - loading;
-- error recovery.
+- retry;
+- reduced motion.
 
 Transitions should communicate causality or continuity.
 
 Do not make users wait for decorative animation.
 
-## 9. Prototype realism
+Essential actions must not depend only on hover.
+
+---
+
+## 10. Prototype realism
 
 Use realistic:
-
 - labels;
-- content lengths;
+- content length;
+- list volume;
 - validation messages;
-- list sizes;
 - empty cases;
 - delays;
-- failures.
+- failures;
+- permissions.
 
-The prototype should break for the same kinds of reasons the real interface might break.
+The prototype should break for the same classes of reasons the production experience might break.
 
-Do not use lorem ipsum where text length affects layout or comprehension.
+Do not use lorem ipsum where content length or meaning affects comprehension/layout.
 
-## 10. Responsive behavior
+---
 
-Prototype structural transformations, not just width changes.
+## 11. Responsive behavior
+
+Prototype structural transformations, not just smaller CSS.
 
 Test:
-
-- narrow supported width;
-- intermediate stress width;
+- narrow stress width;
+- intermediate width;
 - representative desktop;
 - long content;
 - open overlays;
-- keyboard focus after reflow.
+- keyboard focus after reflow;
+- on-screen keyboard overlap where mobile forms matter.
 
-If mobile interaction differs meaningfully, prototype the difference rather than pretending one DOM composition must look identical everywhere.
+If mobile interaction is meaningfully different, prototype the different model.
 
-## 11. Observability
+Do not force one composition to mimic desktop everywhere.
 
-A prototype used for decision-making should make its behavior understandable.
+---
 
-Where useful, provide lightweight development-only observability:
+## 12. Observability
 
+A prototype used for decisions should make its behavior inspectable.
+
+Where useful provide development-only observability:
 - current state;
+- current route/step;
 - selected fixture;
-- simulated latency/failure mode;
-- transition log;
-- route/step identifier.
+- simulated latency;
+- failure mode;
+- transition log.
 
-Do not expose this as product UI unless the test requires it.
+Keep this out of product UI unless the product question requires it.
 
-## 12. Validation run
+Observability should reduce review ambiguity, not become a debug dashboard project.
 
-Before handoff, run at least:
+---
+
+## 13. Scenario validation matrix
+
+Before handoff, run relevant scenarios.
 
 ### Primary path
 Start → successful completion.
 
 ### Invalid path
-Trigger realistic validation failure.
+Trigger a realistic validation or domain error.
 
 ### Recovery
-Recover from an error without resetting unrelated state.
+Recover without resetting unrelated state.
 
 ### Back/cancel
-Verify expected rollback or persistence.
+Verify rollback/persistence expectations.
 
-### Refresh expectation
-Verify whether state should survive refresh; if not, say so.
+### Refresh
+Verify whether state should survive. If not, say so.
 
-### Responsive path
-Complete the core scenario at representative narrow and desktop widths.
+### Race/stale response
+When async ordering matters, verify stale responses do not resurrect old state.
 
-### Accessibility path
-Keyboard-operate the core interaction and inspect focus.
+### Responsive
+Complete the core scenario at narrow and desktop widths.
 
-If browser capability exists, perform the run in the rendered prototype.
+### Accessibility
+Keyboard-operate the core path and inspect focus/announcement behavior.
 
-## 13. Failure recovery
+If browser/rendering capability exists, run the real prototype.
 
-If the prototype does not answer the product question:
+---
 
-- identify whether the problem is flow, state model, content, visual hierarchy, simulation fidelity, or implementation;
-- change the smallest layer that invalidates the hypothesis;
-- rerun the scenario.
+## 14. Evidence capture
 
-Do not keep polishing a prototype whose underlying question remains unanswered.
+Record only evidence that answers the product question:
 
-## 14. Handoff contract
+- observed success/failure;
+- confusing transition;
+- task completion friction;
+- focus/keyboard break;
+- state loss;
+- responsive collapse;
+- misleading pending/success state;
+- timing issue.
+
+Do not collect screenshots because screenshots look impressive.
+
+A prototype exists to change a decision.
+
+---
+
+## 15. Failure recovery
+
+If the prototype does not answer the question:
+
+Classify the failure:
+- question too broad;
+- flow problem;
+- state model problem;
+- content problem;
+- hierarchy problem;
+- simulation fidelity problem;
+- implementation defect;
+- insufficient evidence case.
+
+Change the smallest layer that invalidates the current model and rerun.
+
+Do not polish a prototype whose hypothesis is still undefined.
+
+---
+
+## 16. Production gap ledger
+
+Before handoff separate:
+
+### Real now
+- UI behavior;
+- state transitions;
+- validation logic;
+- responsive composition;
+- accessibility behavior.
+
+### Simulated
+- API;
+- persistence;
+- auth;
+- payment;
+- notifications;
+- background jobs.
+
+### Still required for production
+- API contracts;
+- server validation;
+- analytics;
+- authorization;
+- persistence;
+- error telemetry;
+- real performance testing;
+- security review.
+
+Only include items relevant to the prototype.
+
+Never describe a simulated boundary as production-ready.
+
+---
+
+## 17. Handoff
 
 Report:
-
-- product question answered;
+- product question;
+- conclusion supported by evidence;
 - what is real;
 - what is simulated;
-- state/data persistence assumptions;
+- persistence assumptions;
 - known gaps;
-- what evidence supports the recommended behavior;
-- what production integration still requires.
+- recommended production behavior;
+- what still needs production integration.
 
-Never describe simulated backend behavior as production-ready.
+The prototype succeeds when a product decision becomes easier and more defensible.
 
-The prototype succeeds when a product decision becomes easier to make.
+---
+
+## 18. Exit gate
+
+Finish when:
+- product question is explicit;
+- state machine cannot enter obvious impossible states;
+- fixtures are deterministic;
+- simulation boundary is honest;
+- primary/invalid/recovery paths were exercised as relevant;
+- responsive/accessibility evidence exists where required;
+- decision evidence is sufficient;
+- extra polish would not change the answer.
+
+---
+
+## Standalone core capsule
+
+If shared core is unavailable: preserve product contracts; simulate only what answers the question; use explicit state transitions; keep fixtures deterministic; avoid real destructive systems; test primary/error/recovery/responsive/keyboard paths as relevant; distinguish real from simulated; stop when evidence answers the product question.

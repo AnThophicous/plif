@@ -570,7 +570,10 @@ const SCENARIOS: Record<string, Step[]> = {
         {
           id: 'q1',
           text: 'Salvar o perfil de IA "revisor" para uso futuro?',
-          options: ['sim', 'não'],
+          options: [
+            { value: 'sim', label: 'sim' },
+            { value: 'não', label: 'não' },
+          ],
           context:
             'Modelo: opencode/deepseek-v4-flash-free\n' +
             'Identidade: Você revisa código com foco em correção e segurança.\n' +
@@ -842,6 +845,31 @@ const SCENARIOS: Record<string, Step[]> = {
     { wait: 500 },
     { capture: 'Update(app.tsx) with a coloured diff' },
   ],
+
+  /** A completed tool row, then the real raw Ctrl+E byte through Ink. */
+  'tool-expand': [
+    { wait: 200 },
+    { emit: ['agent.tool', { id: 'expand-1', name: 'run_command', input: { command: 'printf output' }, phase: 'start' }] },
+    { wait: 150 },
+    {
+      emit: [
+        'agent.tool',
+        {
+          id: 'expand-1',
+          name: 'run_command',
+          input: { command: 'printf output' },
+          phase: 'end',
+          ok: true,
+          output: 'line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8',
+        },
+      ],
+    },
+    { wait: 300 },
+    { capture: 'tool collapsed before Ctrl+E' },
+    { type: '\u0005' },
+    { wait: 300 },
+    { capture: 'tool expanded after raw Ctrl+E' },
+  ],
 };
 
 
@@ -920,7 +948,7 @@ const app = render(React.createElement(App, {
     capabilityCache,
     // Plif visual scenarios are event-only; the model picker would obscure
     // the surface being previewed when this machine has no provider config.
-    providerProblem: scenarioName.endsWith('-plif') || scenarioName === 'model-catalog' || scenarioName === 'pasted-popup' || scenarioName === 'sessions' || scenarioName === 'status-screen' || scenarioName === 'config-screen'
+    providerProblem: scenarioName.endsWith('-plif') || scenarioName === 'model-catalog' || scenarioName === 'pasted-popup' || scenarioName === 'sessions' || scenarioName === 'status-screen' || scenarioName === 'config-screen' || scenarioName === 'tool-expand'
       ? null
       : previewProblem,
     tools: (await import('@plif/core')).DEFAULT_TOOLS,

@@ -648,6 +648,37 @@ function summaryProvider(
 }
 
 describe('loop context budget', () => {
+  it('passes the host execution context through to the provider', async () => {
+    const bus = new EventBus();
+    let execution: Parameters<ModelProvider['stream']>[0]['execution'];
+    const provider: ModelProvider = {
+      info: { id: 'execution-context-test', endpoint: 'test', contextWindow: 10_000 },
+      async *stream(request): AsyncGenerator<CompletionEvent> {
+        execution = request.execution;
+        yield { kind: 'done', reason: 'stop', usage: { promptTokens: 1, completionTokens: 1 } };
+      },
+      async probe() { return { ok: true, detail: 'ok' }; },
+      async list() { return []; },
+    };
+
+    await runLoop([{ role: 'user', content: 'hello' }], {
+      provider,
+      container: {} as never,
+      questions: {} as never,
+      bus,
+      tools: [],
+      maxIterations: 1,
+      execution: {
+        cwd: 'C:/workspace/plif',
+        workspaceRoots: ['C:/workspace/plif'],
+        permissionMode: 'ask',
+      },
+    });
+
+    assert.equal(execution?.permissionMode, 'ask');
+    assert.deepEqual(execution?.workspaceRoots, ['C:/workspace/plif']);
+  });
+
   it('uses the provider context window when the caller does not override it', async () => {
     const bus = new EventBus();
     const budgets: number[] = [];
@@ -740,6 +771,48 @@ describe('loop context budget', () => {
         requestCount: 1,
         source: 'reported' as const,
       };
+    }
+  });
+
+  it('emits the reasoning budget once and records Plif mode telemetry', async () => {
+    const previous = process.env['PLIF_REASONING_BUDGET_MS'];
+    process.env['PLIF_REASONING_BUDGET_MS'] = '1';
+    try {
+      const bus = new EventBus();
+      const budgets: number[] = [];
+      const modes: Array<{ mode: string; reviewPasses: number; skillsLoaded: readonly string[] }> = [];
+      bus.on('agent.reasoning_budget', (event) => budgets.push(event.totalMs));
+      bus.on('agent.mode', (event) => modes.push(event));
+      const provider: ModelProvider = {
+        info: { id: 'plif-telemetry-test', endpoint: 'test', contextWindow: 10_000 },
+        async *stream(): AsyncGenerator<CompletionEvent> {
+          yield { kind: 'reasoning', delta: 'working' };
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          yield { kind: 'text', delta: 'done' };
+          yield { kind: 'done', reason: 'stop', usage: { promptTokens: 1, completionTokens: 1 } };
+        },
+        async probe() { return { ok: true, detail: 'ok' }; },
+        async list() { return []; },
+      };
+
+      const result = await runLoop([{ role: 'user', content: 'hello' }], {
+        provider,
+        container: {} as never,
+        questions: {} as never,
+        bus,
+        tools: [],
+        enableHarnessCycle: true,
+        maxIterations: 1,
+        plifTelemetry: { reviewPasses: 3, skillsLoaded: ['galileu'] },
+      });
+
+      assert.equal(result.stop, 'complete');
+      assert.equal(budgets.length, 1);
+      assert.ok(budgets[0]! >= 1);
+      assert.deepEqual(modes, [{ mode: 'plif', reviewPasses: 3, skillsLoaded: ['galileu'] }]);
+    } finally {
+      if (previous === undefined) delete process.env['PLIF_REASONING_BUDGET_MS'];
+      else process.env['PLIF_REASONING_BUDGET_MS'] = previous;
     }
   });
 });

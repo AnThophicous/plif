@@ -8,6 +8,7 @@
  */
 
 import { AnthropicProvider } from './anthropic.js';
+import { CodexProvider } from './codex.js';
 import { OpenAIProvider, type OpenAIProviderOptions } from './openai.js';
 import type { ModelConfig } from './config.js';
 import type { ModelProvider } from './provider.js';
@@ -26,6 +27,9 @@ export function createModelProvider(
   config: ModelConfig,
   options: OpenAIProviderOptions = {},
 ): ModelProvider {
+  if (config.authMode === 'codex' || config.providerId === 'codex') {
+    return new CodexProvider(config);
+  }
   if (config.protocol === 'anthropic-messages' || isAnthropicEndpoint(config.baseURL)) {
     return new AnthropicProvider(config);
   }

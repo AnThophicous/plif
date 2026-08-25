@@ -186,6 +186,10 @@ export class AnthropicProvider implements ModelProvider {
     return result.models.map((model) => model.id).sort();
   }
 
+  withEffort(effort: import('./config.js').Effort): ModelProvider {
+    return new AnthropicProvider({ ...this.#config, effort });
+  }
+
   async listModels(): Promise<ModelListResult> {
     try {
       const models: ProviderModel[] = [];

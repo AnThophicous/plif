@@ -10,8 +10,8 @@ import React from 'react';
 import { FocusFrame, focusRule, infinityCells, infinityFrame } from '../src/components/FocusFrame.js';
 import { PlifDock, plifDockHeight } from '../src/components/PlifDock.js';
 import { plifGlowCells } from '../src/components/PlifGlow.js';
-import { operationalEntries, workDockHeight } from '../src/components/WorkDock.js';
-import type { SubagentView } from '../src/session.js';
+import { ACTIVITY_PANEL_ROWS, WorkDock, activitySummary, operationalEntries, workDockHeight } from '../src/components/WorkDock.js';
+import type { SubagentView, TimelineEntry } from '../src/session.js';
 import { displayWidth } from '../src/text.js';
 import { applyEffortPalette } from '../src/theme.js';
 
@@ -132,6 +132,37 @@ async function renderDock(width: number, model: string): Promise<string> {
         contextMax: 100,
         working: false,
         width,
+      }),
+    ),
+    {
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      exitOnCtrlC: false,
+      patchConsole: false,
+    },
+  );
+  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  app.unmount();
+  return stdout.output.replace(ANSI, '').replace(/\r/g, '');
+}
+
+async function renderActivity(width: number): Promise<string> {
+  const stdout = new CaptureStdout(width, 6);
+  const entries = [
+    { id: 'input', kind: 'input', title: 'inspect the project', at: 1 },
+    { id: 'tool', kind: 'tool', title: 'Read', status: 'active', at: 2 },
+  ] as const satisfies readonly TimelineEntry[];
+  const app = render(
+    React.createElement(
+      Box,
+      { width },
+      React.createElement(WorkDock, {
+        tasks: [],
+        subagents: [],
+        subagentFocus: 0,
+        expanded: true,
+        width,
+        now: 3,
+        entries,
       }),
     ),
     {
@@ -316,6 +347,31 @@ describe('upper work dock', () => {
       { id: 'new-tool', kind: 'tool', title: 'run command', status: 'active', at: 5 },
     ] as const;
     assert.deepEqual(operationalEntries(entries).map((item) => item.title), ['new', 'run command']);
-    assert.equal(workDockHeight([], [], true, entries), 3);
+    assert.equal(workDockHeight([], [], true, entries), ACTIVITY_PANEL_ROWS);
+  });
+
+  it('renders Activity across the useful width instead of as a narrow corner box', async () => {
+    const rendered = await renderActivity(80);
+    const border = rendered.split('\n').find((line) => line.includes('╭'));
+    assert.ok(border, 'Activity should render a bordered panel');
+    assert.ok(displayWidth(border) >= 76, 'Activity should use the terminal width');
+    assert.match(rendered, /ACTIVITY[\s\S]*live/);
+    assert.match(rendered, /input inspect the project/);
+    assert.deepEqual(activitySummary([
+      { id: 'input', kind: 'input', title: 'inspect', at: 1 },
+      { id: 'mcp', kind: 'tool', title: 'Search', toolCategory: 'external', toolTarget: 'github', at: 2 },
+      { id: 'skill', kind: 'tool', title: 'Skill', toolCategory: 'memory', toolTarget: 'galileu', at: 3 },
+      { id: 'question', kind: 'question', title: 'Which path?', status: 'blocked', at: 4 },
+    ] as const satisfies readonly TimelineEntry[]).mcps, ['github']);
+
+    for (const width of [24, 160]) {
+      const narrowOrWide = await renderActivity(width);
+      const lines = narrowOrWide.split('\n').filter(Boolean);
+      assert.equal(lines.length, ACTIVITY_PANEL_ROWS, `Activity should keep four rows at ${width} columns`);
+      assert.ok(
+        lines.every((line) => displayWidth(line) <= width),
+        `Activity should not overflow a ${width}-column terminal`,
+      );
+    }
   });
 });

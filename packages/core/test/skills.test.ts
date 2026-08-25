@@ -342,7 +342,7 @@ describe('SkillRegistry', () => {
     assert.equal(result.ok, true);
     assert.doesNotMatch(result.output, /Skill package:/);
     assert.match(result.output, /Skill: dme-wireframe-spynx-edition/);
-    assert.match(result.output, /Produce 3-5 options only when the user needs comparison/i);
+    assert.match(result.output, /Produce 2–4 options only when comparison will change a decision/i);
     assert.doesNotMatch(result.output, /Skill: dme-interactive-prototype-spynx-edition/);
   });
 

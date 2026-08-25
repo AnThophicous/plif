@@ -47,7 +47,7 @@ import {
 import type { PickerGroup } from '../src/components/Picker.js';
 import type { Engine } from '@plif/core';
 import { initialSession, sessionReducer } from '../src/session.js';
-import { editorDeleteAction } from '../src/editor-keys.js';
+import { editorDeleteAction, isControlShortcut } from '../src/editor-keys.js';
 
 describe('editor delete key normalization', () => {
   it('treats Windows DEL as Backspace even though Ink calls it delete', () => {
@@ -56,6 +56,14 @@ describe('editor delete key normalization', () => {
 
   it('keeps the real Delete escape sequence forward-delete', () => {
     assert.equal(editorDeleteAction({ backspace: false, delete: true }, '\x1b[3~'), 'forward');
+  });
+});
+
+describe('control shortcut normalization', () => {
+  it('accepts Ink letter events and raw control bytes', () => {
+    assert.equal(isControlShortcut('e', { ctrl: true }, 'e'), true);
+    assert.equal(isControlShortcut('\x05', { ctrl: false }, 'e'), true);
+    assert.equal(isControlShortcut('e', { ctrl: false }, 'e'), false);
   });
 });
 

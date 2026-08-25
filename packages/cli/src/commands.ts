@@ -116,8 +116,16 @@ export interface CommandContext {
   readonly setPlanMode?: (enabled: boolean, description?: string) => Promise<void>;
   /** Start a session-scoped completion condition. */
   readonly startGoal?: (condition: string) => Promise<void>;
-  readonly goalStatus?: () => { readonly condition: string; readonly status: 'active' } | null;
-  readonly clearGoal?: () => void;
+  readonly goalStatus?: () => {
+    readonly condition: string;
+    readonly status: 'active' | 'paused' | 'complete' | 'blocked';
+    readonly revision?: number;
+    readonly rounds?: number;
+    readonly maxRounds?: number;
+    readonly armed?: boolean;
+    readonly blockedReason?: string | null;
+  } | null;
+  readonly clearGoal?: () => void | Promise<void>;
   readonly switchProfile: (name: string) => Promise<void>;
   /** Leave the persisted profile/persona layer without changing the model. */
   readonly clearProfile?: () => Promise<void>;
@@ -133,6 +141,8 @@ export interface CommandContext {
   readonly openBrowser: (tab: BrowserTab) => void;
   /** Authenticate one MCP server by name, reporting what happened. */
   readonly loginMcp: (server: string) => Promise<TimelineEntry>;
+  /** Start the official ChatGPT login flow inside the PLIF provider picker. */
+  readonly loginCodex?: () => Promise<boolean>;
   /** The MCP servers this session knows about, for naming them back. */
   readonly mcpNames: readonly string[];
   /** Pull an image off the clipboard and attach it to the line being typed. */
@@ -469,19 +479,21 @@ function modelRowItem(
     model.tools === undefined ? 'tool support' : undefined,
     model.pricing === undefined ? 'token pricing' : undefined,
   ].filter((value): value is string => value !== undefined);
-  const auth = access === 'free'
-    ? model.cost === 'free' || model.badges.includes('no key')
-      ? 'Free · no key'
-      : model.cost === 'paid'
-        ? 'Paid · key required'
-        : 'Access not reported'
-    : access === 'local'
-      ? 'Local'
-      : access === 'configured'
-        ? 'Configured'
+  const auth = effectiveSource.auth === 'codex'
+    ? 'ChatGPT sign-in · PLIF window'
+    : access === 'free'
+      ? model.cost === 'free' || model.badges.includes('no key')
+        ? 'Free · no key'
         : model.cost === 'paid'
-          ? 'Paid · API key'
-          : 'API key';
+          ? 'Paid · key required'
+          : 'Access not reported'
+      : access === 'local'
+        ? 'Local'
+        : access === 'configured'
+          ? 'Configured'
+          : model.cost === 'paid'
+            ? 'Paid · API key'
+            : 'API key';
   const current = effectiveSource.id === currentProvider && model.id === currentModel;
   return {
     value: `${effectiveSource.id}:${model.id}`,
@@ -833,6 +845,15 @@ async function providerAccessMap(
   activeProvider: string | undefined,
 ): Promise<Map<string, ProviderAccess>> {
   const entries = await Promise.all(sources.map(async ({ entryProvider }) => {
+    // ChatGPT/Codex is an optional local session, not a generic API-key
+    // provider. Keep it out of the default model list until the user selects
+    // it (or it is already active), otherwise a logged-in Codex installation
+    // silently changes the default model picker order for every workspace.
+    if (entryProvider.auth === 'codex') {
+      return entryProvider.id === activeProvider
+        ? [entryProvider.id, 'configured' as const] as const
+        : null;
+    }
     const key = await providerKey(entryProvider.id, stored, credentials);
     if (entryProvider.anonymous) return [entryProvider.id, key ? 'configured' as const : 'free' as const] as const;
     if (isLocalEndpoint(entryProvider.endpoint)) return [entryProvider.id, 'local' as const] as const;
@@ -870,13 +891,15 @@ function providerPickerItems(
 ): PickerItem[] {
   return sources.map(({ entryProvider }) => {
     const state = access.get(entryProvider.id);
-    const auth = state === 'free'
-      ? 'Free · no key'
-      : state === 'local'
-        ? 'Local'
-        : state === 'configured'
-          ? 'Configured'
-          : 'API key to unlock';
+    const auth = entryProvider.auth === 'codex'
+      ? 'ChatGPT sign-in in PLIF'
+      : state === 'free'
+        ? 'Free · no key'
+        : state === 'local'
+          ? 'Local'
+          : state === 'configured'
+            ? 'Configured'
+            : 'API key to unlock';
     const live = discovered.get(entryProvider.id);
     const available = live?.live
       ? live.ids.length
@@ -928,9 +951,11 @@ async function openProviderPicker(
       const selected = sources.find(({ entryProvider }) => entryProvider.id === String(value))?.entryProvider;
       if (!selected) return;
       const sameProvider = selected.id === activeProvider;
-      const isLocked = !access.has(selected.id) && !selected.anonymous && !isLocalEndpoint(selected.endpoint);
+      const isCodex = selected.auth === 'codex';
+      const isLocked = !isCodex && !access.has(selected.id) && !selected.anonymous && !isLocalEndpoint(selected.endpoint);
       void (async () => {
         if (isLocked && !(await configureProvider(context, stored, selected))) return;
+        if (isCodex && !sameProvider && !(await context.loginCodex?.() ?? false)) return;
         await openModelPicker(
           context,
           stored,
@@ -2357,7 +2382,7 @@ export const COMMANDS: readonly Command[] = [
           }));
       }
       if (command === 'clear' || command === 'off' || command === 'reset') {
-        context.clearGoal();
+        await context.clearGoal();
         return ok(entry('notice', 'goal cleared', { tone: 'accent' }));
       }
       if (value.length > 2000) {

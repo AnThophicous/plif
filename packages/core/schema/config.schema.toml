@@ -52,6 +52,24 @@ type = "number"
 type = "integer"
 minimum = 1
 
+[fields.plif]
+type = "table"
+description = "Plif-only review, adversarial-review, skill-harvest, and reminder settings."
+
+[fields."plif.maxGoalRounds"]
+type = "integer"
+minimum = 1
+description = "Maximum autonomous goal rounds for the Plif effort."
+
+[fields."plif.runScriptMaxSteps"]
+type = "integer"
+minimum = 1
+description = "Maximum sequential tool steps allowed by run_script."
+
+[fields."plif.continuableSubagents"]
+type = "boolean"
+description = "Persist subagent sessions so they can receive follow-up messages."
+
 [fields.timeoutMs]
 type = "integer"
 minimum = 1

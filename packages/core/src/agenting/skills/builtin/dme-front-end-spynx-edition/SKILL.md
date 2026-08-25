@@ -1,943 +1,886 @@
 ---
 name: dme-front-end-spynx-edition
-description: Build or redesign production frontend experiences — web pages, applications, dashboards, landing pages, components, emails, printable layouts, and slide-like web surfaces — as coherent products with intentional identity, responsive architecture, accessible states, repository-native implementation, and visual proof.
+description: Build, redesign, or refine production frontend experiences as repository-native products with deliberate hierarchy, design DNA, responsive behavior, accessible interaction, strong engineering, and rendered proof.
 ---
 
-# DME Front End | Spynx Edition — Product Experience Kernel
+# DME Front End | Spynx Edition — Product Experience Kernel vNext
 
-Build interfaces that people understand quickly, control confidently, enjoy operating, and remember afterward.
+This is the parent implementation skill of the modular DME frontend suite.
 
-Do not decorate rectangles. Do not optimize for a screenshot. Do not mistake "clean" for designed.
+When available, load `../../shared/CORE_CONTRACT.md` once. Load `../../shared/DESIGN_LANGUAGE_ATLAS.md` only when visual direction is materially open, a reference must be translated, or a new visual grammar is being established.
 
-A successful interface makes product intent visible through structure, interaction, typography, density, motion, content, and technical behavior. It should feel specific to the product even with the logo removed.
+Do not decorate rectangles. Do not optimize for a screenshot. Build a product surface whose structure, visuals, interaction, content, and runtime behavior agree.
 
-Failure modes this skill exists to prevent:
+---
 
-- technically valid but generic UI;
-- visually impressive but confusing UI;
-- beautiful happy-path screenshots with broken real states;
-- responsive layouts that merely shrink desktop;
-- component-library defaults presented as product identity;
-- decorative motion that increases latency or uncertainty;
-- local redesigns that destroy established behavior;
-- accessibility added after the visual system;
-- architecture rewritten for aesthetic convenience;
-- "production-ready" claims without rendered evidence.
+## 1. Role
 
-## 1. Decision precedence
+Use this skill when the user wants to:
 
-When rules compete, use this order:
+- build or redesign a page, screen, application surface, component, landing page, dashboard, email-like web layout, print surface, or slide-like web composition;
+- refine an existing frontend where the primary uncertainty is implementation/product quality rather than unresolved information architecture;
+- translate an approved design/reference into working frontend;
+- improve visual quality without abandoning repository contracts.
 
-1. explicit user outcome, references, scope, and prohibitions;
-2. external behavior and product contracts that must remain correct;
-3. accessibility, security, data integrity, and platform constraints;
-4. deliberate repository conventions and existing design-system contracts;
-5. product evidence discovered from code, content, assets, neighboring screens, and runtime behavior;
-6. this skill's decision systems;
-7. aesthetic defaults and examples.
+Route elsewhere when the dominant uncertainty is:
 
-Lower-precedence rules never override stronger evidence.
+- structure/navigation/task flow → `dme-wireframe-spynx-edition`;
+- visual direction genuinely open → `dme-ui-options-spynx-edition`;
+- shared tokens/primitives/systemic grammar → `dme-design-system-spynx-edition`;
+- behavior must be tested before production commitment → `dme-interactive-prototype-spynx-edition`;
+- external component discovery/transplant → `dme-spyx-component-picker`;
+- implementation already exists and needs adversarial rendered QA → `dme-visual-verification-spynx-edition`.
 
-Preserve existing behavior the user did not ask to change unless:
+Do not invoke specialists ceremonially.
 
-- it is defective;
-- it blocks the requested outcome;
-- it is the root cause of a systemic problem;
-- the benefit of changing it clearly exceeds regression risk.
+---
 
-Do not preserve a bad abstraction merely because it exists. Do preserve external contracts while improving internals whenever possible.
+## 2. Product frame before pixels
 
-## 2. Autonomy model
-
-Default to **bounded autonomy**.
-
-Act without asking when the decision is reversible, well-supported, low-risk, and inside the requested outcome.
-
-Escalate from local improvement to wider reconstruction only when evidence shows that local work would be fragile, contradictory, or materially inferior.
-
-Before widening scope, identify the invariant being protected.
-
-Examples:
-
-- `checkout behavior unchanged`;
-- `existing routes remain valid`;
-- `keyboard path remains operable`;
-- `public component API preserved`;
-- `design tokens remain source of truth`;
-- `server/client rendering assumptions preserved`.
-
-A wider refactor must buy a concrete capability: coherence, correctness, accessibility, performance, maintainability, or a substantially better product experience.
-
-## 3. Route the problem before solving it
-
-This is the frontend kernel. Route to specialist skills when the actual uncertainty belongs there.
-
-| Signal | Specialist |
-|---|---|
-| Information architecture, navigation, hierarchy, or task flow is unsettled | `dme-wireframe-spynx-edition` |
-| Structure is stable but visual direction is genuinely open | `dme-ui-options-spynx-edition` |
-| A clickable flow is needed to answer a product/interaction question | `dme-interactive-prototype-spynx-edition` |
-| Shared tokens, component families, theming, or visual foundations are the task | `dme-design-system-spynx-edition` |
-| An implementation exists and must be judged from rendered evidence | `dme-visual-verification-spynx-edition` |
-
-A substantial project may flow through several specialists:
-
-`frame → wireframe → visual direction → implementation → visual verification`
-
-Do not invoke every skill by ritual. Route only when it can change a decision.
-
-Inherit settled decisions from earlier phases. Do not reopen them without new evidence.
-
-## 4. Adaptive depth
-
-Choose the cheapest depth that can produce reliable work.
-
-### Fast path
-
-Use when:
-
-- scope is local;
-- intended behavior is already clear;
-- regression surface is small;
-- nearby code provides strong precedent;
-- no unresolved product, state, responsive, accessibility, or architecture question exists.
-
-Flow:
-
-`inspect local context → state invariant → edit → targeted verification → stop`
-
-Do not manufacture strategy documents for a localized fix.
-
-### Standard path
-
-Use for:
-
-- a meaningful component;
-- a page or screen;
-- forms;
-- async states;
-- substantial visual refinement;
-- multi-file responsive work.
-
-Flow:
-
-`understand → inspect → model → decide → implement → render → verify → refine`
-
-### Deep path
-
-Use for:
-
-- greenfield experiences;
-- design-system work;
-- multi-screen redesign;
-- ambiguous information architecture;
-- shared state or data architecture;
-- accessibility-sensitive workflows;
-- large data surfaces;
-- performance regressions;
-- high-fidelity reference reconstruction;
-- systemic visual incoherence;
-- defects whose cause is not local.
-
-Add:
-
-- explicit invariant ledger;
-- broader repository reconstruction;
-- hypothesis management;
-- specialist routing;
-- state/viewport matrices;
-- runtime and performance evidence;
-- orthogonal subagents when available.
-
-Start small. Escalate when uncertainty, risk, or evidence grows.
-
-## 5. Repository reconnaissance
-
-Before substantive implementation, discover the minimum context that changes decisions.
-
-Search before opening large files. Prefer symbols, configs, relevant ranges, and neighboring examples.
-
-Inspect when relevant:
-
-- package manifest and framework versions;
-- route and rendering model;
-- styling system and token sources;
-- component library and primitives;
-- existing page shell and navigation;
-- local fonts and font loading;
-- icon source;
-- image/asset pipeline;
-- form and validation conventions;
-- state/data libraries;
-- server-state patterns;
-- localization;
-- themes;
-- tests, typecheck, lint, build, story/demo tooling;
-- browser/preview commands;
-- accessibility or visual-regression tooling;
-- adjacent screens that reveal the product language.
-
-Do not introduce a dependency until you verify the repository cannot already solve the problem adequately.
-
-Do not replace a stack because another stack is easier for you to generate.
-
-## 6. Product frame before pixels
-
-Resolve, infer, or discover:
+Resolve or infer:
 
 - **user** — who operates this surface;
 - **job** — what they came to accomplish;
-- **primary action** — what matters most now;
-- **secondary actions** — what must remain available but not compete;
-- **expertise** — novice, occasional, expert, mixed;
-- **frequency** — one-time, occasional, repetitive;
-- **consequence** — low-stakes, trust-sensitive, destructive, financial, regulated;
-- **density** — how much information must be scanned or compared;
-- **device** — likely widths and input modes;
-- **latency sensitivity** — how quickly feedback must arrive;
-- **content reality** — likely lengths, missing data, localization, user-generated content;
-- **success state** — what "done" feels like to the user.
+- **primary action** — what matters now;
+- **secondary actions** — necessary but non-competing;
+- **expertise** — novice / occasional / expert / mixed;
+- **frequency** — one-time / occasional / repetitive;
+- **consequence** — low-stakes / trust-sensitive / destructive / financial / regulated;
+- **density** — how much must be scanned or compared;
+- **input mode** — keyboard, pointer, touch, mixed;
+- **latency sensitivity** — expected feedback speed;
+- **content reality** — likely lengths, missing data, localization, user content;
+- **success state** — what “done” means and feels like.
 
-Ask only when an unknown would materially change architecture or behavior.
-
-## 7. Product Gravity
-
-Visual form follows product pressure.
-
-Use:
-
-`signal → decision → consequence`
+Convert this into product pressure.
 
 Examples:
 
-**High-frequency expert workflow**
-→ prioritize scanability, short travel, keyboard continuity, stable placement, and dense alignment
-→ reduce ornamental separation and repeated explanations.
+`high-frequency + expert + dense`
+→ stable placement, compact rhythm, keyboard continuity, short pointer travel, high information/chrome ratio.
 
-**Trust-sensitive action**
-→ prioritize consequence visibility, explicit state, reversibility, confirmation proportional to risk
-→ do not hide critical meaning behind clever interaction.
+`trust-sensitive + destructive`
+→ consequence visibility, explicit state, reversible path where practical, proportional confirmation.
 
-**Editorial reading**
-→ typography, measure, cadence, section hierarchy, and reading continuity dominate
-→ controls should stay quiet.
+`exploratory + brand-led`
+→ stronger composition, imagery/motion budget, but task clarity still wins.
 
-**Exploratory consumer surface**
-→ richer imagery, atmosphere, and discovery can be justified
-→ the next action and current state must still remain obvious.
+---
 
-**Large repeated dataset**
-→ alignment, comparison, sorting, filtering, grouping, sticky context, and progressive disclosure dominate
-→ do not wrap every record in a large card.
+## 3. Experience engine
 
-**Mobile repetitive task**
-→ thumb reach, persistent task context, focused actions, compact controls, and interruption recovery dominate
-→ do not preserve desktop composition mechanically.
-
-Every major visual pattern should have a product reason.
-
-## 8. Experience Engine
-
-"Pleasure to use" is not a gradient. It is a chain of reinforced confidence.
-
-Optimize these six properties:
+A good interface reinforces confidence through six properties.
 
 ### Clarity
-At any moment, the user can answer:
-
-- where am I;
-- what matters now;
+The user can tell:
+- where they are;
+- what matters;
 - what changed;
-- what can I do next.
+- what happens next.
 
 ### Agency
-Actions acknowledge input immediately, expose state, remain predictable, and are reversible when practical.
+Input gets immediate acknowledgement, state is visible, actions are predictable, and reversibility exists where practical.
 
 ### Fluency
-Remove repeated decisions, unnecessary pointer travel, duplicate entry, needless modal hops, and re-reading.
+Remove repeated decisions, duplicate entry, needless modal hops, excessive travel, and re-reading.
 
 ### Immediacy
-Feedback arrives at the speed the user expects. Visual effects never make input feel slower.
+Feedback arrives at the speed expected by the action. Do not make decorative motion increase perceived latency.
 
 ### Character
-The interface has a recognizable visual and behavioral voice derived from the product.
+The interface has a recognizable product-specific voice derived from content, context, brand, and interaction.
 
 ### Reward
-Important completions may receive a satisfying response: motion, visual resolution, progressive reveal, subtle sound when the product supports it, or a concise success state.
+Important completion may receive a concise satisfying settlement. Reward must reinforce meaning, not delay frequent work.
 
-Reward must reinforce meaning. Never delay frequent work just to perform delight.
-
-### Interaction physics
-Important controls should have a coherent three-beat response:
+For important controls reason in three beats:
 
 `affordance → acknowledgement → settlement`
 
-- **affordance**: the control looks operable before interaction;
-- **acknowledgement**: input receives immediate perceptible response;
-- **settlement**: the resulting state becomes stable and understandable.
+Do not fake completion. Acknowledge pending work honestly, then settle decisively.
 
-Do not fake completion to create speed. Acknowledge immediately, represent real pending work honestly, then settle decisively.
+---
 
-### Desire without manipulation
-Make people want to return because the interface respects their attention and rewards mastery.
+## 4. Establish Design DNA
 
-Increase desire through:
+For non-trivial visual work, define a compact internal thesis before styling.
 
-- speed;
-- fluency;
-- beautiful proportional relationships;
-- predictable control;
-- useful shortcuts;
-- crisp feedback;
-- meaningful progressive reveal;
-- small moments of craft discovered through use.
+Capture:
 
-Do not use dark patterns, false urgency, obstructive cancellation, deceptive defaults, or attention traps as "engagement."
-
-## 9. Signature DNA
-
-Before meaningful visual implementation, establish a compact internal design thesis.
-
-### Product voice
-
-Place the product on the dimensions that matter:
-
-- restrained ↔ expressive;
-- editorial ↔ application-like;
-- dense ↔ spacious;
-- technical ↔ human;
-- precise ↔ playful;
-- geometric ↔ organic;
-- quiet ↔ theatrical;
-- monochromatic ↔ chromatic;
-- conventional ↔ experimental.
-
-Do not randomly choose an aesthetic label. Derive the coordinates from product context.
-
-### Signature move
-
-Choose one memorable move that improves hierarchy, comprehension, interaction, or identity.
-
-Examples:
-
-- a distinctive type relationship;
-- a deliberate navigation rhythm;
-- a recognizable data composition;
-- a rare accent behavior;
-- a useful spatial interruption;
-- a transition that explains continuity;
-- a signature framing or divider system.
-
-If the only memorable move is "gradient background", there is no design thesis.
-
-### Counter-default
-
-Name the nearest generic pattern being deliberately refused:
-
-- card grid;
-- giant centered hero;
-- repeated metric tiles;
-- universal pills;
-- all-muted-gray dashboard;
-- card-inside-card hierarchy;
-- identical feature rows;
-- decorative gradient field.
-
-### Coherence laws
-
-Choose a small number of repeated rules for:
-
-- typography;
+- dominant design language;
+- emotional tone;
+- density;
+- geometry;
+- radius law;
+- border law;
+- elevation/material law;
+- color/chroma budget;
+- typography strategy;
+- icon strategy;
+- motion strategy;
 - spacing rhythm;
-- surface hierarchy;
-- corner/border logic;
-- accent use;
-- image treatment;
-- iconography;
-- motion.
+- imagery strategy;
+- one signature move;
+- one counter-default.
 
-Identity comes from a few laws repeated with conviction, not from novelty everywhere.
+When the repository already has coherent DNA, inherit it.
 
-## 10. Genericity Firewall
+When it is weak or contradictory, preserve strong intentional signals and repair the smallest systemic layer that blocks coherence.
 
-When a surface begins to look AI-generated, do not add decoration. Diagnose the pattern.
+Do not choose a trendy style label before understanding product pressure.
 
-Warning signals:
+---
 
-- everything is a rounded card;
-- every value is a tile;
-- every label is tiny uppercase gray;
-- every action is a pill;
-- content is centered by reflex;
-- sections repeat the same rhythm;
-- gradients have no semantic/compositional role;
-- shadows are the only grouping device;
-- hero text is huge for no product reason;
-- icon + title + gray sentence repeats in a grid;
-- fake testimonials, fake metrics, or impossible data fill empty space;
-- all sections receive equal emphasis;
-- the component library is more recognizable than the product;
-- swapping logo and accent would make the UI belong to any company.
-
-For each suspicious pattern ask:
-
-1. What job does this pattern perform?
-2. Is it required by hierarchy?
-3. Is it required by interaction?
-4. Is it required by content structure?
-5. Is it part of existing product identity?
-6. Is there a simpler or more distinctive relationship that communicates the same thing?
-
-If no strong answer exists, remove or replace it.
-
-### Logo-off test
-
-Mentally remove logo, company name, and hero artwork.
-
-If the remaining interface has no recognizable identity, strengthen composition, typography, density, interaction language, or spatial rhythm.
-
-## 11. Information hierarchy before components
+## 5. Information hierarchy before components
 
 Before styling, identify:
 
-- entry point;
-- reading/scan path;
-- dominant action;
-- secondary action zones;
+- entry/orientation point;
+- scan/reading path;
+- primary action;
 - persistent context;
+- comparison relationships;
+- semantic groups;
 - transient feedback;
-- tightly related groups;
-- information that must compare;
-- information that can disclose progressively.
+- information that can disclose later;
+- information that must remain simultaneously visible.
 
 Everything cannot be emphasized.
 
-Use contrast, placement, scale, density, color, and space as a hierarchy system rather than independent decoration.
+Use:
+- placement;
+- scale;
+- typography;
+- density;
+- luminance;
+- color scarcity;
+- whitespace;
+- borders/depth
 
-## 12. Typography is architecture
+as one hierarchy system, not independent decoration knobs.
 
-Define roles instead of arbitrary sizes.
+### Macro tests
+Use during design and QA:
 
-Possible roles:
+**Squint test** — hierarchy and major zones survive blur.  
+**Grayscale test** — hierarchy survives hue removal.  
+**Silhouette test** — geometry/composition remain intentional without text/color.  
+**Density test** — if ~20% of containers can disappear without losing grouping, simplify.  
+**Logo-off test** — if removing logo/accent makes the product generic, strengthen product-specific composition, typography, behavior, or rhythm.
 
-- display;
-- page title;
-- section title;
-- body;
-- compact body;
-- label;
-- metadata;
-- numerical/data;
-- control;
-- annotation.
+---
 
-Only create roles the product needs.
+## 6. Typography architecture
 
-For each role decide:
+Typography should carry hierarchy before decoration does.
 
+### Source precedence
+1. existing licensed/project fonts;
+2. system stack if it fits;
+3. existing dependency/font package;
+4. new external/self-hosted family only when it materially improves the product and licensing/performance are acceptable.
+
+### Selection criteria
+Evaluate:
+- personality;
+- x-height/readability;
+- width and density;
+- weight/variable axes;
+- numeral quality;
+- punctuation/symbols;
+- language coverage;
+- code readability when relevant;
+- rendering;
+- file payload.
+
+### Roles
+Create only roles the product needs:
+
+`display | page-title | section-title | body | compact-body | label | metadata | data | code | annotation`
+
+For each decide:
 - family;
 - size behavior;
 - line height;
 - weight;
 - tracking;
 - measure;
-- wrapping;
-- responsive compression.
+- wrapping/truncation;
+- responsive compression;
+- numeral features where relevant.
 
-Prefer fonts already licensed and loaded.
+Do not use:
+- giant headings to compensate for weak hierarchy;
+- 12px application copy by reflex;
+- low-contrast gray-on-gray prose;
+- many font weights without role;
+- random letter spacing;
+- display fonts in dense body copy.
 
-Common fonts are not forbidden. Reflexive font choice is.
+Pair families only when contrast buys identity or function. Before adding a second family, try weight, width, optical size, case, and spacing.
 
-Dense product UI may benefit from quiet, highly legible typography. Expressive surfaces may let display type carry much of the identity.
+---
 
-Never trade legibility for novelty.
+## 7. Color, surfaces, shape, and depth
 
-## 13. Space expresses ownership
+### Color
+Think in semantic roles:
 
-Spacing should answer "what belongs together?"
+`canvas → surface → raised/overlay → text primary/muted/subtle → borders → action → focus → status`
 
-Use a coherent rhythm for:
+Accent color gains meaning through scarcity.
 
-- control internals;
-- related elements;
-- component padding;
-- group separation;
-- section separation;
-- page gutters;
-- major structural voids.
+Do not generate isolated shades without a role.
 
-A scale is a grammar, not a prison.
+Use perceptual color models such as OKLCH when project/browser/tooling constraints make them maintainable; do not adopt new CSS syntax for novelty.
 
-One optical correction can be design. Repeated unexplained exceptions are drift.
+Themes preserve semantic intent rather than blindly inverting raw colors.
 
-Whitespace is not automatically premium.
+### Shape
+Radius is a grammar.
 
-Density is not automatically clutter.
+Choose a deliberate hierarchy or near-zero system based on Design DNA. Do not apply `rounded-xl` to every container.
 
-Choose from task frequency, expertise, device, and information volume.
+Pills belong where the semantic shape makes sense, not as a default button style.
 
-## 14. Color, surface, shape, and depth
+### Depth
+Elevation must indicate grouping, transience, priority, or interaction.
 
-Build a hierarchy of surfaces before assigning decorative effects.
+Possible depth channels:
+- luminance;
+- border;
+- shadow;
+- inset;
+- translucency;
+- scale;
+- spatial separation.
 
-Color should distinguish:
+Do not stack blur + glow + gradient + large shadow to prove effort.
 
-- base environment;
-- elevated or nested regions when needed;
-- text hierarchy;
-- primary emphasis;
-- semantic states;
-- interaction states.
+### Material effects
+Glass, clay, neumorphism, glow, texture, 3D, and shaders are budgeted effects. Each must pay for hierarchy, identity, affordance, or experience.
 
-Accent color is more meaningful when scarce.
+When translucency is used:
+- preserve readable foreground contrast;
+- provide opaque/contrast-safe fallback;
+- limit expensive filter area;
+- treat reduced-transparency media queries as progressive enhancement, not the only fallback.
 
-Do not make all colors equally loud.
+---
 
-Treat radius, borders, dividers, shadows, translucency, and texture as one shape/depth language.
+## 8. Spacing and composition
 
-Use atmosphere only when it supports identity or spatial understanding.
+Use a coherent spacing rhythm.
 
-Possible tools include:
+Spacing communicates ownership:
+- inside a control;
+- between paired elements;
+- inside a component;
+- between groups;
+- between sections;
+- page gutter;
+- intentional major void.
 
-- hairline rule systems;
-- controlled grain;
-- inset depth;
-- selective translucency;
-- geometric pattern;
-- image field;
-- lighting;
-- layered tonal surfaces.
+A 4px-derived scale is common, not mandatory.
 
-Do not stack effects to prove effort.
+Do not mechanically apply the same vertical gap to every section.
 
-## 15. Responsive design is structural transformation
+Use optical corrections sparingly and intentionally.
 
-Never implement responsive behavior as:
+Whitespace is not automatically premium. Density is not automatically clutter.
 
-`desktop but narrower`
+Choose density from task frequency, expertise, device, and content volume.
 
-For each region, decide whether it:
+---
 
+## 9. Layout intelligence
+
+Prefer robust layout systems:
+- CSS Grid;
+- Flexbox;
+- intrinsic sizing;
+- min/max/clamp;
+- logical properties;
+- subgrid when it solves a real relationship;
+- container queries when component behavior depends on available container space.
+
+Avoid structural absolute positioning unless the composition truly requires overlay/spatial behavior.
+
+Reason about:
+- content hierarchy;
+- scan pattern;
+- comparison needs;
+- ownership of overflow;
+- persistent context;
+- container width;
+- wide-screen restructuring.
+
+Large displays should not stretch reading content indefinitely.
+
+---
+
+## 10. Responsive design is behavioral adaptation
+
+Never implement mobile as “desktop stacked vertically.”
+
+For each region decide whether it:
 - remains;
 - compresses;
-- reorders;
 - wraps;
+- reorders;
 - collapses;
 - becomes a drawer/sheet;
-- becomes horizontal overflow inside its own boundary;
+- becomes horizontal overflow within its own boundary;
 - changes control type;
-- moves closer to the active task;
+- moves closer to active task;
 - hides because it is genuinely secondary.
-
-Think in priority transitions, not device names.
 
 Add breakpoints where composition or interaction fails, not because a popular device width exists.
 
-Validate at:
-
-- the narrowest supported width;
-- an intermediate stress width;
-- a representative large width;
-- relevant zoom;
+Validate at minimum for substantive work:
+- narrowest supported/stress width;
+- intermediate awkward width;
+- representative desktop/wide;
 - long/localized content;
-- pointer and touch contexts when supported.
+- relevant zoom;
+- touch/pointer differences.
 
-Avoid page-level horizontal scrolling. Data regions may own intentional overflow when preserving structure is more usable than destructive stacking.
+Page-level horizontal overflow is normally a defect. Data regions may own intentional overflow when it preserves comparison better than destructive stacking.
 
-## 16. Interaction design: every reachable state is product
+On mobile also inspect:
+- safe areas;
+- keyboard overlap;
+- bottom/sticky actions;
+- thumb reach;
+- table adaptation;
+- modal/sheet sizing;
+- touch targets;
+- long labels.
 
-For interactive surfaces, enumerate only reachable states, but do not omit real ones:
+---
 
-- default;
-- hover where pointer exists;
-- focus-visible;
-- active/pressed;
-- selected;
-- disabled;
-- loading;
-- stale/background refresh;
-- empty;
-- partial data;
-- validation error;
-- system error;
-- success;
-- destructive confirmation;
-- optimistic pending;
-- retry;
-- offline or interrupted when relevant;
-- overflow/long content;
-- permission denied when relevant.
+## 11. Component architecture
 
-The interface should explain state without requiring the user to infer it from color alone.
-
-Motion should communicate:
-
-- causality;
-- spatial continuity;
-- hierarchy;
-- state transition;
-- completion.
-
-Decorative motion gets the remaining budget after interaction responsiveness.
-
-Respect reduced motion.
-
-Do not use animation to conceal slow work.
-
-## 17. Component architecture
-
-Do not optimize for number of files.
-
-Extract a component when it buys:
-
-- reuse;
+Create a component because it buys:
+- reusable behavior;
+- domain semantics;
 - state ownership;
-- behavioral isolation;
 - visual identity;
 - testability;
 - cognitive simplification.
 
 Avoid both:
+- monoliths whose behavior cannot be reasoned about independently;
+- microscopic wrappers that only rename markup.
 
-- monoliths whose behaviors cannot be reasoned about independently;
-- fragments that turn simple markup into indirection.
+Prefer semantic variants:
 
-Expose product semantics rather than styling trivia.
+`intent="danger" density="compact" state="selected"`
 
-Prefer:
+over style-prop explosions when those semantic dimensions actually exist.
 
-`density="compact" tone="critical" state="selected"`
+Reuse repository primitives before creating a parallel system.
 
-over collections of props that merely mirror CSS when those semantic dimensions actually exist.
+Do not wrap a library component unless the wrapper adds product semantics, policy, or integration value.
 
-Use the repository's primitives before creating parallel ones.
+---
 
-## 18. State architecture
+## 12. State architecture
 
 Use the smallest correct state model.
 
 Distinguish:
-
-- local transient UI state;
+- local transient UI;
 - form state;
 - URL/navigation state;
 - server state;
-- shared application state;
+- shared app state;
 - persisted state;
 - derived state.
 
 Rules:
-
 - keep state near the behavior that owns it;
-- do not duplicate state that can be derived safely;
-- URL state should represent navigable/shareable product state when appropriate;
-- server state should not be copied into global client state without a concrete reason;
-- model asynchronous transitions explicitly when ordering matters;
-- protect against stale closures, duplicate submission, racing responses, and state resurrection when relevant.
+- do not duplicate safely derivable state;
+- make navigable/shareable state URL-driven when appropriate;
+- do not copy server state into a global client store without reason;
+- model async ordering explicitly when it matters;
+- protect against stale closures, duplicate submission, race conditions, stale responses, and state resurrection.
 
-For complex flows, reconstruct:
+For complex defects or flows reconstruct:
 
-`input → event → owner → transition → side effect → persistence → render`
+`input → event → state owner → transition → side effect → persistence → render`
 
 before editing.
 
-## 19. Data and asynchronous UX
+---
 
-A data interface is a temporal system.
+## 13. Interaction state machine
 
-Consider:
+Every reachable state is part of the product.
 
+Consider only relevant states, but do not omit real ones:
+
+- idle/default;
+- hover on pointer devices;
+- focus-visible;
+- active/pressed;
+- selected;
+- disabled;
+- loading;
+- background refresh/stale;
+- empty;
+- partial;
+- validation error;
+- system error;
+- success;
+- optimistic pending;
+- retry;
+- offline/interrupted;
+- permission denied;
+- destructive confirmation;
+- overflow/long content.
+
+State should not be communicated through color alone.
+
+Microinteractions should make cause and consequence easier to understand:
+- activation;
+- toggle;
+- copy;
+- save;
+- validation;
+- selection;
+- drag/drop;
+- progress.
+
+Do not animate every element.
+
+---
+
+## 14. Forms
+
+Forms are recovery systems, not collections of inputs.
+
+Design:
+- visible/persistent labels where appropriate;
+- field grouping;
+- input purpose;
+- correct input type;
+- autocomplete;
+- instructions before errors occur;
+- validation timing;
+- error association;
+- recovery without losing unrelated state;
+- disabled/loading semantics;
+- keyboard flow;
+- submit/retry behavior;
+- destructive confirmation when relevant.
+
+Avoid placeholder-only labels.
+
+Do not validate so aggressively that typing becomes punishment.
+
+---
+
+## 15. Data and asynchronous UX
+
+A data interface is temporal.
+
+Model when relevant:
 - first load;
 - background refresh;
 - stale data;
+- sorting/filtering;
 - pagination/infinite loading;
-- filtering;
-- sorting;
 - optimistic mutation;
-- retry;
 - partial failure;
+- retry;
 - cancellation;
 - empty results;
-- permissions;
-- network latency;
-- race conditions.
+- permission limits;
+- latency;
+- racing requests.
 
-Skeletons are not mandatory. Spinners are not mandatory. Optimism is not mandatory.
+Skeletons, spinners, and optimism are choices, not defaults.
 
-Choose the representation that gives the user the clearest model of what is happening.
+Choose the representation that gives the clearest mental model of what is happening.
 
-Never fabricate successful server behavior in production code merely to make the UI look complete.
+Never fabricate successful server behavior in production code to make the UI look complete.
 
-## 20. Accessibility is a construction constraint
+---
 
-Prefer native semantic behavior before ARIA.
+## 16. Data visualization
 
-Validate where relevant:
+Choose chart type from the question.
 
-- semantic landmarks;
-- heading structure appropriate to host page;
-- accessible names;
-- persistent form labels;
-- field/error association;
-- keyboard reachability;
-- logical focus order;
-- visible focus;
-- focus restoration for overlays;
-- escape behavior;
-- text contrast of at least 4.5:1 for normal text and 3:1 for large text unless a stricter product requirement applies;
-- meaningful non-text/control contrast around 3:1 against adjacent colors where required;
-- touch targets designed around comfortable ~44 CSS px hit areas for primary touch interactions, without destroying dense expert workflows;
-- screen-reader state announcements;
-- reduced motion;
-- zoom/reflow;
-- non-color state communication.
+- comparison → bars/position;
+- trend → line/area when justified;
+- composition → stacked forms;
+- distribution → histogram/box/violin as audience permits;
+- relationship → scatter;
+- single metric → direct number/context.
 
-Do not force "one h1 inside every reusable component." Heading levels belong to page hierarchy.
+Do not use pie/donut by reflex.
 
-Do not add ARIA that duplicates or conflicts with native semantics.
+Avoid gradients, 3D, or animation that slows interpretation.
 
-Accessibility that changes after visual design is finished usually exposes architectural mistakes.
+Make labels, units, zero baselines, uncertainty, and missing data explicit when material.
 
-## 21. Performance: protect the interaction
+A chart is successful when interpretation is fast and accurate, not when it looks impressive.
+
+---
+
+## 17. Icons and SVG
+
+Source precedence:
+1. current project icon set;
+2. platform-native system for strongly platform-specific products;
+3. one coherent library;
+4. custom SVG for brand/product-specific needs.
+
+Do not casually mix icon families.
+
+Maintain consistent:
+- optical size;
+- stroke/fill;
+- weight;
+- corner language;
+- baseline;
+- bounding box.
+
+For unfamiliar actions, `icon + label` usually beats icon-only.
+
+Use custom SVG for:
+- brand marks;
+- diagrams;
+- bespoke symbols;
+- visualization;
+- product-specific illustration.
+
+Require correct `viewBox`, scalable geometry, accessible treatment, and reuse for repeated assets.
+
+Do not redraw a common icon from scratch if a coherent library already supplies it.
+
+---
+
+## 18. Assets, imagery, and content
+
+Before adding imagery, identify its function:
+- product explanation;
+- evidence;
+- identity;
+- storytelling;
+- atmosphere;
+- navigation;
+- data.
+
+Do not add decorative stock imagery with no semantic contribution.
+
+Prefer real project assets.
+
+Never invent a real company's logo or factual testimonial/metric.
+
+Maintain:
+- consistent art direction;
+- crop/aspect logic;
+- responsive sources;
+- dimensions to reduce layout shift;
+- appropriate loading priority;
+- alt text where informative.
+
+Content is architecture.
+
+Prefer specific, realistic UI copy over generic AI marketing language.
+
+Avoid:
+- “Unlock your potential”;
+- “Revolutionize your workflow”;
+- “Seamless experience”;
+- fake “Welcome back” filler.
+
+Use domain-specific labels that explain what the software actually does.
+
+---
+
+## 19. Motion
+
+Motion communicates:
+- causality;
+- continuity;
+- hierarchy;
+- feedback;
+- spatial relationship.
+
+Prefer fast, restrained state transitions for frequent actions. Larger spatial transitions may take longer only when distance/meaning justifies it.
+
+Use transform/opacity for common animation where practical.
+
+Respect `prefers-reduced-motion`.
+
+Never use animation to conceal slow work.
+
+If motion is decorative, it receives budget only after interaction responsiveness is protected.
+
+---
+
+## 20. Performance
 
 Do not cargo-cult optimize.
 
-Identify the suspected bottleneck first.
-
-Possible contributors:
-
+Identify the likely contributor:
 - render frequency;
-- expensive reconciliation;
-- large lists;
+- reconciliation;
+- list size;
 - layout thrash;
-- image decoding;
-- font loading;
+- images;
+- fonts;
 - network waterfalls;
-- script/bundle weight;
+- JS bundle;
 - hydration;
-- expensive effects;
-- main-thread animation;
-- uncontrolled event work.
+- expensive blur/filter;
+- animation;
+- canvas/WebGL;
+- repeated event work.
 
-Use measurement or defensible proxies.
+Measure when tools exist.
 
-Prioritize the largest contributor.
+High-value protections often include:
+- correct media sizing;
+- lazy loading where useful;
+- minimal client JS;
+- stable layout dimensions;
+- avoiding unnecessary client boundaries;
+- avoiding huge filtered regions;
+- virtualization only for genuinely large data;
+- memoization only for observed/reasoned cost.
 
-Typical high-value protections:
+For 3D/WebGL/shaders:
+- justify product value;
+- set performance/fallback budget;
+- test mobile/GPU constraints when possible;
+- protect text readability;
+- respect reduced motion;
+- preserve useful non-spatial fallback.
 
-- stable layout dimensions for media;
-- appropriate image sizing/format;
-- lazy loading where it helps;
-- avoid unnecessary client JS;
-- virtualization only for genuinely large lists;
-- memoization only when it reduces measured/reasoned cost;
-- transform/opacity motion when animation is needed;
-- avoid forcing layout in hot interactions;
-- preserve streaming/SSR/hydration assumptions.
+---
 
-Never degrade readability or maintainability for speculative micro-optimization.
+## 21. Accessibility construction rules
 
-## 22. Dependencies
+Follow the shared core accessibility baseline.
 
-A new dependency is justified only when:
+Additionally:
+- heading levels belong to page hierarchy, not reusable components by default;
+- native controls beat custom controls when behavior is equivalent;
+- overlays require deliberate focus entry, containment where appropriate, escape/close behavior, and focus restoration;
+- sticky content must not obscure focused controls;
+- hover-only interaction is not sufficient for essential actions;
+- touch ergonomics may target larger hit areas than WCAG minimums when product context warrants it.
 
-1. existing project capability is insufficient;
-2. the need is real, not convenience;
-3. maintenance and bundle/runtime cost are acceptable;
-4. compatibility with the current stack is verified;
-5. the dependency materially reduces risk or implementation complexity.
+Do not add ARIA that duplicates or conflicts with native semantics.
 
-Do not add a component library to implement one component.
+Accessibility that needs dozens of local patches usually signals a primitive or interaction architecture problem.
 
-Do not write fragile custom infrastructure to avoid a mature dependency when the dependency is clearly the safer choice.
+---
 
-## 23. Assets, icons, and content
+## 22. Existing design-system policy
 
-Use real project assets first.
+If a design system exists:
 
-Never:
+1. identify actual source of truth;
+2. understand tokens/primitives/variants;
+3. reuse it;
+4. extend semantically;
+5. repair only when evidence shows systemic inconsistency or it blocks the requested outcome;
+6. avoid a parallel local visual language.
 
-- invent a real company's logo;
-- redraw a brand mark from memory;
-- mix unrelated icon families;
-- use emoji as interface icons unless the product intentionally does;
-- use fake analytics or testimonials as if factual;
-- leave broken image placeholders;
-- hotlink arbitrary assets.
+If repair is systemic, route to `dme-design-system-spynx-edition`.
 
-When an authorized image-generation or asset tool exists and custom imagery materially improves the product, generate for the actual composition and inspect the result before integration.
+Do not preserve inconsistency merely because it is old.
 
-Text is part of interface architecture.
+Do preserve public contracts or provide migration paths when consumers depend on them.
 
-Use realistic copy lengths and domain-appropriate language. Design errors, empties, labels, and confirmations with the same care as the hero state.
+---
 
-## 24. Surface-specific routing
+## 23. External component policy
+
+Do not install a component because the preview looks good.
+
+Use `dme-spyx-component-picker` when external discovery is material.
+
+Before importing any external component:
+- inspect repository-native alternatives;
+- inspect files/dependencies/global changes;
+- verify framework/rendering compatibility;
+- assess accessibility and behavior;
+- preserve product state/routes/content;
+- map styling into host tokens;
+- preserve the candidate's valuable signature, not provider boilerplate;
+- render and verify.
+
+Third-party component code is code, not decoration.
+
+---
+
+## 24. Surface-specific pressure
 
 ### Marketing / landing
-Identity and narrative matter, but conversion hierarchy must remain clear. Vary section rhythm instead of repeating feature-card grids. Use proof only when real or clearly placeholder.
+Identity, narrative, and conversion hierarchy matter.
+Avoid repeated feature-card grids and invented proof.
+Vary rhythm only when content hierarchy warrants it.
 
 ### Product application
-Density, scanability, persistent context, state visibility, and fast interaction dominate decoration.
+Persistent context, state visibility, scan speed, density, and interaction fluency dominate decoration.
 
 ### Dashboard / analytics
-Decide what questions the data answers before choosing charts or metric tiles. Preserve comparison and trend visibility. Do not tile every number.
+Start with questions the data must answer.
+Do not tile every metric.
+Protect comparison, trend, filtering, and empty/error semantics.
 
-### Forms
-Design error recovery, progressive disclosure, field dependencies, input modes, autocomplete, validation timing, and successful completion.
+### Tables / enterprise
+Prioritize alignment, sorting/filtering, selection, bulk actions, keyboard use, sticky context, and overflow ownership.
 
-### Tables / enterprise data
-Prioritize alignment, column semantics, sorting/filtering, bulk actions, selection state, sticky context, overflow ownership, and keyboard use.
+### Forms / onboarding
+Prioritize sequence, dependencies, recovery, completion clarity, and mobile keyboard behavior.
 
-### Print / paged media
-Use print-aware layout, physical units where appropriate, pagination behavior, repeating table headers, and output verification.
+### Media / immersive
+Protect content readability, controls, reduced motion, and runtime budget.
 
-### Email
-Follow the target email-client constraints. Avoid JavaScript and unsupported layout assumptions. Use robust table/inlined-style patterns when required by compatibility.
+### Print / paged output
+Use print-aware composition, pagination, repeating headers where needed, and output verification.
 
-### Slides
-Treat the slide as a fixed composition with one dominant idea. Preserve readability at presentation distance and verify no overflow.
+### Email-like HTML
+Respect target-client constraints; do not assume modern CSS or JavaScript support.
 
-## 25. Anti-default patterns
+### Slide-like web composition
+Treat each viewport as fixed composition with one dominant idea and verify overflow.
 
-These are not universal bans. They require product justification.
+---
 
-- excessive rounded cards;
-- card inside card;
-- universal pills;
+## 25. Genericity firewall
+
+Challenge:
+- universal rounded cards;
+- card nesting;
+- gratuitous gradients;
+- glass everywhere;
 - giant hero type;
-- purple/pink gradient as substitute for identity;
-- glassmorphism without spatial reason;
-- arbitrary glow;
-- excessive shadows;
 - centered everything;
-- three-features-in-a-row by reflex;
-- meaningless metric cards;
-- tiny uppercase labels everywhere;
-- decorative blobs;
-- floating controls without interaction reason;
-- identical spacing across every section;
-- random asymmetry;
-- gradients on headline text as the only typographic idea;
-- decorative icons on every heading;
-- a component library shipped visually untouched;
-- motion on every element.
+- repetitive three-column features;
+- tiny uppercase metadata everywhere;
+- floating blobs;
+- fake dashboards/metrics;
+- identical radius and elevation;
+- random icons;
+- decorative animation;
+- component-library defaults shipped visually untouched.
 
 Do not replace one cliché with another.
 
-## 26. Verification ladder
+Ask:
+`what job does this visual decision perform?`
 
-Verification must be proportional to risk.
+If it does not improve hierarchy, usability, identity, affordance, comprehension, or emotional character, remove it.
 
-### Level 1 — static
-Inspect diff, types, semantics, state paths, and invariants.
+---
 
-### Level 2 — targeted
-Run affected tests, lint/type checks, component checks.
+## 26. Decoration budget and signature moment
 
-### Level 3 — rendered
-Start the real surface and inspect representative states and widths.
+Treat high-energy effects as scarce:
+- gradients;
+- glow;
+- blur;
+- texture;
+- large shadows;
+- glass;
+- 3D;
+- shader/video backgrounds;
+- animated decoration.
 
-### Level 4 — interaction
-Operate with keyboard, pointer/touch where available, validation, overlays, navigation, and error recovery.
+Prefer one excellent signature moment over six competing effects.
 
-### Level 5 — integration/build
-Run relevant integration, build, smoke, or end-to-end validation.
+A signature move should improve:
+- product recognition;
+- hierarchy;
+- understanding;
+- navigation;
+- transition continuity;
+- completion feedback.
 
-### Level 6 — performance
-Measure runtime, bundle, rendering, or network behavior when performance is part of the risk.
+If every element is a signature moment, none is.
 
-A screenshot does not prove behavior.
+---
 
-A passing test does not prove visual quality.
+## 27. Implementation loop
 
-Compilation does not prove usability.
+Use adaptively:
 
-If rendering capability exists, substantial UI work should normally be rendered.
+`UNDERSTAND → INSPECT → MODEL → PRIORITIZE → IMPLEMENT → RUN/RENDER → INSPECT → TEST INTERACTION/RESPONSIVENESS → VERIFY → REFINE`
 
-## 27. Perceptual QA loop
+Fast-path tasks may collapse several phases.
 
-For meaningful UI work:
+Do not stop at IMPLEMENT for substantive UI work when rendering is available.
 
-`IMPLEMENT → RENDER → INSPECT → CLASSIFY DEFECT → FIX ROOT → RENDER AGAIN`
+---
 
-Inspect in this order:
+## 28. Visual QA before handoff
 
-1. product hierarchy;
-2. composition and balance;
+Inspect in perceptual order:
+
+1. product hierarchy and primary action;
+2. macro composition/balance;
 3. typography and content measure;
-4. alignment and spatial rhythm;
-5. responsive behavior and overflow;
-6. interaction states;
+4. spacing/alignment;
+5. responsive transformation and overflow;
+6. states and interaction feedback;
 7. accessibility signals;
-8. runtime errors and performance regressions;
-9. signature DNA and genericity.
+8. runtime/performance symptoms;
+9. Design DNA and genericity.
 
-Do not tweak randomly.
+Classify defects by owner and fix the highest correct layer.
 
-For every defect, identify whether its owner is:
+For deep review route to `dme-visual-verification-spynx-edition`.
 
-- token;
-- primitive;
-- component;
-- layout;
-- state model;
-- content;
-- asset;
-- runtime behavior.
+---
 
-Fix the highest correct owner.
+## 29. Failure recovery examples
 
-Use `dme-visual-verification-spynx-edition` for deep rendered review.
+**Looks generic**
+→ revisit product pressure, counter-default, composition, type, signature; do not add random effects.
 
-## 28. Failure recovery
+**Responsive layout needs many breakpoint patches**
+→ revisit structure/overflow ownership, not breakpoint count.
 
-When an approach fails:
+**State bug returns**
+→ reconstruct event/state owner/order, not another visual patch.
 
-`classify → collect evidence → update model → choose new strategy`
+**Variants explode**
+→ revisit semantic component API and token model.
 
-Examples:
+**Accessibility needs repeated local fixes**
+→ repair primitive/interaction architecture.
 
-- visual direction feels generic → do not add effects; revisit signature DNA and composition;
-- responsive layout collapses repeatedly → revisit structure, not breakpoint count;
-- state bugs recur → identify state owner and event ordering;
-- component variants explode → revisit semantic API and token model;
-- accessibility requires many patches → revisit primitive or interaction choice;
-- performance tweak has no effect → invalidate the hypothesis and measure another contributor.
+**Performance tweak has no effect**
+→ invalidate hypothesis and measure another contributor.
 
-Do not repeat cosmetic variants of the same failed strategy.
-
-## 29. Stop condition
-
-Finish when:
-
-- the user's objective is satisfied;
-- critical invariants hold;
-- the primary action and hierarchy are legible;
-- reachable states are coherent;
-- relevant responsive behavior is verified;
-- accessibility obligations are met for the changed surface;
-- technical checks relevant to risk pass;
-- rendered evidence exists when the environment supports it;
-- no known regression remains;
-- another iteration is unlikely to create material improvement.
-
-Do not keep polishing because more polish is possible.
+---
 
 ## 30. Handoff
 
-Normal frontend work should end with a concise report:
-
+Report concisely:
 - what changed;
-- important design/architecture decisions;
+- important product/design/architecture decisions;
 - validation actually performed;
-- any material limitation or unverified surface.
+- any remaining limitation or unverified surface.
 
 Do not dump private reasoning.
 
-Do not call work "production-ready", "polished", or "pixel-perfect" unless the evidence supports that claim.
-
-The final test is not "does this look modern?"
+The final test is not “does this look modern?”
 
 It is:
 
-**Does this product now feel more obvious, more specific, more trustworthy, more responsive to intent, and more satisfying to operate — without sacrificing correctness?**
+**Does this surface now make the product more obvious, specific, trustworthy, responsive to intent, and satisfying to operate without sacrificing correctness?**
+
+---
+
+## Standalone core capsule
+
+If `../../shared/CORE_CONTRACT.md` is unavailable, preserve explicit user intent and external contracts; inspect minimum repository context; use risk-based depth and autonomy; avoid unjustified dependencies; treat accessibility/responsiveness as construction constraints; verify proportionally; render substantive changes when possible; distinguish verified/inferred/unverified; stop when outcome and relevant gates are satisfied.

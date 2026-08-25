@@ -23,16 +23,20 @@ import {
   loadStoredConfig,
   migrateProviderCredentials,
   mcpServersOf,
+  openOAuthBrowser,
   parseServerConfigs,
   readAgentInstructions,
   resolveConfig,
   resolveServerConfigs,
   runCompaction,
   runLoop,
+  RUN_SCRIPT_SPEC,
   stableToolSpecs,
   skillTool,
   subagentTool,
+  sendMessageTool,
   SubagentCoordinator,
+  GoalController,
   visionTools,
   WEB_TOOLS,
   TaskManager,
@@ -56,10 +60,12 @@ import {
   sourceUrl,
   globalConfigPath,
   loadGlobalConfig,
+  plifModeOf,
   loadTokenSplitConfig,
   loadedSkillNames,
   saveGlobalConfig,
   scheduleProviderDiscovery,
+  startCodexLogin,
   summariseMemory,
   validateModelConfig,
   PlifError,
@@ -78,6 +84,8 @@ import type {
   McpRegistry,
   McpServerConfig,
   Message,
+  ModelApprovalRequest,
+  ModelExecutionContext,
   ModelProvider,
   ModelSelection,
   Session,
@@ -87,7 +95,9 @@ import type {
   ConversationEvent,
   TaskSnapshot,
   Effort,
+  CodexLoginFlow,
   EffortCapabilityCache,
+  GoalState as PlifGoalState,
 } from '@plif/core';
 import type { SandboxCapabilityReport } from '@plif/sandbox';
 
@@ -95,6 +105,8 @@ import { Approval, APPROVAL_CHOICES, approvalHeight } from './components/Approva
 import { Browser, mcpStatusKind, sessionAge, sortMcpStatuses } from './components/Browser.js';
 import { Compaction, COMPACTION_HEIGHT } from './components/Compaction.js';
 import { Completions, EmojiMenu } from './components/Completions.js';
+import { CodexLoginDialog } from './components/CodexLoginDialog.js';
+import type { CodexLoginStatus } from './components/CodexLoginDialog.js';
 import { Discovery, discoveryHeight } from './components/Discovery.js';
 import { Queue, queueHeight } from './components/Queue.js';
 import { Question, questionHeight } from './components/Question.js';
@@ -114,9 +126,11 @@ import { WorkDock, operationalEntries, workDockHeight } from './components/WorkD
 import {
   Timeline,
   TimelineRow,
+  estimateHeight,
   measureTranscriptCells,
   timelineEntriesFromEvents,
 } from './components/Timeline.js';
+import { ToolExpansion } from './components/ToolExpansion.js';
 import { TranscriptOverlay } from './components/TranscriptOverlay.js';
 import { ThinkingOverlay, thinkingBodyHeight } from './components/ThinkingOverlay.js';
 import {
@@ -168,7 +182,7 @@ import { ComposerHistory } from './composer/history.js';
 import { composerReducer, initialComposerState, submissionFromComposer } from './composer/state.js';
 import type { PastedAttachment } from './composer/state.js';
 import { materializePastedLine } from './composer/paste.js';
-import { editorDeleteAction } from './editor-keys.js';
+import { editorDeleteAction, isControlShortcut } from './editor-keys.js';
 import { attachmentsForPrimaryModel, hasImageAttachments } from './attachments.js';
 import { allTranscriptCells } from './transcript/reducer.js';
 import { initialViewport, viewportReducer } from './transcript/scroll.js';
@@ -300,10 +314,7 @@ const PLAN_BLOCKED_TOOLS = new Set([
 ]);
 
 type AgentTurnMode = 'normal' | 'plan';
-type GoalState = {
-  condition: string;
-  status: 'active';
-};
+type GoalState = Pick<PlifGoalState, 'condition' | 'status' | 'revision' | 'rounds' | 'maxRounds' | 'armed' | 'blockedReason'>;
 /**
  * Rows kept in the live frame behind the newest one.
  *
@@ -551,6 +562,12 @@ export function App({
   const [credentialPromptPending, setCredentialPromptPending] = useState(
     needsCredentialPrompt(providerProblem),
   );
+  const [codexLogin, setCodexLogin] = useState<{
+    readonly status: CodexLoginStatus;
+    readonly detail?: string;
+    readonly userCode?: string;
+  } | null>(null);
+  const codexLoginFlow = useRef<CodexLoginFlow | null>(null);
   const [, setThemeRevision] = useState(0);
   const [emojiIndex, setEmojiIndex] = useState(0);
   /** Live MCP status and loaded skills, for the browser's first two tabs. */
@@ -564,6 +581,9 @@ export function App({
   const [effort, setEffortState] = useState<Effort | undefined>(initialEffort);
   useEffect(() => () => {
     if (plifActivationTimer.current) clearTimeout(plifActivationTimer.current);
+  }, []);
+  useEffect(() => () => {
+    void codexLoginFlow.current?.cancel();
   }, []);
   useEffect(() => {
     applyEffortPalette(effort);
@@ -697,12 +717,27 @@ export function App({
   const subagentTokens = useRef(new Map<string, number>());
   /** Identity for the loading line; late events from an older turn are ignored. */
   const loadingOperationRef = useRef<{ id: number; turnId: string } | null>(null);
+  /** Aggregated, redacted timing for the optional Plif end-of-turn report. */
+  const turnMetricsRef = useRef<{
+    turnId: string;
+    startedAt: number;
+    reasoningMs: number;
+    toolsMs: number;
+    compactionMs: number;
+  } | null>(null);
   const loadingSequence = useRef(0);
   const loadingMetricPaintAt = useRef(0);
 
   const beginLoading = useCallback((turnId: string): number => {
     const id = ++loadingSequence.current;
     loadingOperationRef.current = { id, turnId };
+    turnMetricsRef.current = {
+      turnId,
+      startedAt: Date.now(),
+      reasoningMs: 0,
+      toolsMs: 0,
+      compactionMs: 0,
+    };
     loadingMetricPaintAt.current = 0;
     activityModel.start(id, turnId);
     setAgentTurnStartedAt(Date.now());
@@ -852,6 +887,29 @@ export function App({
   const [planMode, setPlanModeState] = useState(false);
   const planModeRef = useRef(false);
   const goalRef = useRef<GoalState | null>(null);
+  const goalControllerRef = useRef<GoalController | null>(null);
+  if (!goalControllerRef.current) {
+    goalControllerRef.current = new GoalController(engine.paths.root, cwd);
+  }
+  const syncGoalRef = (): void => {
+    const state = goalControllerRef.current?.get();
+    goalRef.current = state
+      ? {
+          condition: state.condition,
+          status: state.status,
+          revision: state.revision,
+          rounds: state.rounds,
+          maxRounds: state.maxRounds,
+          armed: state.armed,
+          blockedReason: state.blockedReason,
+        }
+      : null;
+  };
+  useEffect(() => {
+    const controller = goalControllerRef.current;
+    if (!controller) return;
+    void controller.ready().then(syncGoalRef).catch(() => undefined);
+  }, [cwd, engine]);
   const activeThemeId = useRef(initialThemeId ?? themeCatalogue.themes[0]?.id ?? 'minimal');
   const [configSnapshot, setConfigSnapshot] = useState<GlobalConfig | null>(null);
   const [configLoading, setConfigLoading] = useState(false);
@@ -1142,6 +1200,10 @@ export function App({
         // loop's wall-clock duration, which can jump when the system clock is
         // adjusted during a long request.
         if (currentLoading && active) activityModel.reasoningEnd(active.id);
+        const metrics = turnMetricsRef.current;
+        if (metrics?.turnId === event.turnId && event.durationMs) {
+          metrics.reasoningMs += event.durationMs;
+        }
         closeThinking(event.durationMs);
       }),
 
@@ -1174,6 +1236,14 @@ export function App({
           { lane: 'reasoning', delta: event.delta },
           { lane: 'completion', delta: event.delta },
         ]);
+      }),
+
+      engine.bus.on('agent.reasoning_budget', (event) => {
+        if (!isCurrentLoadingTurn(event.turnId)) return;
+        push(entry('notice', '! 8min de reasoning neste turno — effort alto custa ~1min por ciclo. Baixe o effort (medium) para ~5x mais rápido.', {
+          tone: 'warn',
+          tag: formatDuration(event.totalMs),
+        }));
       }),
 
       /**
@@ -1237,6 +1307,10 @@ export function App({
       }),
 
       engine.bus.on('agent.compacted', (event) => {
+        const metrics = turnMetricsRef.current;
+        if (metrics && compactionSince.current !== null) {
+          metrics.compactionMs += Math.max(0, Date.now() - compactionSince.current);
+        }
         compactionSince.current = null;
         dispatch({ type: 'compaction.end' });
         if (event.failure) {
@@ -1391,6 +1465,10 @@ export function App({
         }
 
         usage.current = { ...usage.current, toolCalls: usage.current.toolCalls + 1 };
+        const metrics = turnMetricsRef.current;
+        if (metrics?.turnId === event.turnId && event.durationMs) {
+          metrics.toolsMs += event.durationMs;
+        }
 
         if (discoveryKind) {
           dispatch({
@@ -1696,6 +1774,67 @@ export function App({
     },
     [mcpRegistry],
   );
+
+  const cancelCodexLogin = useCallback(async (): Promise<void> => {
+    const flow = codexLoginFlow.current;
+    if (!flow) {
+      setCodexLogin(null);
+      return;
+    }
+    await flow.cancel();
+  }, []);
+
+  const loginCodex = useCallback(async (): Promise<boolean> => {
+    if (codexLoginFlow.current) return false;
+    setCodexLogin({ status: 'starting' });
+    try {
+      const flow = await startCodexLogin();
+      codexLoginFlow.current = flow;
+      if (flow.alreadyAuthenticated) {
+        setCodexLogin(null);
+        return true;
+      }
+
+      setCodexLogin({
+        status: 'waiting',
+        ...(flow.userCode ? { userCode: flow.userCode } : {}),
+      });
+      const loginUrl = flow.authUrl ?? flow.verificationUrl;
+      if (!loginUrl) throw new Error('the Codex sign-in URL was empty');
+      try {
+        await openOAuthBrowser(new URL(loginUrl));
+      } catch (error) {
+        await flow.cancel();
+        const { title } = formatError(error);
+        setCodexLogin({ status: 'error', detail: `Could not open ChatGPT sign-in: ${title}` });
+        return false;
+      }
+
+      const result = await flow.wait();
+      if (result.ok) {
+        setCodexLogin(null);
+        return true;
+      }
+      if (result.cancelled) {
+        setCodexLogin(null);
+        return false;
+      }
+      setCodexLogin({
+        status: 'error',
+        detail: result.detail ?? 'ChatGPT sign-in was not completed',
+      });
+      return false;
+    } catch (error) {
+      const { title, detail } = formatError(error);
+      setCodexLogin({
+        status: 'error',
+        detail: [title, detail].filter(Boolean).join(' · '),
+      });
+      return false;
+    } finally {
+      codexLoginFlow.current = null;
+    }
+  }, []);
 
   const runMcpBrowserAction = useCallback(
     async (action: 'connect' | 'disconnect' | 'authenticate' | 'test', server: string): Promise<void> => {
@@ -2012,10 +2151,11 @@ export function App({
    *
    * A row can still change while it is the newest thing on screen — output
    * streams into it, its status resolves, an approval is inserted above it — so
-   * only unsettled work remains in the live frame. Once the Worked separator
-   * exists and every row before it is settled, promote that complete turn to
-   * `<Static>` in one ordered batch. This prevents the bounded live viewport
-   * from dropping finished answers as they grow beyond the terminal height.
+   * only unsettled work remains in the live frame. A completed turn stays live
+   * until the next user input; that prevents the final answer from triggering
+   * a fresh native-scrollback batch and jumping the terminal at completion.
+   * The next input establishes the older-turn boundary and promotes it to
+   * `<Static>` in one ordered batch.
    */
   useEffect(() => {
     // Committing prints settled rows to native terminal scrollback. Plif does
@@ -2355,11 +2495,13 @@ export function App({
       // `/goal` is a session note, not a hidden submission. It must never
       // spend a model turn or start editing just because the user recorded
       // their desired outcome.
-      goalRef.current = { condition, status: 'active' };
+      await goalControllerRef.current?.setUserGoal(condition);
+      syncGoalRef();
     },
     goalStatus: () => goalRef.current ? { ...goalRef.current } : null,
-    clearGoal: () => {
-      goalRef.current = null;
+    clearGoal: async () => {
+      await goalControllerRef.current?.clear();
+      syncGoalRef();
     },
     switchProfile: async (name) => {
       const loaded = await loadStoredConfig(engine.paths);
@@ -2449,6 +2591,7 @@ export function App({
     pasteImage: () => pasteImage(),
     openBrowser: (tab) => dispatch({ type: 'browser.open', tab }),
     loginMcp,
+    loginCodex,
     mcpNames: mcpStatuses.map((server) => server.name),
     openPicker: (picker) => dispatch({ type: 'picker.open', picker }),
     notify: (notice) => push(notice),
@@ -2845,6 +2988,9 @@ export function App({
       instructionsPromise,
       configPromise,
     ]);
+    await goalControllerRef.current?.ready();
+    goalControllerRef.current?.setMaxRounds(plifModeOf(profileConfig).maxGoalRounds);
+    syncGoalRef();
     if (!existingContainer) {
       // Deliberately silent. The container's name is already in the header and
       // on the prompt badge.
@@ -2909,8 +3055,8 @@ export function App({
       }));
     }
     const planOnly = mode === 'plan';
-    const goalInstructions = goalRef.current
-      ? `SESSION GOAL (user-defined, guidance only): ${goalRef.current.condition}\nRead this goal to understand the user's final desired outcome across subsequent turns. Do not start work merely because the goal was recorded; act on the user's current request and use ask_user when scope or approval is unclear.`
+    const goalInstructions = goalRef.current?.status === 'active'
+      ? `SESSION GOAL: ${goalRef.current.condition}\nGoal state: ${goalRef.current.armed ? 'armed for autonomous rounds' : 'context only; not armed'}, round ${goalRef.current.rounds}/${goalRef.current.maxRounds}. Read this goal to understand the user's final desired outcome. Do not start autonomous work unless the user armed it with /goal.`
       : "No session goal is set. Do not invent a final objective silently. If the user's end goal is unclear, use ask_user first; when the Galileo skill is available, use it after clarification to help structure the objective.";
     const turnInstructions = [
       agentInstructions,
@@ -2936,6 +3082,8 @@ export function App({
       edits,
       coordinator: subagents.current,
       ...(turnInstructions ? { agentInstructions: turnInstructions } : {}),
+      sessions: engine.sessions,
+      continuable: plifModeOf(storedConfig).continuableSubagents !== false,
     };
     const allAgentTools = [
       ...tools,
@@ -2944,6 +3092,9 @@ export function App({
       ...WEB_TOOLS,
       ...(planOnly ? [] : visionTools(childOptions)),
       ...(planOnly ? [] : [subagentTool(childOptions)]),
+      ...(planOnly || plifModeOf(storedConfig).continuableSubagents === false
+        ? []
+        : [sendMessageTool(childOptions)]),
     ];
     const agentTools = planOnly
       ? allAgentTools.filter((tool) => !PLAN_BLOCKED_TOOLS.has(tool.spec.name))
@@ -2957,6 +3108,7 @@ export function App({
 
     const loadingOperationId = beginLoading(durableTurnId);
     let loadingResult: 'done' | 'error' | 'cancelled' = 'done';
+    let goalRoundEligible = false;
     // Token Split configuration is read once at turn start. A command can
     // change it safely for the next turn, never halfway through this request.
     const tokenSplitConfig = await loadTokenSplitConfig();
@@ -2974,7 +3126,10 @@ export function App({
               capabilities: container.capabilities,
               isolation: report.isolation,
               contextTokens: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
-              tools: stableToolSpecs(agentTools.map((tool) => tool.spec)),
+              tools: stableToolSpecs([
+                ...agentTools.map((tool) => tool.spec),
+                ...(planOnly ? [] : [RUN_SCRIPT_SPEC]),
+              ]),
               skills: skillRegistry?.catalogue() ?? skillCatalogue,
               loadedSkills: loadedSkillNames(carried),
               mcpServers: mcpRegistry ? mcpRegistry.catalogue() : mcpCatalogue,
@@ -3008,6 +3163,27 @@ export function App({
           tools: agentTools,
           memory: engine.memory,
           workspace: cwd,
+          execution: {
+            cwd,
+            workspaceRoots: [cwd],
+            permissionMode: engine.approvals.permissionMode,
+            ask: (question) => engine.questions.ask(question),
+            approve: async (request: ModelApprovalRequest): Promise<'allow' | 'deny' | 'cancel'> => {
+              const answer = await engine.approvals.ask({
+                containerId: container.name,
+                action: request.kind === 'execute'
+                  ? 'exec'
+                  : request.kind === 'permissions' && request.network
+                    ? 'net.connect'
+                    : 'fs.write',
+                target: request.target,
+                ...(request.argv ? { argv: request.argv } : {}),
+                reason: request.reason ?? 'Codex requested approval through the shared PLIF permission broker.',
+                rationale: 'The Codex app-server request is governed by the active PLIF permission mode.',
+              }, abort.signal);
+              return answer.decision === 'allow' ? 'allow' : 'deny';
+            },
+          } satisfies ModelExecutionContext,
           sessionId: transcript.session?.id ?? 'interactive',
           contextTokens: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
           tokenSplit: {
@@ -3016,6 +3192,20 @@ export function App({
             sessionId: transcript.session?.id ?? 'interactive',
           },
           enableHarnessCycle: effortRef.current === 'plif',
+          runScript: !planOnly,
+          runScriptMaxSteps: plifModeOf(storedConfig).runScriptMaxSteps,
+          goal: goalControllerRef.current ?? undefined,
+          sessions: engine.sessions,
+          maxIterations: effortRef.current === 'plif' ? 50 : undefined,
+          maxReviewReminders: effortRef.current === 'plif'
+            ? plifModeOf(storedConfig as GlobalConfig).maxReviewReminders
+            : undefined,
+          plifTelemetry: effortRef.current === 'plif'
+            ? {
+                reviewPasses: plifModeOf(storedConfig as GlobalConfig).reviewPasses ?? 3,
+                skillsLoaded: skillRegistry?.list().map((skill) => skill.name) ?? [],
+              }
+            : undefined,
           ...(attachments.length ? { attachments } : {}),
           ...(taskManager.current ? { tasks: taskManager.current } : {}),
           ...(lspManager.current ? { lsp: lspManager.current } : {}),
@@ -3084,7 +3274,8 @@ export function App({
             });
           },
           setGoal: async (condition) => {
-            goalRef.current = { condition, status: 'active' };
+            await goalControllerRef.current?.setModelGoal(condition);
+            syncGoalRef();
             push(entry('notice', 'goal recorded by agent', {
               tone: 'accent',
               subtitle: condition,
@@ -3099,6 +3290,7 @@ export function App({
       conversation.current = result.messages.slice(1);
       if (result.stop === 'cancelled') loadingResult = 'cancelled';
       else if (result.stop !== 'complete' || result.error) loadingResult = 'error';
+      else goalRoundEligible = true;
 
       // conversation.event is emitted synchronously by the loop, but the
       // session append is real asynchronous I/O. Commit it before closing the
@@ -3121,6 +3313,24 @@ export function App({
             tone: result.stop === 'cancelled' ? 'muted' : 'warn',
           }),
         );
+      }
+      if (effortRef.current === 'plif' && result.stop === 'max_iterations') {
+        push(entry('notice', 'PLIF turn limit reached', {
+          tone: 'warn',
+          subtitle: 'The turn was capped at 50 cycles to protect the session. Type /continue to resume from the saved transcript.',
+        }));
+      }
+      if (effortRef.current === 'plif' && result.iterations > 3) {
+        const metrics = turnMetricsRef.current?.turnId === durableTurnId
+          ? turnMetricsRef.current
+          : null;
+        const timing = metrics
+          ? ` · wall ${formatDuration(Date.now() - metrics.startedAt)} · reasoning ${formatDuration(metrics.reasoningMs)} · tools ${formatDuration(metrics.toolsMs)} · compaction ${formatDuration(metrics.compactionMs)}`
+          : '';
+        push(entry('notice', `PLIF turn report · ${result.iterations} cycles`, {
+          tone: 'accent',
+          subtitle: `${result.toolCalls} tool calls · ${result.retries} retries · ${formatCount(result.promptTokens)} input tokens · ${formatCount(result.completionTokens)} output tokens${timing}`,
+        }));
       }
       if (result.error) {
         const recovered = await recoverModelAuth(result.error);
@@ -3166,6 +3376,31 @@ export function App({
       closeAnswer();
       closeThinking();
       transcript.finishTurn(durableTurnId);
+      if (abort.signal.aborted) {
+        const goal = goalControllerRef.current?.get();
+        if (goal?.status === 'active' && goal.armed) {
+          await goalControllerRef.current?.pause('paused by user cancellation');
+          syncGoalRef();
+        }
+      } else if (goalRoundEligible && mode === 'normal') {
+        const next = await goalControllerRef.current?.startRound();
+        syncGoalRef();
+        if (next) {
+          const roundPrompt =
+            `[goal round ${next.rounds}/${next.maxRounds} — continue this objective: ${next.condition}\n` +
+            'Read the current plan (.plif/plans/) and NOTES first. Do the single most useful next step. ' +
+            'When the objective is genuinely achieved, call complete_goal with evidence (commands/results). ' +
+            'When the same blocker has persisted for 3 rounds, call block_goal with the concrete reason. ' +
+            'Do not recap past rounds.]';
+          const timer = setTimeout(() => {
+            const currentGoal = goalControllerRef.current?.get();
+            if (currentGoal?.status === 'active' && currentGoal.armed) {
+              void runAgent(roundPrompt, [], undefined, 'normal');
+            }
+          }, 25);
+          timer.unref?.();
+        }
+      }
       // Still open here means the turn ended without the endpoint ever
       // answering — the retry budget ran out or the endpoint failed permanently.
       settleRetry('gave up');
@@ -3576,7 +3811,7 @@ export function App({
 
   function handleMouse(mouse: { readonly button: number; readonly action: string; readonly column: number; readonly row: number }): void {
     if (mouse.action !== 'press' || mouse.button !== 0 || pastedTextPopup) return;
-    if (state.screen || state.browser || state.approval || state.question || state.picker || credentialPromptPending) return;
+    if (state.screen || state.browser || state.approval || state.question || state.picker || credentialPromptPending || codexLogin) return;
 
     const sequence = nextClickSequence(pastedClick.current, mouse, Date.now());
     pastedClick.current = sequence.count >= 3 ? EMPTY_CLICK_SEQUENCE : sequence;
@@ -3623,6 +3858,11 @@ export function App({
       return;
     }
 
+    if (codexLogin) {
+      if (key.escape || (key.ctrl && char === 'c')) void cancelCodexLogin();
+      return;
+    }
+
     if (state.screen) {
       handleConfigKey(char, key);
       return;
@@ -3664,7 +3904,7 @@ export function App({
 
     if (thinkingViewport.open) {
       const metrics = { contentLines: thinkingLines, height: thinkingRows };
-      if ((key.ctrl && char === 'r') || key.escape) {
+      if (isControlShortcut(char, key, 'r') || key.escape) {
         dispatchThinkingViewport({ type: 'close' });
         return;
       }
@@ -3684,7 +3924,7 @@ export function App({
         });
         return;
       }
-      if (key.ctrl && (char === 'end' || char === 'e')) {
+      if ((key.ctrl && char === 'end') || isControlShortcut(char, key, 'e')) {
         dispatchThinkingViewport({ type: 'end', ...metrics });
         return;
       }
@@ -3700,7 +3940,7 @@ export function App({
         contentLines: transcriptContentLines,
         height: transcriptBodyHeight,
       };
-      if ((key.ctrl && char === 't') || key.escape) {
+      if (isControlShortcut(char, key, 't') || key.escape) {
         dispatchTranscriptViewport({ type: 'close' });
         return;
       }
@@ -3715,7 +3955,7 @@ export function App({
       // Ink exposes Ctrl+End as the parsed key name `end` with ctrl=true.
       // Ctrl+E remains the short equivalent for terminals that do not emit a
       // distinct End sequence.
-      if (key.ctrl && (char === 'end' || char === 'e')) {
+      if ((key.ctrl && char === 'end') || isControlShortcut(char, key, 'e')) {
         dispatchTranscriptViewport({ type: 'end', ...metrics });
         return;
       }
@@ -3727,11 +3967,11 @@ export function App({
       if (!(key.ctrl && char === 'c')) return;
     }
 
-    if (key.ctrl && char === 'e') {
+    if (isControlShortcut(char, key, 'e')) {
       dispatch({ type: 'toggleLastTool' });
       return;
     }
-    if (key.ctrl && char === 'r') {
+    if (isControlShortcut(char, key, 'r')) {
       dispatchThinkingViewport({
         type: 'open',
         contentLines: thinkingLines,
@@ -3759,7 +3999,7 @@ export function App({
       setWorkDockOpen(false);
       return;
     }
-    if (key.ctrl && char === 't') {
+    if (isControlShortcut(char, key, 't')) {
       dispatchTranscriptViewport({
         type: 'open',
         contentLines: transcriptContentLines,
@@ -4590,7 +4830,7 @@ export function App({
     const question = state.question;
     if (!question) return;
 
-    if (key.ctrl && char === 'e') {
+    if (isControlShortcut(char, key, 'e')) {
       dispatch({ type: 'question.expand' });
       return;
     }
@@ -4918,16 +5158,32 @@ export function App({
   // them can say what it is busy *with* and how far along it is, so the vaguer
   // one steps aside rather than the two stacking.
   const operational = useMemo(
-    () => operationalEntries([...state.committed, ...state.entries]),
-    [state.committed, state.entries],
+    () => operationalEntries(state.entries),
+    [state.entries],
   );
-  const activityOpen = operational.length > 0;
+  // Activity is a live work surface, not a second copy of the transcript.
+  // Once a turn is finished its input/tool rows belong to history and should
+  // not keep a floating panel alive forever.
+  const activityOpen = state.busy && operational.length > 0;
+  const dockEntries = activityOpen || workDockOpen ? state.entries : [];
   const workRows = workDockHeight(
     tasks,
     state.subagents,
     workDockOpen || activityOpen,
-    [...state.committed, ...state.entries],
+    dockEntries,
   );
+  const expandedTool = useMemo(
+    () => state.expandedToolId === null
+      ? null
+      : state.committed.find((item) => item.id === state.expandedToolId && item.kind === 'tool') ?? null,
+    [state.committed, state.expandedToolId],
+  );
+  const toolExpansionRows = expandedTool
+    ? Math.min(
+        surface.contentHeight,
+        estimateHeight({ ...expandedTool, expand: true }, Math.max(12, surface.contentWidth - 2)) + 3,
+      )
+    : 0;
   const discoveryRows = discoveryHeight(state.discovery.calls, state.discovery.open);
 
   // How many rows a list-style dialog may use. Shrinks with the window so the
@@ -4949,6 +5205,7 @@ export function App({
     footerRows + // contextual bottom HUD; zero rows in quiet idle
     workingRows +
     workRows +
+    toolExpansionRows +
     (showCompletions ? suggestionRows + (completionCount > suggestionRows ? 1 : 0) + 1 + completionHeadingRows : 0) +
     (showEmoji ? suggestionRows + (emojiMatches.length > suggestionRows ? 1 : 0) + 1 : 0) +
     (state.picker
@@ -5162,16 +5419,6 @@ export function App({
           paddingY={surface.panelPaddingY}
         >
           <Box flexDirection="column" width={surface.contentWidth} flexGrow={1}>
-            <WorkDock
-              tasks={tasks}
-              subagents={state.subagents}
-              subagentFocus={state.subagentFocus}
-              expanded={workDockOpen || activityOpen}
-              width={surface.contentWidth}
-              now={now}
-              entries={[...state.committed, ...state.entries]}
-            />
-
             <Box flexDirection="column">
               <Timeline
                 entries={state.entries}
@@ -5179,6 +5426,17 @@ export function App({
                 maxLines={timelineBudget}
               />
             </Box>
+
+            {codexLogin && (
+              <Box paddingX={1}>
+                <CodexLoginDialog
+                  status={codexLogin.status}
+                  detail={codexLogin.detail}
+                  userCode={codexLogin.userCode}
+                  width={Math.max(1, surface.contentWidth - 2)}
+                />
+              </Box>
+            )}
 
             {state.picker && (
               <Box paddingX={1}>
@@ -5235,6 +5493,10 @@ export function App({
 
             <Box flexGrow={1} />
 
+            {expandedTool && (
+              <ToolExpansion entry={expandedTool} width={surface.contentWidth} />
+            )}
+
             {showCompletions && (
               <Completions
                 matches={completions}
@@ -5250,6 +5512,15 @@ export function App({
             )}
 
             <Box flexDirection="column" flexShrink={0}>
+              <WorkDock
+                tasks={tasks}
+                subagents={state.subagents}
+                subagentFocus={state.subagentFocus}
+                expanded={workDockOpen || activityOpen}
+                width={surface.contentWidth}
+                now={now}
+                entries={dockEntries}
+              />
               {working && (
                 <Box paddingX={layout.gutter}>
                   {working}
@@ -5267,7 +5538,7 @@ export function App({
                 // Focused while busy too: the field takes input the whole time, and
                 // an unfocused-looking box that nonetheless accepts typing is a lie
                 // about where the keystrokes are going.
-                focused={!state.approval && !state.question && !state.picker}
+                focused={!codexLogin && !state.approval && !state.question && !state.picker}
                 busy={state.busy}
                 busyLabel={state.busyLabel}
                 width={surface.contentWidth}

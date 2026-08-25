@@ -55,6 +55,8 @@ export interface ModelCatalogProvider {
   readonly origin: ModelCatalogOrigin;
   readonly preset: string;
   readonly endpoint: string;
+  /** Authentication owned by a local provider bridge, not an API key. */
+  readonly auth?: 'codex';
   /** Curated ids, most used first. Used for ranking and when listing fails. */
   readonly models: readonly ModelCatalogModel[];
   /** True when the endpoint serves models to callers with no credential. */
@@ -157,7 +159,7 @@ const provider = (
   label: string,
   description: string,
   models: readonly ModelCatalogModel[],
-  extra: { anonymous?: boolean; product?: string; tier?: string; defaultCost?: ModelCost } = {},
+  extra: { anonymous?: boolean; product?: string; tier?: string; defaultCost?: ModelCost; auth?: 'codex' } = {},
 ): ModelCatalogProvider =>
   Object.freeze({
     id,
@@ -171,6 +173,7 @@ const provider = (
     ...(extra.product ? { product: extra.product } : {}),
     ...(extra.tier ? { tier: extra.tier } : {}),
     ...(extra.defaultCost ? { defaultCost: extra.defaultCost } : {}),
+    ...(extra.auth ? { auth: extra.auth } : {}),
   });
 
 /**
@@ -216,6 +219,17 @@ export const MODEL_CATALOG: readonly ModelCatalogProvider[] = Object.freeze([
     model('gemini-2.5-flash', 'Gemini 2.5 Flash', 'Fast and inexpensive'),
     model('gemini-2.0-flash', 'Gemini 2.0 Flash', 'Previous fast generation'),
   ]),
+  provider('codex', 'OpenAI Codex (ChatGPT)', 'Use your ChatGPT account through the PLIF sign-in window', [
+    model('codex-default', 'Codex default', 'Uses the model selected by your ChatGPT/Codex account', ['ChatGPT login'], ['text', 'image'], {
+      reasoning: true,
+      tools: true,
+      provider: 'codex',
+      product: 'OpenAI',
+      tier: 'Codex / ChatGPT',
+      protocol: 'openai-chat',
+      metadataSource: 'registry',
+    }),
+  ], { product: 'OpenAI', tier: 'Codex / ChatGPT', defaultCost: 'unknown', auth: 'codex' }),
   provider('xai', 'xAI', 'Grok models', [
     model('grok-4', 'Grok 4', 'Flagship model'),
     model('grok-code-fast-1', 'Grok Code Fast', 'Tuned for coding turnaround'),

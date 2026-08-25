@@ -85,13 +85,15 @@ test('token split artifacts are redacted, auditable, and stored outside the mode
       dir: '.plif/tmp/spill',
     });
     assert.equal(secret, null);
-    const escaped = await spillToolOutput(workspace, 'session/one', 'call-escape', 'safe output '.repeat(5000), {
-      maxInlineChars: 100,
-      headChars: 20,
-      tailChars: 10,
-      dir: '..\\outside',
-    });
-    assert.equal(escaped, null);
+    for (const dir of ['..\\outside', 'C:\\outside', '\\\\server\\share']) {
+      const escaped = await spillToolOutput(workspace, 'session/one', 'call-escape', 'safe output '.repeat(5000), {
+        maxInlineChars: 100,
+        headChars: 20,
+        tailChars: 10,
+        dir,
+      });
+      assert.equal(escaped, null, `spill directory escaped workspace: ${dir}`);
+    }
     const notes = await fs.readFile(stateNotesPath(workspace, 'session/one'), 'utf8');
     assert.doesNotMatch(notes, /sk-secret-value/);
   } finally {

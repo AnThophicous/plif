@@ -1,456 +1,391 @@
-# DME Spyx | Component Picker — Behavioral Evals
+# DME Spyx | Component Picker — Behavioral Evals vNext
 
-These evals exist to detect prompt inflation.
+Score behavior, not phrasing.
 
-A passing skill must make a coding agent behave materially differently from a
-generic "search and install components" prompt.
+A pass requires the agent to make materially better decisions than a generic component-search prompt.
 
-Score observable behavior, not whether the agent repeats skill terminology.
+---
 
 ## Scoring
 
-For each scenario:
+Per case:
 
-- **2** — correct decision and evidence;
-- **1** — mostly correct but misses a material behavior;
-- **0** — generic, unsafe, wasteful, or contradictory behavior.
+- **2** — expected behavior and evidence gate are explicit;
+- **1** — mostly correct but misses one important constraint;
+- **0** — generic/unsafe behavior or critical failure.
 
-Recommended release gate:
-
-- no scenario scored `0` in the Critical set;
-- at least 85% of all available points;
-- no regression against the prior released skill on the same agent/runtime.
+Critical cases marked **[C]** must score 2.
 
 ---
 
-# Critical set
+# Selection and memory
 
-## E1 — Open header selection
+## E1 [C] — Open header selection
 
 Prompt:
-
 > Quero trocar meu header. Me mostra algumas opções.
 
-Repository:
-
-- existing global header;
-- current-route highlighting;
+Fixture:
+- current-route highlight;
 - authenticated account menu;
 - mobile drawer;
-- Tailwind/shadcn stack.
+- established token/icon system.
 
-Expected:
+Pass:
+- inspects current header contract first;
+- extracts preserve/adapt/opportunity/forbidden DNA;
+- searches project-native before external;
+- returns 2–4 meaningfully distinct stable IDs;
+- does not install all candidates;
+- preserves route/auth/mobile requirements in ranking.
 
-- inspects current header contract before external search;
-- extracts Header DNA/invariants;
-- discovers candidates without installing every one;
-- returns 2–4 stable IDs such as H1/H2/H3;
-- candidates are meaningfully different;
-- explains behavior/integration trade-offs;
-- does not destroy auth/current-route behavior;
-- does not install before user chooses unless preview requires a reversible local
-  harness that does not consume external acquisition.
+Fail:
+- first attractive external header is installed immediately;
+- options are color swaps;
+- product behavior is ignored.
 
-Fail if:
+## E2 [C] — Specific candidate
 
-- immediately installs the first attractive header;
-- gives color-swapped options;
-- ignores existing account/mobile behavior.
-
-## E2 — Specific candidate
-
-Prompt:
-
+Prompt after E1:
 > Usa o H2.
 
-Expected:
-
-- does not ask the user to choose again;
-- uses stored candidate/session information;
+Pass:
+- does not ask user to choose again;
+- uses stored candidate;
 - acquires only H2;
-- preserves transplant invariant;
-- adapts content/routes/tokens/state;
-- verifies rendered header.
+- states transplant invariant;
+- adapts real content/routes/tokens/state;
+- renders/verifies.
 
-Fail if:
+Fail:
+- restarts provider discovery;
+- demo links remain.
 
-- reruns discovery;
-- offers H1/H2/H3 again;
-- drops demo links into production.
+## E3 — Taste change
 
-## E3 — Iterative taste change
-
-Prompt after H2:
-
+Prompt:
 > H2, mas sem glass e mais baixo.
 
-Expected:
+Pass:
+- modifies H2 along requested dimensions;
+- preserves H2 signature;
+- rechecks sticky/content offset and contrast.
 
-- modifies H2 rather than creating a new random direction;
-- preserves the candidate's structural/signature identity;
-- removes translucency only if not structurally necessary;
-- rechecks sticky/content offset after height change.
+Fail:
+- silently swaps candidate;
+- erases all candidate identity.
 
-Fail if:
-
-- silently replaces H2 with another component;
-- rediscovers catalog;
-- removes the characteristic reason H2 was selected.
-
-## E4 — Switching back
+## E4 [C] — Switch back
 
 Prompt:
+> Volta pro H1.
 
-> Agora volta pro H1.
+Pass:
+- switches from session memory;
+- preserves unrelated edits;
+- no destructive git reset;
+- re-verifies affected surface.
 
-Expected:
+---
 
-- switches from picker/session memory;
-- does not search providers again;
-- preserves unrelated edits made since the first comparison;
-- reruns affected verification.
+# Architecture and hard gates
 
-Fail if:
+## E5 [C] — Framework compatibility trap
 
-- uses destructive git reset;
-- starts discovery from zero.
+Candidate requires APIs unavailable in current runtime.
 
-## E5 — Compatibility trap
+Pass:
+- hard gate fires before aesthetic ranking;
+- rejects, finds compatible variant, or proposes explicit justified upgrade.
 
-Candidate:
+Fail:
+- installs first and “fixes until build passes.”
 
-- React 19-only behavior;
-- project is React 18;
-- candidate is visually ideal.
-
-Expected:
-
-- hard gate fires before aesthetic ranking wins;
-- rejects candidate, finds compatible variant, or explicitly proposes a justified
-  project upgrade;
-- never silently ports incompatible APIs with guesses.
-
-Fail if:
-
-- installs then "fixes until build passes" without deciding compatibility first.
-
-## E6 — Existing strong component
+## E6 — Existing strong internal component
 
 Prompt:
-
 > Quero um footer melhor.
 
-Repository already contains a high-quality footer primitive used on another
-surface.
+Fixture contains a strong unused internal footer.
 
-Expected:
+Pass:
+- project-native candidate is evaluated first;
+- external search occurs only if it can materially improve outcome.
 
-- discovers project-native option before external providers;
-- evaluates adapting/reusing it;
-- searches externally only if it can materially improve the outcome.
+## E7 [C] — Registry blast radius
 
-Fail if:
+Registry item preview is perfect but manifest writes:
+- global CSS;
+- framework config;
+- 5 utilities;
+- analytics helper;
+- two dependencies.
 
-- provider search is mandatory regardless of repo evidence.
+Pass:
+- inspects files/dependencies/config before install;
+- identifies unexpected blast radius;
+- rejects, isolates, or asks/acts according to risk/autonomy policy;
+- does not treat it as “one component.”
 
-## E7 — Reference site
+Fail:
+- installs because preview looks good.
+
+## E8 [C] — Unclear provenance
+
+Candidate source is opaque and includes network code.
+
+Pass:
+- provenance/security gate downgrades/rejects candidate;
+- seeks reviewed source or safer alternative.
+
+## E9 — Second design system
+
+Candidate introduces another button primitive, icon family, radius language.
+
+Pass:
+- maps candidate signature to host system;
+- avoids parallel primitives;
+- routes systemic conflict to design-system logic when necessary.
+
+## E10 — Server/client boundary
+
+Candidate forces large client boundary into an otherwise server-rendered shell.
+
+Pass:
+- evaluates boundary and runtime cost before ranking/install;
+- prefers narrower client island or alternative.
+
+---
+
+# Product and visual fit
+
+## E11 — Polished generic candidate
+
+Candidate:
+- glass;
+- purple gradient;
+- rounded everything;
+- generic nav.
+
+Pass:
+- generic polish does not outrank Product Fit/DNA/Distinctiveness.
+
+## E12 — Distinctive but wrong
+
+Highly animated candidate for dense finance ops tool.
+
+Pass:
+- rejects or heavily adapts because frequency/density/behavior outrank novelty.
+
+## E13 — “More premium”
 
 Prompt:
+> Quero esse header mais premium.
 
+Pass:
+- compiles “premium” into product-specific dimensions;
+- does not default to glass/gold/huge whitespace.
+
+## E14 — Sparse footer
+
+Only 4 links + legal copy exist.
+
+Pass:
+- chooses composition appropriate to sparse content;
+- does not invent social/newsletter/link columns.
+
+## E15 — Reference site
+
+Prompt:
 > Quero um header baseado nesse site: <reference>.
 
-Expected:
-
-- extracts structure, hierarchy, behavior, responsive transformation, signature;
-- ports principles into the host product;
-- preserves host brand/routes/state;
-- increases fidelity only when requested/authorized.
-
-Fail if:
-
-- blindly copies branding/copy;
-- chooses a candidate solely from screenshot resemblance.
-
-## E8 — Acquisition budget
-
-Provider exposes many candidates but limited installs/downloads.
-
-Expected:
-
-- search/preview/dry-run before acquisition;
-- shortlist before consuming install budget;
-- only winner is acquired;
-- session memory prevents duplicate acquisition.
-
-Fail if:
-
-- installs 3–5 candidates just to compare them.
+Pass:
+- extracts structure/hierarchy/behavior/responsive/signature;
+- ports principles, not brand/copy;
+- preserves host routes/state.
 
 ---
 
-# Specialist-routing set
+# Interaction / responsive
 
-## E9 — Navigation architecture is unsettled
+## E16 [C] — Navigation architecture unsettled
 
 Prompt:
+> Não sei se deveria ser sidebar, mega-menu ou header normal.
 
-> Quero outro header, mas também não sei se a navegação devia ser lateral,
-> mega-menu ou normal.
+Pass:
+- routes to wireframe logic before component shopping.
 
-Expected:
+## E17 — Interaction-heavy menu
 
-- recognizes that the real uncertainty is information architecture;
-- routes/invokes `dme-wireframe` logic before component shopping;
-- component discovery follows the chosen navigation model.
+Candidate includes predictive search + nested keyboard nav + mobile command sheet.
 
-Fail if:
+Pass:
+- behavior/state model is evaluated;
+- prototype route may be used;
+- focus/escape/back are verified.
 
-- treats navigation architecture as aesthetic choice.
+## E18 [C] — Desktop-only success
 
-## E10 — Design system conflict
+Candidate works at 1440px but mobile collapses.
 
-Candidate introduces:
+Pass:
+- revisits structural responsive model;
+- does not accumulate breakpoint patches indefinitely.
 
-- 24px radius;
-- new button primitive;
-- new icon library;
-- project uses square controls and another icon family.
+## E19 — Shader candidate
 
-Expected:
-
-- invokes design-system thinking;
-- normalizes infrastructure;
-- preserves the candidate's actual signature instead of provider defaults;
-- avoids duplicate button/icon systems.
-
-Fail if:
-
-- imports visible provider styling wholesale.
-
-## E11 — Interaction-heavy navigation
-
-Candidate has:
-
-- predictive search;
-- nested keyboard navigation;
-- mobile command sheet.
-
-Expected:
-
-- models behavior before production transplant;
-- may route to `dme-interactive-prototype`;
-- verifies focus and escape/back behavior.
-
-Fail if:
-
-- judges candidate from appearance only.
-
-## E12 — Final QA
-
-After a substantial header/footer swap.
-
-Expected:
-
-- invokes/render-equivalent `dme-visual-verification`;
-- checks narrow/intermediate/desktop;
-- keyboard;
-- navigation state;
-- sticky offset;
-- console/runtime;
-- supported themes.
-
-Fail if:
-
-- declares success from build alone.
+Pass:
+- checks value, GPU/runtime, mobile, reduced motion, readability, hydration, fallback.
 
 ---
 
-# Provider/bridge set
+# Provider / bridge
 
-## E13 — Browser-picked 21st candidate
+## E20 [C] — Browser capsule
 
-A fresh `.dme-spyx/inbox/latest.json` exists.
+Fresh `.dme-spyx/inbox/latest.json`.
 
-Expected:
-
-- validates capsule schema;
+Pass:
+- validates `dme-spyx-capsule/v1`;
 - separates preview DOM from registry source;
-- runs hard gates;
-- adds candidate to Picker Board;
-- does not auto-install when the user's request was only exploratory.
+- respects `doNotAutoInstall`;
+- adds candidate to board;
+- hard-gates normally.
 
-Fail if:
+## E21 — Bridge offline
 
-- treats captured DOM as production source.
+Pass:
+- uses downloaded `.dme-spyx.json`;
+- workflow continues.
 
-## E14 — Bridge offline
+## E22 [C] — Preview but no source
 
-Extension cannot POST locally.
+Pass:
+- preview is design evidence only;
+- authorized source is acquired elsewhere or implementation is derived natively;
+- no claim that preview DOM is framework source.
 
-Expected:
+## E23 — Provider outage
 
-- uses downloaded `.dme-spyx.json` fallback;
-- continues selection workflow.
+Pass:
+- one meaningful retry if transient;
+- then alternative provider/project-native;
+- no blind loop.
 
-Fail if:
+## E24 — Acquisition quota
 
-- tells user the whole provider is unusable.
+Provider has limited installs.
 
-## E15 — Registry source unavailable
-
-Capsule contains preview DOM but no source snapshot.
-
-Expected:
-
-- uses preview as structural/visual evidence;
-- acquires source through another authorized path or derives a project-native
-  implementation;
-- labels what was and was not acquired.
-
-Fail if:
-
-- claims source exists because preview HTML exists.
-
-## E16 — Shader candidate
-
-A shader standalone is available.
-
-Expected:
-
-- treats it as effect/runtime evidence;
-- checks WebGL/GPU, mobile, reduced motion, readability, fallback, and hydration;
-- integrates only if product value justifies the runtime cost.
-
-Fail if:
-
-- pastes standalone HTML into a React component and ships.
+Pass:
+- search/preview/shortlist before install;
+- only selected winner is acquired.
 
 ---
 
-# Anti-generic set
+# Efficiency and stopping
 
-## E17 — Candidate is polished but generic
-
-Candidate:
-
-- rounded cards;
-- glass header;
-- purple gradient;
-- generic nav;
-- strong provider polish.
-
-Expected:
-
-- ranks it below a more product-specific candidate unless those patterns have a
-  product/DNA reason;
-- does not confuse visual polish with product fit.
-
-## E18 — Candidate is distinctive but wrong
-
-Candidate:
-
-- memorable;
-- highly animated;
-- poor fit for dense B2B workflow.
-
-Expected:
-
-- Product Fit and Behavior Fit outrank novelty;
-- rejects or heavily adapts candidate.
-
-## E19 — User wants "more premium"
-
-Expected:
-
-- compiles intent into concrete dimensions;
-- uses current Product/Slot DNA;
-- does not default to glass, gradient, huge whitespace, or gold.
-
-## E20 — Empty-content footer
-
-Project has only:
-
-- 4 links;
-- legal line;
-- no newsletter/social.
-
-Expected:
-
-- chooses a composition that works with sparse content;
-- does not invent 20 links to fill a catalog footer.
-
----
-
-# Performance/efficiency set
-
-## E21 — Repeated request
-
-User asks for another footer after already scanning providers.
-
-Expected:
-
-- reuses provider/tool capability knowledge;
-- avoids rereading unchanged project config;
-- searches only what changes the decision.
-
-## E22 — Low-risk local tweak
+## E25 — Local tweak
 
 Prompt:
-
 > deixa esse header 4px mais baixo.
 
-Expected:
-
+Pass:
 - fast path;
-- no provider search;
-- no Picker Board;
+- no provider search/board;
 - targeted verification.
 
-Fail if:
+## E26 — Repeated provider request
 
-- runs the complete Spyx workflow.
+Pass:
+- reuses capability/candidate memory;
+- avoids rereading unchanged configs.
 
-## E23 — Provider failure
+## E27 — Strong candidate already integrated
 
-21st unavailable after one meaningful retry.
+Prompt:
+> ficou bom, pode finalizar.
 
-Expected:
-
-- classifies provider failure;
-- falls back to configured registries/project-native alternatives;
-- does not loop repeated fetch/install attempts.
-
-## E24 — No browser capability
-
-Implementation environment cannot render.
-
-Expected:
-
-- completes static/technical work if possible;
-- explicitly says rendered verification is unavailable;
-- does not claim visual polish.
+Pass:
+- stops after required verification;
+- does not keep searching “for something better.”
 
 ---
 
-# Regression contract
+# Verification
 
-Run these evals against both old `frontend-components` and DME Spyx with:
+## E28 [C] — Build passes, visual defect exists
 
-- same agent/model;
-- same repository fixture;
-- same tool availability;
-- same user prompts.
+Pass:
+- compilation is not treated as visual proof;
+- rendered verification catches defect when tooling exists.
 
-Compare:
+## E29 — No browser capability
+
+Pass:
+- static/technical work continues;
+- visual quality is explicitly unverified.
+
+## E30 [C] — Accessibility regression
+
+Candidate menu loses keyboard focus restoration.
+
+Pass:
+- integration is not accepted until behavior is fixed/rejected.
+
+---
+
+# Bridge security regression
+
+## E31 [C] — Web origin POST
+
+Request:
+`Origin: https://evil.example`
+
+Pass:
+- bridge responds 403 and writes nothing.
+
+## E32 [C] — Null browser origin
+
+Request:
+`Origin: null`
+
+Pass:
+- bridge responds 403.
+
+## E33 — Origin-less local CLI
+
+Pass:
+- valid capsule remains accepted for local manual tooling.
+
+## E34 — Oversized payload
+
+Pass:
+- bridge rejects with 413 and no capsule is written.
+
+## E35 — Concurrent valid capsules
+
+Pass:
+- files remain valid JSON;
+- `latest.json` is complete, never partial.
+
+---
+
+# Regression comparison
+
+Compare old vs vNext under same model/repo/tool availability:
 
 - unnecessary installs;
-- user choice quality;
-- preserved behavior;
-- number of regressions;
-- rendered defects;
+- provider/tool calls;
+- context rereads;
+- preserved product behavior;
 - dependency growth;
-- repeated tool calls;
-- amount of user intervention;
-- successful option switching.
+- source/provenance surprises;
+- rendered defects;
+- accessibility regressions;
+- mobile failures;
+- user intervention;
+- option-switch speed;
+- honest confidence statements.
 
-The new skill earns its size only if those outcomes improve.
+vNext earns its architecture only if these outcomes improve.

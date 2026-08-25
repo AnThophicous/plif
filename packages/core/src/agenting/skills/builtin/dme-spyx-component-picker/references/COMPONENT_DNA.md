@@ -1,191 +1,201 @@
-# DME Spyx — Component DNA
+# DME Spyx — Component DNA vNext
 
-Use this reference when choosing a replacement from an existing product or a
-reference site.
+Use this reference only during component discovery/transplant.
 
-The purpose is not to describe everything visible. Capture only properties that
-change which candidate is appropriate.
+Component DNA is not a checklist of visual properties. It is a compact model of **what must survive, what may change, and why the slot exists**.
+
+---
 
 ## 1. Slot identity
 
-Determine:
-
-- component role;
-- screen/layout owner;
-- frequency of exposure;
-- product importance;
+Record:
+- slot kind;
+- user job;
 - primary action;
-- state/data dependencies;
-- structural width;
-- sticky/fixed/static behavior.
+- frequency;
+- trust/consequence;
+- dominant device/input;
+- host design-system authority.
 
-## 2. Structure fingerprint
+Examples:
+`global-header`, `workspace-sidebar`, `checkout-summary`, `marketing-hero`, `command-search`.
 
-For headers:
+---
 
-- logo position;
-- nav position;
-- nav count;
-- CTA count;
-- utility/account region;
-- row count;
-- constrained vs edge-to-edge;
-- overlay vs document flow;
-- sticky behavior;
-- mobile transformation.
+## 2. Four fingerprints
 
-For footers:
-
-- column/group count;
-- brand continuation;
-- legal/trust region;
-- newsletter/action;
-- social;
-- locale;
-- product/status links;
-- collapse behavior.
-
-For other slots:
-
-- dominant axis;
-- grouping model;
+### Structural
+- container/full-bleed;
+- row/stack/split/overlay;
+- persistent/sticky/fixed;
+- primary/secondary regions;
+- alignment;
 - content density;
-- primary interaction;
-- repeated-unit behavior;
-- overflow ownership;
-- disclosure model.
+- responsive transformation;
+- overflow ownership.
 
-## 3. Visual fingerprint
+### Visual
+- typography voice;
+- spacing rhythm;
+- shape/radius;
+- border/divider;
+- surface/elevation/material;
+- icon style;
+- color/chroma behavior;
+- motion character.
 
-Record relationships, not every pixel.
+### Behavioral
+- navigation/state;
+- active/selected;
+- menus/sheets;
+- search;
+- auth/account;
+- theme/locale;
+- keyboard/focus;
+- scroll;
+- loading/error;
+- analytics/flags if contractually relevant.
 
-### Type
-- quiet / expressive;
-- serif / sans / mono / mixed;
-- contrast between display/body/label;
-- density;
-- casing;
-- numeric behavior.
+### Product
+- job;
+- expertise;
+- frequency;
+- consequence;
+- primary conversion/action;
+- content reality.
 
-### Space
-- compact / normal / expansive;
-- consistent / editorial irregularity;
-- page-edge behavior;
-- relationship between internal and external space.
+---
 
-### Shape
-- square / subtle radius / rounded / pill;
-- border-first / surface-first / shadow-first;
-- divider behavior.
+## 3. Preservation classes
 
-### Color
-- surface dominance;
-- ink contrast;
-- accent scarcity;
-- semantic state treatment;
-- transparency.
-
-### Motion
-- none / state-only / spatial / expressive;
-- scroll-linked behavior;
-- menu transition;
-- reduced-motion expectation.
-
-## 4. Behavioral fingerprint
-
-Ask:
-
-- what changes on scroll;
-- what opens;
-- what remains visible;
-- how current location is indicated;
-- what changes when authenticated;
-- what changes on mobile;
-- what keyboard path exists;
-- which controls are persistent;
-- which state is URL-driven vs local.
-
-## 5. Signature vs commodity
-
-Split findings:
+For each important property classify:
 
 ### Preserve
-Product-specific behavior or visual language that should survive.
+Changing it would break product behavior or deliberate identity.
+
+### Adapt
+May change to integrate candidate into host product.
 
 ### Opportunity
-Generic or weak behavior that a new candidate can improve.
+Current slot is weak; candidate may intentionally improve this dimension.
 
 ### Forbidden regression
-Something the current component already gets right and the replacement must not
-break.
+Specific failure that must not occur.
 
 Example:
 
 ```text
-PRESERVE
-- compact 64px-ish shell rhythm
-- high-contrast primary CTA
-- active route underline
-- one-level mobile nav
+HEADER DNA
+Preserve:
+- auth/account behavior
+- active route
+- compact expert navigation
+- sticky content offset
 
-OPPORTUNITY
-- generic centered nav
-- weak account separation
+Adapt:
+- exact height
+- border treatment
+- icon implementation
 
-FORBIDDEN REGRESSION
-- sticky header cannot cover anchor targets
-- keyboard account menu must survive
+Opportunity:
+- stronger CTA hierarchy
+- clearer mobile transition
+
+Forbidden:
+- hover-only submenu
+- provider demo routes
+- second icon family
 ```
 
-## 6. Reference-site extraction
+---
 
-When analyzing another site, separate:
+## 4. Signature vs commodity
 
-- principle;
-- implementation;
-- branding.
+Separate valuable identity from replaceable provider details.
 
-Example:
+### Signature
+The reason the candidate deserves selection:
+- unusual but useful structure;
+- distinctive navigation rhythm;
+- strong typography relationship;
+- helpful motion/transition;
+- excellent data composition.
 
-Observed:
-`logo left / nav center / CTA detached right / header floats over hero`
+### Commodity
+Usually safe to remap:
+- raw hex values;
+- provider font;
+- exact radius;
+- generic icon set;
+- demo content;
+- provider utility wrapper.
 
-Principle:
-`brand, exploration, and conversion occupy three distinct visual zones`
+The **transplant invariant** preserves signature while commodity details become host-native.
 
-Adaptation:
-`keep the three-zone tension but use host typography, routes, tokens, and mobile
-menu conventions`
+---
 
-This is more useful than copying raw CSS.
+## 5. Candidate distance
 
-## 7. Candidate distance
-
-Candidate distance is the amount of adaptation needed.
+Classify distance:
 
 ### Near
-Same structural model and behavior; mostly visual port.
+Same structural/behavioral model; mostly visual adaptation.
 
 ### Medium
-Strong visual fit but behavior/spacing/token adaptation required.
+Useful signature with moderate structural/behavior adaptation.
 
 ### Far
-Different navigation or interaction architecture.
+Requires new interaction/state architecture, significant dependencies, or design-system divergence.
 
-Prefer Near/Medium for fast swaps.
+Distance is not bad by itself.
 
-Use Far only when its advantage justifies structural change and DME wireframe
-logic has been considered.
+Use farther candidates only when their product value justifies adaptation cost and risk.
+
+---
+
+## 6. DNA affinity test
+
+Ask:
+- Can host semantics/routes/state remain intact?
+- Can candidate signature survive token/style adaptation?
+- Does candidate fit product density/frequency?
+- Does its responsive model fit the host?
+- Does accessibility remain repairable at reasonable cost?
+- Would it still feel native after demo branding/provider defaults disappear?
+
+If not, rank down or reject.
+
+---
+
+## 7. Reference-site extraction
+
+From references derive:
+- structure;
+- hierarchy;
+- behavior;
+- responsive transformation;
+- signature move;
+- typography relationship;
+- density/material.
+
+Do not copy brand/copy/data or inaccessible defects.
+
+Translate evidence into target-product DNA.
+
+---
 
 ## 8. Transplant invariant
 
-Before adapting the winner, write one sentence defining why it was selected.
+Before implementation write one concise statement.
 
-Examples:
+Example:
 
-- preserve the editorial split between navigation and account action;
-- preserve the edge-to-edge footer closure with one concentrated conversion band;
-- preserve the compact command-bar density and keyboard-first focus treatment.
+```text
+TRANSPLANT INVARIANT
+Keep the two-zone navigation tension and instant mobile command-sheet transition;
+all raw colors, fonts, icons, and route data become host-native.
+```
 
-If adaptation destroys that sentence, the transplant failed even if the result is
-"on brand."
+After adaptation, test the candidate against that sentence.
+
+If the candidate no longer expresses it, adaptation erased the reason for choosing it.

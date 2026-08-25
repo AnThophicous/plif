@@ -1,102 +1,117 @@
 ---
 name: dme-design-system-spynx-edition
-description: Extract, create, repair, or extend a frontend design system from real product evidence, producing semantic tokens, coherent visual grammar, component contracts, state behavior, governance, and rendered proof.
+description: Extract, create, repair, extend, or migrate a frontend design system from product evidence, producing semantic foundations, coherent component contracts, accessibility behavior, governance, and rendered proof without token theater.
 ---
 
-# DME Design System | Spynx Edition — Evidence to Visual Grammar
+# DME Design System | Spynx Edition — Decision Compression System vNext
 
-A design system is not a token dump and not a component catalog.
+A design system is a **decision compression system**.
 
-It is a **decision compression system**: repeated product decisions become named, reusable rules so new surfaces feel coherent without rediscovering design every time.
+Repeated product decisions become named, reusable rules so new surfaces feel coherent without rediscovering design every time.
 
-Use this for:
+When available, load:
+- `../../shared/CORE_CONTRACT.md`;
+- `../../shared/DESIGN_LANGUAGE_ATLAS.md` when visual grammar itself is open.
 
-- design-system extraction;
-- shared visual foundations;
-- component libraries;
-- theming;
-- systemic visual inconsistency;
-- token migration;
-- brand-to-product translation;
-- multi-surface convergence.
+Do not load this skill for a one-off CSS fix with no reusable decision.
 
-Do not load this for a one-off CSS fix with no reusable decision.
+---
 
-## 1. Establish authority
+## 1. Modes
 
-Before defining anything, locate the real sources of truth:
+Classify the task:
 
-- token/theme files;
-- CSS variables;
-- utility config;
-- component primitives;
-- variant APIs;
-- font files and loading rules;
+### Extract
+The product is coherent but undocumented.
+
+### Repair
+The product has contradictory tokens/primitives/variants or systemic drift.
+
+### Extend
+A new product need requires a reusable addition.
+
+### Migrate
+The current system must move to a new token/component/theme architecture without breaking consumers.
+
+### Create
+No usable system exists and representative product surfaces need a coherent foundation.
+
+Do not treat all modes as “generate a token file.”
+
+---
+
+## 2. Establish authority
+
+Locate the real sources of truth:
+
+- CSS variables/theme files;
+- Tailwind or utility config;
+- component primitives and variant APIs;
+- font files/loading;
 - icon packages/assets;
 - brand assets;
+- global/layout CSS;
 - rendered production surfaces;
-- content voice;
-- accessibility conventions;
 - tests/stories/demos;
-- design exports when available.
+- accessibility conventions;
+- design exports/specs where available;
+- downstream consumers.
 
 Evidence precedence:
 
-`structured source → component behavior → rendered recurring pattern → isolated screenshot → assumption`
+`structured source → component behavior → recurring rendered pattern → isolated reference → assumption`
 
-A screenshot can reveal hierarchy and rhythm. It cannot prove token values or component contracts.
-
-Separate findings into:
-
+Classify findings:
 - **observed**;
 - **inferred**;
 - **missing**;
 - **contradictory**.
 
-Do not silently invent missing brand assets.
+Frequency alone does not prove intent.
 
-## 2. Find the existing grammar
+---
 
-Do not start by generating standard tokens.
+## 3. Reconstruct the grammar
 
-Identify repeated decisions already present:
+Identify repeated decisions around:
 
-- dominant spacing intervals;
 - type roles;
-- surface hierarchy;
-- border/radius logic;
-- elevation;
+- spacing intervals;
+- density modes;
 - control heights;
 - content widths;
 - layout grids;
-- accent behavior;
-- semantic colors;
-- icon sizes;
-- motion timing;
-- state treatments.
+- color semantics;
+- surface hierarchy;
+- border/radius logic;
+- elevation;
+- icon sizing/weight;
+- motion;
+- focus/error states;
+- responsive transformation.
 
-Distinguish:
-
-- intentional pattern;
+For each repeated pattern decide whether it is:
+- intentional grammar;
 - historical accident;
 - one-off exception;
 - duplication;
 - contradiction.
 
-Frequency alone does not prove correctness.
+Do not encode accidental inconsistency as a “system.”
 
-## 3. Model the system in layers
+---
+
+## 4. Layer model
 
 Prefer:
 
 `primitive values → semantic tokens → component contracts → compositions`
 
 ### Primitive values
-Raw colors, lengths, type metrics, durations.
+Raw measurable values: colors, lengths, type metrics, duration, easing.
 
 ### Semantic tokens
-Meaning:
-
+Stable meaning:
 - `surface-canvas`;
 - `surface-raised`;
 - `text-primary`;
@@ -107,112 +122,192 @@ Meaning:
 - `space-control-inline`;
 - `radius-control`.
 
-Names should survive visual redesign better than raw-value names.
+Names should survive visual redesign better than `blue-500` or `radius-12`.
 
 ### Component contracts
-Behavioral/visual APIs built from semantic decisions.
+Visual + behavioral APIs composed from semantic decisions.
 
 ### Compositions
-Representative screens proving the primitives work together.
+Representative screens proving the system works in reality.
 
-Do not expose raw implementation details as public design semantics without reason.
+Do not expose implementation details as public product semantics without reason.
 
-## 4. Token architecture
+---
 
-Create only dimensions the product needs.
-
-Potential domains:
-
-- color;
-- typography;
-- spacing;
-- sizing;
-- radius;
-- border;
-- depth;
-- layout;
-- motion;
-- z-order;
-- breakpoints when the project uses them.
-
-Avoid token theater:
-
-- hundreds of aliases no component consumes;
-- one token per arbitrary pixel value;
-- semantic names that merely restate hex values;
-- tokens created to make every exception look systematic.
+## 5. Token admission gate
 
 A token earns existence when it represents a reusable decision.
 
-## 5. Typography system
+Before adding one ask:
+- Does this decision recur?
+- Does it have semantic meaning?
+- Will consumers need to coordinate around it?
+- Would changing it centrally be useful?
+- Is an existing token already the correct concept?
 
-Define roles through product use, not size inventory.
+Reject token theater:
+- one token per arbitrary pixel;
+- hundreds of aliases no component consumes;
+- names that merely restate values;
+- semantic aliases created only to hide one-off exceptions.
 
-For each role capture:
+---
 
+## 6. Typography system
+
+Define roles from product use, not a size inventory.
+
+For each role:
 - family;
 - weight;
-- size;
+- size/responsive behavior;
 - line height;
 - tracking;
-- casing if truly systemic;
+- casing if genuinely systemic;
 - intended contexts;
-- responsive behavior;
-- content limits where relevant.
+- content limits;
+- numeric behavior.
 
-Check numeric/data use separately from prose.
+Inspect separately:
+- body reading;
+- dense controls;
+- tabular/numeric data;
+- code/technical labels;
+- display/brand moments.
 
-Do not make every small label uppercase because one dashboard screen did.
+Font decisions must account for:
+- existing license/source;
+- language coverage;
+- loading cost;
+- variable axes;
+- numeral quality;
+- fallback shifts.
 
-## 6. Color and theme system
+Do not introduce a second family when weight/width/optical size can solve the need.
+
+Do not make every small label uppercase because one screen did.
+
+---
+
+## 7. Color and theme system
 
 Separate:
 
-- base palette;
-- semantic application;
-- component state.
+`primitive palette → semantic role → component state`
 
-Verify semantic colors in the contexts where they are consumed.
+Typical semantic roles:
+- canvas/background;
+- surface;
+- raised/overlay;
+- foreground;
+- muted/subtle foreground;
+- border/strong border;
+- action;
+- focus;
+- selected;
+- success/warning/danger/info.
 
-Themes are authored states, not inversion filters.
+Use perceptual color models such as OKLCH when project constraints support maintainable use.
 
-When multiple themes exist, preserve semantic intent across them rather than forcing identical raw contrast relationships.
+Do not adopt them merely because they are modern.
 
-Do not add dark mode solely because a design system seems incomplete without it.
+Themes are authored semantic states, not inversion filters.
 
-## 7. Spacing and density
+For every theme verify:
+- text readability;
+- non-text/control contrast;
+- focus;
+- disabled;
+- selected;
+- status colors;
+- overlays;
+- media/illustration interactions.
+
+Do not add dark mode just because a system “should” have one.
+
+---
+
+## 8. Spacing and density
 
 Model both rhythm and density.
 
-A mature product may need density modes or component sizes because one spacing scale cannot satisfy both dashboard tables and marketing content.
+Potential concepts:
+- control-internal spacing;
+- inline gap;
+- stack gap;
+- component padding;
+- group separation;
+- section separation;
+- page gutter.
 
-Only add density variants when product contexts justify them.
+Mature products may need density modes if both dense expert UI and spacious content exist.
 
-Avoid arbitrary per-component padding drift.
+Add density variants only when product contexts justify them.
 
-## 8. Shape and surface language
+Avoid per-component padding drift.
 
-Radius, border, divider, shadow, inset, translucency, and surface tone should express one coherent depth model.
+A 4px-derived rhythm is common, not mandatory.
+
+---
+
+## 9. Shape and surface language
+
+Radius, border, divider, shadow, inset, translucency, and surface tone should express one depth model.
 
 Ask:
+- What is actually elevated?
+- What is grouped but flat?
+- What is selected?
+- What is interactive?
+- What is transient?
+- What is destructive?
 
-- what is actually elevated;
-- what is merely grouped;
-- what is selected;
-- what is interactive;
-- what is transient;
-- what is destructive.
+Create a radius hierarchy only if multiple roles are real.
 
-Do not use elevation as decoration.
+Avoid universal `rounded-xl`.
 
-## 9. Component inventory from evidence
+Create elevation semantics by meaning, not shadow size.
 
-Do not build the components a generic design system "should" have.
+Glass/material effects require:
+- contrast fallback;
+- limited deployment;
+- performance budget;
+- reduced-transparency-safe rendering.
 
-Inventory what the product actually uses and what upcoming work materially requires.
+---
+
+## 10. Iconography and SVG system
+
+Prefer current product icon source.
+
+If adding a library, choose one coherent family and expose it through product semantics only when useful.
+
+Standardize:
+- optical size;
+- stroke/fill;
+- weight;
+- baseline;
+- bounding box;
+- semantic color behavior.
+
+Custom SVG belongs to:
+- brand marks;
+- diagrams;
+- bespoke symbols;
+- product-specific illustration;
+- visualization.
+
+Require accessible treatment and reuse.
+
+Do not create a wrapper layer that adds no semantic value.
+
+---
+
+## 11. Component inventory from evidence
+
+Build the components the product uses, not the components a generic design system “should” have.
 
 For each component define:
-
 - role;
 - anatomy;
 - states;
@@ -226,189 +321,254 @@ For each component define:
 - forbidden combinations;
 - extension points.
 
-State should be first-class.
+A button spec with default + hover is incomplete.
 
-A button spec containing only default/hover is not a component contract.
+State is first-class.
 
-## 10. Component API quality
+---
 
-Prefer APIs reflecting product meaning.
+## 12. Component API quality
+
+Prefer product meaning over styling trivia.
+
+Good axes:
+- intent;
+- emphasis;
+- density;
+- state;
+- size where meaningful.
 
 Avoid:
-
-- prop explosion;
 - raw color props;
 - arbitrary padding props;
+- prop explosion;
 - parallel styling channels;
-- wrappers that merely rename another library.
+- wrappers that only rename another library;
+- one variant for every historical exception.
 
-When adapting an external component library:
+When adapting an external primitive:
+- preserve proven behavior/accessibility;
+- map into product semantics;
+- do not leak provider vocabulary unless it is already project vocabulary.
 
-- preserve its behavior/accessibility;
-- map it into product semantics;
-- avoid exposing library implementation as product language when unnecessary.
+---
 
-## 11. Design-system extraction vs repair
+## 13. Extraction vs repair
 
 ### Extraction
-When the product is coherent but undocumented, encode existing grammar faithfully.
+Encode coherent existing grammar faithfully.
 
 ### Repair
-When evidence conflicts, do not preserve inconsistency as tokens.
+When evidence conflicts:
+1. identify dominant/intentional pattern;
+2. map consumers;
+3. estimate migration/blast radius;
+4. find root owner;
+5. normalize where coherence gain exceeds regression cost;
+6. provide aliases/deprecation path when public usage is broad.
 
-Identify:
+Do not “clean up” values without understanding consumers.
 
-- dominant/intentional pattern;
-- affected consumers;
-- migration risk;
-- compatibility constraints.
+Do not preserve every inconsistency because it exists.
 
-Normalize only when the gain in coherence exceeds regression cost.
+---
 
-Use aliases/deprecation paths when public usage makes hard replacement risky.
-
-## 12. New design systems
+## 14. New-system creation
 
 If no system exists:
 
-Start with the minimum coherent foundation needed by representative product surfaces.
+`representative composition → extract reusable decisions → test on second composition → stabilize`
 
-Do not produce a 200-token theoretical architecture before one real screen exists.
+Do not start with a 200-token theoretical architecture.
 
-Use:
-
-`representative composition → extract reusable decisions → test on another composition → stabilize`
+Use the smallest foundation that can produce real screens.
 
 The product should pull the system into existence.
 
-## 13. Accessibility contract
-
-Accessibility belongs in primitives and component contracts.
-
-Include where relevant:
-
-- semantics;
-- names/labels;
-- focus behavior;
-- keyboard operation;
-- contrast;
-- state communication;
-- reduced motion;
-- target size;
-- error association;
-- overlay focus management.
-
-A design system that requires every consumer to reinvent these is incomplete.
-
-## 14. Motion system
-
-Create motion tokens only for meaningful recurring behaviors.
-
-Classify:
-
-- state feedback;
-- spatial transition;
-- entrance/exit;
-- progress;
-- attention.
-
-Define reduced-motion behavior.
-
-Do not centralize decorative animation merely to make it consistent.
+---
 
 ## 15. Responsive system
 
 Do not reduce responsiveness to breakpoint constants.
 
 Document component transformation rules:
-
 - collapse;
 - reorder;
 - wrap;
 - overflow ownership;
-- compact mode;
-- changed control;
+- density change;
+- control change;
+- drawer/sheet transition;
 - persistent context.
 
-A breakpoint token without behavioral contracts is insufficient.
+Use container queries when a component's behavior depends on its container and the project supports them.
 
-## 16. Governance without bureaucracy
+A breakpoint token without behavioral contract is not a responsive system.
 
-For mature/shared systems, define lightweight rules:
+---
 
-- how new tokens are justified;
-- how variants are added;
+## 16. Motion system
+
+Create motion tokens only for recurring meaningful behavior.
+
+Classify:
+- immediate state feedback;
+- spatial transition;
+- entrance/exit;
+- progress;
+- attention.
+
+For each recurring category define:
+- duration range;
+- easing character;
+- interruption behavior;
+- reduced-motion equivalent.
+
+Do not centralize decorative animation just to make it “consistent.”
+
+Frequent actions should remain fast.
+
+---
+
+## 17. Accessibility contract
+
+Accessibility belongs in primitives and component contracts.
+
+Encode where relevant:
+- semantics;
+- names/labels;
+- focus style;
+- keyboard operation;
+- overlay focus restoration;
+- text/non-text contrast;
+- target size/spacing expectations;
+- error association;
+- state announcements;
+- reduced motion;
+- transparency fallback;
+- zoom/reflow.
+
+Standards-aware:
+- WCAG 2.2 AA target minimum is not the same thing as an ergonomic 44px touch target;
+- document the product target and conformance target separately.
+
+A system that makes every consumer reinvent accessibility behavior is incomplete.
+
+---
+
+## 18. Governance proportional to blast radius
+
+For shared/mature systems define lightweight rules:
+
+- how tokens are admitted;
+- how variants are justified;
 - when a one-off is acceptable;
+- how experimental tokens are marked;
 - how deprecations work;
-- how visual drift is detected;
+- how migrations are communicated;
+- how drift is detected;
 - how consumers discover correct usage.
 
-Do not create committee process for a small codebase.
+Do not create committee process for a three-component app.
 
-Governance scales with number of contributors and blast radius.
+Governance scales with contributors and blast radius.
 
-## 17. Drift detection
+---
+
+## 19. Drift detection
 
 Look for:
-
 - repeated raw values below token layer;
-- near-duplicate colors;
+- near-duplicate semantic colors;
 - radius proliferation;
 - divergent control heights;
-- duplicated primitives;
-- local overrides that fight shared components;
-- inconsistent focus states;
-- semantic tokens used for visual convenience;
-- variants that encode one screen's special case.
+- duplicate primitives;
+- focus states that differ without reason;
+- semantic tokens used for convenience;
+- local overrides fighting shared components;
+- variants that encode one screen’s special case;
+- inconsistent icon families;
+- unbounded z-index values;
+- motion timings with no taxonomy.
 
-Fix the owner layer, not every consumer individually.
+Fix the correct owner.
 
-## 18. Proof
+Do not change a global token to solve one exceptional composition.
 
-A design system is unverified until rendered consumers prove it.
+---
 
-Render when possible:
+## 20. Migration discipline
+
+For systemic changes:
+
+1. inventory consumers;
+2. define old → new mapping;
+3. preserve public API when practical;
+4. add compatibility aliases only where they reduce migration risk;
+5. migrate representative/high-risk consumers first;
+6. validate rendered downstream surfaces;
+7. remove dead compatibility layers when safe.
+
+Do not leave two competing design systems indefinitely.
+
+---
+
+## 21. Proof surfaces
+
+A design system is unverified until consumers prove it.
+
+When applicable render:
 
 1. foundations/specimens;
 2. representative component states;
-3. at least one dense composition;
-4. at least one content-rich or spacious composition when the product has both;
+3. one dense composition;
+4. one content-rich/spacious composition if product has both;
 5. narrow layout;
 6. long/localized content;
 7. focus/disabled/error states;
-8. every existing theme affected.
+8. all affected themes;
+9. one downstream consumer after systemic changes.
 
-Check that the same foundation can produce variety without losing identity.
+The same foundations should produce useful variety without losing identity.
 
-## 19. Verification
+---
+
+## 22. Verification
 
 Run relevant:
-
-- static checks;
+- static inspection;
 - component tests;
 - accessibility tests;
 - typecheck/lint;
 - build;
-- visual regression if available.
+- visual regression if available;
+- representative consumer render.
 
-If changes are systemic, sample affected downstream consumers.
+If changes are systemic, sample downstream consumers.
 
-Do not claim "no visual regression" without rendered evidence.
+Do not claim “no visual regression” without rendered evidence.
 
-## 20. Exit gate
+---
+
+## 23. Exit gate
 
 Finish when:
-
-- authority/source-of-truth is clear;
-- semantic foundations represent real reusable decisions;
-- component contracts include behavior and states;
+- source of truth is clear;
+- reusable decisions are semantic rather than arbitrary;
+- component contracts include behavior/state;
 - contradictory legacy patterns are intentionally handled;
-- representative compositions prove coherence;
 - accessibility is encoded at the appropriate layer;
 - migration risk is known;
-- consumers have a clear path to correct usage;
-- another token or abstraction would add more vocabulary than capability.
+- representative compositions prove coherence;
+- consumers have a clear path;
+- another token/abstraction would add more vocabulary than capability.
 
 The strongest design system is not the largest.
 
 It is the one that makes the correct product decision easier than the inconsistent one.
+
+---
+
+## Standalone core capsule
+
+If shared core is unavailable: identify source of truth; distinguish extraction/repair/create/migrate; add tokens only for reusable decisions; preserve public contracts; put accessibility in primitives; test representative consumers; avoid parallel systems; verify systemic changes through rendered evidence when possible.

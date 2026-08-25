@@ -1,17 +1,19 @@
 ---
 name: dme-wireframe-spynx-edition
-description: Explore and pressure-test information architecture, navigation, content hierarchy, and task flow through structurally different low-fidelity interface directions before visual styling hides bad decisions.
+description: Resolve unsettled information architecture, navigation, content hierarchy, density, and task flow through structurally distinct low-fidelity directions that are pressure-tested before visual polish.
 ---
 
-# DME Wireframe | Spynx Edition — Structure Before Style
+# DME Wireframe | Spynx Edition — Structure Before Style vNext
 
-Use this when the product's structure is unsettled.
+Use this when the product's **structure is the uncertainty**.
 
-The deliverable is not a gray mockup. It is a **decision instrument** that makes competing information architectures and interaction models comparable.
+When available, load `../../shared/CORE_CONTRACT.md` once.
 
-Do not spend polish to hide uncertainty.
+A wireframe is not a gray screenshot. It is a **decision instrument** that makes competing task models and information architectures comparable before visual styling hides bad structure.
 
-## 1. Entry conditions
+---
+
+## 1. Entry gate
 
 Use this skill when one or more are unresolved:
 
@@ -22,223 +24,384 @@ Use this skill when one or more are unresolved:
 - content grouping;
 - density;
 - primary/secondary action placement;
-- relationship between list/detail;
-- mobile structure;
+- list/detail relationship;
+- mobile structural transformation;
 - multi-step flow;
-- persistent context.
+- persistent context;
+- comparison strategy;
+- workspace/shell architecture.
 
 Do not use it when:
 
-- the structure is already approved and only visual direction is open — use `dme-ui-options-spynx-edition`;
-- the structure and design are settled and implementation is requested — use `dme-front-end-spynx-edition`;
-- a clickable behavior model is necessary — use `dme-interactive-prototype-spynx-edition`.
+- structure is settled but visual direction is open → `dme-ui-options-spynx-edition`;
+- structure/design are settled and implementation is requested → `dme-front-end-spynx-edition`;
+- behavior must be exercised to answer the question → `dme-interactive-prototype-spynx-edition`.
 
-## 2. Frame the task
+If repository evidence already makes the structure obvious, skip option theater and recommend the strongest structure directly.
 
-Before drawing structure, establish:
+---
 
-- user;
+## 2. Frame the decision
+
+Resolve:
+
+- actor/user;
 - job-to-be-done;
 - entry point;
 - completion condition;
 - primary action;
 - decisions the user must make;
 - information required before each decision;
-- information that can wait;
-- frequency of use;
-- user expertise;
-- device constraints;
+- what can wait;
+- frequency and expertise;
+- content volume/variance;
+- device/input constraints;
 - high-consequence steps;
-- expected content volume.
+- required persistent context;
+- interruption/recovery needs.
 
-Use real labels and realistic content lengths whenever they affect structure.
+Use real labels and realistic content lengths when they affect structure.
 
-Placeholder styling is acceptable.
+Placeholder visual style is fine.
 
 Placeholder meaning is not.
 
+---
+
 ## 3. Build the task graph
 
-Model the primary path as:
+Model the core path:
 
 `entry → orient → inspect/decide → act → system response → next state`
 
-For each step, ask:
+For each step answer:
 
-- what question is the user answering;
-- what information answers it;
-- what action moves them forward;
-- what context must remain visible;
-- what can be deferred;
-- what can go wrong;
-- how they recover.
+- What question is the user answering?
+- What information is required to answer it?
+- What action advances the task?
+- What context must stay visible?
+- What can be deferred?
+- What could fail?
+- How does the user recover?
+- What should survive back/refresh/navigation?
 
 Do not arrange sections before understanding the task graph.
 
-## 4. Establish structural invariants
+For complex flows also map:
+- branch points;
+- destructive exits;
+- confirmation gates;
+- expert shortcuts;
+- return paths;
+- state that crosses screens.
 
-Write the constraints that every option must satisfy.
+---
+
+## 4. Information obligations
+
+Classify information by obligation:
+
+### Must-see-before-action
+Required for safe/correct decision.
+
+### Must-remain-visible
+Context needed while comparing or acting.
+
+### Reveal-on-demand
+Useful but not worth permanent chrome.
+
+### Background/status
+Should be available without competing with the task.
+
+### Historical/reference
+Important for audit or understanding, rarely primary.
+
+This prevents "everything on the page" from becoming equal-weight UI.
+
+---
+
+## 5. Structural invariants
+
+Write only constraints that every viable option must satisfy.
 
 Examples:
 
-- primary action remains visible after filtering;
-- account context is never lost;
-- mobile users can complete the task with one hand;
+- primary action remains available after filtering;
+- account/workspace context cannot disappear;
 - comparison requires simultaneous visibility;
 - destructive action cannot be confused with navigation;
-- expert users need keyboard continuity;
-- legal copy must be visible before confirmation.
+- mobile users must complete the task without impossible reach/overflow;
+- experts require keyboard continuity;
+- legal meaning must appear before confirmation;
+- selected object context must survive detail navigation.
 
-These invariants make option comparison honest.
+An invariant is useful only if violating it would reject an option.
 
-## 5. Generate real alternatives
+---
 
-Produce 3-5 options only when the user needs comparison.
+## 6. Generate genuinely different structures
 
-Each option must vary the **structural thesis**, not merely component placement.
+Produce 2–4 options only when comparison will change a decision.
+
+Vary the **structural thesis**, not cosmetics.
 
 Useful axes:
 
-- navigation: persistent / contextual / step-driven;
-- hierarchy: overview-first / task-first / object-first;
-- density: scan-dense / staged / progressive;
-- relationship: master-detail / page transition / split pane / inline expansion;
-- flow: linear / branching / command-driven / direct manipulation;
-- disclosure: visible / expandable / just-in-time;
-- mobile adaptation: reordered / collapsed / task-focused / tabbed.
+### Navigation
+- persistent global;
+- contextual;
+- step-driven;
+- command/search-led;
+- object-centric;
+- split shell.
 
-If two options would be implemented with essentially the same information architecture, they are not two options.
+### Hierarchy
+- overview-first;
+- task-first;
+- object-first;
+- timeline-first;
+- exception-first.
 
-## 6. Option contract
+### Relationship
+- master/detail;
+- split pane;
+- page transition;
+- inline expansion;
+- side sheet;
+- stacked workspace.
 
-Give each option:
+### Disclosure
+- visible;
+- staged;
+- expandable;
+- just-in-time;
+- mode-based.
 
-- stable id;
-- one-line thesis;
+### Flow
+- linear;
+- branching;
+- direct manipulation;
+- command-driven;
+- bulk-first.
+
+### Mobile
+- reordered;
+- task-focused;
+- tabbed;
+- drawer-backed;
+- sheet-based;
+- horizontally scrollable within a bounded data region.
+
+If two options preserve the same decision sequence, same context, and same information ownership, they are probably one option with different placement.
+
+---
+
+## 7. Option contract
+
+Give each option a stable ID and:
+
+- thesis in one sentence;
 - best-fit user/context;
-- dominant navigation model;
-- primary-action placement;
-- strongest advantage;
-- largest cost;
-- failure risk;
-- mobile transformation.
+- navigation model;
+- primary action placement;
+- persistent context;
+- disclosure strategy;
+- list/detail or comparison model;
+- mobile transformation;
+- expert-efficiency behavior;
+- major advantage;
+- major cost/risk;
+- invariant pressure points;
+- what evidence would falsify the option.
 
-Order from most conventional defensible solution to most exploratory unless evidence suggests another ordering.
+Do not use meaningless names such as “Modern” or “Clean.”
 
-Preserve ids across rounds.
+Name the structural mechanism.
 
-## 7. Keep fidelity low but meaning high
+---
 
-Use visual quietness deliberately.
+## 8. Fidelity discipline
+
+Keep visual fidelity low enough that reviewers judge structure.
+
+Use:
+- real labels;
+- realistic content lengths;
+- clear hierarchy;
+- basic states;
+- meaningful spacing;
+- enough responsive behavior to expose structural problems.
 
 Avoid:
+- final brand palette;
+- decorative gradients/effects;
+- detailed icon polish;
+- elaborate motion;
+- high-fidelity illustrations
 
-- brand color debates;
-- decorative imagery;
-- complex shadows;
-- motion polish;
-- detailed token systems;
-- ornamental iconography.
+unless one is structurally necessary to test the model.
 
-Show enough to understand:
+Do not let visual attractiveness bias architecture selection.
 
-- hierarchy;
-- regions;
-- controls;
-- content length;
-- states;
-- transitions;
-- overlays;
-- empty/error behavior;
-- responsive transformation.
+---
 
-A beautiful wireframe is not the goal.
+## 9. Pressure tests
 
-A bad structure that is impossible to ignore is useful.
-
-## 8. Pressure-test each option
-
-Walk the same scenario through every option.
-
-At minimum test:
+Pressure-test each serious option.
 
 ### Task pressure
-Can the primary user reach completion without unnecessary decisions?
+Can the primary job be completed without needless context switching?
 
 ### Information pressure
-Is required context visible at the moment of decision?
+Does important information appear before the decision that needs it?
 
 ### Volume pressure
-What happens with many records, long labels, long values, or empty data?
+What happens with 3, 30, 300, or 3,000 items where relevant?
+
+### Long-content/localization pressure
+Do labels, names, errors, and translated text break grouping?
 
 ### Narrow-width pressure
-What transforms structurally at the smallest supported layout?
+What transforms rather than merely stacks?
+
+### Intermediate-width pressure
+Does the design become awkward before the mobile breakpoint?
 
 ### Wide-width pressure
-Does extra space improve the task or merely create emptiness?
+Does content become disconnected or excessively stretched?
 
 ### Interruption pressure
-Can the user leave, go back, or recover without losing context?
+Can users leave, return, resume, or understand pending state?
 
 ### Error pressure
-Where is the error explained and how does recovery work?
+Can they recover without losing unrelated work?
 
 ### Expertise pressure
-Does the design punish experts with ceremony or overwhelm novices with density?
+Does the same structure support novice comprehension and expert speed where required?
 
 ### Accessibility pressure
-Does source order still make sense? Are actions distinguishable without relying on spatial tricks?
+Does the structure create a logical reading/focus order and avoid interactions that depend solely on hover/visual position?
 
-## 9. Compare by consequence
+### State pressure
+What happens when content is empty, loading, partial, permission-limited, or stale?
 
-Do not write vague judgments such as "Option B feels cleaner."
+---
 
-Compare consequences.
+## 10. Compare by consequence
+
+Do not flatten everything into a fake score if one trade-off dominates.
+
+Compare:
+
+- task completion clarity;
+- information availability;
+- navigation cost;
+- context preservation;
+- scan/comparison quality;
+- mobile viability;
+- expert efficiency;
+- accessibility risk;
+- implementation/state complexity;
+- scalability with content;
+- reversibility;
+- fit with existing product shell.
+
+A structurally elegant option that violates a critical invariant loses.
+
+---
+
+## 11. Recommend, do not outsource judgment
+
+When evidence is sufficient:
+- recommend one option;
+- explain the dominant reason;
+- name the strongest alternative and the condition under which it would win.
+
+Do not end with “all options are valid.”
+
+If user preference materially changes the product, invite the choice using stable IDs.
+
+If one option dominates under known constraints, say so and continue.
+
+---
+
+## 12. Convergence
+
+Once a direction is selected, freeze:
+
+- navigation model;
+- information ownership;
+- task sequence;
+- primary action;
+- persistent context;
+- disclosure rules;
+- responsive structural transformations;
+- critical state transitions.
+
+Create an **IA Handoff Contract**.
 
 Example:
 
-`Option B keeps filters and results in one visual field, reducing context switches for frequent users, but consumes more horizontal space and requires a deliberate mobile filter-sheet model.`
+```text
+IA CONTRACT
+- global nav remains persistent desktop, drawer-backed mobile
+- object list owns filters and selection
+- detail context stays side-by-side >= container threshold, route transition below it
+- primary action remains in object context, never global header
+- destructive action requires explicit detail context
+- filter state is URL-shareable
+```
 
-Use a decision matrix only when it clarifies a genuine trade-off. Do not create tables by ritual.
+Later skills inherit this contract.
 
-## 10. Recommend
+Do not reopen it without new evidence.
 
-Recommend the option whose trade-offs best fit:
+---
 
-- user frequency;
-- task complexity;
-- content density;
-- device mix;
-- risk;
-- product goals.
+## 13. When to prototype
 
-Do not automatically recommend the most experimental option.
+Route to `dme-interactive-prototype-spynx-edition` when a structural choice cannot be judged statically because it depends on:
 
-Do not automatically recommend the safest option.
+- gesture;
+- multi-step timing;
+- keyboard traversal;
+- predictive search;
+- nested menus;
+- drag/drop;
+- optimistic behavior;
+- complex validation;
+- animation/spatial continuity.
 
-If a hybrid is clearly superior, derive it explicitly from named strengths of existing options rather than inventing a silent fourth design.
+Prototype only the uncertainty.
 
-## 11. Convergence
+---
 
-Once the structure is selected:
 
-- freeze the main information architecture;
-- preserve its id/thesis;
-- record important invariants;
-- pass them to `dme-ui-options-spynx-edition`, `dme-interactive-prototype-spynx-edition`, or `dme-front-end-spynx-edition`.
+## 14. Verification
 
-Do not continue generating alternatives after the decision has been made unless new evidence invalidates it.
+Before finalizing the IA Contract, verify the selected structure against the highest-risk cases identified in the pressure tests.
 
-## 12. Exit gate
+When a rendered low-fidelity harness exists, operate the core path rather than judging screenshots alone.
 
-A wireframe phase is complete when:
+Mark structural assumptions that remain unverified.
 
-- primary flow is understandable;
-- hierarchy supports the job;
-- the selected structure survives realistic content;
-- mobile and wide behavior are defined structurally;
-- critical states have a place;
-- known trade-offs are explicit;
-- the next phase does not need to rediscover information architecture.
+## 15. Exit gate
 
-If typography, color, and polish are still needed, that is success. They were not the purpose of this phase.
+Finish when:
+
+- task graph is understood;
+- important information obligations are explicit;
+- structural invariants are protected;
+- alternatives are meaningfully different when options were needed;
+- serious options survived relevant pressure tests;
+- one structure is selected/recommended;
+- IA Handoff Contract is clear;
+- visual polish has not concealed unresolved structure.
+
+The outcome should make later visual design easier because **what belongs where and why** is no longer ambiguous.
+
+---
+
+## Standalone core capsule
+
+If the shared core cannot be loaded: preserve explicit user intent and product contracts; inspect minimum repository context; use risk-based depth; avoid unnecessary options; protect invariants; validate the selected structure against realistic content, narrow/wide layouts, error/recovery, and accessibility; distinguish verified from inferred.
