@@ -2,6 +2,44 @@
 
 All notable changes to plif. This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 2026-08-25
+
+This branch consolidates the reliability and workspace-flow fixes prepared
+after 0.3.9. It is not a versioned release yet.
+
+### Fixed
+
+- **Repeated read commands no longer become false errors.** When the model
+  repeats an unchanged, read-only tool call such as `run_command` with the same
+  arguments, PLIF reuses the successful result instead of emitting the
+  misleading “already called” failure. Real mutations remain protected by the
+  repetition guard, and a successful mutation invalidates cached reads.
+- Added regression coverage for both unchanged-read replay and replay
+  invalidation after a workspace mutation.
+
+### Changed
+
+- **Managed scratch space.** Session files, pasted images, LSP metadata and
+  base-image scaffolds now live below `~/.plif/temp` (or the active PLIF store)
+  instead of creating loose `plif-*` folders in the operating system Temp
+  directory. The container-facing path remains `/temp`.
+- **First-run project location.** When PLIF starts outside a detected project,
+  it asks for the default projects folder through the normal Ink input and
+  persists the choice in `~/.plif/config.toml`; an explicit `-C/--workspace`
+  always takes precedence.
+- **Frontend preflight.** Web/landing/UI requests can collect a stack and
+  visual direction in the same PLIF input before the agent starts, then carry
+  those selections as explicit constraints for implementation.
+- **Skill policy.** Galileu remains a global review requirement, while
+  `plif-cybersecurity` is mandatory specifically in PLIF effort mode.
+
+### Validation
+
+- Core harness tests: **37 passed, 0 failed**.
+- Full test suite: **1,123 passed, 0 failed, 20 skipped**.
+- Core TypeScript check: passed.
+- `git diff --check`: passed.
+
 ## [0.3.9] — 2026-08-24
 
 This release packages the current PLIF runtime and interaction work as a new

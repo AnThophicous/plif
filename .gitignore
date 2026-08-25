@@ -20,6 +20,7 @@ packages/*/README.md
 
 # The local store: containers, layers, sessions, audit log.
 .plif/
+/model-cache.json
 
 # Credentials, in any of the shapes people reach for.
 .env
