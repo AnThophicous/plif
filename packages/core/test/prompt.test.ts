@@ -62,7 +62,7 @@ describe('modular system prompt', () => {
     assert.match(plif, /evaluator-optimizer/i);
   });
 
-  it('requires Galileu and PLIF Cybersecurity before any work in the Plif effort', () => {
+  it('requires Galileu globally and PLIF Cybersecurity in the Plif effort', () => {
     const skills = [
       '- galileu: Socratic decision review',
       '- plif-cybersecurity: Principal security engineering',
@@ -71,7 +71,9 @@ describe('modular system prompt', () => {
     const normal = buildSystemPrompt({ ...base, effort: 'high', skills, tools });
     const plif = buildSystemPrompt({ ...base, effort: 'plif', skills, tools });
 
-    assert.doesNotMatch(normal, /## Mandatory PLIF skill/);
+    assert.match(normal, /## Mandatory Galileu review/);
+    assert.match(normal, /skill.*name.*galileu/s);
+    assert.doesNotMatch(normal, /plif-cybersecurity.*must be loaded now/i);
     assert.match(plif, /## Mandatory PLIF skills and review checkpoint/);
     assert.match(plif, /skill.*name.*galileu/s);
     assert.match(plif, /skill.*name.*plif-cybersecurity/s);
@@ -225,7 +227,8 @@ describe('modular system prompt', () => {
   it('omits optional integrations when they are unavailable', () => {
     const prompt = buildSystemPrompt(base);
 
-    assert.doesNotMatch(prompt, /Available skills/);
+    assert.match(prompt, /Available skills/);
+    assert.match(prompt, /Mandatory Galileu review/);
     assert.doesNotMatch(prompt, /Connected MCP servers/);
     assert.doesNotMatch(prompt, /Historical workspace context/);
   });
