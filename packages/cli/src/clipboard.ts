@@ -20,9 +20,10 @@
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+
+import { plifTempRoot } from './temp-workspace.js';
 
 const run = promisify(execFile);
 
@@ -120,13 +121,17 @@ const MAX_BYTES = 8 * 1024 * 1024;
 
 export const MAX_ATTACHMENT_BYTES = MAX_BYTES;
 
-/** Where pasted images go. Per-user temp, as the developer asked. */
-export function pasteDirectory(): string {
-  return path.join(os.tmpdir(), 'plif-pasted');
+/**
+ * Where pasted images go. With an active session they live inside that
+ * session's managed scratch tree; the fallback is still under ~/.plif/temp,
+ * never a loose top-level OS Temp directory.
+ */
+export function pasteDirectory(sessionTempDir?: string): string {
+  return path.join(sessionTempDir ? path.resolve(sessionTempDir) : path.join(plifTempRoot(), 'clipboard'), 'pasted');
 }
 
-export async function readClipboardImage(): Promise<ClipboardImage | null> {
-  const target = path.join(pasteDirectory(), `paste-${Date.now()}-${randomUUID().slice(0, 8)}.png`);
+export async function readClipboardImage(sessionTempDir?: string): Promise<ClipboardImage | null> {
+  const target = path.join(pasteDirectory(sessionTempDir), `paste-${Date.now()}-${randomUUID().slice(0, 8)}.png`);
   await fs.mkdir(path.dirname(target), { recursive: true });
 
   const written =

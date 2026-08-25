@@ -211,6 +211,8 @@ import { compactPlifReviewCheckpoint, preToolProseAction } from './pre-tool-pros
 import { applyEffortPalette, color, formatCount, formatDuration, glyph, layout } from './theme.js';
 import { containerMount, containerTempMount, containerWorkdir } from './container-paths.js';
 import { authNotice } from './auth.js';
+import { askProjectBrief, projectBriefInstruction } from './project-brief.js';
+import { ensureProjectRoot, projectRootChoices } from './project-root.js';
 import { completedTitle, titleForWorking, writeTerminalTitle } from './terminal-title.js';
 import { terminalFrameRows } from './terminal-resize.js';
 import { activateTheme } from './themes.js';
@@ -265,6 +267,8 @@ export interface AppProps {
   readonly mcpRegistry?: McpRegistry;
   /** Finds credentials the MCP configuration asked for, asking when it must. */
   readonly credentials?: CredentialBroker;
+  /** Show the first-run project location question before model startup prompts. */
+  readonly projectRootSetup?: boolean;
   readonly themeCatalogue: ThemeCatalogue;
 }
 
@@ -515,6 +519,7 @@ export function App({
   mcpStatuses: initialMcpStatuses = [],
   mcpRegistry,
   credentials,
+  projectRootSetup = false,
   themeCatalogue,
 }: AppProps): React.ReactElement {
   const [state, dispatch] = useReducer(
@@ -562,6 +567,8 @@ export function App({
   const [credentialPromptPending, setCredentialPromptPending] = useState(
     needsCredentialPrompt(providerProblem),
   );
+  const [projectRootSetupPending, setProjectRootSetupPending] = useState(projectRootSetup);
+  const projectRootSetupStarted = useRef(false);
   const [codexLogin, setCodexLogin] = useState<{
     readonly status: CodexLoginStatus;
     readonly detail?: string;
@@ -1712,6 +1719,62 @@ export function App({
     scheduleTaskOutputRefresh,
   ]);
 
+  // First launch asks once, through the normal QuestionBroker, so the choice
+  // appears in the same Ink input instead of spawning a native dialog or
+  // stopping the session. This effect intentionally lives after the engine
+  // event subscription above: QuestionBroker emits question.asked
+  // synchronously, so registering it earlier would lose the first-run prompt
+  // and leave the normal composer blocked forever.
+  useEffect(() => {
+    if (!projectRootSetup || projectRootSetupStarted.current) return;
+    projectRootSetupStarted.current = true;
+    void (async () => {
+      try {
+        const selected = await engine.questions.ask({
+          text: 'Choose the default local projects folder for PLIF.',
+          context: 'This is saved in ~/.plif/config.toml and used only when PLIF starts outside an existing project. Use --workspace/-C to override it for a run.',
+          options: projectRootChoices(cwd),
+        });
+        if (!selected) {
+          push(entry('notice', 'project folder setup cancelled', {
+            tone: 'muted',
+            subtitle: 'Launch PLIF again to choose it, or use -C/--workspace for this run.',
+          }));
+          return;
+        }
+        const typed = selected === '__custom__'
+          ? await engine.questions.ask({
+              text: 'Type the full path for your local projects folder.',
+              context: 'PLIF creates the folder if it does not exist and keeps using it as the default project root.',
+            })
+          : selected;
+        if (!typed?.trim()) {
+          push(entry('notice', 'project folder setup cancelled', { tone: 'muted' }));
+          return;
+        }
+        const projectRoot = await ensureProjectRoot(typed);
+        const config = await loadGlobalConfig();
+        await saveGlobalConfig(
+          { ...config, projectRoot },
+          globalConfigPath(),
+          { preserveProviderKeys: false },
+        );
+        push(entry('notice', 'project folder saved', {
+          tone: 'success',
+          subtitle: projectRoot,
+        }));
+      } catch (error) {
+        const { title, detail } = formatError(error);
+        push(entry('notice', 'could not save project folder', {
+          tone: 'danger',
+          detail: detail ? `${title}: ${detail}` : title,
+        }));
+      } finally {
+        setProjectRootSetupPending(false);
+      }
+    })();
+  }, [cwd, engine, projectRootSetup, push]);
+
   /**
    * The MCP configuration with its credentials filled in.
    *
@@ -2763,7 +2826,7 @@ export function App({
 
   const submit = useCallback(
     async (line: string, suppliedAttachments?: readonly PastedAttachment[]) => {
-      if (credentialPromptPending) return;
+      if (credentialPromptPending || projectRootSetupPending) return;
       const visibleLine = line.trim();
       if (!visibleLine) return;
       if (visibleLine.startsWith('/')) {
@@ -2785,6 +2848,30 @@ export function App({
       const privateShell = visibleLine.startsWith('!!');
       const submissionKind = classifySubmission(trimmed);
       const agentSubmission = submissionKind === 'agent';
+      let agentText = trimmed;
+      if (agentSubmission && !privateShell) {
+        try {
+          const brief = await askProjectBrief(
+            (question) => engine.questions.ask(question),
+            trimmed,
+          );
+          if (brief === null) {
+            push(entry('notice', 'frontend brief cancelled', {
+              tone: 'muted',
+              subtitle: 'Choose the stack and visual direction before sending this request.',
+            }));
+            return;
+          }
+          if (brief) agentText = `${trimmed}\n\n${projectBriefInstruction(brief)}`;
+        } catch (error) {
+          const { title, detail } = formatError(error);
+          push(entry('notice', 'could not prepare the frontend brief', {
+            tone: 'danger',
+            detail: detail ? `${title}: ${detail}` : title,
+          }));
+          return;
+        }
+      }
       history.current.record(privateShell ? '!! [private command]' : visibleLine);
       if (agentSubmission) {
         setTurn((value) => value + 1);
@@ -2799,7 +2886,7 @@ export function App({
       // sending its visual placeholder to the model or transcript backend.
       push(entry('input', privateShell ? '!! [private command]' : visibleLine));
       const turnId = !privateShell && !trimmed.startsWith('/') && !trimmed.startsWith('!')
-        ? transcript.appendUserTurn(trimmed)
+        ? transcript.appendUserTurn(agentText)
         : undefined;
       dispatch({
         type: 'busy',
@@ -2823,7 +2910,7 @@ export function App({
           await runExec(trimmed.slice(isPrivate ? 2 : 1).trim(), !isPrivate);
         } else {
           await runAgent(
-            trimmed,
+            agentText,
             await encodePasted(materialized.attachments),
             turnId,
             planModeRef.current ? 'plan' : 'normal',
@@ -2845,7 +2932,7 @@ export function App({
         dispatch({ type: 'busy', busy: false });
       }
     },
-    [credentialPromptPending, push, transcript],
+    [credentialPromptPending, engine, projectRootSetupPending, push, transcript],
   );
 
   /**
@@ -3027,6 +3114,7 @@ export function App({
       setTasks(visibleTasks(taskManager.current.list()));
       const nextLsp = new LspManager({
         root: await container.hostPathFor(container.workdir),
+        tempRoot: tempDir,
         bus: engine.bus,
       });
       lspManager.current = nextLsp;
@@ -3543,7 +3631,7 @@ export function App({
 
   async function pasteImage({ quiet = false }: { quiet?: boolean } = {}): Promise<void> {
     try {
-      const image = await readClipboardImage();
+      const image = await readClipboardImage(tempDir);
       if (image) {
         addPasted({ kind: 'image', path: image.path, mediaType: image.mediaType, bytes: image.bytes });
         return;
@@ -4952,7 +5040,7 @@ export function App({
   }, [agentTurnStartedAt, runQuiet, push]);
 
   useEffect(() => {
-    if (modelPickerPrompted.current || !providerProblem || !/no model/i.test(providerProblem)) return;
+    if (projectRootSetupPending || modelPickerPrompted.current || !providerProblem || !/no model/i.test(providerProblem)) return;
     modelPickerPrompted.current = true;
     push(
       entry('notice', 'no model configured yet', {
@@ -4961,10 +5049,10 @@ export function App({
       }),
     );
     void findCommand('model')?.run([], context);
-  }, [providerProblem, push]);
+  }, [projectRootSetupPending, providerProblem, push]);
 
   useEffect(() => {
-    if (modelKeyPrompted.current || !needsCredentialPrompt(providerProblem)) return;
+    if (projectRootSetupPending || modelKeyPrompted.current || !needsCredentialPrompt(providerProblem)) return;
     modelKeyPrompted.current = true;
     void (async () => {
       try {
@@ -5014,7 +5102,7 @@ export function App({
         setCredentialPromptPending(false);
       }
     })();
-  }, [engine, providerProblem, push, requestModelKey]);
+  }, [engine, projectRootSetupPending, providerProblem, push, requestModelKey]);
 
   // ---- render ------------------------------------------------------------
 

@@ -19,6 +19,11 @@ type = "string"
 format = "provider/model"
 description = "Primary model. An image-capable primary model can inspect images directly."
 
+[fields.projectRoot]
+type = "string"
+format = "directory"
+description = "Default local projects folder used when launching PLIF outside an existing project."
+
 [fields.visionModel]
 type = "string"
 format = "provider/model"

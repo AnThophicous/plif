@@ -150,7 +150,9 @@ export class Engine {
     // directories and one file, blobs deduplicate, and the image digest is
     // derived from the content, so an unchanged definition re-resolves to the
     // exact same image without writing anything new.
-    const scaffold = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-base-'));
+    const scratchRoot = path.join(this.paths.root, 'temp', 'base-images');
+    await fs.mkdir(scratchRoot, { recursive: true });
+    const scaffold = await fs.mkdtemp(path.join(scratchRoot, 'base-'));
     try {
       const directories = ['tmp', 'cache'];
       if (process.platform === 'linux') {
