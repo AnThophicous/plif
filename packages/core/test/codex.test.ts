@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
+import os from 'node:os';
+import path from 'node:path';
 
 import {
   CodexProvider,
@@ -11,6 +15,18 @@ import {
   validateModelConfig,
 } from '../src/index.js';
 import { codexPermissionSettings } from '../src/model/codex.js';
+
+async function fakeCodexCommand(root: string): Promise<string> {
+  const fixture = fileURLToPath(new URL('./fixtures/fake-codex-app-server.mjs', import.meta.url));
+  const command = path.join(root, process.platform === 'win32' ? 'fake-codex.cmd' : 'fake-codex');
+  if (process.platform === 'win32') {
+    await writeFile(command, `@echo off\r\n"${process.execPath}" "${fixture}" %*\r\n`, 'utf8');
+  } else {
+    await writeFile(command, `#!/bin/sh\nexec "${process.execPath}" "${fixture}" "$@"\n`, 'utf8');
+    await chmod(command, 0o755);
+  }
+  return command;
+}
 
 describe('Codex / ChatGPT provider', () => {
   it('uses ChatGPT auth mode and never treats an OpenAI API key as Codex credentials', () => {
@@ -51,6 +67,19 @@ describe('Codex / ChatGPT provider', () => {
     assert.ok(provider instanceof CodexProvider);
     assert.equal(provider.info.providerId, 'codex');
     assert.equal(provider.info.endpoint, 'codex://app-server');
+  });
+
+  it('advertises the experimental app-server capability required by model discovery', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'plif-codex-capabilities-'));
+    try {
+      const config = resolveConfig({ preset: 'codex', model: 'codex/codex-default' }, { env: {} });
+      const provider = new CodexProvider(config, { command: await fakeCodexCommand(root) });
+      const result = await provider.listModels();
+      assert.equal(result.supported, true);
+      assert.deepEqual(result.models.map((model) => model.id), ['codex-default']);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('turns a missing Codex CLI into an actionable login message', async () => {

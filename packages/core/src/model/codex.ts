@@ -172,7 +172,11 @@ class JsonRpcClient {
     try {
       await client.request('initialize', {
         clientInfo: { name: 'plif', version: '0.3.9' },
-        capabilities: { experimentalApi: false },
+        // PLIF sends runtimeWorkspaceRoots with thread/start and turn/start
+        // so the official app-server can enforce the selected workspace
+        // boundary. That field is part of Codex's experimental API surface;
+        // advertising it here is required before either request is accepted.
+        capabilities: { experimentalApi: true },
       }, INITIALIZE_TIMEOUT_MS);
       client.notify('initialized', {});
       return client;

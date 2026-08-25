@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import { describe, it } from 'node:test';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { saveGlobalConfig, tokenSplitDefinitions } from '@plif/core';
 
@@ -23,6 +24,18 @@ import type { ProviderModel } from '@plif/core';
 import type { CommandContext } from '../src/commands.js';
 import { entry } from '../src/session.js';
 import type { BrowserTab, TimelineEntry } from '../src/session.js';
+
+async function fakeCodexCommand(root: string): Promise<string> {
+  const fixture = fileURLToPath(new URL('../../core/test/fixtures/fake-codex-app-server.mjs', import.meta.url));
+  const command = path.join(root, process.platform === 'win32' ? 'fake-codex.cmd' : 'fake-codex');
+  if (process.platform === 'win32') {
+    await fs.writeFile(command, `@echo off\r\n"${process.execPath}" "${fixture}" %*\r\n`, 'utf8');
+  } else {
+    await fs.writeFile(command, `#!/bin/sh\nexec "${process.execPath}" "${fixture}" "$@"\n`, 'utf8');
+    await fs.chmod(command, 0o755);
+  }
+  return command;
+}
 
 const mcp = COMMANDS.find((command) => command.name === 'mcp');
 const sessions = COMMANDS.find((command) => command.name === 'sessions');
@@ -597,6 +610,40 @@ describe('provider model picker', () => {
     } finally {
       if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
       else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('revalidates an already selected Codex session before opening its models', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-codex-provider-picker-'));
+    const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
+    const previousCodexCommand = process.env['PLIF_CODEX_COMMAND'];
+    process.env['PLIF_CONFIG_PATH'] = path.join(root, 'config.toml');
+    process.env['PLIF_CODEX_COMMAND'] = await fakeCodexCommand(root);
+    await saveGlobalConfig({ preset: 'codex', model: 'codex/codex-default' }, process.env['PLIF_CONFIG_PATH']);
+    const opened: Array<{
+      title: string;
+      items: readonly { value: string }[];
+      onPick: (value: string) => void | Promise<void>;
+    }> = [];
+    let loginCalls = 0;
+    try {
+      await findCommand('providers')!.run([], {
+        loginCodex: async () => { loginCalls += 1; return false; },
+        openPicker: (request) => {
+          if ('items' in request) opened.push(request as typeof opened[number]);
+        },
+      } as unknown as CommandContext);
+      assert.ok(opened[0]?.items.some((item) => item.value === 'codex'));
+      opened[0]!.onPick('codex');
+      await new Promise<void>((resolve) => setTimeout(resolve, 150));
+      assert.equal(loginCalls, 1);
+      assert.equal(opened.length, 1, 'a failed session check must not open the model picker');
+    } finally {
+      if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
+      else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
+      if (previousCodexCommand === undefined) delete process.env['PLIF_CODEX_COMMAND'];
+      else process.env['PLIF_CODEX_COMMAND'] = previousCodexCommand;
       await fs.rm(root, { recursive: true, force: true });
     }
   });

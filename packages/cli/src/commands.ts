@@ -960,7 +960,11 @@ async function openProviderPicker(
       const isLocked = !isCodex && !access.has(selected.id) && !selected.anonymous && !isLocalEndpoint(selected.endpoint);
       void (async () => {
         if (isLocked && !(await configureProvider(context, stored, selected))) return;
-        if (isCodex && !sameProvider && !(await context.loginCodex?.() ?? false)) return;
+        // Selecting Codex is also the explicit session-verification action.
+        // Do this even when the config already points at Codex: that state only
+        // records the selected provider, not whether the ChatGPT session is
+        // still authenticated in the official app-server.
+        if (isCodex && !(await context.loginCodex?.() ?? false)) return;
         await openModelPicker(
           context,
           stored,
