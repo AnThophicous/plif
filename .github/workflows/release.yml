@@ -16,7 +16,7 @@ on:
       release_ref:
         description: 'Existing tag to publish'
         required: true
-        default: 'v0.3.8'
+        default: 'v0.3.9'
         type: string
 
 permissions:

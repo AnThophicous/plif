@@ -1,8 +1,8 @@
 <div align="center">
 
-**Plif 0.3.8 — the stable, adaptive coding agent for your terminal.**
+**Plif 0.3.9 — the stable, adaptive coding agent for your terminal.**
 
-Bring your own model. Configure the provider yourself. Plif 0.3.8 is built for
+Bring your own model. Configure the provider yourself. Plif 0.3.9 is built for
 long coding sessions with durable memory, better adaptation to the user, a
 calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 
@@ -16,7 +16,7 @@ calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 
 ---
 
-## What's new in 0.3.8
+## What's new in 0.3.9
 
 ### Isolated session scratch space
 
@@ -91,7 +91,7 @@ PLIF's pink accent identity.
 - Screen-owned keyboard handling, terminal resize coverage and narrow/wide TUI
   previews received additional regression coverage.
 
-## Why 0.3.8
+## Why 0.3.9
 
 - **Adaptive memory.** Useful facts are ranked and reused without turning the
   conversation into noise.
@@ -108,11 +108,11 @@ PLIF's pink accent identity.
 
 ## Install
 
-The current stable release is [v0.3.8](https://github.com/AnThophicous/plif/releases/tag/v0.3.8).
+The current stable release is [v0.3.9](https://github.com/AnThophicous/plif/releases/tag/v0.3.9).
 For a reproducible install, pin that version explicitly:
 
 ```powershell
-npm install -g @plif/cli@0.3.8
+npm install -g @plif/cli@0.3.9
 ```
 
 To follow the newest published stable release instead:

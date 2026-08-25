@@ -2,6 +2,69 @@
 
 All notable changes to plif. This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9] — 2026-08-24
+
+This release packages the current PLIF runtime and interaction work as a new
+artifact. It is the first release after the 0.3.8 npm publication and includes
+the complete Codex integration and the pending TUI/engine changes.
+
+### Added
+
+- **Codex provider inside PLIF.** The Codex app-server adapter is now part of
+  the provider catalogue, with in-app login/request handling instead of sending
+  users to an unrelated external flow.
+- **Native inline decisions.** Provider questions and Codex
+  `requestUserInput` events return to the active PLIF input as selectable
+  choices, so a model can ask for a decision without ending the session and
+  waiting for a separate chat turn.
+- **Shared permission context.** The active workspace roots, permission mode,
+  file-change approvals, command approvals and network approvals are passed
+  through one PLIF execution context.
+- **Modular command loading.** Interactive commands are split into focused
+  modules and loaded through a smaller startup path, while the command surface
+  remains compatible.
+- **Reusable builtin skill foundation.** DME Spynx skills now include shared
+  core-contract and design-language references, plus the DME Spyx component
+  picker package and its bridge assets.
+
+### Changed
+
+- **Permission semantics.** Codex follows the same PLIF policy boundary as the
+  rest of the harness: auto-approve stays inside the workspace, on-request
+  actions return to the PLIF approval UI, and paths outside the workspace are
+  denied instead of silently escaping the project.
+- **Model/runtime metadata.** Provider and model catalog data, discovery,
+  stream handling, protocol metadata and capability details stay attached to
+  the selected route instead of being inferred from display names.
+- **Session and engine flow.** Goals, subagents, tool expansion, event/state
+  propagation, token-split artifacts and session persistence are wired through
+  the same runtime lifecycle.
+- **Terminal behavior.** Input history, resize handling, focus frames, activity
+  surfaces and command navigation were tightened for narrow and wide TTYs
+  without changing the public `plif` command.
+- **Distribution metadata.** Root and workspace packages, lockfile, README,
+  CI release defaults and the Codex client version now consistently identify
+  `0.3.9`.
+
+### Fixed
+
+- Codex no longer falls back to an independent read-only permission model when
+  PLIF has already granted a scoped workspace policy.
+- Model questions no longer terminate a turn as an unselectable prose prompt.
+- Internal command extraction no longer requires loading the full interactive
+  command implementation on the first startup path.
+- Cross-package release metadata no longer points the CLI at stale `0.3.8`
+  workspace dependencies.
+
+### Validation
+
+- Windows validation: **1,135 tests passed, 0 failed, 20 platform skips**.
+- `npm run typecheck`: passed.
+- `npm run build`: passed.
+- `npm pack --workspace @plif/cli --dry-run`: passed for `@plif/cli@0.3.9`.
+- Node compatibility: local Node.js `24.19.0`; package contract remains
+  `Node.js >=20.11`; CI runs Node.js 22 on Windows and Ubuntu.
+
 ## [0.3.8] — 2026-08-24
 
 ### Added
@@ -243,6 +306,7 @@ npm install -g @plif/cli@latest
 
 First release.
 
+[0.3.9]: https://github.com/AnThophicous/plif/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/AnThophicous/plif/compare/v0.3.7...v0.3.8
 [0.3.6]: https://github.com/AnThophicous/plif/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/AnThophicous/plif/compare/v0.3.0...v0.3.5

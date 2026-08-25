@@ -171,7 +171,7 @@ class JsonRpcClient {
     const client = new JsonRpcClient(child, options);
     try {
       await client.request('initialize', {
-        clientInfo: { name: 'plif', version: '0.3.8' },
+        clientInfo: { name: 'plif', version: '0.3.9' },
         capabilities: { experimentalApi: false },
       }, INITIALIZE_TIMEOUT_MS);
       client.notify('initialized', {});
