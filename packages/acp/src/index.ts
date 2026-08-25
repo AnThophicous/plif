@@ -42,6 +42,7 @@ import {
   skillTool,
   createSkillTool,
   loadStoredConfig,
+  loadTokenSplitConfig,
   McpRegistry,
   type McpServerConfig,
   type Message,
@@ -531,6 +532,7 @@ async function main() {
 
     session.abortController = new AbortController();
     const turnId = `turn-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const tokenSplitConfig = await loadTokenSplitConfig().catch(() => undefined);
 
     const tools = [
       ...DEFAULT_TOOLS,
@@ -714,6 +716,13 @@ async function main() {
         workspace: session.workspace,
         sessionId: params.sessionId,
         contextTokens: provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+        // Token-split pipeline (budgets, spill, tool-clear, prune, verified
+        // compaction) applies to ACP sessions exactly like interactive ones.
+        tokenSplit: tokenSplitConfig && {
+          config: tokenSplitConfig,
+          workspace: session.workspace,
+          sessionId: params.sessionId,
+        },
         tools,
       });
 
