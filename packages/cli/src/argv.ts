@@ -22,6 +22,8 @@ export interface GlobalFlags {
   readonly json: boolean;
   /** The workspace whose sessions we are talking about. Defaults to cwd. */
   readonly workspace: string;
+  /** True when --workspace/-C was explicitly supplied and must be respected. */
+  readonly workspaceExplicit: boolean;
   /** Model id override, beating the environment and the stored config. */
   readonly model: string | undefined;
   /** OpenAI-compatible endpoint override. */
@@ -170,6 +172,7 @@ export function parseArgv(argv: readonly string[], cwd: string): Invocation {
     strict: flags.get('strict') === true,
     json: flags.get('json') === true,
     workspace: typeof workspaceFlag === 'string' ? path.resolve(cwd, workspaceFlag) : cwd,
+    workspaceExplicit: typeof workspaceFlag === 'string',
     model: stringFlag(flags, 'model'),
     baseURL: stringFlag(flags, 'base-url'),
     preset: stringFlag(flags, 'preset'),

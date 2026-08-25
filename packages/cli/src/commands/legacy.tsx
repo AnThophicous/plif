@@ -90,6 +90,7 @@ import { startInteractiveSurface } from '../startup.js';
 import { createTerminalSurfaceStream } from '../terminal-surface-output.js';
 import { VERSION, VERSION_LABEL } from '../version.js';
 import { createSessionTempWorkspace } from '../temp-workspace.js';
+import { resolveWorkspace } from '../project-root.js';
 
 export function buildEngine(flags: GlobalFlags): Engine {
   return new Engine({
@@ -438,10 +439,22 @@ export async function buildProvider(
 }
 
 export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt' }>): Promise<void> {
+  const startupAppearance = await loadGlobalConfig();
+  invocation = {
+    ...invocation,
+    flags: {
+      ...invocation.flags,
+      workspace: await resolveWorkspace(
+        invocation.flags.workspace,
+        startupAppearance.projectRoot,
+        invocation.flags.workspaceExplicit,
+      ),
+    },
+  };
   const engine = buildEngine(invocation.flags);
   const report = await engine.start();
   const [appearance, themeCatalogue] = await Promise.all([
-    loadGlobalConfig(),
+    Promise.resolve(startupAppearance),
     loadThemes(),
   ]);
   await configureGlobalApprovals(engine, appearance);
@@ -452,7 +465,7 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
     initialTheme,
   );
   const done = installTeardown(engine);
-  const tempWorkspace = await createSessionTempWorkspace();
+  const tempWorkspace = await createSessionTempWorkspace({ root: engine.paths.root });
 
   try {
 
@@ -601,7 +614,11 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
     approvals: engine.approvals,
     sessionId: session.id,
   });
-  const lsp = new LspManager({ root: await container.hostPathFor(container.workdir), bus: engine.bus });
+  const lsp = new LspManager({
+    root: await container.hostPathFor(container.workdir),
+    tempRoot: tempWorkspace.hostPath,
+    bus: engine.bus,
+  });
   void lsp.warmup().catch(() => undefined);
   // The subagent inherits the LSP tools but not the parent's own subagent tool
   // — that is what stops recursion, and it is enforced here rather than trusted
@@ -826,6 +843,18 @@ export async function runInteractive(
 
   const [{ render }, { App }] = await Promise.all([import('ink'), import('../app.js')]);
 
+  const startupAppearance = await loadGlobalConfig();
+  invocation = {
+    ...invocation,
+    flags: {
+      ...invocation.flags,
+      workspace: await resolveWorkspace(
+        invocation.flags.workspace,
+        startupAppearance.projectRoot,
+        invocation.flags.workspaceExplicit,
+      ),
+    },
+  };
   clearNativeInteractiveTerminal();
   startInteractiveSurface(process.stdout, {
     version: VERSION_LABEL,
@@ -836,7 +865,7 @@ export async function runInteractive(
   const engine = buildEngine(invocation.flags);
   const report = await engine.start();
   const [appearance, themeCatalogue] = await Promise.all([
-    loadGlobalConfig(),
+    Promise.resolve(startupAppearance),
     loadThemes(),
   ]);
   await configureGlobalApprovals(engine, appearance);
@@ -845,7 +874,7 @@ export async function runInteractive(
     ?? themeCatalogue.themes[0]!;
   activateTheme(initialTheme);
   const done = installTeardown(engine);
-  const tempWorkspace = await createSessionTempWorkspace();
+  const tempWorkspace = await createSessionTempWorkspace({ root: engine.paths.root });
   // Ink's erase sequence can briefly expose the terminal's default (usually
   // black) on the reserved row below the live frame. Paint that row with the
   // active panel colour after every frame without changing Ink's line count.
@@ -956,6 +985,7 @@ export async function runInteractive(
       mcpStatuses={[]}
       mcpRegistry={mcp}
       credentials={credentials}
+      projectRootSetup={!appearance.projectRoot}
       themeCatalogue={themeCatalogue}
     />,
     // Ink's own Ctrl+C handling would exit before containers are reaped.

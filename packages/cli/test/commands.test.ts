@@ -99,7 +99,7 @@ describe('/token-split picker', () => {
     const configPath = path.join(root, 'config.toml');
     process.env['PLIF_CONFIG_PATH'] = configPath;
     await fs.writeFile(configPath, '');
-    let onPick: ((value: string) => void) | undefined;
+    let onPick: ((value: string) => void | Promise<void>) | undefined;
     const notices: TimelineEntry[] = [];
     try {
       await findCommand('token-split')!.run([], {
@@ -110,8 +110,7 @@ describe('/token-split picker', () => {
         engine: { questions: { ask: async () => 'enable' } },
       } as unknown as CommandContext);
 
-      onPick?.('compaction');
-      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      await onPick?.('compaction');
 
       const persisted = JSON.parse(await fs.readFile(path.join(root, 'token-split.json'), 'utf8')) as {
         techniques: { compaction: { on: boolean } };

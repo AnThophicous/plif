@@ -204,8 +204,9 @@ const WINDOWS_SUFFIXES = ['.cmd', '.exe', '.bat', ''];
 export async function resolveServer(
   spec: ServerSpec,
   workspace: string,
+  tempRoot?: string,
 ): Promise<ResolvedServer | null> {
-  if (spec.id === 'powershell') return await resolvePowerShell(spec);
+  if (spec.id === 'powershell') return await resolvePowerShell(spec, tempRoot);
 
   // A package-relative script is the only Windows path that does not depend on
   // spawning an npm-generated `.cmd` shim (Node rejects that with EINVAL when
@@ -280,14 +281,18 @@ function quoteWindowsArgument(value: string): string {
   return result + '\\'.repeat(backslashes * 2) + '"';
 }
 
-async function resolvePowerShell(spec: ServerSpec): Promise<ResolvedServer | null> {
+async function resolvePowerShell(spec: ServerSpec, tempRoot?: string): Promise<ResolvedServer | null> {
   const executable = await findOnPath('pwsh');
   if (!executable) return null;
   const configured = process.env['PLIF_POWERSHELL_EDITOR_SERVICES'];
   const script = configured && await exists(configured) ? configured : await discoverPowerShellEditorServices();
   if (!script) return null;
   const bundled = path.dirname(path.dirname(script));
-  const session = path.join(os.tmpdir(), `plif-pses-${process.pid}.json`);
+  const sessionDirectory = tempRoot
+    ? path.join(path.resolve(tempRoot), 'lsp')
+    : os.tmpdir();
+  await fs.mkdir(sessionDirectory, { recursive: true });
+  const session = path.join(sessionDirectory, `pses-${process.pid}.json`);
   return {
     spec,
     command: executable,

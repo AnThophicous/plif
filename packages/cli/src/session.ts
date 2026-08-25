@@ -266,7 +266,7 @@ export interface PickerState {
   readonly expanded?: readonly string[];
   readonly filter: string;
   readonly selected: number;
-  readonly onPick: (value: string | ModelSelection) => void;
+  readonly onPick: (value: string | ModelSelection) => void | Promise<void>;
   /** Nested provider → model pickers return here before closing. */
   readonly onBack?: () => void;
   /** Open a compact, picker-owned filter/sort menu. */

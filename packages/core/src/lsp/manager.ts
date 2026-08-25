@@ -16,9 +16,11 @@ export interface LspStatus {
 
 export interface LspManagerOptions {
   readonly root: string;
+  /** Managed scratch root for server metadata; avoids loose OS-temp files. */
+  readonly tempRoot?: string;
   readonly bus?: EventBus;
   readonly enabled?: boolean;
-  readonly resolveServer?: (spec: ServerSpec, root: string) => Promise<ResolvedServer | null>;
+  readonly resolveServer?: (spec: ServerSpec, root: string, tempRoot?: string) => Promise<ResolvedServer | null>;
   readonly createClient?: (resolved: ResolvedServer, root: string) => LspClient;
 }
 
@@ -30,12 +32,14 @@ export class LspManager {
   #clients = new Map<string, LspClient>();
   #starting = new Map<string, Promise<LspClient | null>>();
   #missing = new Map<string, ServerSpec>();
-  #resolveServer: (spec: ServerSpec, root: string) => Promise<ResolvedServer | null>;
+  #resolveServer: (spec: ServerSpec, root: string, tempRoot?: string) => Promise<ResolvedServer | null>;
   #createClient: (resolved: ResolvedServer, root: string) => LspClient;
   #stopping = false;
+  #tempRoot: string | undefined;
 
   constructor(options: LspManagerOptions) {
     this.root = path.resolve(options.root);
+    this.#tempRoot = options.tempRoot ? path.resolve(options.tempRoot) : undefined;
     this.#bus = options.bus;
     this.#enabled = options.enabled !== false;
     this.#resolveServer = options.resolveServer ?? resolveServer;
@@ -59,7 +63,7 @@ export class LspManager {
     const missing: ServerSpec[] = [];
 
     for (const spec of detected) {
-      const resolved = await this.#resolveServer(spec, this.root);
+      const resolved = await this.#resolveServer(spec, this.root, this.#tempRoot);
       if (resolved) available.push(spec);
       else {
         missing.push(spec);
@@ -110,7 +114,7 @@ export class LspManager {
   }
 
   async #start(spec: ServerSpec): Promise<LspClient | null> {
-    const resolved = await this.#resolveServer(spec, this.root);
+    const resolved = await this.#resolveServer(spec, this.root, this.#tempRoot);
     if (!resolved) {
       this.#missing.set(spec.id, spec);
       this.#bus?.emit('log', {

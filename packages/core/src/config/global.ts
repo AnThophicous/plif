@@ -60,6 +60,8 @@ export interface GlobalConfig {
    * resolves, because config files on disk outlive schema opinions.
    */
   readonly model?: string;
+  /** Default local projects folder used when PLIF starts outside a project. */
+  readonly projectRoot?: string;
   /**
    * Named agents available for subagent spawning, keyed by name.
    *
