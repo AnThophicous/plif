@@ -84,11 +84,12 @@ export function Question({
               flexDirection="column"
               paddingX={1}
             >
-              <Text color={color(active ? 'text' : 'muted')} bold={active} backgroundColor={active ? color('surface') : undefined}>
-                {index + 1}   <Text color={color(active ? 'accent' : 'ghost')}>○</Text> {truncate(option.label, inner - 7)}
+              <Text color={color(active ? 'accentBright' : 'text')} bold>
+                {index + 1}   <Text color={color(active ? 'accentBright' : 'faint')}>{active ? '●' : '○'}</Text>{' '}
+                {truncate(option.label, inner - 7)}
               </Text>
               {option.description ? (
-                <Text color={color('ghost')} backgroundColor={active ? color('surface') : undefined}>    {truncate(option.description, inner - 4)}</Text>
+                <Text color={color(active ? 'muted' : 'faint')}>    {truncate(option.description, inner - 4)}</Text>
               ) : null}
             </Box>
           );

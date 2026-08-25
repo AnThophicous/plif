@@ -84,15 +84,21 @@ describe('provider model discovery cache', () => {
   it('separates the same provider id by effective endpoint', async () => {
     const first = await modelServer(['first-model']);
     const second = await modelServer(['second-model']);
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-model-discovery-isolated-'));
+    const cacheFile = path.join(root, 'models.json');
     forgetDiscoveredModels();
     try {
-      const left = await discoverProviderModels('bridge', { stored: stored(first.baseURL) });
-      const right = await discoverProviderModels('bridge', { stored: stored(second.baseURL) });
+      // This assertion is about the in-memory endpoint key. Do not let the
+      // user's persistent model-cache or another test's refresh decide which
+      // temporary server is observed on a parallel Windows run.
+      const left = await discoverProviderModels('bridge', { stored: stored(first.baseURL), cacheFile });
+      const right = await discoverProviderModels('bridge', { stored: stored(second.baseURL), cacheFile });
       assert.deepEqual(left.ids, ['first-model']);
       assert.deepEqual(right.ids, ['second-model']);
     } finally {
       forgetDiscoveredModels();
       await Promise.all([first.close(), second.close()]);
+      await fs.rm(root, { recursive: true, force: true });
     }
   });
 

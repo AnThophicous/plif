@@ -7,12 +7,41 @@ export interface ProjectBrief {
 
 type AskQuestion = (question: Question) => Promise<string | null>;
 
-const FRONTEND_SIGNAL = /\b(?:website|web\s+site|landing|frontend|front-end|ui|ux|interface|design|css|html|react|next(?:\.js)?|vue|svelte|tailwind|component|dashboard|page|site)\b/i;
+const FRONTEND_DELIVERABLE = /\b(?:website|web\s*site|web\s*app|webapp|landing(?:\s+page)?|frontend|front-end|ui|ux|interface|dashboard|component|page|site|portal)\b/i;
+const IMPLEMENTATION_INTENT = /\b(?:build|create|make|implement|develop|design|redesign|rebuild|rewrite|refactor|revamp|remake|craft|produce|ship|launch|convert|migrate|add|replace)\b/i;
+
+const STACK_HINTS = [
+  { value: 'next-ts', pattern: /\bnext(?:\.js|js)\b/i },
+  { value: 'react-ts', pattern: /\breact(?:\s*(?:\+|with)\s*typescript|\s+typescript|\s+ts)?\b/i },
+  { value: 'vue-ts', pattern: /\bvue(?:\s*(?:\+|with)\s*typescript|\s+typescript|\s+ts)?\b/i },
+  { value: 'html-css-js', pattern: /\b(?:html\s*(?:\+|,|\/)\s*css|html\s*\+\s*css\s*\+\s*(?:javascript|js)|vanilla\s+(?:javascript|js)|plain\s+html)\b/i },
+] as const;
+
+const STYLE_HINTS = [
+  { value: 'neo-minimalism', pattern: /\bneo[-\s]?minimal(?:ism)?\b/i },
+  { value: 'neomorphism', pattern: /\bneo[-\s]?morphism\b/i },
+  { value: 'maximalism', pattern: /\bmaximalism\b/i },
+  { value: 'editorial', pattern: /\beditorial\b/i },
+  { value: 'brutalism', pattern: /\bbrutalism\b/i },
+] as const;
 
 /** Only frontend/design-shaped requests need a creative implementation brief. */
 export function needsProjectBrief(text: string): boolean {
   const trimmed = text.trim();
-  return trimmed.length > 0 && !trimmed.startsWith('!') && FRONTEND_SIGNAL.test(trimmed);
+  return trimmed.length > 0
+    && !trimmed.startsWith('!')
+    // Mentioning a skill, a framework, or an existing UI is not itself a
+    // request for a design preflight. Require an implementation verb so a
+    // user can say "use the frontend skill" without opening two dialogs.
+    && IMPLEMENTATION_INTENT.test(trimmed)
+    && FRONTEND_DELIVERABLE.test(trimmed);
+}
+
+function explicitHint(
+  text: string,
+  hints: readonly { readonly value: string; readonly pattern: RegExp }[],
+): string | undefined {
+  return hints.find((hint) => hint.pattern.test(text))?.value;
 }
 
 const STACK_OPTIONS: readonly QuestionChoice[] = [
@@ -51,20 +80,20 @@ async function chooseOrType(
 export async function askProjectBrief(ask: AskQuestion, request: string): Promise<ProjectBrief | undefined | null> {
   if (!needsProjectBrief(request)) return undefined;
 
-  const stack = await chooseOrType(
-    ask,
-    'Which stack should PLIF use for this frontend task?',
-    'Choose before implementation. The selected stack is authoritative for this request.',
-    STACK_OPTIONS,
-  );
+  const stack = explicitHint(request, STACK_HINTS) ?? await chooseOrType(
+      ask,
+      'Which stack should PLIF use for this frontend task?',
+      'Choose before implementation. The selected stack is authoritative for this request.',
+      STACK_OPTIONS,
+    );
   if (!stack) return null;
 
-  const style = await chooseOrType(
-    ask,
-    'Which visual direction should PLIF follow?',
-    'Choose the design language before implementation. Do not replace it with a generic default.',
-    STYLE_OPTIONS,
-  );
+  const style = explicitHint(request, STYLE_HINTS) ?? await chooseOrType(
+      ask,
+      'Which visual direction should PLIF follow?',
+      'Choose the design language before implementation. Do not replace it with a generic default.',
+      STYLE_OPTIONS,
+    );
   if (!style) return null;
 
   return { stack, style };
