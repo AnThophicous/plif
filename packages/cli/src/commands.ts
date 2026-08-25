@@ -165,7 +165,12 @@ export interface FlatPickerRequest {
   readonly hint?: string;
   readonly countLabel?: string;
   readonly items: readonly PickerItem[];
-  readonly onPick: (value: string | ModelSelection) => void;
+  /**
+   * Pickers may perform asynchronous work after the row is selected. Returning
+   * that promise lets callers (and tests) wait for the operation to settle;
+   * existing synchronous pickers remain valid.
+   */
+  readonly onPick: (value: string | ModelSelection) => void | Promise<void>;
   /** Initial keyboard position; defaults to the first visible row. */
   readonly selected?: number;
   readonly onBack?: () => void;
@@ -1523,7 +1528,7 @@ function openTokenSplitPicker(
     selected: Math.max(0, items.findIndex((item) => item.current)),
     onPick: (value) => {
       const id = String(value);
-      void runTokenSplitAction('toggle', [id], context)
+      return runTokenSplitAction('toggle', [id], context)
         .then((result) => result.entries.forEach((item) => context.notify?.(item)))
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : String(error);
