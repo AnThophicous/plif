@@ -314,6 +314,27 @@ describe('live controls', () => {
     assert.equal(second.questionChoice, 1);
     assert.equal(other.questionChoice, -1);
   });
+
+  it('enters the options from a typed answer in either arrow direction', () => {
+    const asked = sessionReducer(initialSession, {
+      type: 'question.push',
+      question: {
+        id: 'q1',
+        text: 'Pick one',
+        options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }],
+        context: undefined,
+        askedAt: 1,
+      },
+    });
+    const drafted = sessionReducer(asked, { type: 'question.draft', draft: 'custom answer' });
+    const first = sessionReducer(drafted, { type: 'question.move', delta: 1 });
+    const last = sessionReducer(drafted, { type: 'question.move', delta: -1 });
+
+    assert.equal(first.questionChoice, 0);
+    assert.equal(last.questionChoice, 1);
+    assert.equal(first.questionDraft, '');
+    assert.equal(last.questionDraft, '');
+  });
 });
 
 describe('clipping an answer that is still streaming', () => {

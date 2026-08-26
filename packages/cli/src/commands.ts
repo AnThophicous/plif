@@ -2310,7 +2310,11 @@ export const COMMANDS: readonly Command[] = [
       const stored = await loadGlobalConfig();
       const current = stored.effort ?? 'default';
       const value = argv[0];
-      const available = [...new Set(context.supportedEfforts?.() ?? EFFORT_LEVELS)];
+      // Snapshot capabilities once. Providers can refresh their model metadata
+      // asynchronously; reading the callback again while building the picker
+      // can otherwise make its rows and selected index disagree.
+      const supported = context.supportedEfforts?.();
+      const available = [...new Set(supported ?? EFFORT_LEVELS)];
       if (!value) {
           context.openPicker({
             title: `Select effort · ${context.model?.info.id ?? 'current model'}`,
@@ -2318,11 +2322,11 @@ export const COMMANDS: readonly Command[] = [
           countLabel: 'efforts',
           items: [
             { value: 'default', label: 'Default', detail: 'let the provider choose', current: current === 'default' },
-            ...effortPickerItems(context.supportedEfforts?.() ?? [], current === 'default' ? undefined : current as Effort),
+            ...effortPickerItems(available, current === 'default' ? undefined : current as Effort),
           ],
           selected: current === 'default'
             ? 0
-            : Math.max(0, (context.supportedEfforts?.() ?? []).indexOf(current as Effort) + 1),
+            : Math.max(0, available.indexOf(current as Effort) + 1),
           onPick: async (picked) => {
             await context.setEffort(picked === 'default' ? undefined : picked as Effort);
           },

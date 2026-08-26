@@ -528,6 +528,39 @@ describe('/effort validation', () => {
     }
   });
 
+  it('builds the effort picker from one stable capability snapshot', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-effort-picker-'));
+    const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
+    process.env['PLIF_CONFIG_PATH'] = path.join(root, 'config.toml');
+    await fs.writeFile(process.env['PLIF_CONFIG_PATH'], '');
+    let calls = 0;
+    let picker: { items?: readonly { value: string }[]; selected?: number } | undefined;
+    try {
+      await effort!.run([], {
+        supportedEfforts: () => {
+          calls += 1;
+          return calls === 1
+            ? ['low', 'medium', 'high', 'xhigh', 'max', 'plif']
+            : ['medium'];
+        },
+        openPicker: (request) => {
+          if ('items' in request) picker = request;
+        },
+      } as unknown as CommandContext);
+
+      assert.equal(calls, 1, 'capabilities must be read once while opening the picker');
+      assert.deepEqual(
+        picker?.items?.map((item) => item.value),
+        ['default', 'low', 'medium', 'high', 'xhigh', 'max', 'plif'],
+      );
+      assert.equal(picker?.selected, 0);
+    } finally {
+      if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
+      else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
   it('applies /effort plif directly instead of reopening the picker', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-effort-plif-'));
     const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
