@@ -44,6 +44,8 @@ export interface ModelConfig {
   /** Seconds before a request is abandoned. */
   readonly timeoutMs: number;
   readonly effort?: Effort;
+  /** Use the Codex app-server's higher-speed service tier for this session. */
+  readonly codexFast?: boolean;
 }
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | 'ultracode' | 'plif';
@@ -334,6 +336,8 @@ export interface StoredConfig {
   readonly maxTokens?: number;
   readonly timeoutMs?: number;
   readonly effort?: Effort;
+  /** Opt-in Codex service tier; ignored by every other provider. */
+  readonly codexFast?: boolean;
   readonly autoApprove?: boolean;
   readonly mcpServers?: unknown;
   readonly providers?: unknown;
@@ -719,6 +723,7 @@ export function resolveConfig(
     contextWindow: modelMetadata?.contextWindow,
     timeoutMs: numberFrom(env['PLIF_TIMEOUT_MS']) ?? stored.timeoutMs ?? DEFAULTS.timeoutMs,
     effort,
+    ...(providerId === 'codex' ? { codexFast: stored.codexFast === true } : {}),
   };
 }
 
@@ -735,7 +740,7 @@ export function resolveConfig(
  */
 export function adoptProvider(
   stored: StoredConfig,
-  selection: { readonly preset: string; readonly model: string },
+  selection: { readonly preset: string; readonly model: string; readonly codexFast?: boolean },
   apiKey?: string,
   options: { readonly persistCredential?: boolean } = {},
 ): StoredConfig {
@@ -760,6 +765,11 @@ export function adoptProvider(
 
   next['preset'] = selection.preset;
   next['model'] = selection.model;
+  if (selection.preset === 'codex' && selection.codexFast !== undefined) {
+    next['codexFast'] = selection.codexFast;
+  } else if (selection.preset !== 'codex') {
+    delete next['codexFast'];
+  }
   if (persistCredential && Object.keys(providerKeys).length > 0) next['providerKeys'] = providerKeys;
 
   // Only a real change of provider invalidates the root fields. Re-picking a

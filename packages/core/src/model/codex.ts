@@ -20,6 +20,7 @@ import type {
   ModelInfo,
   ModelListResult,
   ModelProvider,
+  NativeToolActivity,
   ProviderModel,
 } from './provider.js';
 import { NO_USAGE } from './provider.js';
@@ -356,6 +357,19 @@ function modelEfforts(raw: Record<string, unknown>): string[] {
     .filter((item): item is string => typeof item === 'string' && item.length > 0);
 }
 
+function booleanValue(raw: Record<string, unknown>, ...keys: string[]): boolean | undefined {
+  for (const key of keys) if (typeof raw[key] === 'boolean') return raw[key] as boolean;
+  return undefined;
+}
+
+function numberValue(raw: Record<string, unknown>, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = raw[key];
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
+  }
+  return undefined;
+}
+
 function codexModel(raw: Record<string, unknown>): ProviderModel | undefined {
   const id = textValue(raw['model']) ?? textValue(raw['id']);
   if (!id || raw['hidden'] === true) return undefined;
@@ -363,12 +377,23 @@ function codexModel(raw: Record<string, unknown>): ProviderModel | undefined {
     .filter((value): value is 'text' | 'image' => value === 'text' || value === 'image');
   const efforts = modelEfforts(raw);
   const displayName = textValue(raw['displayName']);
+  const reasoning = booleanValue(raw, 'reasoning', 'supportsReasoning', 'supports_reasoning', 'thinking', 'supportsThinking', 'supports_thinking');
+  const tools = booleanValue(raw, 'tools', 'supportsTools', 'supports_tools');
   return {
     id,
     ...(displayName ? { name: displayName } : {}),
     ...(modalities.length > 0 ? { modalities } : { modalities: ['text', 'image'] }),
-    reasoning: efforts.length > 0,
-    tools: true,
+    ...(reasoning === undefined && efforts.length > 0 ? { reasoning: true } : reasoning === undefined ? {} : { reasoning }),
+    ...(tools === undefined ? { tools: true } : { tools }),
+    ...(numberValue(raw, 'contextWindow', 'context_window', 'contextWindowTokens') === undefined
+      ? {}
+      : { contextWindow: numberValue(raw, 'contextWindow', 'context_window', 'contextWindowTokens') }),
+    ...(numberValue(raw, 'maxInputTokens', 'max_input_tokens') === undefined
+      ? {}
+      : { maxInputTokens: numberValue(raw, 'maxInputTokens', 'max_input_tokens') }),
+    ...(numberValue(raw, 'maxOutputTokens', 'max_output_tokens') === undefined
+      ? {}
+      : { maxOutputTokens: numberValue(raw, 'maxOutputTokens', 'max_output_tokens') }),
     cost: 'unknown',
     provider: 'codex',
     product: 'OpenAI',
@@ -376,6 +401,106 @@ function codexModel(raw: Record<string, unknown>): ProviderModel | undefined {
     protocol: 'openai-chat',
     metadataSource: 'provider',
   };
+}
+
+function nativeToolType(value: unknown, method = ''): string | undefined {
+  const item = recordValue(value);
+  const rawType = textValue(item?.['type']) ?? textValue(item?.['itemType']);
+  const methodType = method.match(/^item\/(?:.+\/)?([^/]+)\/(?:started|completed|outputDelta)$/)?.[1];
+  const type = rawType ?? methodType;
+  if (!type) return undefined;
+  const normalized = type.toLowerCase();
+  if (['agentmessage', 'reasoning', 'usermessage', 'plan', 'turn', 'status', 'contextcompaction'].includes(normalized)) return undefined;
+  if (normalized.includes('command') || normalized.includes('file') || normalized.includes('tool') ||
+    normalized.includes('search') || normalized.includes('fetch') || normalized.includes('browser') ||
+    normalized.includes('computer')) return type;
+  return undefined;
+}
+
+function nativeToolId(params: Record<string, unknown>, item: Record<string, unknown> | undefined): string | undefined {
+  return textValue(item?.['id']) ?? textValue(params['itemId']) ?? textValue(params['id']);
+}
+
+function nativeToolInput(item: Record<string, unknown>, type: string): Record<string, unknown> {
+  const normalized = type.toLowerCase();
+  if (normalized.includes('command')) {
+    const command = item['command'] ?? item['commandLine'];
+    const argv = Array.isArray(command)
+      ? command.filter((value): value is string => typeof value === 'string')
+      : typeof command === 'string' && command.length > 0 ? [command] : undefined;
+    return {
+      ...(argv && argv.length > 0 ? { argv } : {}),
+      ...(textValue(item['cwd']) ? { cwd: textValue(item['cwd']) } : {}),
+    };
+  }
+  if (normalized.includes('file')) {
+    const changes = item['changes'] ?? item['patch'] ?? item['edits'];
+    return changes === undefined ? {} : { edits: changes };
+  }
+  if (normalized.includes('mcp') || normalized.includes('tool')) {
+    const input = item['arguments'] ?? item['input'] ?? item['params'];
+    return input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
+  }
+  if (normalized.includes('search') || normalized.includes('fetch')) {
+    const query = textValue(item['query']) ?? textValue(item['url']);
+    return query ? { query } : {};
+  }
+  return {};
+}
+
+function nativeToolName(item: Record<string, unknown>, type: string): string {
+  const normalized = type.toLowerCase();
+  if (normalized.includes('command')) return 'run_command';
+  if (normalized.includes('file')) return 'apply_patch';
+  if (normalized.includes('mcp')) {
+    const server = textValue(item['server']) ?? 'server';
+    const tool = textValue(item['tool']) ?? textValue(item['name']) ?? 'call';
+    return `mcp__${server}__${tool}`;
+  }
+  if (normalized.includes('search') || normalized.includes('fetch')) return 'web_search';
+  return `codex_${type.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()}`;
+}
+
+function nativeToolOutput(item: Record<string, unknown>, buffered: string | undefined): string | undefined {
+  if (buffered) return buffered;
+  for (const key of ['output', 'aggregatedOutput', 'stdout', 'stderr', 'result']) {
+    const value = item[key];
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+function nativeToolOutputValue(params: Record<string, unknown>): string | undefined {
+  return nativeToolOutput({ ...params, ...(recordValue(params['item']) ?? {}) }, undefined);
+}
+
+function nativeToolActivity(
+  params: Record<string, unknown>,
+  method: string,
+  phase: 'start' | 'end',
+  output: string | undefined,
+  durationMs: number | undefined,
+): NativeToolActivity | undefined {
+  const rawItem = recordValue(params['item']);
+  const item = { ...params, ...(rawItem ?? {}) };
+  const type = nativeToolType(item, method);
+  const id = nativeToolId(params, rawItem) ?? nativeToolId(params, item);
+  if (!type || !id) return undefined;
+  const activity: NativeToolActivity = {
+    id,
+    name: nativeToolName(item, type),
+    phase,
+    input: nativeToolInput(item, type),
+    ...(output === undefined ? {} : { output }),
+    ...(durationMs === undefined ? {} : { durationMs }),
+  };
+  if (phase === 'end') {
+    const status = textValue(item['status'])?.toLowerCase();
+    const exitCode = typeof item['exitCode'] === 'number' ? item['exitCode'] : undefined;
+    const failed = status === 'failed' || status === 'error' || status === 'cancelled' || status === 'interrupted' || (exitCode !== undefined && exitCode !== 0);
+    return { ...activity, ok: !failed };
+  }
+  return activity;
 }
 
 function supportedEffortsFromModel(raw: Record<string, unknown>): string[] {
@@ -563,6 +688,7 @@ function codexPrompt(request: CompletionRequest): { text: string; images: string
           ...preloadedSkills.map((skill) => `# Skill: ${skill.name}\n\n${skill.instructions}`),
         ]
       : []),
+    'PLIF response contract: never write or emit emoji in a user-visible answer. Keep the response clean and scan-friendly: use a short opening, descriptive headings only when useful, compact Markdown lists for parallel items, and fenced code blocks for commands or code. Avoid decorative preambles, repeated status narration, and duplicate conclusions.',
     'When a material decision from the human is required, use the inline PLIF question UI (or your native request_user_input tool) instead of asking a clarification question in prose. Keep the same turn open and continue after the answer.',
   ].join('\n\n');
   const text = request.messages
@@ -728,6 +854,7 @@ export class CodexProvider implements ModelProvider {
       providerId: 'codex',
       endpoint: 'codex://app-server',
       contextWindow: config.contextWindow,
+      codexFast: config.codexFast === true,
       ...(config.maxTokens === undefined ? {} : { maxOutputTokens: config.maxTokens }),
       capabilities: {
         usageSemantics: 'unknown',
@@ -795,6 +922,9 @@ export class CodexProvider implements ModelProvider {
     let threadId: string | undefined;
     let turnId: string | undefined;
     let abortHandler: (() => void) | undefined;
+    const nativeToolStartedAt = new Map<string, number>();
+    const nativeToolOutput = new Map<string, string>();
+    const nativeToolCompleted = new Set<string>();
 
     try {
       const permissionSettings = codexPermissionSettings(request.execution);
@@ -837,6 +967,7 @@ export class CodexProvider implements ModelProvider {
         ...permissionSettings.turn,
         ...(effort ? { effort } : {}),
         ...(!isDefaultCodexModel(this.#config.model) ? { model: this.#config.model } : {}),
+        ...(this.#config.codexFast ? { serviceTier: 'priority' } : {}),
       }));
       turnId = textValue(turn?.['turn'] && recordValue(turn['turn'])?.['id']) ?? textValue(turn?.['id']);
       if (!turnId) throw new Error('Codex did not return a turn id');
@@ -847,6 +978,45 @@ export class CodexProvider implements ModelProvider {
         const method = message.method;
         const params = message.params ?? {};
         const delta = textValue(params['delta']);
+        const nativeType = nativeToolType(recordValue(params['item']) ?? params, method ?? '');
+        const nativeId = nativeToolId(params, recordValue(params['item']));
+        const isOutputDelta = Boolean(method?.startsWith('item/') && method.endsWith('/outputDelta'));
+        const isItemStart = method === 'item/started' || Boolean(method?.startsWith('item/') && method.endsWith('/started'));
+        const isItemEnd = method === 'item/completed' || Boolean(method?.startsWith('item/') && method.endsWith('/completed'));
+
+        if (isOutputDelta && nativeId && delta) {
+          nativeToolOutput.set(nativeId, `${nativeToolOutput.get(nativeId) ?? ''}${delta}`);
+          continue;
+        }
+        if (nativeType && nativeId && isItemStart) {
+          if (nativeToolCompleted.has(nativeId)) continue;
+          if (!nativeToolStartedAt.has(nativeId)) {
+            nativeToolStartedAt.set(nativeId, Date.now());
+            const activity = nativeToolActivity(params, method ?? '', 'start', undefined, undefined);
+            if (activity) yield { kind: 'tool_activity', activity };
+          }
+          continue;
+        }
+        if (nativeType && nativeId && isItemEnd) {
+          if (nativeToolCompleted.has(nativeId)) continue;
+          const startedAt = nativeToolStartedAt.get(nativeId);
+          if (startedAt === undefined) {
+            const activity = nativeToolActivity(params, method ?? '', 'start', undefined, undefined);
+            if (activity) yield { kind: 'tool_activity', activity };
+          }
+          const activity = nativeToolActivity(
+            params,
+            method ?? '',
+            'end',
+            nativeToolOutput.get(nativeId) ?? nativeToolOutputValue(params),
+            startedAt === undefined ? 0 : Math.max(0, Date.now() - startedAt),
+          );
+          if (activity) yield { kind: 'tool_activity', activity };
+          nativeToolStartedAt.delete(nativeId);
+          nativeToolOutput.delete(nativeId);
+          nativeToolCompleted.add(nativeId);
+          continue;
+        }
         if (delta && method === 'item/agentMessage/delta') {
           yield { kind: 'text', delta };
           continue;

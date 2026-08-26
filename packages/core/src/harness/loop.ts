@@ -82,6 +82,14 @@ import {
   observeHarnessCycle,
   reviewGate,
 } from './cycle.js';
+import {
+  actionFingerprint,
+  ActionLoopDetector,
+  DEFAULT_AGENT_EXECUTION_POLICY,
+  normalizeActionArguments,
+  ProgressWatchdog,
+} from './loop-safety.js';
+import type { AgentExecutionPolicy, ProgressSnapshot } from './loop-safety.js';
 
 export interface SkillBootstrap {
   readonly name: string;
@@ -110,6 +118,8 @@ export interface LoopOptions {
   readonly maxConsecutiveFailures?: number;
   /** Stop with an error instead of completing after this many unanswered review gates. */
   readonly maxReviewReminders?: number;
+  /** Runtime loop-safety policy. Defaults are conservative and bounded. */
+  readonly executionPolicy?: Partial<AgentExecutionPolicy>;
   /** Enable the durable plan/review cycle for the selected effort only. */
   readonly enableHarnessCycle?: boolean;
   readonly plifTelemetry?: {
@@ -303,6 +313,9 @@ export type LoopStop =
   | 'complete'
   | 'max_iterations'
   | 'too_many_failures'
+  | 'stagnation'
+  | 'run_budget'
+  | 'retry_limit'
   | 'cancelled'
   | 'error';
 
@@ -317,6 +330,13 @@ export interface LoopResult {
   readonly promptTokens: number;
   readonly completionTokens: number;
   readonly retries: number;
+  /** Runtime progress/budget telemetry for diagnostics and callers. */
+  readonly progressEpoch: number;
+  readonly iterationsSinceProgress: number;
+  readonly totalRunTokens: number;
+  readonly tokensSinceProgress: number;
+  readonly recoveryAttempts: number;
+  readonly stagnationState: ProgressSnapshot['stagnationState'];
   readonly tokenUsage?: CanonicalTokenUsage;
   readonly error?: PlifError;
 }
@@ -324,6 +344,68 @@ export interface LoopResult {
 /** A fingerprint for "the model just did exactly this". */
 function callSignature(call: ToolCall): string {
   return `${call.name}(${call.arguments})`;
+}
+
+function totalUsageTokens(
+  usage: CanonicalTokenUsage,
+  legacy: { promptTokens: number; completionTokens: number },
+): number {
+  if (usage.totalTokens !== undefined && Number.isFinite(usage.totalTokens)) {
+    return Math.max(0, Math.floor(usage.totalTokens));
+  }
+  const input = usage.totalPromptTokens ?? legacy.promptTokens;
+  const output = usage.outputTokens ?? legacy.completionTokens;
+  return Math.max(0, Math.floor(input + output));
+}
+
+function stagnationError(snapshot: ProgressSnapshot): PlifError {
+  return new PlifError(
+    'MODEL_ERROR',
+    'Execution paused — no meaningful progress detected.',
+    {
+      detail: {
+        progressEpoch: snapshot.progressEpoch,
+        iterationsSinceProgress: snapshot.iterationsSinceProgress,
+        tokensSinceProgress: snapshot.tokensSinceProgress,
+        totalRunTokens: snapshot.totalRunTokens,
+        recoveryAttempts: snapshot.recoveryAttempts,
+      },
+      hint: 'Review the latest result, change the strategy, or continue with a new turn.',
+    },
+  );
+}
+
+function runBudgetError(snapshot: ProgressSnapshot, limit: number): PlifError {
+  return new PlifError(
+    'MODEL_ERROR',
+    'Execution paused — run token budget reached.',
+    {
+      detail: {
+        maxRunTokens: limit,
+        totalRunTokens: snapshot.totalRunTokens,
+        progressEpoch: snapshot.progressEpoch,
+      },
+      hint: 'Start a new turn or raise the run budget deliberately.',
+    },
+  );
+}
+
+function recoveryPrompt(snapshot: ProgressSnapshot, recentCalls: readonly RecentCall[]): string {
+  const actions = recentCalls.slice(-6).map((call) => `${call.name}#${call.fingerprint.slice(0, 10)}`);
+  return [
+    'PLIF STAGNATION_DETECTED (runtime recovery):',
+    `No meaningful execution progress has occurred since progress epoch ${snapshot.progressEpoch}.`,
+    `Tokens consumed since progress: ${snapshot.tokensSinceProgress}.`,
+    `Iterations since progress: ${snapshot.iterationsSinceProgress}.`,
+    `Recent executable actions: ${actions.length ? actions.join(', ') : 'none'}.`,
+    'Do not repeat the previous strategy unchanged. Choose exactly one:',
+    '1. perform a materially different action;',
+    '2. reuse an existing result;',
+    '3. revise the plan;',
+    '4. identify a concrete blocker;',
+    '5. ask the user for missing information; or',
+    '6. finish the task.',
+  ].join(' ');
 }
 
 export interface CompactionRun {
@@ -375,7 +457,32 @@ export async function runCompaction(
   return result;
 }
 
+const ACTIVE_RUNS = new Set<string>();
+
+/**
+ * Protect the continuation boundary from accidental re-entry. The interactive
+ * host normally serializes turns, but durable turn IDs make that invariant
+ * enforceable for reconnects, retries and embedders too.
+ */
 export async function runLoop(
+  history: readonly Message[],
+  options: LoopOptions,
+): Promise<LoopResult> {
+  if (options.turnId && ACTIVE_RUNS.has(options.turnId)) {
+    throw new PlifError(
+      'INTERNAL',
+      `A run with turn id ${options.turnId} is already active; duplicate continuation ignored.`,
+    );
+  }
+  if (options.turnId) ACTIVE_RUNS.add(options.turnId);
+  try {
+    return await runLoopInternal(history, options);
+  } finally {
+    if (options.turnId) ACTIVE_RUNS.delete(options.turnId);
+  }
+}
+
+async function runLoopInternal(
   history: readonly Message[],
   options: LoopOptions,
 ): Promise<LoopResult> {
@@ -452,10 +559,10 @@ export async function runLoop(
     registry.has('update_plan') && [...registry.keys()].some((name) =>
       isFileMutationTool(name) || name === 'run_command' || name === 'shell_command'
     );
-  // A model/tool mistake is recoverable work, not a reason to kill the task.
-  // Keep an explicit cap for embedders that need one, but interactive Plif
-  // sessions are uncapped and end through completion, cancellation, or a
-  // structural error.
+  // A model/tool mistake is recoverable work, but continuation is never
+  // allowed to become an economic blank cheque. maxIterations remains an
+  // optional caller backstop; the progress and token policy below is the
+  // primary protection against non-progress.
   const maxIterations = options.maxIterations ?? Number.POSITIVE_INFINITY;
   const maxFailures = options.maxConsecutiveFailures ?? 4;
   const maxReviewReminders = Math.max(
@@ -469,6 +576,13 @@ export async function runLoop(
   const tokenSplitConfig = options.tokenSplit?.config;
   const tokenSplitTransformations: TokenSplitTransformation[] = [];
   const recentCalls: RecentCall[] = [];
+  const executionPolicy = {
+    ...DEFAULT_AGENT_EXECUTION_POLICY,
+    ...options.executionPolicy,
+  };
+  const progress = new ProgressWatchdog(executionPolicy);
+  const actionLoops = new ActionLoopDetector(progress.policy);
+  let stateVersion = 0;
 
   const persistTokenSplitNotes = async (): Promise<void> => {
     if (!tokenSplitConfig || !options.tokenSplit?.workspace || !options.tokenSplit.sessionId) return;
@@ -504,6 +618,36 @@ export async function runLoop(
   let reasoningBudgetEmitted = false;
   let modeTelemetryEmitted = false;
 
+  const safetyEvent = (
+    executionState: 'thinking' | 'awaiting_tool' | 'executing_tool' | 'processing_result' | 'recovering' | 'completed' | 'failed' | 'cancelled',
+    progressDetected: boolean,
+    transitionReason: string,
+    action?: string,
+  ): void => {
+    const snapshot = progress.snapshot();
+    options.bus.emit('agent.safety', {
+      turnId,
+      iteration: snapshot.iterationCount,
+      executionState,
+      progressEpoch: snapshot.progressEpoch,
+      progressDetected,
+      inputTokens: turnPromptTokensForTelemetry,
+      outputTokens: turnCompletionTokensForTelemetry,
+      tokensSinceProgress: snapshot.tokensSinceProgress,
+      totalRunTokens: snapshot.totalRunTokens,
+      stateVersion,
+      stagnationState: snapshot.stagnationState,
+      recoveryAttempts: snapshot.recoveryAttempts,
+      retryCount: retries,
+      transitionReason,
+      ...(action ? { actionFingerprint: action } : {}),
+    });
+  };
+
+  // These are set for the current iteration before a safety event is emitted.
+  let turnPromptTokensForTelemetry = 0;
+  let turnCompletionTokensForTelemetry = 0;
+
   const setCycle = (
     next: typeof cycle,
     reason: 'turn_started' | 'plan_ready' | 'change_applied' | 'review_required' | 'completed',
@@ -519,8 +663,15 @@ export async function runLoop(
     if (options.signal?.aborted) {
       return done('cancelled');
     }
+    if (progress.snapshot().totalRunTokens >= progress.policy.maxRunTokens) {
+      return done('run_budget', runBudgetError(progress.snapshot(), progress.policy.maxRunTokens));
+    }
     iterations += 1;
+    progress.beginIteration();
+    turnPromptTokensForTelemetry = 0;
+    turnCompletionTokensForTelemetry = 0;
     options.bus.emit('agent.turn', { iteration: iterations, maxIterations });
+    safetyEvent('thinking', false, 'model_invocation');
 
     let projection: TokenSplitProjection | null = tokenSplitConfig
       ? projectTokenSplitInput(messages, tokenSplitConfig)
@@ -583,6 +734,7 @@ export async function runLoop(
     const requested: ToolCall[] = [];
     /** When the current thinking block opened, or null when not thinking. */
     let thinkingSince: number | null = null;
+    let retryLimitReached: string | null = null;
 
     /**
      * Add this turn's prose to the answer, as its own paragraph.
@@ -648,8 +800,54 @@ export async function runLoop(
           options.bus.emit('agent.reasoning', { turnId, delta: event.delta });
         } else if (event.kind === 'tool') {
           requested.push(event.call);
+        } else if (event.kind === 'tool_activity') {
+          // Provider-owned runtimes (currently Codex app-server) execute the
+          // tool themselves. Project their lifecycle into the same bus and
+          // durable transcript used by local tools, but never add it to
+          // `requested`: doing so would execute the call a second time.
+          const activity = event.activity;
+          const call = {
+            id: activity.id,
+            name: activity.name,
+            arguments: JSON.stringify(activity.input ?? {}),
+          };
+          if (activity.phase === 'start') {
+            options.bus.emit('agent.tool', {
+              turnId,
+              id: activity.id,
+              name: activity.name,
+              input: activity.input ?? {},
+              phase: 'start',
+            });
+            options.bus.emit('conversation.event', {
+              ...eventBase('tool.started', turnId),
+              call,
+            });
+          } else {
+            options.bus.emit('agent.tool', {
+              turnId,
+              id: activity.id,
+              name: activity.name,
+              input: activity.input ?? {},
+              phase: 'end',
+              ...(activity.ok === undefined ? {} : { ok: activity.ok }),
+              ...(activity.durationMs === undefined ? {} : { durationMs: activity.durationMs }),
+              ...(activity.output === undefined ? {} : { output: activity.output }),
+            });
+            options.bus.emit('conversation.event', {
+              ...eventBase('tool.completed', turnId),
+              callId: activity.id,
+              output: activity.output ?? '',
+              ok: activity.ok !== false,
+              durationMs: activity.durationMs ?? 0,
+            });
+          }
         } else if (event.kind === 'retry') {
           retries += 1;
+          if (retries > progress.policy.maxRetries) {
+            retryLimitReached = `provider retry limit reached (${progress.policy.maxRetries})`;
+            break;
+          }
           options.bus.emit('agent.retry', {
             turnId,
             attempt: event.attempt,
@@ -676,6 +874,9 @@ export async function runLoop(
             ? canonicalFromLegacyUsage(event.usage.promptTokens, event.usage.completionTokens)
             : estimatedTokenUsage(estimateTokens(messages), event.usage.completionTokens));
           tokenUsage = mergeTokenUsage(tokenUsage, currentUsage);
+          progress.recordTokens(totalUsageTokens(currentUsage, event.usage));
+          turnPromptTokensForTelemetry = turnPromptTokens;
+          turnCompletionTokensForTelemetry = turnCompletionTokens;
           if (currentUsage.source !== 'estimated' && currentUsage.source !== 'unknown') {
             if (currentUsage.inputCachedTokens !== undefined) turnCacheHitTokens = (turnCacheHitTokens ?? 0) + currentUsage.inputCachedTokens;
             if (currentUsage.inputNewTokens !== undefined) turnCacheMissTokens = (turnCacheMissTokens ?? 0) + currentUsage.inputNewTokens;
@@ -726,6 +927,13 @@ export async function runLoop(
           options.tokenSplit.sessionId ?? 'interactive',
           metric,
         ).catch(() => undefined);
+      }
+      if (retryLimitReached) {
+        if (turnText || turnReasoning) keepTurnText();
+        return done('retry_limit', new PlifError('MODEL_ERROR', retryLimitReached, {
+          detail: { retries, maxRetries: progress.policy.maxRetries },
+          hint: 'Retry the task after checking the provider status or choose another model.',
+        }));
       }
     } catch (error) {
       endThinking();
@@ -788,25 +996,44 @@ export async function runLoop(
     });
     await persistTokenSplitNotes();
 
+    const postModelBudget = progress.evaluate();
+    if (postModelBudget.kind === 'stop' && postModelBudget.reason === 'run_budget') {
+      return done('run_budget', runBudgetError(postModelBudget.snapshot, progress.policy.maxRunTokens));
+    }
+
     // No tools requested means the model considers itself finished.
     if (requested.length === 0) {
       if (cycleEnabled) {
+        const previousPhase = cycle.phase;
         setCycle(
           observeHarnessCycle(cycle, { type: 'review_requested' }),
           'review_required',
         );
+        if (cycle.phase !== previousPhase) {
+          progress.markProgress();
+          safetyEvent('processing_result', true, 'harness_phase_changed');
+        }
         const gate = reviewGate(cycle);
         if (gate !== null) {
           reviewReminders += 1;
           if (reviewReminders > maxReviewReminders) {
             return done(
-              'error',
+              'stagnation',
               new PlifError('INTERNAL', 'The review gate was not satisfied before completion.', {
                 hint: gate,
               }),
             );
           }
           messages.push({ role: 'user', content: gate });
+          const decision = progress.evaluate();
+          if (decision.kind === 'stop') {
+            return done('stagnation', stagnationError(decision.snapshot));
+          }
+          if (decision.kind === 'recover') {
+            progress.markRecoveryAttempt();
+            messages.push({ role: 'user', content: recoveryPrompt(decision.snapshot, recentCalls) });
+            safetyEvent('recovering', false, 'bounded_recovery');
+          }
           continue;
         }
         setCycle(observeHarnessCycle(cycle, { type: 'complete' }), 'completed');
@@ -824,16 +1051,35 @@ export async function runLoop(
     const deferred = laterBatches.flat();
     {
       if (options.signal?.aborted) return done('cancelled');
+      safetyEvent('awaiting_tool', false, 'model_requested_tools');
 
       const prepared = batch
-        .map((call) => prepare(call, recentCalls, registry))
+        .map((call) => prepare(call, recentCalls, registry, stateVersion))
         .map((item) => {
-          if (!cycleEnabled || item.parseError !== null || item.refusal !== null) return item;
+          if (item.parseError !== null || item.refusal !== null) return item;
+
+          // Repeated executable actions are different from legitimate reads:
+          // the model must either change state or choose a materially different
+          // action. This guard runs before tool execution and also catches
+          // short A→B→A→B oscillations, not just A→A.
+          const repeatable = registry.get(item.call.name)?.repeatable === true;
+          if (!repeatable) {
+            const observed = actionLoops.observe(item.fingerprint);
+            if (observed.repeated || observed.sequence) {
+              const reason = observed.sequence
+                ? 'Error: a repeated action sequence was detected without a state change.'
+                : 'Error: this action has repeated without a state change.';
+              const recorded = recentCalls.findLastIndex((entry) => entry.fingerprint === item.fingerprint);
+              if (recorded >= 0) recentCalls.splice(recorded, 1);
+              return { ...item, replay: null, refusal: `${reason} Use a different action, inspect new evidence, or stop.` };
+            }
+          }
+
+          if (!cycleEnabled) return item;
           const mutates = isFileMutationTool(item.call.name) || isShellMutation(item.call.name, item.parsed);
           const gate = mutates ? mutationGate(cycle) : null;
           if (gate === null) return item;
-          const signature = callSignature(item.call);
-          const recorded = recentCalls.findLastIndex((entry) => entry.signature === signature);
+          const recorded = recentCalls.findLastIndex((entry) => entry.fingerprint === item.fingerprint);
           if (recorded >= 0) recentCalls.splice(recorded, 1);
           return { ...item, refusal: gate };
         });
@@ -847,6 +1093,7 @@ export async function runLoop(
         });
       }
 
+      safetyEvent('executing_tool', false, 'tool_execution_started');
       const settled = await Promise.all(
         prepared.map(async (item) => {
           options.bus.emit('conversation.event', {
@@ -881,7 +1128,7 @@ export async function runLoop(
         await recordStrategy(options, item.call, item.parsed, item.ok, item.durationMs);
 
         if (item.replay === null && item.refusal === null && item.parseError === null) {
-          rememberCallResult(recentCalls, item.call, {
+          rememberCallResult(recentCalls, item.call, item.fingerprint, {
             output: item.output,
             ok: item.ok,
             ...(item.diff ? { diff: item.diff } : {}),
@@ -892,7 +1139,9 @@ export async function runLoop(
         // A successful mutation changes the evidence available to later reads.
         // Do not replay a pre-change directory listing or file contents.
         if (item.ok && (isFileMutationTool(item.call.name) || isShellMutation(item.call.name, item.parsed))) {
+          stateVersion += 1;
           recentCalls.length = 0;
+          actionLoops.reset();
         }
 
         options.bus.emit('agent.tool', {
@@ -914,6 +1163,12 @@ export async function runLoop(
           durationMs: item.durationMs,
           ...(item.diff ? { diff: item.diff } : {}),
         });
+
+        const executed = item.replay === null && item.refusal === null && item.parseError === null;
+        if (executed) {
+          progress.markProgress();
+          safetyEvent('processing_result', true, item.ok ? 'new_tool_result' : 'new_tool_failure', item.fingerprint);
+        }
 
         let modelToolOutput = item.output;
         if (tokenSplitConfig && options.tokenSplit?.workspace && options.tokenSplit.sessionId && techniqueIsOn(tokenSplitConfig, 'spill')) {
@@ -1035,12 +1290,29 @@ export async function runLoop(
           toolCalls: settled.length,
         });
       }
+
+      const decision = progress.evaluate();
+      if (decision.kind === 'stop') {
+        return done(decision.reason, decision.reason === 'run_budget'
+          ? runBudgetError(decision.snapshot, progress.policy.maxRunTokens)
+          : stagnationError(decision.snapshot));
+      }
+      if (decision.kind === 'recover') {
+        progress.markRecoveryAttempt();
+        messages.push({ role: 'user', content: recoveryPrompt(decision.snapshot, recentCalls) });
+        safetyEvent('recovering', false, 'bounded_recovery');
+      }
     }
   }
 
   return done('max_iterations');
 
   function done(stop: LoopStop, error?: PlifError): LoopResult {
+    safetyEvent(
+      stop === 'complete' ? 'completed' : stop === 'cancelled' ? 'cancelled' : 'failed',
+      stop === 'complete',
+      `run_${stop}`,
+    );
     if (options.enableHarnessCycle && !modeTelemetryEmitted) {
       modeTelemetryEmitted = true;
       const reviewPasses = options.plifTelemetry?.reviewPasses ?? 3;
@@ -1077,6 +1349,7 @@ export async function runLoop(
       promptTokens,
       completionTokens,
       retries,
+      ...progress.snapshot(),
       ...(tokenUsage ? { tokenUsage } : {}),
       ...(error ? { error } : {}),
     };
@@ -1127,7 +1400,9 @@ const REPEAT_WINDOW = 6;
 type ReplayedToolResult = Pick<ToolResult, 'output' | 'ok' | 'diff' | 'display' | 'toolCallCount'>;
 
 interface RecentCall {
+  readonly name: string;
   readonly signature: string;
+  readonly fingerprint: string;
   result?: ReplayedToolResult;
 }
 
@@ -1152,15 +1427,15 @@ function canReplayUnchangedCall(
 function rememberCallResult(
   recentCalls: RecentCall[],
   call: ToolCall,
+  fingerprint: string,
   result: ReplayedToolResult,
 ): void {
-  const signature = callSignature(call);
-  const record = [...recentCalls].reverse().find((item) => item.signature === signature);
+  const record = [...recentCalls].reverse().find((item) => item.fingerprint === fingerprint);
   if (record) {
     record.result = result;
     return;
   }
-  recentCalls.push({ signature, result });
+  recentCalls.push({ name: call.name, signature: callSignature(call), fingerprint, result });
   if (recentCalls.length > REPEAT_WINDOW) recentCalls.shift();
 }
 
@@ -1199,6 +1474,7 @@ export function scheduleBatches(
 interface PreparedCall {
   readonly call: ToolCall;
   readonly parsed: Record<string, unknown>;
+  readonly fingerprint: string;
   readonly parseError: string | null;
   /** Set when the repetition guard is refusing this call outright. */
   readonly refusal: string | null;
@@ -1217,6 +1493,7 @@ function prepare(
   call: ToolCall,
   recentCalls: RecentCall[],
   registry: Map<string, Tool>,
+  stateVersion: number,
 ): PreparedCall {
   let parsed: Record<string, unknown> = {};
   let parseError: string | null = null;
@@ -1230,21 +1507,32 @@ function prepare(
     parseError = `arguments were not valid JSON: ${call.arguments}`;
   }
 
-  if (parseError) return { call, parsed, parseError, refusal: null, replay: null };
+  if (parseError) {
+    return {
+      call,
+      parsed,
+      fingerprint: actionFingerprint(call.name, call.arguments, stateVersion),
+      parseError,
+      refusal: null,
+      replay: null,
+    };
+  }
 
   // A tool that declares itself repeatable is exempt. Polling is the whole
   // reason: `task_status` on a running job is meant to be asked again, and
   // refusing it left the model unable to watch a task it had just started.
   const repeatable = registry.get(call.name)?.repeatable === true;
   const signature = callSignature(call);
+  const fingerprint = actionFingerprint(call.name, normalizeActionArguments(parsed), stateVersion);
   const previous = !repeatable
-    ? [...recentCalls].reverse().find((item) => item.signature === signature)
+    ? [...recentCalls].reverse().find((item) => item.fingerprint === fingerprint)
     : undefined;
   if (previous && canReplayUnchangedCall(call, parsed, registry)) {
     if (!previous.result) {
       return {
         call,
         parsed,
+        fingerprint,
         parseError,
         refusal: null,
         replay: {
@@ -1256,6 +1544,7 @@ function prepare(
     return {
       call,
       parsed,
+      fingerprint,
       parseError,
       refusal: null,
       replay: {
@@ -1270,6 +1559,7 @@ function prepare(
     return {
       call,
       parsed,
+      fingerprint,
       parseError,
       refusal:
         `Error: you already called ${call.name} with exactly these arguments in this turn, ` +
@@ -1280,11 +1570,11 @@ function prepare(
   }
 
   if (!repeatable) {
-    recentCalls.push({ signature });
+    recentCalls.push({ name: call.name, signature, fingerprint });
     if (recentCalls.length > REPEAT_WINDOW) recentCalls.shift();
   }
 
-  return { call, parsed, parseError, refusal: null, replay: null };
+  return { call, parsed, fingerprint, parseError, refusal: null, replay: null };
 }
 
 /**
@@ -1383,6 +1673,7 @@ async function executeCall(input: {
       callId: call.id,
       ...(options.memory ? { memory: options.memory } : {}),
       ...(options.workspace ? { workspace: options.workspace } : {}),
+      ...(options.execution ? { execution: options.execution } : {}),
       ...(options.tasks ? { tasks: options.tasks } : {}),
       ...(options.lsp ? { lsp: options.lsp } : {}),
       ...(options.edits ? { edits: options.edits } : {}),

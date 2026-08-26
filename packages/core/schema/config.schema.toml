@@ -50,6 +50,10 @@ deprecatedBy = "permissionMode"
 type = "string"
 values = ["low", "medium", "high", "xhigh", "max", "ultra", "ultracode", "plif"]
 
+[fields.codexFast]
+type = "boolean"
+description = "Use Codex's higher-speed service tier; applies only to the Codex provider."
+
 [fields.temperature]
 type = "number"
 

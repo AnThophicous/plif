@@ -391,6 +391,7 @@ export type SessionAction =
   | { type: 'question.push'; question: PendingQuestion }
   | { type: 'question.resolve' }
   | { type: 'question.draft'; draft: string }
+  | { type: 'question.select'; selected: number }
   | { type: 'question.move'; delta: number }
   | { type: 'question.expand' }
   | { type: 'compaction.stage'; stage: CompactionState }
@@ -744,6 +745,20 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       // a highlight that stays lit while someone types a different answer makes
       // it ambiguous which one Enter will send.
       return { ...state, questionDraft: action.draft, questionChoice: action.draft ? -1 : 0 };
+
+    case 'question.select': {
+      const options = state.question?.options ?? [];
+      if (options.length === 0 || action.selected < 0) {
+        return state.questionChoice === -1 ? state : { ...state, questionChoice: -1 };
+      }
+      const selected = Math.min(action.selected, options.length - 1);
+      if (state.questionChoice === selected && state.questionDraft === '') return state;
+      return {
+        ...state,
+        questionChoice: selected,
+        questionDraft: '',
+      };
+    }
 
     case 'question.move': {
       const options = state.question?.options ?? [];

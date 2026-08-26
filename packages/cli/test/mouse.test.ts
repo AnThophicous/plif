@@ -31,8 +31,13 @@ describe('SGR mouse input', () => {
     });
   });
 
-  it('ignores wheel and motion events', () => {
-    assert.equal(parseSgrMouse('[<32;18;34M'), null);
+  it('parses motion for active chooser hover and ignores wheel events', () => {
+    assert.deepEqual(parseSgrMouse('[<32;18;34M'), {
+      button: 0,
+      column: 18,
+      row: 34,
+      action: 'move',
+    });
     assert.equal(parseSgrMouse('[<64;18;34M'), null);
   });
 

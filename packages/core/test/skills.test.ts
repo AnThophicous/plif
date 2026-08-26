@@ -9,6 +9,7 @@ import {
   SkillRegistry,
   createSkillTool,
   loadedSkillNames,
+  mandatorySkillsForEffort,
   parseSkill,
   skillTool,
   writeSkill,
@@ -21,6 +22,17 @@ import type { ToolContext } from '../src/harness/tools.js';
 import type { Message } from '../src/model/provider.js';
 
 const context = {} as ToolContext;
+
+describe('mandatory skill policy', () => {
+  it('requires anti-AI-slop and Galileu for every effort, with PLIF Cybersecurity added to Plif', () => {
+    assert.deepEqual(mandatorySkillsForEffort('low'), ['anti-ai-slop', 'galileu']);
+    assert.deepEqual(mandatorySkillsForEffort('plif'), [
+      'anti-ai-slop',
+      'galileu',
+      'plif-cybersecurity',
+    ]);
+  });
+});
 
 describe('parseSkill', () => {
   it('reads name and description from frontmatter', () => {

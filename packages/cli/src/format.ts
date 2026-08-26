@@ -171,8 +171,8 @@ export function isTerminalPaste(chunk: string): boolean {
   return sanitizePastedText(chunk).replace(/\n+$/, '').includes('\n');
 }
 
-/** 200 characters remain inline; 201 is the first compacted paste. */
-export const PASTE_ATTACHMENT_MIN_CHARS = 201;
+/** Pasted text stays readable in the input until it reaches 700 characters. */
+export const PASTE_ATTACHMENT_MIN_CHARS = 700;
 
 export function shouldAttachPastedText(text: string): boolean {
   return text.length >= PASTE_ATTACHMENT_MIN_CHARS;

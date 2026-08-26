@@ -49,7 +49,7 @@ import {
   DEFAULT_TOOLS,
   McpRegistry,
   SkillRegistry,
-  MANDATORY_PLIF_SKILLS,
+  mandatorySkillsForEffort,
   parseServerConfigs,
   DEFAULT_CONTEXT_TOKENS,
   eventBase,
@@ -77,7 +77,16 @@ import {
   visionTools,
   ProviderCapabilityCache,
 } from '@plif/core';
-import type { EffortCapabilityCache, GlobalConfig, ModelProvider, Session, Skill, StoredConfig } from '@plif/core';
+import type {
+  EffortCapabilityCache,
+  GlobalConfig,
+  ModelApprovalRequest,
+  ModelExecutionContext,
+  ModelProvider,
+  Session,
+  Skill,
+  StoredConfig,
+} from '@plif/core';
 
 import type { Invocation } from '../argv.js';
 import type { GlobalFlags } from '../argv.js';
@@ -629,9 +638,7 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
   // Native Codex runs cannot execute PLIF's host-only `skill` tool. Preload
   // the same mandatory skills used by the interactive app into the native
   // developer instructions so `plif prompt` follows the same contract.
-  const codexMandatoryNames = promptConfig.effort === 'plif'
-    ? MANDATORY_PLIF_SKILLS
-    : (['galileu'] as const);
+  const codexMandatoryNames = mandatorySkillsForEffort(promptConfig.effort);
   const codexSkillBootstrap = provider.info.providerId === 'codex'
     ? codexMandatoryNames
         .map((name) => skills.get(name))
@@ -707,6 +714,27 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
         signal: abort.signal,
         memory: engine.memory,
         workspace: invocation.flags.workspace,
+        execution: {
+          cwd: invocation.flags.workspace,
+          workspaceRoots: [invocation.flags.workspace],
+          permissionMode: engine.approvals.permissionMode,
+          ask: (question) => engine.questions.ask(question),
+          approve: async (request: ModelApprovalRequest): Promise<'allow' | 'deny' | 'cancel'> => {
+            const answer = await engine.approvals.ask({
+              containerId: container.name,
+              action: request.kind === 'execute'
+                ? 'exec'
+                : request.kind === 'permissions' && request.network
+                  ? 'net.connect'
+                  : 'fs.write',
+              target: request.target,
+              ...(request.argv ? { argv: request.argv } : {}),
+              reason: request.reason ?? 'Codex requested approval through the shared PLIF permission broker.',
+              rationale: 'The Codex app-server request is governed by the active PLIF permission mode.',
+            });
+            return answer.decision === 'allow' ? 'allow' : 'deny';
+          },
+        } satisfies ModelExecutionContext,
         sessionId: session.id,
         contextTokens: provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
         tokenSplit: {

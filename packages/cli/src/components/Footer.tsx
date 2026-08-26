@@ -15,8 +15,10 @@ interface FooterProps {
   readonly width: number;
   readonly status?: string;
   readonly provider?: string;
+  readonly providerId?: string;
   readonly model?: string;
   readonly effort?: string;
+  readonly codexFast?: boolean;
   readonly contextUsed?: number;
   readonly contextMax?: number;
   /** Retained for callers; temporary selectors own their keyboard hints. */
@@ -35,8 +37,10 @@ export const Footer = React.memo(function Footer({
   width,
   status,
   provider,
+  providerId,
   model,
   effort,
+  codexFast,
   contextUsed = 0,
   contextMax = 0,
   showHints = false,
@@ -50,15 +54,17 @@ export const Footer = React.memo(function Footer({
   const providerLabel = provider ? providerDisplayName(provider) : 'not configured';
   const modelLabel = model?.trim() || 'model not configured';
   const effortLabel = effortDisplay(effort);
+  const showCodexFast = providerId === 'codex';
+  const fastLabel = codexFast === true ? 'FAST ON' : 'FAST OFF';
   const wide = innerWidth >= 112;
   const medium = innerWidth >= 72;
   const plain = wide
-    ? `Provider ${providerLabel}  ${glyph.divider}  Model ${modelLabel}  ${glyph.divider}  Effort ${effortLabel}  ${glyph.divider}  ctx ${percent}% ${meter}`
+    ? `Provider ${providerLabel}  ${glyph.divider}  Model ${modelLabel}  ${glyph.divider}  Effort ${effortLabel}${showCodexFast ? `  ${glyph.divider}  ${fastLabel}` : ''}  ${glyph.divider}  ctx ${percent}% ${meter}`
     : medium
-      ? `${providerLabel}  ${glyph.divider}  ${modelLabel}  ${glyph.divider}  ${effortLabel}  ${glyph.divider}  ctx ${percent}% ${meter}`
+      ? `${providerLabel}  ${glyph.divider}  ${modelLabel}  ${glyph.divider}  ${effortLabel}${showCodexFast ? `  ${glyph.divider}  ${fastLabel}` : ''}  ${glyph.divider}  ctx ${percent}% ${meter}`
       : innerWidth >= 48
-        ? `${modelLabel}  ${glyph.divider}  ${effortLabel}  ${glyph.divider}  ctx ${percent}% ${meter}`
-        : `${truncate(modelLabel, Math.max(10, innerWidth - 17))}  ${glyph.divider}  ${effortLabel}  ${percent}%`;
+        ? `${modelLabel}  ${glyph.divider}  ${effortLabel}${showCodexFast ? `  ${glyph.divider}  ${fastLabel}` : ''}  ${glyph.divider}  ctx ${percent}% ${meter}`
+        : `${truncate(modelLabel, Math.max(10, innerWidth - (showCodexFast ? 27 : 17)))}  ${glyph.divider}  ${effortLabel}${showCodexFast ? `  ${glyph.divider}  ${fastLabel}` : ''}  ${percent}%`;
 
   return (
     <Box
@@ -75,9 +81,11 @@ export const Footer = React.memo(function Footer({
         <HudText
           wide={wide}
           provider={providerLabel}
+          providerId={providerId}
           model={modelLabel}
           effort={effortLabel}
           effortId={effort}
+          codexFast={codexFast}
           percent={percent}
           meter={meter}
         />
@@ -87,8 +95,10 @@ export const Footer = React.memo(function Footer({
 }, (previous, next) => (
   previous.width === next.width &&
   previous.provider === next.provider &&
+  previous.providerId === next.providerId &&
   previous.model === next.model &&
   previous.effort === next.effort &&
+  previous.codexFast === next.codexFast &&
   previous.contextUsed === next.contextUsed &&
   previous.contextMax === next.contextMax
 ));
@@ -98,17 +108,21 @@ Footer.displayName = 'Footer';
 function HudText({
   wide,
   provider,
+  providerId,
   model,
   effort,
   effortId,
+  codexFast,
   percent,
   meter,
 }: {
   readonly wide: boolean;
   readonly provider: string;
+  readonly providerId?: string;
   readonly model: string;
   readonly effort: string;
   readonly effortId?: string;
+  readonly codexFast?: boolean;
   readonly percent: number;
   readonly meter: string;
 }): React.ReactElement {
@@ -121,6 +135,12 @@ function HudText({
       {divider}
       {wide && <Text color={color('muted')}>Effort </Text>}
       <HudEffort effort={effortId} label={effort} />
+      {providerId === 'codex' && <>
+        {divider}
+        <Text color={codexFast === true ? color('success') : color('muted')} bold={codexFast === true}>
+          {codexFast === true ? 'FAST ON' : 'FAST OFF'}
+        </Text>
+      </>}
       {divider}
       <Text color={color('faint')}>ctx {percent}% </Text>
       <ContextMeter meter={meter} />
@@ -163,6 +183,7 @@ export function providerDisplayName(endpoint: string | undefined): string {
   if (host.includes('opencode')) return 'OpenCode';
   if (host.includes('nvidia')) return 'NVIDIA';
   if (host.includes('openai') || host.includes('chatgpt')) return 'OpenAI';
+  if (host.startsWith('codex:')) return 'Codex';
   if (host.includes('google')) return 'Google';
   if (host.includes('deepseek')) return 'DeepSeek';
   if (host.includes('ollama')) return 'Ollama';
@@ -187,14 +208,18 @@ export function contextMeter(percent: number, segments = 10): string {
 
 export function footerSummary({
   provider,
+  providerId,
   model,
   effort,
+  codexFast,
   contextUsed,
   contextMax,
 }: {
   readonly provider?: string;
+  readonly providerId?: string;
   readonly model?: string;
   readonly effort?: string;
+  readonly codexFast?: boolean;
   readonly contextUsed: number;
   readonly contextMax: number;
 }): string {
@@ -202,6 +227,7 @@ export function footerSummary({
     ...(provider ? [providerDisplayName(provider)] : []),
     model?.trim() || 'model not configured',
     `effort: ${effort ? effortVisual(effort).label.toLowerCase() : 'default'}`,
+    ...(providerId === 'codex' ? [`FAST ${codexFast === true ? 'ON' : 'OFF'}`] : []),
     `ctx ${contextPercent(contextUsed, contextMax)}%`,
   ].join(`  ${glyph.divider}  `);
 }

@@ -10,7 +10,7 @@ export interface SgrMouseEvent {
   readonly column: number;
   /** One-based terminal row. */
   readonly row: number;
-  readonly action: 'press' | 'release';
+  readonly action: 'press' | 'release' | 'move';
 }
 
 /** Parse both the raw SGR sequence and Ink's version with the leading ESC removed. */
@@ -26,17 +26,17 @@ export function parseSgrMouse(input: string): SgrMouseEvent | null {
     return null;
   }
 
-  // 32 is motion and 64/65 are wheel events. The popup only needs an actual
-  // button press/release, so ignoring them prevents scroll and drag activity
-  // from becoming accidental composer interactions.
-  if ((code & 32) !== 0 || (code & 64) !== 0) return null;
+  // Wheel events remain outside the application so they cannot become an
+  // accidental answer. Motion is useful only while a question is active; App
+  // filters it everywhere else, preserving the normal terminal behaviour.
+  if ((code & 64) !== 0) return null;
   if (column < 1 || row < 1) return null;
 
   return {
     button: code & 3,
     column,
     row,
-    action: match[4] === 'M' ? 'press' : 'release',
+    action: (code & 32) !== 0 ? 'move' : match[4] === 'M' ? 'press' : 'release',
   };
 }
 

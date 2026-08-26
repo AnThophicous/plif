@@ -290,6 +290,29 @@ function fitToHeight(
   return entries.slice(first);
 }
 
+/**
+ * Return the number of rows occupied by the same visible slice as Timeline.
+ *
+ * This is intentionally kept beside `fitToHeight`: mouse hit-testing and the
+ * renderer must agree about where a question begins after the transcript.
+ * It uses the same conservative estimates as the live view, so a long or
+ * still-running row cannot make the click target drift into the prompt.
+ */
+export function timelineVisibleHeight(
+  entries: readonly TimelineEntry[],
+  width: number,
+  maxLines: number,
+  limit?: number,
+): number {
+  const inner = width - layout.gutter * 2;
+  const byCount = limit ? entries.slice(-limit) : entries.slice(-layout.maxTimelineRows);
+  const visible = maxLines <= 0 ? [] : fitToHeight(byCount, inner, maxLines);
+  return visible.reduce(
+    (total, item) => total + estimateHeight(item, inner, Math.max(0, maxLines - total)),
+    0,
+  );
+}
+
 /** Wrapped height of one source line at a given width. */
 function wrappedHeight(line: string, width: number): number {
   return Math.max(1, Math.ceil(line.length / Math.max(8, width)));

@@ -432,7 +432,7 @@ export function subagentTool(options: SubagentOptions): Tool {
 
       const parent = context.bus;
       const callId = context.callId;
-      const taskId = `subagent-${callId ?? Date.now()}`;
+      const taskId = `subagent-${callId ?? randomUUID()}`;
       const startedAt = Date.now();
       const childAbort = new AbortController();
       const abortChild = (): void => childAbort.abort();
@@ -460,6 +460,10 @@ export function subagentTool(options: SubagentOptions): Tool {
         }
       }
       const subagentId = childSession ? continuationId(childSession) : undefined;
+      // The child has its own logical turn. Keep the identity stable across
+      // the whole run so a duplicate continuation cannot enter the same
+      // child loop through two asynchronous paths.
+      const childTurnId = subagentId ?? taskId;
       const record: SubagentRecord | undefined = childSession && context.workspace && subagentId
         ? {
             subagentId,
@@ -613,6 +617,7 @@ export function subagentTool(options: SubagentOptions): Tool {
         container: context.container,
         questions: context.questions,
         bus: inner,
+        turnId: childTurnId,
         tools,
         skillBootstrap: options.skillBootstrap,
         maxIterations:
@@ -621,6 +626,7 @@ export function subagentTool(options: SubagentOptions): Tool {
         enableHarnessCycle: options.stored.effort === 'plif',
         signal: childAbort.signal,
         ...(context.workspace ? { workspace: context.workspace } : {}),
+        ...(context.execution ? { execution: context.execution } : {}),
         ...(context.lsp ? { lsp: context.lsp } : {}),
         ...(context.edits ? { edits: context.edits } : {}),
         ...(options.shellDialect ? { shellDialect: options.shellDialect } : {}),
@@ -799,6 +805,7 @@ export function sendMessageTool(options: SubagentOptions): Tool {
           container: context.container,
           questions: context.questions,
           bus: inner,
+          turnId,
           tools,
           skillBootstrap: options.skillBootstrap,
           maxIterations,

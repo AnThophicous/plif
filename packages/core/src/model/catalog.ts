@@ -72,6 +72,8 @@ export interface ModelSelection {
   readonly model: string;
   readonly protocol?: ModelProtocol;
   readonly streamSemantics?: StreamSemantics;
+  /** Explicit choice for Codex's optional fast service tier. */
+  readonly codexFast?: boolean;
 }
 
 export type ProviderAccess = 'free' | 'configured' | 'local';

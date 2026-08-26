@@ -527,4 +527,6 @@ Plain prose is the default. Use short headings for genuinely separate topics,
 bullets for parallel facts, backticks for identifiers and commands, and short code
 blocks only when the exact snippet matters. Avoid decorative emphasis, repeated
 summaries, giant pasted files, generic praise, canned introductions, and theatrical
-certainty.
+certainty. Keep user-visible answers clean and scan-friendly: use a short opening,
+descriptive headings only when useful, compact Markdown lists for parallel facts,
+and fenced code blocks for commands or code. Never add emoji to the response.

@@ -62,8 +62,9 @@ describe('modular system prompt', () => {
     assert.match(plif, /evaluator-optimizer/i);
   });
 
-  it('requires Galileu globally and PLIF Cybersecurity in the Plif effort', () => {
+  it('requires anti-AI-slop and Galileu globally, plus PLIF Cybersecurity in the Plif effort', () => {
     const skills = [
+      '- anti-ai-slop: Clean, human-readable output without generated-sounding prose',
       '- galileu: Socratic decision review',
       '- plif-cybersecurity: Principal security engineering',
     ].join('\n');
@@ -71,19 +72,22 @@ describe('modular system prompt', () => {
     const normal = buildSystemPrompt({ ...base, effort: 'high', skills, tools });
     const plif = buildSystemPrompt({ ...base, effort: 'plif', skills, tools });
 
-    assert.match(normal, /## Mandatory Galileu review/);
+    assert.match(normal, /## Mandatory anti-AI-slop and Galileu review/);
+    assert.match(normal, /skill.*name.*anti-ai-slop/s);
     assert.match(normal, /skill.*name.*galileu/s);
     assert.doesNotMatch(normal, /plif-cybersecurity.*must be loaded now/i);
     assert.match(plif, /## Mandatory PLIF skills and review checkpoint/);
+    assert.match(plif, /skill.*name.*anti-ai-slop/s);
     assert.match(plif, /skill.*name.*galileu/s);
     assert.match(plif, /skill.*name.*plif-cybersecurity/s);
     assert.match(plif, /before answering.*using another tool/i);
-    assert.match(plif, /wait for both successful results/i);
+    assert.match(plif, /wait for all requested results/i);
     assert.match(plif, /do not print gate narration/i);
   });
 
   it('does not ask PLIF to reload skills that are already in the carried session', () => {
     const skills = [
+      '- anti-ai-slop: Clean, human-readable output without generated-sounding prose',
       '- galileu: Socratic decision review',
       '- plif-cybersecurity: Principal security engineering',
     ].join('\n');
@@ -92,7 +96,7 @@ describe('modular system prompt', () => {
       effort: 'plif',
       skills,
       tools: [{ name: 'skill', description: 'Load a skill.', parameters: {} }],
-      loadedSkills: ['galileu', 'plif-cybersecurity'],
+      loadedSkills: ['anti-ai-slop', 'galileu', 'plif-cybersecurity'],
     });
 
     assert.match(prompt, /already loaded successfully in this session/i);
@@ -102,6 +106,7 @@ describe('modular system prompt', () => {
 
   it('uses native Codex preloading instead of asking for the unavailable host skill tool', () => {
     const skills = [
+      '- anti-ai-slop: Clean, human-readable output without generated-sounding prose',
       '- galileu: Socratic decision review',
       '- plif-cybersecurity: Principal security engineering',
     ].join('\n');
@@ -113,7 +118,7 @@ describe('modular system prompt', () => {
       tools: [{ name: 'skill', description: 'Load a skill.', parameters: {} }],
     });
 
-    assert.match(prompt, /native Codex adapter must preload galileu and plif-cybersecurity/i);
+    assert.match(prompt, /native Codex adapter must preload anti-ai-slop and galileu and plif-cybersecurity/i);
     assert.match(prompt, /do not try to call the host-only skill tool/i);
     assert.doesNotMatch(prompt, /call the skill tool for \{ "name": "galileu" \}/i);
   });
@@ -126,7 +131,8 @@ describe('modular system prompt', () => {
       tools: [{ name: 'skill', description: 'Load a skill.', parameters: {} }],
     });
 
-    assert.match(prompt, /PLIF session is misconfigured/i);
+    assert.match(prompt, /this session is misconfigured/i);
+    assert.match(prompt, /anti-ai-slop.*not present in the catalogue/i);
     assert.match(prompt, /galileu.*not present in the catalogue/i);
     assert.match(prompt, /plif-cybersecurity.*not present in the catalogue/i);
   });
@@ -246,7 +252,7 @@ describe('modular system prompt', () => {
     const prompt = buildSystemPrompt(base);
 
     assert.match(prompt, /Available skills/);
-    assert.match(prompt, /Mandatory Galileu review/);
+    assert.match(prompt, /Mandatory anti-AI-slop and Galileu review/);
     assert.doesNotMatch(prompt, /Connected MCP servers/);
     assert.doesNotMatch(prompt, /Historical workspace context/);
   });

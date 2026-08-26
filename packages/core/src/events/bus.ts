@@ -266,6 +266,24 @@ export interface PlifEvents {
     pressure: ContextPressure;
     breakdown: ContextBreakdown;
   };
+  /** Runtime-only progress and budget diagnostics; never contains model reasoning. */
+  'agent.safety': {
+    turnId: string;
+    iteration: number;
+    executionState: 'thinking' | 'awaiting_tool' | 'executing_tool' | 'processing_result' | 'recovering' | 'completed' | 'failed' | 'cancelled';
+    progressEpoch: number;
+    progressDetected: boolean;
+    inputTokens: number;
+    outputTokens: number;
+    tokensSinceProgress: number;
+    totalRunTokens: number;
+    stateVersion: number;
+    stagnationState: 'normal' | 'suspected_stagnation' | 'recovery_required' | 'hard_stop';
+    recoveryAttempts: number;
+    retryCount: number;
+    transitionReason: string;
+    actionFingerprint?: string;
+  };
   /**
    * How far along a delegated investigation is.
    *

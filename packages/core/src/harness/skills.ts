@@ -244,7 +244,18 @@ export class SkillRegistry {
   }
 }
 
-export const MANDATORY_PLIF_SKILLS = ['galileu', 'plif-cybersecurity'] as const;
+/** Skills that every provider and every effort must load before proceeding. */
+export const MANDATORY_GLOBAL_SKILLS = ['anti-ai-slop', 'galileu'] as const;
+
+/** Additional skills required by the PLIF effort. */
+export const MANDATORY_PLIF_SKILLS = [
+  ...MANDATORY_GLOBAL_SKILLS,
+  'plif-cybersecurity',
+] as const;
+
+export function mandatorySkillsForEffort(effort?: string): readonly string[] {
+  return effort === 'plif' ? MANDATORY_PLIF_SKILLS : MANDATORY_GLOBAL_SKILLS;
+}
 
 /**
  * Find successful mandatory skill loads already carried by the conversation.

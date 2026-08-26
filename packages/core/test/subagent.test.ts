@@ -110,10 +110,11 @@ describe('subagent credential routing', () => {
       provider: childProvider,
       isolation: 'test',
       stored: { model: 'parent', effort: 'plif' },
-       skillCatalogue: [
-         '- galileu: Socratic decision review',
-         '- plif-cybersecurity: Principal security engineering',
-       ].join('\n'),
+      skillCatalogue: [
+        '- anti-ai-slop: Clean, human-readable output without generated-sounding prose',
+        '- galileu: Socratic decision review',
+        '- plif-cybersecurity: Principal security engineering',
+      ].join('\n'),
       extraTools: [skill],
       maxIterations: 2,
     });

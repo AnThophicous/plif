@@ -63,7 +63,7 @@ import {
   plifModeOf,
   loadTokenSplitConfig,
   loadedSkillNames,
-  MANDATORY_PLIF_SKILLS,
+  mandatorySkillsForEffort,
   saveGlobalConfig,
   scheduleProviderDiscovery,
   startCodexLogin,
@@ -110,7 +110,7 @@ import { CodexLoginDialog } from './components/CodexLoginDialog.js';
 import type { CodexLoginStatus } from './components/CodexLoginDialog.js';
 import { Discovery, discoveryHeight } from './components/Discovery.js';
 import { Queue, queueHeight } from './components/Queue.js';
-import { Question, questionHeight } from './components/Question.js';
+import { Question, questionChoiceAtRow, questionHeight } from './components/Question.js';
 import { Footer, FOOTER_HEIGHT } from './components/Footer.js';
 import type { Hint } from './components/Footer.js';
 import { Header, headerHeight } from './components/Header.js';
@@ -129,6 +129,7 @@ import {
   TimelineRow,
   estimateHeight,
   measureTranscriptCells,
+  timelineVisibleHeight,
   timelineEntriesFromEvents,
 } from './components/Timeline.js';
 import { ToolExpansion } from './components/ToolExpansion.js';
@@ -542,6 +543,11 @@ export function App({
   const cursor = composer.cursor;
   const pasted = composer.attachments;
   const hasTextPasteAttachment = needsPasteClickTracking(pasted);
+  // Mouse reports are enabled only while there is an interaction that can use
+  // them. This keeps wheel scrolling native in ordinary sessions while making
+  // the textual question chooser clickable when it is actually on screen.
+  const questionMouseTracking = state.question !== null;
+  const mouseTrackingActive = hasTextPasteAttachment || questionMouseTracking;
   const completionIndex = composer.completion?.selected ?? 0;
   const queuedIndex = composer.queuedSelection;
   const setInput = (next: React.SetStateAction<string>): void => {
@@ -2054,14 +2060,16 @@ export function App({
   useEffect(() => {
     // Mouse tracking also captures wheel reports (button 64/65). Keeping it
     // enabled for the whole session made the parser discard the wheel bytes
-    // before the terminal could scroll. Only a text paste has a triple-click
-    // action, so ordinary sessions leave the wheel entirely native.
-    if (!stdout.isTTY || !hasTextPasteAttachment) return;
-    stdout.write('\u001B[?1002l\u001B[?1003l\u001B[?1000h\u001B[?1006h');
+    // before the terminal could scroll. Only paste tokens and live questions
+    // need reports, so ordinary sessions leave the wheel entirely native.
+    if (!stdout.isTTY || !mouseTrackingActive) return;
+    stdout.write(
+      `\u001B[?1000l\u001B[?1002l\u001B[?1003l${questionMouseTracking ? '\u001B[?1003h' : '\u001B[?1000h'}\u001B[?1006h`,
+    );
     return () => {
-      stdout.write('\u001B[?1000l\u001B[?1006l');
+      stdout.write('\u001B[?1000l\u001B[?1002l\u001B[?1003l\u001B[?1006l');
     };
-  }, [hasTextPasteAttachment, stdout]);
+  }, [mouseTrackingActive, questionMouseTracking, stdout]);
 
   // Mirror the queue into a ref so the running turn's drain callback sees the
   // current list rather than the one that existed when it started.
@@ -3158,9 +3166,7 @@ export function App({
     // Native Codex app-server turns cannot execute PLIF's host-only `skill`
     // tool. Preload only the mandatory skills for that provider; other
     // providers keep the existing lazy skill-tool path.
-    const codexMandatoryNames = effortRef.current === 'plif'
-      ? MANDATORY_PLIF_SKILLS
-      : (['galileu'] as const);
+    const codexMandatoryNames = mandatorySkillsForEffort(effortRef.current);
     const codexSkillBootstrap = providerRef.current.info.providerId === 'codex'
       ? codexMandatoryNames
           .map((name) => skillRegistry?.get(name))
@@ -3917,9 +3923,39 @@ export function App({
     return null;
   }
 
+  function questionChoiceAtMouse(mouse: { readonly row: number }): number | null {
+    const question = state.question;
+    if (!question) return null;
+
+    // The live surface follows the append-only header. Its top is therefore a
+    // stable terminal row even after the transcript has scrolled above it.
+    // Timeline and Question share the same row-budget helpers used to render
+    // the frame, avoiding a second hand-written layout model for hit-testing.
+    const transcriptRows = timelineVisibleHeight(
+      state.entries,
+      surface.contentWidth,
+      timelineBudget,
+    );
+    const questionTop = headerHeight(headerAvailableWidth)
+      + surface.panelPaddingY
+      + transcriptRows;
+    const localRow = mouse.row - questionTop - 1;
+    return questionChoiceAtRow(question, localRow, compactDialogs, state.questionExpanded);
+  }
+
   function handleMouse(mouse: { readonly button: number; readonly action: string; readonly column: number; readonly row: number }): void {
-    if (mouse.action !== 'press' || mouse.button !== 0 || pastedTextPopup) return;
-    if (state.screen || state.browser || state.approval || state.question || state.picker || credentialPromptPending || codexLogin) return;
+    if ((mouse.action !== 'press' && mouse.action !== 'move') || pastedTextPopup) return;
+    if (mouse.action === 'move' && !state.question) return;
+    if (state.screen || state.browser || state.approval || state.picker || credentialPromptPending || codexLogin) return;
+
+    if (state.question) {
+      if (mouse.action === 'move' && mouse.button !== 0) return;
+      const selected = questionChoiceAtMouse(mouse);
+      if (selected !== null) {
+        dispatch({ type: 'question.select', selected });
+      }
+      return;
+    }
 
     const sequence = nextClickSequence(pastedClick.current, mouse, Date.now());
     pastedClick.current = sequence.count >= 3 ? EMPTY_CLICK_SEQUENCE : sequence;
@@ -5663,8 +5699,10 @@ export function App({
                   hints={hints}
                   width={surface.contentWidth}
                   provider={providerRef.current?.info.endpoint ?? provider?.info.endpoint}
+                  providerId={providerRef.current?.info.providerId ?? provider?.info.providerId}
                   model={providerRef.current?.info.id ?? provider?.info.id}
                   effort={effort}
+                  codexFast={providerRef.current?.info.codexFast ?? provider?.info.codexFast}
                   contextUsed={state.contextUsed}
                   contextMax={state.contextMax}
                   showHints={showFooterHints}

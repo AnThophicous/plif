@@ -81,6 +81,12 @@ describe('config precedence', () => {
     assert.equal(resolveConfig({ effort: 'high', maxTokens: 32_000 }, { env: { PLIF_MAX_TOKENS: '12' } }).maxTokens, 12);
   });
 
+  it('keeps Codex FAST opt-in and provider-scoped', () => {
+    assert.equal(resolveConfig({ preset: 'codex', model: 'codex/codex-default', codexFast: true }, { env: {} }).codexFast, true);
+    assert.equal(resolveConfig({ preset: 'codex', model: 'codex/codex-default', codexFast: false }, { env: {} }).codexFast, false);
+    assert.equal(resolveConfig({ preset: 'openai', model: 'gpt-4.1', codexFast: true }, { env: {} }).codexFast, undefined);
+  });
+
   const metadataConfig: ModelConfig = {
     providerId: 'bridge',
     baseURL: 'https://bridge.example/v1',
@@ -507,6 +513,24 @@ describe('config precedence', () => {
     assert.equal(next.baseURL, 'https://gateway.internal/v1');
   });
 
+  it('persists the Codex FAST choice and clears it outside Codex', () => {
+    const fast = adoptProvider(
+      { preset: 'openai', model: 'gpt-4.1' },
+      { preset: 'codex', model: 'codex-default', codexFast: true },
+    );
+    assert.equal(fast.codexFast, true);
+
+    const standard = adoptProvider(fast, {
+      preset: 'codex',
+      model: 'codex-default',
+      codexFast: false,
+    });
+    assert.equal(standard.codexFast, false);
+
+    const nonCodex = adoptProvider(standard, { preset: 'openai', model: 'gpt-4.1' });
+    assert.equal(nonCodex.codexFast, undefined);
+  });
+
   it('rejects an unknown preset with the list of real ones', () => {
     assert.throws(
       () => resolveConfig({}, { preset: 'nope', env: {} }),
@@ -796,9 +820,9 @@ describe('model catalog', () => {
       assert.ok(MODEL_CATALOG.some((provider) => provider.id === id), `${id} is missing`);
     }
     // Every HTTP provider must resolve to a real endpoint, or the picker offers
-    // a row that cannot possibly work. Codex is intentionally the exception:
-    // its documented local app-server URI is handled by the official Codex
-    // CLI, which owns the ChatGPT session and token refresh.
+    // a row that cannot possibly work. Codex owns its local app-server URI,
+    // which is handled by the official Codex CLI, which owns the ChatGPT
+    // session and token refresh.
     for (const provider of MODEL_CATALOG) {
       assert.ok(
         provider.auth === 'codex'

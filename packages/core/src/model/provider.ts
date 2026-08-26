@@ -174,6 +174,14 @@ export type CompletionEvent =
   | { readonly kind: 'reasoning'; readonly delta: string }
   | { readonly kind: 'tool'; readonly call: ToolCall }
   /**
+   * A tool lifecycle item executed by a provider-owned agent runtime.
+   *
+   * This is deliberately separate from `tool`: the harness must render the
+   * activity but must not execute it a second time. Codex's app-server owns
+   * these calls and already applies its permission policy and tool results.
+   */
+  | { readonly kind: 'tool_activity'; readonly activity: NativeToolActivity }
+  /**
    * The endpoint failed and another attempt is coming after `waitMs`.
    *
    * Informational: the consumer does not act on it beyond telling the human
@@ -198,6 +206,16 @@ export type CompletionEvent =
   | { readonly kind: 'done'; readonly reason: FinishReason; readonly usage: Usage };
 
 export type FinishReason = 'stop' | 'length' | 'tool_calls' | 'cancelled' | 'error';
+
+export interface NativeToolActivity {
+  readonly id: string;
+  readonly name: string;
+  readonly phase: 'start' | 'end';
+  readonly input?: Record<string, unknown>;
+  readonly output?: string;
+  readonly ok?: boolean;
+  readonly durationMs?: number;
+}
 
 export interface Usage {
   readonly promptTokens: number;
@@ -243,6 +261,8 @@ export interface ModelInfo {
   readonly contextWindow: number | undefined;
   /** Provider/model output ceiling, when it is explicitly configured or known. */
   readonly maxOutputTokens?: number;
+  /** True when the Codex provider is using its opt-in fast service tier. */
+  readonly codexFast?: boolean;
   /** Normalized adapter capabilities used by context and accounting layers. */
   readonly capabilities?: ProviderCapabilities;
 }
@@ -344,6 +364,7 @@ export async function collect(stream: AsyncGenerator<CompletionEvent>): Promise<
     if (event.kind === 'text') text += event.delta;
     else if (event.kind === 'reasoning') reasoning += event.delta;
     else if (event.kind === 'tool') toolCalls.push(event.call);
+    else if (event.kind === 'tool_activity') continue;
     else if (event.kind === 'retry') continue;
     else if (event.kind === 'reset') {
       // The attempt that produced this is being redone from scratch. Keeping
