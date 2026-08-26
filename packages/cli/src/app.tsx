@@ -63,6 +63,7 @@ import {
   plifModeOf,
   loadTokenSplitConfig,
   loadedSkillNames,
+  MANDATORY_PLIF_SKILLS,
   saveGlobalConfig,
   scheduleProviderDiscovery,
   startCodexLogin,
@@ -3153,6 +3154,23 @@ export function App({
         : undefined,
       goalInstructions,
     ].filter(Boolean).join('\n\n');
+    const carried = conversation.current;
+    // Native Codex app-server turns cannot execute PLIF's host-only `skill`
+    // tool. Preload only the mandatory skills for that provider; other
+    // providers keep the existing lazy skill-tool path.
+    const codexMandatoryNames = effortRef.current === 'plif'
+      ? MANDATORY_PLIF_SKILLS
+      : (['galileu'] as const);
+    const codexSkillBootstrap = providerRef.current.info.providerId === 'codex'
+      ? codexMandatoryNames
+          .map((name) => skillRegistry?.get(name))
+          .filter((skill): skill is Skill => skill !== undefined)
+          .map((skill) => ({ name: skill.name, instructions: skill.instructions }))
+      : [];
+    const loadedSkillsForPrompt = [...new Set([
+      ...loadedSkillNames(carried),
+      ...codexSkillBootstrap.map((skill) => skill.name),
+    ])];
     const childOptions = {
       provider: providerRef.current,
       isolation: report.isolation,
@@ -3172,6 +3190,7 @@ export function App({
       ...(turnInstructions ? { agentInstructions: turnInstructions } : {}),
       sessions: engine.sessions,
       continuable: plifModeOf(storedConfig).continuableSubagents !== false,
+      skillBootstrap: codexSkillBootstrap,
     };
     const allAgentTools = [
       ...tools,
@@ -3188,7 +3207,6 @@ export function App({
       ? allAgentTools.filter((tool) => !PLAN_BLOCKED_TOOLS.has(tool.spec.name))
       : allAgentTools;
 
-    const carried = conversation.current;
     const outgoing: Message[] = [
       ...carried,
       { role: 'user', content: text, ...(wireAttachments.length ? { attachments: wireAttachments } : {}) },
@@ -3219,7 +3237,8 @@ export function App({
                 ...(planOnly ? [] : [RUN_SCRIPT_SPEC]),
               ]),
               skills: skillRegistry?.catalogue() ?? skillCatalogue,
-              loadedSkills: loadedSkillNames(carried),
+              loadedSkills: loadedSkillsForPrompt,
+              providerId: providerRef.current.info.providerId,
               mcpServers: mcpRegistry ? mcpRegistry.catalogue() : mcpCatalogue,
               guidance: snapshot.guidance,
               memory: summariseMemory(snapshot),
@@ -3249,6 +3268,7 @@ export function App({
           turnId: durableTurnId,
           signal: abort.signal,
           tools: agentTools,
+          skillBootstrap: codexSkillBootstrap,
           memory: engine.memory,
           workspace: cwd,
           execution: {

@@ -547,10 +547,17 @@ async function handleCodexServerRequest(
 }
 
 function codexPrompt(request: CompletionRequest): { text: string; images: string[]; developer?: string } {
+  const preloadedSkills = request.preloadedSkills ?? [];
   const developer = [
     ...request.messages
       .filter((message) => message.role === 'system' && message.content)
       .map((message) => message.content),
+    ...(preloadedSkills.length > 0
+      ? [
+          'PLIF SKILL BRIDGE: this is a native Codex turn. Host-defined PLIF tools are not part of the native Codex tool schema, so do not call the `skill` tool for the preloaded skills below. Treat these skill bodies as already loaded and follow them for this turn.',
+          ...preloadedSkills.map((skill) => `# Skill: ${skill.name}\n\n${skill.instructions}`),
+        ]
+      : []),
     'When a material decision from the human is required, use the inline PLIF question UI (or your native request_user_input tool) instead of asking a clarification question in prose. Keep the same turn open and continue after the answer.',
   ].join('\n\n');
   const text = request.messages

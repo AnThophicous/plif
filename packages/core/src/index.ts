@@ -138,7 +138,7 @@ export type {
 export { MemoryStore, rankFacts, strategyId, strategyStatus, summariseMemory } from './harness/memory.js';
 export type { Fact, FactKind, MemorySnapshot } from './harness/memory.js';
 export { DEFAULT_CONTEXT_TOKENS, answerDanglingToolCalls } from './harness/loop.js';
-export type { LoopOptions, LoopResult, LoopStop } from './harness/loop.js';
+export type { LoopOptions, LoopResult, LoopStop, SkillBootstrap } from './harness/loop.js';
 export { GoalController } from './harness/goals.js';
 export type { GoalState, GoalStatus } from './harness/goals.js';
 export {
@@ -309,6 +309,7 @@ export type {
   Role,
   ToolCall,
   ToolSpec,
+  PreloadedSkill,
   Usage,
   ModelListResult,
   ProviderModel,

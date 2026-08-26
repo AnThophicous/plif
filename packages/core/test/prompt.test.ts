@@ -100,6 +100,24 @@ describe('modular system prompt', () => {
     assert.doesNotMatch(prompt, /call the skill tool for \{ "name": "galileu" \}/i);
   });
 
+  it('uses native Codex preloading instead of asking for the unavailable host skill tool', () => {
+    const skills = [
+      '- galileu: Socratic decision review',
+      '- plif-cybersecurity: Principal security engineering',
+    ].join('\n');
+    const prompt = buildSystemPrompt({
+      ...base,
+      effort: 'plif',
+      providerId: 'codex',
+      skills,
+      tools: [{ name: 'skill', description: 'Load a skill.', parameters: {} }],
+    });
+
+    assert.match(prompt, /native Codex adapter must preload galileu and plif-cybersecurity/i);
+    assert.match(prompt, /do not try to call the host-only skill tool/i);
+    assert.doesNotMatch(prompt, /call the skill tool for \{ "name": "galileu" \}/i);
+  });
+
   it('fails closed when Plif cannot see a mandatory skill catalogue entry', () => {
     const prompt = buildSystemPrompt({
       ...base,

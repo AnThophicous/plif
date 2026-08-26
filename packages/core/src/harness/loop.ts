@@ -83,6 +83,11 @@ import {
   reviewGate,
 } from './cycle.js';
 
+export interface SkillBootstrap {
+  readonly name: string;
+  readonly instructions: string;
+}
+
 export interface LoopOptions {
   readonly provider: ModelProvider;
   readonly container: Container;
@@ -91,6 +96,8 @@ export interface LoopOptions {
   /** Stable identity shared by every durable event emitted during this run. */
   readonly turnId?: string;
   readonly tools?: readonly Tool[];
+  /** Mandatory skill bodies for native providers that cannot call host tools. */
+  readonly skillBootstrap?: readonly SkillBootstrap[];
   /**
    * Hard ceiling on passes through the loop.
    *
@@ -620,6 +627,9 @@ export async function runLoop(
       for await (const event of options.provider.stream({
         messages: projection?.messages ?? messages,
         tools: specs,
+        ...(options.provider.info.providerId === 'codex' && options.skillBootstrap?.length
+          ? { preloadedSkills: options.skillBootstrap }
+          : {}),
         ...(options.signal ? { signal: options.signal } : {}),
         ...(options.execution ? { execution: options.execution } : {}),
       })) {

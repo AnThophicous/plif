@@ -100,6 +100,19 @@ export interface ToolSpec {
   readonly parameters: Record<string, unknown>;
 }
 
+/**
+ * Instructions that PLIF has already loaded for a native provider turn.
+ *
+ * Native Codex app-server turns do not accept arbitrary PLIF-host tools in
+ * their wire schema. The adapter therefore receives the mandatory skill
+ * bodies explicitly instead of advertising a tool the native server cannot
+ * execute.
+ */
+export interface PreloadedSkill {
+  readonly name: string;
+  readonly instructions: string;
+}
+
 /** Permission policy shared by PLIF and providers that run a local agent. */
 export type ModelPermissionMode = 'ask' | 'auto-approve' | 'deny';
 
@@ -139,6 +152,8 @@ export interface ModelExecutionContext {
 export interface CompletionRequest {
   readonly messages: readonly Message[];
   readonly tools?: readonly ToolSpec[];
+  /** Skill bodies already loaded by PLIF for providers without host tools. */
+  readonly preloadedSkills?: readonly PreloadedSkill[];
   readonly temperature?: number;
   readonly maxTokens?: number;
   readonly signal?: AbortSignal;

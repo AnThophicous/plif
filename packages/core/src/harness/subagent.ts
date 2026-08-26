@@ -19,6 +19,7 @@ import type { Effort, StoredConfig } from '../model/config.js';
 import { createModelProvider } from '../model/factory.js';
 import type { Message, ModelProvider } from '../model/provider.js';
 import { DEFAULT_CONTEXT_TOKENS, runLoop } from './loop.js';
+import type { SkillBootstrap } from './loop.js';
 import { stableToolSpecs } from './context-budget.js';
 import { buildSystemPrompt } from './prompt.js';
 import { conversationFromTranscript } from '../session/resume.js';
@@ -62,6 +63,8 @@ export interface SubagentOptions {
   readonly agentInstructions?: string;
   /** The parent's routable skill catalogue, inherited by the child prompt. */
   readonly skillCatalogue?: string;
+  /** Mandatory skill bodies for native providers that cannot call host tools. */
+  readonly skillBootstrap?: readonly SkillBootstrap[];
   /** Inherited from the parent session; subagents never resolve a new dialect. */
   readonly shellDialect?: ShellDialect;
   /** Persist children and expose send_message when true and a store exists. */
@@ -586,6 +589,7 @@ export function subagentTool(options: SubagentOptions): Tool {
             // The worker inherits the parent's PLIF operating mode and skill
             // gate, while its provider wire uses the reduced `resolved.effort`.
             effort: options.stored.effort,
+            providerId: resolved.provider.info.providerId,
             contextTokens: resolved.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
             tools: stableToolSpecs(tools.map((tool) => tool.spec)),
             ...(options.skillCatalogue ? { skills: options.skillCatalogue } : {}),
@@ -610,6 +614,7 @@ export function subagentTool(options: SubagentOptions): Tool {
         questions: context.questions,
         bus: inner,
         tools,
+        skillBootstrap: options.skillBootstrap,
         maxIterations:
           resolved.maxIterations ?? options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
         contextTokens: resolved.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
@@ -775,6 +780,7 @@ export function sendMessageTool(options: SubagentOptions): Tool {
             isolation: options.isolation,
             mode: 'subagent',
             effort: options.stored.effort,
+            providerId: provider.info.providerId,
             contextTokens: provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
             tools: stableToolSpecs(tools.map((tool) => tool.spec)),
             ...(options.skillCatalogue ? { skills: options.skillCatalogue } : {}),
@@ -794,6 +800,7 @@ export function sendMessageTool(options: SubagentOptions): Tool {
           questions: context.questions,
           bus: inner,
           tools,
+          skillBootstrap: options.skillBootstrap,
           maxIterations,
           contextTokens: provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
           signal: abort.signal,
