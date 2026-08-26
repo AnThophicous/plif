@@ -7,6 +7,7 @@ import path from 'node:path';
 
 import {
   CodexProvider,
+  conversationScopeOf,
   MODEL_CATALOG,
   createModelProvider,
   describe as describeModel,
@@ -14,6 +15,7 @@ import {
   resolveConfig,
   validateModelConfig,
 } from '../src/index.js';
+import type { ConversationState } from '../src/index.js';
 import { codexPermissionSettings } from '../src/model/codex.js';
 
 async function fakeCodexCommand(root: string): Promise<string> {
@@ -95,7 +97,7 @@ describe('Codex / ChatGPT provider', () => {
       }, { env: {} });
       const provider = new CodexProvider(config, { command: await fakeCodexCommand(root) });
       const events = [];
-      for await (const event of provider.stream({ messages: [{ role: 'user', content: 'hello' }] })) {
+      for await (const event of provider.stream({ messages: [{ role: 'user', content: 'hello' }], conversationStateMode: 'replay' })) {
         events.push(event);
       }
       const turnRequest = JSON.parse(await readFile(capturePath, 'utf8'));
@@ -124,7 +126,7 @@ describe('Codex / ChatGPT provider', () => {
         codexFast: false,
       }, { env: {} });
       const provider = new CodexProvider(config, { command: await fakeCodexCommand(root) });
-      for await (const _event of provider.stream({ messages: [{ role: 'user', content: 'hello' }] })) {
+      for await (const _event of provider.stream({ messages: [{ role: 'user', content: 'hello' }], conversationStateMode: 'replay' })) {
         // Drain the stream so the app-server request and cleanup complete.
       }
       const turnRequest = JSON.parse(await readFile(capturePath, 'utf8'));
@@ -132,6 +134,162 @@ describe('Codex / ChatGPT provider', () => {
     } finally {
       if (previousCapture === undefined) delete process.env['PLIF_CODEX_CAPTURE'];
       else process.env['PLIF_CODEX_CAPTURE'] = previousCapture;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('starts a non-ephemeral native thread and returns a durable continuation pointer', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'plif-codex-native-start-'));
+    const threadCapturePath = path.join(root, 'thread.json');
+    const previousCapture = process.env['PLIF_CODEX_THREAD_CAPTURE'];
+    process.env['PLIF_CODEX_THREAD_CAPTURE'] = threadCapturePath;
+    try {
+      const config = resolveConfig({ preset: 'codex', model: 'codex/codex-default' }, { env: {} });
+      const provider = new CodexProvider(config, { command: await fakeCodexCommand(root) });
+      const events = [];
+      for await (const event of provider.stream({
+        messages: [{ role: 'user', content: 'first native turn' }],
+        conversationStateMode: 'auto',
+      })) events.push(event);
+
+      const threadRequest = JSON.parse(await readFile(threadCapturePath, 'utf8'));
+      assert.equal(threadRequest.method, 'thread/start');
+      assert.equal(threadRequest.params.ephemeral, false);
+      const stateEvent = events.find((event) => event.kind === 'conversation_state');
+      assert.ok(stateEvent);
+      assert.equal(stateEvent.kind, 'conversation_state');
+      assert.equal(stateEvent.state.kind, 'codex-thread');
+      assert.equal(stateEvent.state.threadId, 'thread-1');
+      assert.equal(stateEvent.state.scope.providerId, 'codex');
+    } finally {
+      if (previousCapture === undefined) delete process.env['PLIF_CODEX_THREAD_CAPTURE'];
+      else process.env['PLIF_CODEX_THREAD_CAPTURE'] = previousCapture;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('scopes a native thread to a non-secret account label when Codex exposes one', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'plif-codex-account-scope-'));
+    const previousAccountId = process.env['PLIF_CODEX_ACCOUNT_ID'];
+    process.env['PLIF_CODEX_ACCOUNT_ID'] = 'chatgpt-account-1';
+    try {
+      const config = resolveConfig({ preset: 'codex', model: 'codex/codex-default' }, { env: {} });
+      const provider = new CodexProvider(config, { command: await fakeCodexCommand(root) });
+      const events = [];
+      for await (const event of provider.stream({
+        messages: [{ role: 'user', content: 'account-scoped turn' }],
+        conversationStateMode: 'native',
+      })) events.push(event);
+
+      const stateEvent = events.find((event) => event.kind === 'conversation_state');
+      assert.equal(stateEvent?.kind, 'conversation_state');
+      if (stateEvent?.kind === 'conversation_state') {
+        assert.match(stateEvent.state.scope.account ?? '', /^account:[a-f0-9]{24}$/);
+        assert.equal(stateEvent.state.scope.account?.includes('chatgpt-account-1'), false);
+      }
+    } finally {
+      if (previousAccountId === undefined) delete process.env['PLIF_CODEX_ACCOUNT_ID'];
+      else process.env['PLIF_CODEX_ACCOUNT_ID'] = previousAccountId;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('resumes the native thread and sends only the current turn after replay recovery', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'plif-codex-native-resume-'));
+    const resumeCapturePath = path.join(root, 'resume.json');
+    const turnCapturePath = path.join(root, 'turn.json');
+    const previousResumeCapture = process.env['PLIF_CODEX_RESUME_CAPTURE'];
+    const previousTurnCapture = process.env['PLIF_CODEX_CAPTURE'];
+    process.env['PLIF_CODEX_RESUME_CAPTURE'] = resumeCapturePath;
+    process.env['PLIF_CODEX_CAPTURE'] = turnCapturePath;
+    try {
+      const config = resolveConfig({ preset: 'codex', model: 'codex/codex-default' }, { env: {} });
+      const provider = new CodexProvider(config, { command: await fakeCodexCommand(root) });
+      let firstState: ConversationState | undefined;
+      for await (const event of provider.stream({
+        messages: [{ role: 'user', content: 'first native turn' }],
+        conversationStateMode: 'auto',
+      })) {
+        if (event.kind === 'conversation_state') firstState = event.state;
+      }
+      assert.ok(firstState);
+
+      for await (const _event of provider.stream({
+        messages: [
+          { role: 'user', content: 'first native turn' },
+          { role: 'assistant', content: 'first answer' },
+          { role: 'user', content: 'second native turn' },
+        ],
+        conversationState: firstState,
+        conversationStateMode: 'auto',
+      })) {
+        // Drain the stream so the native resume and turn complete.
+      }
+
+      const resumeRequest = JSON.parse(await readFile(resumeCapturePath, 'utf8'));
+      const turnRequest = JSON.parse(await readFile(turnCapturePath, 'utf8'));
+      assert.equal(resumeRequest.method, 'thread/resume');
+      assert.equal(resumeRequest.params.threadId, 'thread-1');
+      assert.equal(turnRequest.params.input[0].text.includes('second native turn'), true);
+      assert.equal(turnRequest.params.input[0].text.includes('first native turn'), false);
+    } finally {
+      if (previousResumeCapture === undefined) delete process.env['PLIF_CODEX_RESUME_CAPTURE'];
+      else process.env['PLIF_CODEX_RESUME_CAPTURE'] = previousResumeCapture;
+      if (previousTurnCapture === undefined) delete process.env['PLIF_CODEX_CAPTURE'];
+      else process.env['PLIF_CODEX_CAPTURE'] = previousTurnCapture;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to a fresh non-ephemeral thread when native resume fails', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'plif-codex-native-fallback-'));
+    const resumeCapturePath = path.join(root, 'resume.json');
+    const threadCapturePath = path.join(root, 'thread.json');
+    const previousResumeCapture = process.env['PLIF_CODEX_RESUME_CAPTURE'];
+    const previousThreadCapture = process.env['PLIF_CODEX_THREAD_CAPTURE'];
+    const previousResumeFail = process.env['PLIF_CODEX_RESUME_FAIL'];
+    process.env['PLIF_CODEX_RESUME_CAPTURE'] = resumeCapturePath;
+    process.env['PLIF_CODEX_THREAD_CAPTURE'] = threadCapturePath;
+    process.env['PLIF_CODEX_RESUME_FAIL'] = '1';
+    try {
+      const config = resolveConfig({ preset: 'codex', model: 'codex/codex-default' }, { env: {} });
+      const provider = new CodexProvider(config, { command: await fakeCodexCommand(root) });
+      const state: ConversationState = {
+        version: 1,
+        scope: conversationScopeOf(config),
+        mode: 'auto',
+        kind: 'codex-thread',
+        threadId: 'expired-thread',
+        generation: 1,
+        updatedAt: new Date().toISOString(),
+      };
+      const events = [];
+      for await (const event of provider.stream({
+        messages: [
+          { role: 'user', content: 'replay this after expiry' },
+          { role: 'assistant', content: 'old answer' },
+          { role: 'user', content: 'current turn' },
+        ],
+        conversationState: state,
+        conversationStateMode: 'auto',
+      })) events.push(event);
+
+      const resumeRequest = JSON.parse(await readFile(resumeCapturePath, 'utf8'));
+      const threadRequest = JSON.parse(await readFile(threadCapturePath, 'utf8'));
+      assert.equal(resumeRequest.params.threadId, 'expired-thread');
+      assert.equal(threadRequest.method, 'thread/start');
+      assert.equal(threadRequest.params.ephemeral, false);
+      const stateEvent = events.find((event) => event.kind === 'conversation_state');
+      assert.ok(stateEvent);
+      assert.equal(stateEvent.kind, 'conversation_state');
+      assert.equal(stateEvent.state.lastFallbackReason, 'thread_resume_failed');
+    } finally {
+      if (previousResumeCapture === undefined) delete process.env['PLIF_CODEX_RESUME_CAPTURE'];
+      else process.env['PLIF_CODEX_RESUME_CAPTURE'] = previousResumeCapture;
+      if (previousThreadCapture === undefined) delete process.env['PLIF_CODEX_THREAD_CAPTURE'];
+      else process.env['PLIF_CODEX_THREAD_CAPTURE'] = previousThreadCapture;
+      if (previousResumeFail === undefined) delete process.env['PLIF_CODEX_RESUME_FAIL'];
+      else process.env['PLIF_CODEX_RESUME_FAIL'] = previousResumeFail;
       await rm(root, { recursive: true, force: true });
     }
   });
@@ -221,7 +379,7 @@ describe('Codex / ChatGPT provider', () => {
       const config = resolveConfig({ preset: 'codex', model: 'codex/codex-default' }, { env: {} });
       const provider = new CodexProvider(config, { command: await fakeCodexCommand(root) });
       const events = [];
-      for await (const event of provider.stream({ messages: [{ role: 'user', content: 'run tests' }] })) events.push(event);
+      for await (const event of provider.stream({ messages: [{ role: 'user', content: 'run tests' }], conversationStateMode: 'replay' })) events.push(event);
       assert.equal(events[0]?.kind, 'tool_activity');
       assert.deepEqual(events[0]?.kind === 'tool_activity' ? events[0].activity : null, {
         id: 'cmd-1',

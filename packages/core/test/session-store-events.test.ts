@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
 import type { ConversationEvent } from '../src/session/events.js';
+import type { ConversationState } from '../src/model/conversation-state.js';
 import { SessionStore, workspaceKey } from '../src/session/store.js';
 import { StorePaths } from '../src/store/paths.js';
 
@@ -124,5 +125,63 @@ describe('versioned session event storage', () => {
     assert.equal(session.meta.title, 'Raw input investigation');
     assert.equal((await store.list(workspace))[0]?.title, 'Raw input investigation');
     assert.equal(await fs.readFile(transcript, 'utf8'), before);
+  });
+
+  it('persists only the provider continuation pointer beside the canonical JSONL transcript', async () => {
+    const { session, store, workspace, root } = await fixture();
+    const state: ConversationState = {
+      version: 1,
+      scope: {
+        providerId: 'codex',
+        model: 'gpt-5.6-luna',
+        endpoint: 'codex://app-server',
+        protocol: 'openai-chat',
+      },
+      mode: 'auto',
+      kind: 'codex-thread',
+      threadId: 'thread-server-id',
+      lastTurnId: 'turn-server-id',
+      generation: 2,
+      updatedAt: at,
+    };
+
+    await session.append({ kind: 'user', at, text: 'keep this in JSONL' });
+    await session.saveConversationState(state);
+
+    assert.deepEqual(await session.loadConversationState(), state);
+    assert.equal((await store.list(workspace)).length, 1);
+    const files = await fs.readdir(path.join(root, 'sessions', workspaceKey(workspace)));
+    assert.equal(files.some((file) => file.endsWith('.state.json')), true);
+    const rawState = JSON.parse(await fs.readFile(
+      path.join(root, 'sessions', workspaceKey(workspace), `${session.id}.state.json`),
+      'utf8',
+    )) as Record<string, unknown>;
+    assert.equal('apiKey' in rawState, false);
+    assert.equal('credential' in rawState, false);
+    assert.deepEqual(await session.history().then((events) => events.map((event) => event.kind)), ['user.message']);
+  });
+
+  it('serializes concurrent pointer writes and ignores malformed sidecars', async () => {
+    const { session, root, workspace } = await fixture();
+    const state = (generation: number): ConversationState => ({
+      version: 1,
+      scope: { providerId: 'codex', model: 'codex-default', endpoint: 'codex://app-server' },
+      mode: 'native',
+      kind: 'codex-thread',
+      threadId: `thread-${generation}`,
+      generation,
+      updatedAt: at,
+    });
+    await Promise.all([session.saveConversationState(state(1)), session.saveConversationState(state(2))]);
+    assert.equal((await session.loadConversationState())?.generation, 2);
+
+    await session.saveConversationState(state(1));
+    assert.equal((await session.loadConversationState())?.generation, 2);
+
+    const sidecar = path.join(root, 'sessions', workspaceKey(workspace), `${session.id}.state.json`);
+    await fs.writeFile(sidecar, '{malformed', 'utf8');
+    assert.equal(await session.loadConversationState(), null);
+    await session.clearConversationState();
+    assert.equal(await session.loadConversationState(), null);
   });
 });

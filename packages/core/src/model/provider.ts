@@ -14,6 +14,11 @@
 
 import type { UsageInfo } from './usage.js';
 import type { CanonicalTokenUsage } from './token-usage.js';
+import type {
+  ConversationState,
+  ConversationStateMetrics,
+  ConversationStateMode,
+} from './conversation-state.js';
 
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
@@ -159,6 +164,10 @@ export interface CompletionRequest {
   readonly signal?: AbortSignal;
   /** Optional host execution policy; omitted providers retain their defaults. */
   readonly execution?: ModelExecutionContext;
+  /** Provider-native continuation pointer, scoped to one provider/model/account. */
+  readonly conversationState?: ConversationState;
+  /** Selection made by PLIF configuration; defaults are applied by the host. */
+  readonly conversationStateMode?: ConversationStateMode;
 }
 
 /**
@@ -203,6 +212,12 @@ export type CompletionEvent =
    * and the model would be sent both as its own previous turn.
    */
   | { readonly kind: 'reset' }
+  /** Provider-native continuation state returned only after a successful turn. */
+  | {
+      readonly kind: 'conversation_state';
+      readonly state: ConversationState;
+      readonly metrics?: ConversationStateMetrics;
+    }
   | { readonly kind: 'done'; readonly reason: FinishReason; readonly usage: Usage };
 
 export type FinishReason = 'stop' | 'length' | 'tool_calls' | 'cancelled' | 'error';
@@ -372,6 +387,8 @@ export async function collect(stream: AsyncGenerator<CompletionEvent>): Promise<
       text = '';
       reasoning = '';
       toolCalls.length = 0;
+    } else if (event.kind === 'conversation_state') {
+      continue;
     } else {
       reason = event.reason;
       usage = event.usage;

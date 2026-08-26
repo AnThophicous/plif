@@ -8,11 +8,19 @@
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
 
 import { PlifError } from '../errors.js';
 import type { Effort, ModelConfig } from './config.js';
+import {
+  conversationScopeOf,
+  sameConversationScope,
+  type ConversationState,
+  type ConversationStateMode,
+  type ConversationStateScope,
+} from './conversation-state.js';
 import type {
   CompletionEvent,
   CompletionRequest,
@@ -301,6 +309,30 @@ function textValue(value: unknown): string | undefined {
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function codexAccountLabel(account: Record<string, unknown> | undefined): string | undefined {
+  const identity = textValue(account?.['id']) ?? textValue(account?.['accountId']) ?? textValue(account?.['email']);
+  if (!identity) return undefined;
+  // Keep the sidecar scoped to the account without persisting an email or
+  // another provider identifier in the workspace session directory.
+  return `account:${createHash('sha256').update(identity).digest('hex').slice(0, 24)}`;
+}
+
+async function codexConversationScope(
+  client: JsonRpcClient,
+  base: ConversationStateScope,
+): Promise<ConversationStateScope> {
+  try {
+    const response = recordValue(await client.request('account/read', {}, 5_000));
+    const account = recordValue(response?.['account']);
+    const label = codexAccountLabel(account);
+    return label ? { ...base, account: label } : base;
+  } catch {
+    // Account metadata is an optional scope refinement. A provider that does
+    // not expose it can still safely use provider/model/endpoint scoping.
+    return base;
+  }
 }
 
 function arrayValue(value: unknown): readonly unknown[] {
@@ -676,7 +708,10 @@ async function handleCodexServerRequest(
   throw new Error(`Unsupported Codex app-server request: ${method}`);
 }
 
-function codexPrompt(request: CompletionRequest): { text: string; images: string[]; developer?: string } {
+function codexPrompt(
+  request: CompletionRequest,
+  messages: CompletionRequest['messages'] = request.messages,
+): { text: string; images: string[]; developer?: string } {
   const preloadedSkills = request.preloadedSkills ?? [];
   const developer = [
     ...request.messages
@@ -691,7 +726,7 @@ function codexPrompt(request: CompletionRequest): { text: string; images: string
     'PLIF response contract: never write or emit emoji in a user-visible answer. Keep the response clean and scan-friendly: use a short opening, descriptive headings only when useful, compact Markdown lists for parallel items, and fenced code blocks for commands or code. Avoid decorative preambles, repeated status narration, and duplicate conclusions.',
     'When a material decision from the human is required, use the inline PLIF question UI (or your native request_user_input tool) instead of asking a clarification question in prose. Keep the same turn open and continue after the answer.',
   ].join('\n\n');
-  const text = request.messages
+  const text = messages
     .filter((message) => message.role !== 'system')
     .map((message) => {
       const attachmentText = (message.attachments ?? [])
@@ -702,7 +737,7 @@ function codexPrompt(request: CompletionRequest): { text: string; images: string
       return `${message.role.toUpperCase()}:\n${message.content}${attachmentText}${reasoning}`;
     })
     .join('\n\n');
-  const images = request.messages.flatMap((message) => (message.attachments ?? [])
+  const images = messages.flatMap((message) => (message.attachments ?? [])
     .filter((attachment): attachment is Extract<NonNullable<typeof message.attachments>[number], { kind: 'image' }> => attachment.kind === 'image')
     .map((attachment) => `data:${attachment.mediaType};base64,${attachment.data}`));
   return { text: text || 'Please respond to the user.', images, ...(developer ? { developer } : {}) };
@@ -845,6 +880,11 @@ export class CodexProvider implements ModelProvider {
   readonly #options: CodexProviderOptions;
   #effortMap: Map<string, string[]> | undefined;
   #effortLoad: Promise<void> | undefined;
+  /** Native thread identity is durable state; the app-server process is not. */
+  #threadId: string | undefined;
+  #threadScope: ConversationStateScope | undefined;
+  #threadCwd: string | undefined;
+  #generation = 0;
 
   constructor(config: ModelConfig, options: CodexProviderOptions = {}) {
     this.#config = config;
@@ -925,6 +965,10 @@ export class CodexProvider implements ModelProvider {
     const nativeToolStartedAt = new Map<string, number>();
     const nativeToolOutput = new Map<string, string>();
     const nativeToolCompleted = new Set<string>();
+    const startedAt = Date.now();
+    const mode: ConversationStateMode = request.conversationStateMode ?? this.#config.conversationState ?? 'auto';
+    let scope: ConversationStateScope = conversationScopeOf(this.#config);
+    let fallbackReason: string | undefined;
 
     try {
       const permissionSettings = codexPermissionSettings(request.execution);
@@ -933,20 +977,55 @@ export class CodexProvider implements ModelProvider {
         requestTimeoutMs: this.#config.timeoutMs,
         onServerRequest: (message) => handleCodexServerRequest(message, request.execution, permissionSettings.roots),
       });
+      scope = await codexConversationScope(client, scope);
       const prompt = codexPrompt(request);
       const threadParams: Record<string, unknown> = {
         cwd: request.execution?.cwd ?? process.cwd(),
-        ephemeral: true,
+        ephemeral: mode === 'replay',
         serviceName: 'plif',
         threadSource: 'plif',
         ...permissionSettings.thread,
         ...(prompt.developer ? { developerInstructions: prompt.developer } : {}),
         ...(!isDefaultCodexModel(this.#config.model) ? { model: this.#config.model } : {}),
       };
-      const thread = recordValue(await client.request('thread/start', threadParams));
+      const persisted = request.conversationState;
+      const persistedThread = mode !== 'replay' && persisted?.kind === 'codex-thread' &&
+        sameConversationScope(persisted.scope, scope)
+        ? persisted.threadId
+        : undefined;
+      const reusableThread = mode !== 'replay' &&
+        sameConversationScope(this.#threadScope, scope) &&
+        this.#threadCwd === threadParams.cwd
+        ? this.#threadId
+        : persistedThread;
+      let resumed = false;
+      let thread: Record<string, unknown>;
+      if (reusableThread) {
+        try {
+          thread = recordValue(await client.request('thread/resume', {
+            threadId: reusableThread,
+            ...threadParams,
+          })) ?? {};
+          resumed = true;
+        } catch (error) {
+          // A server restart, expired thread, account switch or deleted thread
+          // must not strand the local transcript. Start a new native thread and
+          // replay the canonical messages already present in `prompt.text`.
+          fallbackReason = 'thread_resume_failed';
+          thread = recordValue(await client.request('thread/start', threadParams)) ?? {};
+        }
+      } else {
+        thread = recordValue(await client.request('thread/start', threadParams)) ?? {};
+      }
       threadId = textValue(thread?.['thread'] && recordValue(thread['thread'])?.['id'])
         ?? textValue(thread?.['id']);
       if (!threadId) throw new Error('Codex did not return a thread id');
+      if (mode !== 'replay') {
+        this.#threadId = threadId;
+        this.#threadScope = scope;
+        this.#threadCwd = String(threadParams.cwd);
+        this.#generation = Math.max(this.#generation, persisted?.generation ?? 0);
+      }
 
       queue = new NotificationQueue();
       unsubscribe = client.onNotification((message) => queue!.push(message));
@@ -959,8 +1038,16 @@ export class CodexProvider implements ModelProvider {
       request.signal?.addEventListener('abort', abortHandler, { once: true });
 
       const effort = wireEffort(this.#config.effort, this.#effortMap?.get(this.#config.model) ?? []);
-      const input: Array<Record<string, string>> = [{ type: 'text', text: prompt.text }];
-      for (const image of prompt.images) input.push({ type: 'image', url: image });
+      // A resumed native thread already contains its previous turns. Sending
+      // the whole local transcript again would duplicate context and can make
+      // the model repeat itself. New/fallback threads receive the complete
+      // canonical replay; a successful resume receives only the current turn.
+      const latestMessage = request.messages.at(-1);
+      const turnPrompt = resumed && latestMessage
+        ? codexPrompt(request, [latestMessage])
+        : prompt;
+      const input: Array<Record<string, string>> = [{ type: 'text', text: turnPrompt.text }];
+      for (const image of turnPrompt.images) input.push({ type: 'image', url: image });
       const turn = recordValue(await client.request('turn/start', {
         threadId,
         input,
@@ -1038,6 +1125,31 @@ export class CodexProvider implements ModelProvider {
         if (status === 'failed') {
           const error = recordValue(turn?.['error']) ?? recordValue(params['error']);
           throw translateCodexError(new Error(textValue(error?.['message']) ?? 'Codex turn failed'), 'running the turn');
+        }
+        if (mode !== 'replay') {
+          const state: ConversationState = {
+            version: 1,
+            scope,
+            mode,
+            kind: 'codex-thread',
+            threadId,
+            lastTurnId: turnId,
+            generation: ++this.#generation,
+            updatedAt: new Date().toISOString(),
+            ...(fallbackReason ? { lastFallbackReason: fallbackReason } : {}),
+          };
+          yield {
+            kind: 'conversation_state',
+            state,
+            metrics: {
+              mode,
+              kind: 'codex-thread',
+              messageCount: request.messages.length,
+              payloadBytes: Buffer.byteLength(turnPrompt.text, 'utf8') + turnPrompt.images.reduce((total, image) => total + Buffer.byteLength(image, 'utf8'), 0),
+              latencyMs: Math.max(0, Date.now() - startedAt),
+              ...(fallbackReason ? { fallbackReason } : {}),
+            },
+          };
         }
         yield { kind: 'done', reason: 'stop', usage: NO_USAGE };
         return;

@@ -289,6 +289,18 @@ export type {
 } from './model/reasoning.js';
 export { collect, NO_USAGE } from './model/provider.js';
 export {
+  conversationScopeOf,
+  isConversationState,
+  sameConversationScope,
+} from './model/conversation-state.js';
+export type {
+  ConversationState,
+  ConversationStateMetrics,
+  ConversationStateMode,
+  ConversationStateScope,
+  NativeConversationStateKind,
+} from './model/conversation-state.js';
+export {
   canonicalFromLegacyUsage,
   estimatedTokenUsage,
   mergeTokenUsage,

@@ -33,6 +33,8 @@ export interface TranscriptController {
   readonly appendUserTurn: (text: string) => string;
   readonly persist: (event: ConversationEvent) => Promise<void>;
   readonly flushPersistence: () => Promise<void>;
+  /** Resolve the session after queued transcript writes have settled. */
+  readonly resolveSession: () => Promise<Session | null>;
   readonly applyStreamFrame: (frame: StreamFrame) => void;
   readonly resetStream: () => void;
   readonly finishTurn: (turnId: string) => void;
@@ -172,6 +174,12 @@ export function useTranscriptController({
     return persistence.current?.flush() ?? Promise.resolve();
   }, []);
 
+  const resolveSession = useCallback(async (): Promise<Session | null> => {
+    if (!persistence.current) return liveSession;
+    await persistence.current.flush();
+    return persistence.current.session();
+  }, [liveSession]);
+
   const switchSession = useCallback((nextSession: Session, nextReplay: readonly ConversationEvent[]): void => {
     persistence.current?.setSession(nextSession);
     persisted.current = new Set(nextReplay.map((event) => event.eventId));
@@ -233,6 +241,7 @@ export function useTranscriptController({
     appendUserTurn,
     persist,
     flushPersistence,
+    resolveSession,
     applyStreamFrame,
     resetStream,
     finishTurn,

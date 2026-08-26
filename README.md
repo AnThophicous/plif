@@ -91,6 +91,17 @@ PLIF's pink accent identity.
 - Screen-owned keyboard handling, terminal resize coverage and narrow/wide TUI
   previews received additional regression coverage.
 
+### Durable provider continuation
+
+The canonical session history remains append-only JSONL. PLIF stores only a
+scoped, non-secret provider pointer beside it: `auto` uses native Codex thread
+resume when it is available and replays the canonical transcript when the
+pointer is missing, expired or incompatible. `replay` disables native
+continuation; `native` prefers it but still fails safely to replay. Configure
+the policy with `conversationState = "auto"` or
+`PLIF_CONVERSATION_STATE=native|replay`. See
+[the conversation-state guide](docs/conversation-state.md).
+
 ## Why 0.3.9
 
 - **Adaptive memory.** Useful facts are ranked and reused without turning the

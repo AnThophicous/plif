@@ -87,6 +87,13 @@ describe('config precedence', () => {
     assert.equal(resolveConfig({ preset: 'openai', model: 'gpt-4.1', codexFast: true }, { env: {} }).codexFast, undefined);
   });
 
+  it('defaults continuation to auto and accepts only the supported policies', () => {
+    assert.equal(resolveConfig({}, { env: {} }).conversationState, 'auto');
+    assert.equal(resolveConfig({ conversationState: 'replay' }, { env: {} }).conversationState, 'replay');
+    assert.equal(resolveConfig({ conversationState: 'replay' }, { env: { PLIF_CONVERSATION_STATE: 'native' } }).conversationState, 'native');
+    assert.equal(resolveConfig({ conversationState: 'native' }, { env: { PLIF_CONVERSATION_STATE: 'invalid' } }).conversationState, 'auto');
+  });
+
   const metadataConfig: ModelConfig = {
     providerId: 'bridge',
     baseURL: 'https://bridge.example/v1',

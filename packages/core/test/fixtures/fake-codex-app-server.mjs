@@ -53,10 +53,33 @@ input.on('line', (line) => {
     });
     return;
   }
+  if (request.method === 'account/read') {
+    const accountId = process.env.PLIF_CODEX_ACCOUNT_ID;
+    send({
+      jsonrpc: '2.0',
+      id: request.id,
+      result: accountId ? { account: { id: accountId, type: 'chatgpt' } } : {},
+    });
+    return;
+  }
   if (request.method === 'thread/start') {
     const capturePath = process.env.PLIF_CODEX_THREAD_CAPTURE;
     if (capturePath) writeFileSync(capturePath, JSON.stringify(request), 'utf8');
     send({ jsonrpc: '2.0', id: request.id, result: { thread: { id: 'thread-1' } } });
+    return;
+  }
+  if (request.method === 'thread/resume') {
+    const capturePath = process.env.PLIF_CODEX_RESUME_CAPTURE;
+    if (capturePath) writeFileSync(capturePath, JSON.stringify(request), 'utf8');
+    if (process.env.PLIF_CODEX_RESUME_FAIL === '1') {
+      send({
+        jsonrpc: '2.0',
+        id: request.id,
+        error: { code: -32004, message: 'thread expired' },
+      });
+      return;
+    }
+    send({ jsonrpc: '2.0', id: request.id, result: { thread: { id: request.params.threadId } } });
     return;
   }
   if (request.method === 'turn/start') {
