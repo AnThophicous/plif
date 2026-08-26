@@ -23,6 +23,7 @@ import type {
   ProviderModel,
 } from './provider.js';
 import { NO_USAGE } from './provider.js';
+import { repairCorruptCodexWindowsSandboxState } from './codex-sandbox-recovery.js';
 
 const CODEX_COMMAND = 'codex';
 const INITIALIZE_TIMEOUT_MS = 10_000;
@@ -149,6 +150,10 @@ class JsonRpcClient {
   }
 
   static async start(options: JsonRpcClientOptions = {}): Promise<JsonRpcClient> {
+    // The official Windows helper persists this state outside the repository.
+    // Recover a torn state file before spawning the server so the first native
+    // request does not fail with the misleading generic ACL error.
+    repairCorruptCodexWindowsSandboxState();
     const command = options.command?.trim() || process.env['PLIF_CODEX_COMMAND']?.trim() || CODEX_COMMAND;
     let child: ChildProcessWithoutNullStreams;
     try {
