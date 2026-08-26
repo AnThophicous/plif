@@ -8,7 +8,35 @@ describe('footer status summary', () => {
     assert.equal(providerDisplayName('https://api.anthropic.com/v1'), 'Anthropic');
     assert.equal(providerDisplayName('https://openrouter.ai/api/v1'), 'OpenRouter');
     assert.equal(providerDisplayName('https://integrate.api.nvidia.com/v1'), 'NVIDIA');
+    assert.equal(providerDisplayName('codex://app-server'), 'Codex');
     assert.equal(providerDisplayName(undefined), 'not configured');
+  });
+
+  it('shows the Codex fast tier beside effort and omits it for other providers', () => {
+    assert.equal(
+      footerSummary({
+        provider: 'codex://app-server',
+        providerId: 'codex',
+        model: 'gpt-5.6-luna',
+        effort: 'high',
+        codexFast: true,
+        contextUsed: 0,
+        contextMax: 100,
+      }),
+      'Codex  │  gpt-5.6-luna  │  effort: high  │  FAST ON  │  ctx 0%',
+    );
+    assert.equal(
+      footerSummary({
+        provider: 'https://api.openai.com/v1',
+        providerId: 'openai',
+        model: 'gpt-5.4',
+        effort: 'high',
+        codexFast: true,
+        contextUsed: 0,
+        contextMax: 100,
+      }).includes('FAST'),
+      false,
+    );
   });
 
   it('keeps provider, model, effort and context readable in one stable line', () => {

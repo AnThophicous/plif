@@ -202,11 +202,12 @@ describe('when a paste becomes an attachment', () => {
   });
 
   it('uses the character threshold even when a paste has multiple lines', () => {
-    assert.equal(PASTE_ATTACHMENT_MIN_CHARS, 201);
-    assert.equal(shouldAttachPastedText('x'.repeat(200)), false);
-    assert.equal(shouldAttachPastedText('x'.repeat(201)), true);
+    assert.equal(PASTE_ATTACHMENT_MIN_CHARS, 700);
+    assert.equal(shouldAttachPastedText('x'.repeat(699)), false);
+    assert.equal(shouldAttachPastedText('x'.repeat(700)), true);
     assert.equal(shouldAttachPastedText('one\ntwo\nthree\nfour'), false);
-    assert.equal(shouldAttachPastedText(Array.from({ length: 60 }, () => 'line').join('\n')), true);
+    assert.equal(shouldAttachPastedText(Array.from({ length: 140 }, () => 'line').join('\n')), false);
+    assert.equal(shouldAttachPastedText(Array.from({ length: 141 }, () => 'line').join('\n')), true);
   });
 });
 

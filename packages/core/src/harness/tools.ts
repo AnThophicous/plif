@@ -47,6 +47,7 @@ import type { Attachment } from '../model/provider.js';
 import type { GoalController } from './goals.js';
 import type { SessionStore } from '../session/store.js';
 import type { ConversationEvent } from '../session/events.js';
+import type { ModelExecutionContext } from '../model/provider.js';
 
 export interface ToolContext {
   readonly container: Container;
@@ -69,6 +70,8 @@ export interface ToolContext {
   readonly callId?: string;
   readonly memory?: MemoryStore;
   readonly workspace?: string;
+  /** Shared provider execution policy inherited from the parent PLIF loop. */
+  readonly execution?: ModelExecutionContext;
   readonly tasks?: TaskManager;
   readonly lsp?: LspManager;
   readonly edits?: EditCoordinator;

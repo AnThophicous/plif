@@ -140,15 +140,15 @@ export function createConfigSettings(runtime: ConfigRuntime, actions: ConfigActi
       id: 'permissionMode',
       label: 'Permission mode',
       category: 'Behavior',
-      description: 'How tool actions are approved before they run.',
+      description: 'One PLIF policy inherited by every provider, including Codex, before actions run.',
       kind: 'enum',
       scope: 'global',
       value: permission === 'auto-approve' ? 'Auto-approve' : permission === 'deny' ? 'Deny' : 'Ask',
       inputValue: permission,
       options: [
-        option('ask', 'Ask', 'confirm tool actions'),
-        option('auto-approve', 'Auto-approve', 'run allowed actions without a prompt'),
-        option('deny', 'Deny', 'block tool actions'),
+        option('ask', 'Ask', 'confirm provider, tool, file, and network actions'),
+        option('auto-approve', 'Auto-approve', 'allow actions only inside the active workspace'),
+        option('deny', 'Deny', 'block provider actions and keep the workspace read-only'),
       ],
       searchableTerms: ['approval', 'security', 'tools'],
       apply: async (value) => {
@@ -162,7 +162,7 @@ export function createConfigSettings(runtime: ConfigRuntime, actions: ConfigActi
       id: 'autoApprove',
       label: 'Auto-approve actions',
       category: 'Behavior',
-      description: 'Shortcut for allowing tool actions without a confirmation prompt.',
+      description: 'Shortcut for the shared PLIF policy: allow actions without prompts inside the active workspace.',
       kind: 'boolean',
       scope: 'global',
       value: binaryStateIndicator(permission === 'auto-approve' ? 'on' : 'off').icon,
@@ -173,6 +173,17 @@ export function createConfigSettings(runtime: ConfigRuntime, actions: ConfigActi
         if (value !== 'true' && value !== 'false') throw new Error('Enter true or false.');
         await actions.setPermissionMode(value === 'true' ? 'auto-approve' : 'ask');
       },
+    },
+    {
+      id: 'providerPermissions',
+      label: 'Provider permissions',
+      category: 'Behavior',
+      description: 'All providers, including Codex, inherit the active PLIF permission mode and workspace roots.',
+      kind: 'readonly',
+      scope: 'runtime',
+      value: `PLIF policy · ${permission === 'auto-approve' ? 'Auto-approve' : permission === 'deny' ? 'Deny' : 'Ask'}`,
+      inputValue: permission,
+      searchableTerms: ['provider', 'codex', 'workspace', 'permissions', 'inherit'],
     },
     {
       id: 'provider',

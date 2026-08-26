@@ -50,6 +50,43 @@ function capture(bus: EventBus): ConversationEvent[] {
 }
 
 describe('durable harness conversation events', () => {
+  it('projects provider-owned tool activity without executing the tool twice', async () => {
+    const bus = new EventBus();
+    const events = capture(bus);
+
+    const result = await runLoop([{ role: 'user', content: 'run the check' }], {
+      provider: scripted([[
+        {
+          kind: 'tool_activity',
+          activity: { id: 'native-1', name: 'run_command', phase: 'start', input: { argv: ['npm', 'test'] } },
+        },
+        {
+          kind: 'tool_activity',
+          activity: { id: 'native-1', name: 'run_command', phase: 'end', input: { argv: ['npm', 'test'] }, output: 'passed', ok: true, durationMs: 12 },
+        },
+        { kind: 'text', delta: 'Done.' },
+        { kind: 'done', reason: 'stop', usage: { promptTokens: 1, completionTokens: 1 } },
+      ]]),
+      container,
+      questions: new QuestionBroker(bus, 50),
+      bus,
+      tools: [],
+      turnId: 'turn-native-tool',
+    });
+
+    assert.equal(result.stop, 'complete');
+    assert.deepEqual(events.map((event) => event.kind), [
+      'tool.started',
+      'tool.completed',
+      'assistant.message',
+      'turn.completed',
+    ]);
+    const started = events.find((event) => event.kind === 'tool.started');
+    assert.equal(started?.kind === 'tool.started' ? started.call.name : null, 'run_command');
+    const completed = events.find((event) => event.kind === 'tool.completed');
+    assert.equal(completed?.kind === 'tool.completed' ? completed.output : null, 'passed');
+  });
+
   it('emits semantic boundaries in protocol order with one turn id', async () => {
     const bus = new EventBus();
     const events = capture(bus);

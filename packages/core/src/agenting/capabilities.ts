@@ -1,4 +1,5 @@
 import { definePromptModule } from './types.js';
+import { mandatorySkillsForEffort } from '../harness/skills.js';
 
 export const mcpModule = definePromptModule({
   id: '80-mcp',
@@ -41,9 +42,9 @@ export const skillsModule = definePromptModule({
   enabled: () => true,
   render: (context) => {
     const catalogue = context.skills?.trim() || '(No skills are installed.)';
-    const galileuListed = catalogue
+    const skillListed = (name: string): boolean => catalogue
       .split(/\r?\n/)
-      .some((line) => /^\s*-\s+galileu\s*:/i.test(line));
+      .some((line) => new RegExp(`^\\s*-\\s+${name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*:`, 'i').test(line));
     const lines = [
       '# Available skills',
       '',
@@ -64,34 +65,38 @@ export const skillsModule = definePromptModule({
     ];
 
     const loaded = new Set(context.loadedSkills ?? []);
-    const mandatory = context.effort === 'plif'
-      ? (['galileu', 'plif-cybersecurity'] as const)
-      : (['galileu'] as const);
+    const codexNative = context.providerId === 'codex';
+    const mandatory = mandatorySkillsForEffort(context.effort);
     const missing = mandatory.filter((name) => !loaded.has(name));
     lines.push(
       '',
       context.effort === 'plif'
         ? '## Mandatory PLIF skills and review checkpoint'
-        : '## Mandatory Galileu review',
-      missing.length > 0
-        ? `The ${context.effort === 'plif' ? 'PLIF' : 'Galileu'} skill gate is non-optional. Before answering, asking a question, planning, editing, running a command, or using another tool, call the skill tool for ${missing.map((name) => `{ "name": "${name}" }`).join(' and then ')}; ${missing.length === 2 ? 'wait for both successful results' : 'wait for the requested result to succeed'}.`
+        : '## Mandatory anti-AI-slop and Galileu review',
+      missing.length > 0 && !codexNative
+        ? `The ${context.effort === 'plif' ? 'PLIF' : 'global'} skill gate is non-optional. Before answering, asking a question, planning, editing, running a command, or using another tool, call the skill tool for ${missing.map((name) => `{ "name": "${name}" }`).join(' and then ')}; ${missing.length === 1 ? 'wait for the requested result to succeed' : 'wait for all requested results to succeed'}.`
+        : missing.length > 0
+          ? `The ${context.effort === 'plif' ? 'PLIF' : 'global'} skill gate is non-optional. The native Codex adapter must preload ${missing.join(' and ')} before this turn; do not try to call the host-only skill tool. If a preloaded body is absent, report a runtime configuration error rather than claiming the skill is unavailable.`
         : `The non-optional ${mandatory.join(' and ')} skill${mandatory.length === 1 ? '' : 's'} were already loaded successfully in this session. Apply their instructions from the preceding skill result${mandatory.length === 1 ? '' : 's'}; do not call the skill tool again unless one of those results is missing.`,
-      missing.length > 0
+      missing.length > 0 && !codexNative
         ? 'Do not proceed when a requested load fails. If the skill tool is unavailable or a required skill is missing from the catalogue, stop and report a runtime configuration error instead of silently falling back.'
+        : missing.length > 0
+          ? 'Do not proceed until PLIF has supplied the preloaded skill bodies. Do not emit a prose refusal merely because the native tool list does not contain the host-only skill tool.'
         : 'Do not discard or reload successful skill results: keeping one copy in the carried conversation prevents context growth and preserves the same mandatory policy. Do not call the `skill` tool again unless a successful result is missing.',
-      galileuListed
-        ? 'The `galileu` skill is available in the catalogue and must be loaded now.'
-        : 'Galileu is not present in the catalogue; this session is misconfigured.',
     );
 
-    if (context.effort === 'plif') {
-      const cybersecurityListed = catalogue
-        .split(/\r?\n/)
-        .some((line) => /^\s*-\s+plif-cybersecurity\s*:/i.test(line));
+    for (const name of mandatory) {
       lines.push(
-        cybersecurityListed
-          ? 'The `plif-cybersecurity` skill is available in the catalogue and must be loaded now.'
-          : 'plif-cybersecurity is not present in the catalogue; this PLIF session is misconfigured.',
+        codexNative && loaded.has(name)
+          ? `The \`${name}\` skill body was preloaded by the native Codex adapter. Apply it directly; do not call the host-only \`skill\` tool.`
+          : skillListed(name)
+            ? `The \`${name}\` skill is available in the catalogue and must be loaded now.`
+            : `${name} is not present in the catalogue; this session is misconfigured.`,
+      );
+    }
+
+    if (context.effort === 'plif') {
+      lines.push(
         'Once loaded, follow the mandatory procedures for this turn. The review checkpoint is internal orchestration: perform checks with tools, do not print gate narration or repeated audit receipts, and finish with a concise result. Do not persist a Galileu decision record automatically.',
       );
     }

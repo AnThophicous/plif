@@ -49,6 +49,7 @@ import {
   DEFAULT_TOOLS,
   McpRegistry,
   SkillRegistry,
+  mandatorySkillsForEffort,
   parseServerConfigs,
   DEFAULT_CONTEXT_TOKENS,
   eventBase,
@@ -76,7 +77,16 @@ import {
   visionTools,
   ProviderCapabilityCache,
 } from '@plif/core';
-import type { EffortCapabilityCache, GlobalConfig, ModelProvider, Session, StoredConfig } from '@plif/core';
+import type {
+  EffortCapabilityCache,
+  GlobalConfig,
+  ModelApprovalRequest,
+  ModelExecutionContext,
+  ModelProvider,
+  Session,
+  Skill,
+  StoredConfig,
+} from '@plif/core';
 
 import type { Invocation } from '../argv.js';
 import type { GlobalFlags } from '../argv.js';
@@ -625,6 +635,16 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
   // to the prompt.
   const lspForAgent = lspTools(lsp);
   const edits = new EditCoordinator();
+  // Native Codex runs cannot execute PLIF's host-only `skill` tool. Preload
+  // the same mandatory skills used by the interactive app into the native
+  // developer instructions so `plif prompt` follows the same contract.
+  const codexMandatoryNames = mandatorySkillsForEffort(promptConfig.effort);
+  const codexSkillBootstrap = provider.info.providerId === 'codex'
+    ? codexMandatoryNames
+        .map((name) => skills.get(name))
+        .filter((skill): skill is Skill => skill !== undefined)
+        .map((skill) => ({ name: skill.name, instructions: skill.instructions }))
+    : [];
   const childOptions = {
     provider,
     isolation: report.isolation,
@@ -635,6 +655,7 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
     agentAutoLaunch: stored.agentAutoLaunch !== false,
     extraTools: [skillTool(skills), ...lspForAgent, ...WEB_TOOLS],
     skillCatalogue: skills.catalogue(),
+    skillBootstrap: codexSkillBootstrap,
     edits,
     ...(agentInstructions ? { agentInstructions } : {}),
   };
@@ -662,6 +683,8 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
             contextTokens: provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
             tools: stableToolSpecs(agentTools.map((tool) => tool.spec)),
             skills: skills.catalogue(),
+            loadedSkills: codexSkillBootstrap.map((skill) => skill.name),
+            providerId: provider.info.providerId,
             mcpServers: mcp.catalogue(),
             guidance: snapshot.guidance,
             memory: summariseMemory(snapshot),
@@ -691,6 +714,27 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
         signal: abort.signal,
         memory: engine.memory,
         workspace: invocation.flags.workspace,
+        execution: {
+          cwd: invocation.flags.workspace,
+          workspaceRoots: [invocation.flags.workspace],
+          permissionMode: engine.approvals.permissionMode,
+          ask: (question) => engine.questions.ask(question),
+          approve: async (request: ModelApprovalRequest): Promise<'allow' | 'deny' | 'cancel'> => {
+            const answer = await engine.approvals.ask({
+              containerId: container.name,
+              action: request.kind === 'execute'
+                ? 'exec'
+                : request.kind === 'permissions' && request.network
+                  ? 'net.connect'
+                  : 'fs.write',
+              target: request.target,
+              ...(request.argv ? { argv: request.argv } : {}),
+              reason: request.reason ?? 'Codex requested approval through the shared PLIF permission broker.',
+              rationale: 'The Codex app-server request is governed by the active PLIF permission mode.',
+            });
+            return answer.decision === 'allow' ? 'allow' : 'deny';
+          },
+        } satisfies ModelExecutionContext,
         sessionId: session.id,
         contextTokens: provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
         tokenSplit: {
@@ -703,6 +747,7 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
         tasks,
         lsp,
         edits,
+        skillBootstrap: codexSkillBootstrap,
       },
     );
 

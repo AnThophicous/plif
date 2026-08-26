@@ -93,6 +93,8 @@ export interface GlobalConfig {
   readonly maxTokens?: number;
   readonly timeoutMs?: number;
   readonly effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | 'ultracode' | 'plif';
+  /** Opt-in Codex fast service tier; ignored by all other providers. */
+  readonly codexFast?: boolean;
   readonly providers?: unknown;
   /** OpenCode-style custom provider map. `providers` remains accepted. */
   readonly provider?: unknown;

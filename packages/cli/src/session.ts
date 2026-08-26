@@ -391,6 +391,7 @@ export type SessionAction =
   | { type: 'question.push'; question: PendingQuestion }
   | { type: 'question.resolve' }
   | { type: 'question.draft'; draft: string }
+  | { type: 'question.select'; selected: number }
   | { type: 'question.move'; delta: number }
   | { type: 'question.expand' }
   | { type: 'compaction.stage'; stage: CompactionState }
@@ -745,10 +746,29 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       // it ambiguous which one Enter will send.
       return { ...state, questionDraft: action.draft, questionChoice: action.draft ? -1 : 0 };
 
+    case 'question.select': {
+      const options = state.question?.options ?? [];
+      if (options.length === 0 || action.selected < 0) {
+        return state.questionChoice === -1 ? state : { ...state, questionChoice: -1 };
+      }
+      const selected = Math.min(action.selected, options.length - 1);
+      if (state.questionChoice === selected && state.questionDraft === '') return state;
+      return {
+        ...state,
+        questionChoice: selected,
+        questionDraft: '',
+      };
+    }
+
     case 'question.move': {
       const options = state.question?.options ?? [];
       const other = options.length;
-      const from = state.questionChoice < 0 ? other : state.questionChoice;
+      // A typed answer also uses questionChoice === -1. Start arrow
+      // navigation just outside the options so either direction enters the
+      // list instead of getting stuck on the implicit "Other" row.
+      const from = state.questionChoice < 0
+        ? (state.questionDraft ? (action.delta > 0 ? -1 : other) : other)
+        : state.questionChoice;
       const next = Math.min(other, Math.max(0, from + action.delta));
       return { ...state, questionChoice: next === other ? -1 : next, questionDraft: '' };
     }

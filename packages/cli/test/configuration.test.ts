@@ -66,6 +66,8 @@ describe('config registry', () => {
     assert.ok(ids.includes('theme'));
     assert.ok(ids.includes('permissionMode'));
     assert.equal(value.find((setting) => setting.id === 'autoApprove')?.kind, 'boolean');
+    assert.equal(value.find((setting) => setting.id === 'providerPermissions')?.kind, 'readonly');
+    assert.match(value.find((setting) => setting.id === 'providerPermissions')?.description ?? '', /Codex.*inherit/i);
     assert.ok(ids.includes('model'));
     assert.ok(ids.includes('effort'));
     assert.doesNotMatch(JSON.stringify(value), /this-must-never-be-rendered|another-secret/);

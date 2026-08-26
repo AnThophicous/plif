@@ -27,10 +27,12 @@ export type {
 export { QuestionBroker } from './harness/ask.js';
 export {
   BUILTIN_SKILLS,
+  MANDATORY_GLOBAL_SKILLS,
   MANDATORY_PLIF_SKILLS,
   SkillRegistry,
   createSkillTool,
   loadedSkillNames,
+  mandatorySkillsForEffort,
   parseSkill,
   skillTool,
   writeSkill,
@@ -83,6 +85,23 @@ export type { Question, QuestionChoice } from './harness/ask.js';
 export type { QuestionOption } from './events/bus.js';
 export { runLoop, runCompaction, RUN_SCRIPT_SPEC } from './harness/loop.js';
 export type { CompactionRun } from './harness/loop.js';
+export {
+  ActionLoopDetector,
+  DEFAULT_AGENT_EXECUTION_POLICY,
+  ProgressWatchdog,
+  SingleFlight,
+  actionFingerprint,
+  normalizeActionArguments,
+  resolveAgentExecutionPolicy,
+} from './harness/loop-safety.js';
+export type {
+  ActionObservation,
+  AgentExecutionPolicy,
+  ProgressSnapshot,
+  SingleFlightToken,
+  StagnationState,
+  WatchdogDecision,
+} from './harness/loop-safety.js';
 export { COMPACTION_STAGES, compact, estimateTokens, pinnedIndices } from './harness/compaction.js';
 export type { CompactionFailure, CompactionOptions, CompactionResult } from './harness/compaction.js';
 export {
@@ -138,7 +157,7 @@ export type {
 export { MemoryStore, rankFacts, strategyId, strategyStatus, summariseMemory } from './harness/memory.js';
 export type { Fact, FactKind, MemorySnapshot } from './harness/memory.js';
 export { DEFAULT_CONTEXT_TOKENS, answerDanglingToolCalls } from './harness/loop.js';
-export type { LoopOptions, LoopResult, LoopStop } from './harness/loop.js';
+export type { LoopOptions, LoopResult, LoopStop, SkillBootstrap } from './harness/loop.js';
 export { GoalController } from './harness/goals.js';
 export type { GoalState, GoalStatus } from './harness/goals.js';
 export {
@@ -304,11 +323,13 @@ export type {
   ModelInfo,
   ModelPermissionMode,
   ModelProvider,
+  NativeToolActivity,
   ModelQuestion,
   ModelQuestionOption,
   Role,
   ToolCall,
   ToolSpec,
+  PreloadedSkill,
   Usage,
   ModelListResult,
   ProviderModel,

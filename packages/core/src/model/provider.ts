@@ -100,6 +100,19 @@ export interface ToolSpec {
   readonly parameters: Record<string, unknown>;
 }
 
+/**
+ * Instructions that PLIF has already loaded for a native provider turn.
+ *
+ * Native Codex app-server turns do not accept arbitrary PLIF-host tools in
+ * their wire schema. The adapter therefore receives the mandatory skill
+ * bodies explicitly instead of advertising a tool the native server cannot
+ * execute.
+ */
+export interface PreloadedSkill {
+  readonly name: string;
+  readonly instructions: string;
+}
+
 /** Permission policy shared by PLIF and providers that run a local agent. */
 export type ModelPermissionMode = 'ask' | 'auto-approve' | 'deny';
 
@@ -139,6 +152,8 @@ export interface ModelExecutionContext {
 export interface CompletionRequest {
   readonly messages: readonly Message[];
   readonly tools?: readonly ToolSpec[];
+  /** Skill bodies already loaded by PLIF for providers without host tools. */
+  readonly preloadedSkills?: readonly PreloadedSkill[];
   readonly temperature?: number;
   readonly maxTokens?: number;
   readonly signal?: AbortSignal;
@@ -158,6 +173,14 @@ export type CompletionEvent =
   /** Thinking, from a reasoning model. Must be fed back on the next request. */
   | { readonly kind: 'reasoning'; readonly delta: string }
   | { readonly kind: 'tool'; readonly call: ToolCall }
+  /**
+   * A tool lifecycle item executed by a provider-owned agent runtime.
+   *
+   * This is deliberately separate from `tool`: the harness must render the
+   * activity but must not execute it a second time. Codex's app-server owns
+   * these calls and already applies its permission policy and tool results.
+   */
+  | { readonly kind: 'tool_activity'; readonly activity: NativeToolActivity }
   /**
    * The endpoint failed and another attempt is coming after `waitMs`.
    *
@@ -183,6 +206,16 @@ export type CompletionEvent =
   | { readonly kind: 'done'; readonly reason: FinishReason; readonly usage: Usage };
 
 export type FinishReason = 'stop' | 'length' | 'tool_calls' | 'cancelled' | 'error';
+
+export interface NativeToolActivity {
+  readonly id: string;
+  readonly name: string;
+  readonly phase: 'start' | 'end';
+  readonly input?: Record<string, unknown>;
+  readonly output?: string;
+  readonly ok?: boolean;
+  readonly durationMs?: number;
+}
 
 export interface Usage {
   readonly promptTokens: number;
@@ -228,6 +261,8 @@ export interface ModelInfo {
   readonly contextWindow: number | undefined;
   /** Provider/model output ceiling, when it is explicitly configured or known. */
   readonly maxOutputTokens?: number;
+  /** True when the Codex provider is using its opt-in fast service tier. */
+  readonly codexFast?: boolean;
   /** Normalized adapter capabilities used by context and accounting layers. */
   readonly capabilities?: ProviderCapabilities;
 }
@@ -329,6 +364,7 @@ export async function collect(stream: AsyncGenerator<CompletionEvent>): Promise<
     if (event.kind === 'text') text += event.delta;
     else if (event.kind === 'reasoning') reasoning += event.delta;
     else if (event.kind === 'tool') toolCalls.push(event.call);
+    else if (event.kind === 'tool_activity') continue;
     else if (event.kind === 'retry') continue;
     else if (event.kind === 'reset') {
       // The attempt that produced this is being redone from scratch. Keeping

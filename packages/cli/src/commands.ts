@@ -22,12 +22,14 @@ import {
   filterAvailableModels,
   BUILTIN_AGENT_PRESETS,
   formatModelRef,
+  isLocal,
   MODEL_CATALOG,
   modelVisionBadge,
   rankFacts,
   rankModelIds,
   scoreModel,
   providerIdForConfig,
+  providerForModel,
   selectAvailableModels,
   supportedEfforts,
   strategyStatus,
@@ -573,14 +575,21 @@ async function openModelPicker(
   await Promise.all(visibleSources.map(async ({ entryProvider }) => {
     const key = await providerKey(entryProvider.id, stored, context.credentials);
     const isCurrentProvider = entryProvider.id === currentProvider && currentModel !== undefined;
+    const isCodex = entryProvider.auth === 'codex';
     const result = await discoverProviderModels(entryProvider.id, {
       stored,
       // Opening /models is an explicit catalog request. Refresh the active
       // offer synchronously so removed models disappear and newly published
-      // offers are visible in this picker. Other providers keep their cached
-      // or background path and are refreshed when selected, avoiding a burst
-      // of network calls just to paint a menu.
-      ...(isCurrentProvider ? { refresh: true, waitForNetwork: true } : { waitForNetwork: false }),
+      // offers are visible in this picker. Codex model/list is read-only and
+      // does not trigger the sign-in dialog, so account-backed models are
+      // discovered here even before Codex is the active provider. Other
+      // providers keep their cached or background path and are refreshed when
+      // selected, avoiding a burst of network calls just to paint a menu.
+      ...(isCurrentProvider
+        ? { refresh: true, waitForNetwork: true }
+        : isCodex
+          ? { waitForNetwork: true }
+          : { waitForNetwork: false }),
       ...(key ? { apiKey: key } : {}),
     });
     discovered.set(entryProvider.id, result);
@@ -627,6 +636,12 @@ async function openModelPicker(
     : hint;
 
   const hasVisionHelper = visionCandidates(stored).length > 0;
+  // With no active model, keep the picker anchored to the existing anonymous
+  // default instead of letting a newly visible account-backed provider change
+  // what Enter selects. This preserves the first-run path while still showing
+  // Codex as an available provider in the same catalog.
+  const initialModel = currentItem ?? selectedModels.find(({ provider, access: providerAccess }) =>
+    provider.anonymous === true && providerAccess === 'free');
   const filterOptions: readonly PickerItem[] = [
     { value: 'strength', label: 'Strongest first', detail: 'PLIF default ranking', current: true },
     { value: 'context', label: 'Largest context', detail: 'Known context window, largest first' },
@@ -684,15 +699,27 @@ async function openModelPicker(
   function openModelList(activeFilter: ModelBrowserFilter = 'strength'): void {
     const qualifiedItems = qualify(filterAvailableModels(selectedModels, activeFilter));
     const activeHint = `${modelHint}\nfilter: ${filterOptions.find((item) => item.value === activeFilter)?.label ?? 'Strongest first'}`;
+    const initialValue = initialModel
+      ? `${initialModel.provider.id}:${initialModel.model.id}`
+      : undefined;
+    // Keep the anonymous first-run path at row zero. Codex is intentionally
+    // visible in this same catalog, but must never become the accidental
+    // Enter target before the user explicitly signs in.
+    const orderedItems = !currentModel && activeFilter === 'strength' && initialValue
+      ? [
+          ...qualifiedItems.filter((item) => item.value === initialValue),
+          ...qualifiedItems.filter((item) => item.value !== initialValue),
+        ]
+      : qualifiedItems;
     context.openPicker({
       title,
       hint: activeHint,
       countLabel: 'available',
-      items: qualifiedItems,
-      selected: Math.max(0, qualifiedItems.findIndex((item) => item.current)),
+      items: orderedItems,
+      selected: Math.max(0, orderedItems.findIndex((item) => item.current || item.value === initialValue)),
       onPick: (selection) => {
         if (typeof selection !== 'string') {
-          void (options.onPick ? options.onPick(selection) : context.switchModel(selection));
+          void (options.onPick ? options.onPick(selection) : switchModelSelection(context, selection));
         }
       },
       onFilter: () => openFilterPicker(activeFilter),
@@ -700,6 +727,39 @@ async function openModelPicker(
     });
   }
   openModelList();
+}
+
+/** Ask only for the Codex-specific speed tier when a user picks a model. */
+async function askCodexFast(context: CommandContext): Promise<boolean | undefined> {
+  const answer = await context.engine.questions.ask({
+    text: 'Deseja usar o modo FAST?',
+    options: [
+      {
+        value: 'fast',
+        label: 'FAST',
+        description: 'até 1,5× mais velocidade · maior gasto de tokens',
+      },
+      {
+        value: 'standard',
+        label: 'Padrão',
+        description: 'velocidade normal · menor gasto de tokens',
+      },
+    ],
+    context: 'Disponível somente para modelos do Codex. Esc mantém a configuração atual.',
+  });
+  if (answer === null) return undefined;
+  return answer === 'fast';
+}
+
+/** Keep the fast-mode prompt out of startup/fallback paths; it is user-choice only. */
+async function switchModelSelection(context: CommandContext, selection: ModelSelection): Promise<void> {
+  if (selection.preset !== 'codex') {
+    await context.switchModel(selection);
+    return;
+  }
+  const codexFast = await askCodexFast(context);
+  if (codexFast === undefined) return;
+  await context.switchModel({ ...selection, codexFast });
 }
 
 export function mergeDiscoveredModel(
@@ -800,7 +860,8 @@ async function configureProvider(
   stored: StoredConfig,
   source: ModelCatalogProvider,
 ): Promise<boolean> {
-  if (!context.credentials) {
+  const needsCredential = !isLocal(source.endpoint) && source.id !== 'codex';
+  if (needsCredential && !context.credentials) {
     context.notify?.(entry('notice', `cannot configure ${source.label} without secure credential storage`, {
       tone: 'warn',
       subtitle: 'Nothing was requested or saved. Start the normal interactive session and try again.',
@@ -808,37 +869,41 @@ async function configureProvider(
     return false;
   }
   const keyEnv = credentialVariableForProvider(source.id, stored);
-  const key = (await context.engine.questions.ask({
-    text: `API key · ${source.label}`,
-    secret: true,
-    context: [
-      `Endpoint: ${source.endpoint}`,
-      'The key is masked and never enters the transcript or model cache.',
-      `After validation it is stored in the encrypted credential store (${keyEnv}). Esc cancels.`,
-    ].join('\n'),
-  }))?.trim();
-  if (!key) return false;
+  const key = needsCredential
+    ? (await context.engine.questions.ask({
+      text: `API key · ${source.label}`,
+      secret: true,
+      context: [
+        `Endpoint: ${source.endpoint}`,
+        'The key is masked and never enters the transcript or model cache.',
+        `After validation it is stored in the encrypted credential store (${keyEnv}). Esc cancels.`,
+      ].join('\n'),
+    }))?.trim()
+    : undefined;
+  if (needsCredential && !key) return false;
   const result = await discoverProviderModels(source.id, {
     stored,
-    apiKey: key,
+    ...(key ? { apiKey: key } : {}),
     refresh: true,
     waitForNetwork: true,
   });
   if (!result.live || result.error) {
-    context.notify?.(entry('notice', `could not validate ${source.label} API key`, {
+    context.notify?.(entry('notice', `could not validate ${source.label} endpoint`, {
       tone: 'danger',
       subtitle: 'Nothing was saved. Check the key and endpoint, then try again.',
     }));
     return false;
   }
-  try {
-    await context.credentials.remember(keyEnv, key);
-  } catch {
-    context.notify?.(entry('notice', `validated ${source.label}, but could not save its API key`, {
-      tone: 'warn',
-      subtitle: 'The provider was not changed. Check the secure credential store and try again.',
-    }));
-    return false;
+  if (key) {
+    try {
+      await context.credentials!.remember(keyEnv, key);
+    } catch {
+      context.notify?.(entry('notice', `validated ${source.label}, but could not save its API key`, {
+        tone: 'warn',
+        subtitle: 'The provider was not changed. Check the secure credential store and try again.',
+      }));
+      return false;
+    }
   }
   return true;
 }
@@ -850,14 +915,11 @@ async function providerAccessMap(
   activeProvider: string | undefined,
 ): Promise<Map<string, ProviderAccess>> {
   const entries = await Promise.all(sources.map(async ({ entryProvider }) => {
-    // ChatGPT/Codex is an optional local session, not a generic API-key
-    // provider. Keep it out of the default model list until the user selects
-    // it (or it is already active), otherwise a logged-in Codex installation
-    // silently changes the default model picker order for every workspace.
+    // ChatGPT/Codex is an account-backed provider, not an API-key provider.
+    // Its static offer must remain visible in the global model browser so the
+    // user can discover and select it before the explicit sign-in step.
     if (entryProvider.auth === 'codex') {
-      return entryProvider.id === activeProvider
-        ? [entryProvider.id, 'configured' as const] as const
-        : null;
+      return [entryProvider.id, 'configured' as const] as const;
     }
     const key = await providerKey(entryProvider.id, stored, credentials);
     if (entryProvider.anonymous) return [entryProvider.id, key ? 'configured' as const : 'free' as const] as const;
@@ -938,6 +1000,7 @@ async function openProviderPicker(
   const access = await providerAccessMap(sources, stored, context.credentials, activeProvider);
   const discovered = new Map<string, Awaited<ReturnType<typeof discoverProviderModels>>>();
   await Promise.all(sources.filter(({ entryProvider }) => access.has(entryProvider.id)).map(async ({ entryProvider }) => {
+    if (entryProvider.auth === 'codex' && entryProvider.id !== activeProvider) return;
     const key = await providerKey(entryProvider.id, stored, context.credentials);
     discovered.set(entryProvider.id, await discoverProviderModels(entryProvider.id, {
       stored,
@@ -960,6 +1023,7 @@ async function openProviderPicker(
       const isLocked = !isCodex && !access.has(selected.id) && !selected.anonymous && !isLocalEndpoint(selected.endpoint);
       void (async () => {
         if (isLocked && !(await configureProvider(context, stored, selected))) return;
+        const pickerStored = stored;
         // Selecting Codex is also the explicit session-verification action.
         // Do this even when the config already points at Codex: that state only
         // records the selected provider, not whether the ChatGPT session is
@@ -967,13 +1031,13 @@ async function openProviderPicker(
         if (isCodex && !(await context.loginCodex?.() ?? false)) return;
         await openModelPicker(
           context,
-          stored,
+          pickerStored,
           [{ entryProvider: selected, section: 'selected provider' }],
           selected.id,
           sameProvider ? context.model?.info.id : undefined,
           `Provider / ${selected.label}`,
           `${selected.description} · select a model · Esc returns to providers`,
-          () => { void openProviderPicker(context, stored, sources, onBack); },
+          () => { void openProviderPicker(context, pickerStored, sources, onBack); },
           { availableOnly: false },
         );
       })();
@@ -2266,7 +2330,14 @@ export const COMMANDS: readonly Command[] = [
         // A complete model id applies directly, exactly like `/effort plif`:
         // the picker is for browsing, not for confirming a typed decision.
         // `switchModel` reports the switch itself, so there is no second row.
-        await context.switchModel(argv[0]);
+        const preset = providerForModel(argv[0]);
+        if (preset === 'codex') {
+          await switchModelSelection(context, { preset, model: argv[0] });
+        } else {
+          // Preserve the existing string-selection behavior for custom or
+          // user-configured models whose provider cannot be inferred here.
+          await context.switchModel(argv[0]);
+        }
         return ok();
       }
 
@@ -2310,7 +2381,11 @@ export const COMMANDS: readonly Command[] = [
       const stored = await loadGlobalConfig();
       const current = stored.effort ?? 'default';
       const value = argv[0];
-      const available = [...new Set(context.supportedEfforts?.() ?? EFFORT_LEVELS)];
+      // Snapshot capabilities once. Providers can refresh their model metadata
+      // asynchronously; reading the callback again while building the picker
+      // can otherwise make its rows and selected index disagree.
+      const supported = context.supportedEfforts?.();
+      const available = [...new Set(supported ?? EFFORT_LEVELS)];
       if (!value) {
           context.openPicker({
             title: `Select effort · ${context.model?.info.id ?? 'current model'}`,
@@ -2318,11 +2393,11 @@ export const COMMANDS: readonly Command[] = [
           countLabel: 'efforts',
           items: [
             { value: 'default', label: 'Default', detail: 'let the provider choose', current: current === 'default' },
-            ...effortPickerItems(context.supportedEfforts?.() ?? [], current === 'default' ? undefined : current as Effort),
+            ...effortPickerItems(available, current === 'default' ? undefined : current as Effort),
           ],
           selected: current === 'default'
             ? 0
-            : Math.max(0, (context.supportedEfforts?.() ?? []).indexOf(current as Effort) + 1),
+            : Math.max(0, available.indexOf(current as Effort) + 1),
           onPick: async (picked) => {
             await context.setEffort(picked === 'default' ? undefined : picked as Effort);
           },

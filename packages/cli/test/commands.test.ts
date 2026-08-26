@@ -528,6 +528,39 @@ describe('/effort validation', () => {
     }
   });
 
+  it('builds the effort picker from one stable capability snapshot', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-effort-picker-'));
+    const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
+    process.env['PLIF_CONFIG_PATH'] = path.join(root, 'config.toml');
+    await fs.writeFile(process.env['PLIF_CONFIG_PATH'], '');
+    let calls = 0;
+    let picker: { items?: readonly { value: string }[]; selected?: number } | undefined;
+    try {
+      await effort!.run([], {
+        supportedEfforts: () => {
+          calls += 1;
+          return calls === 1
+            ? ['low', 'medium', 'high', 'xhigh', 'max', 'plif']
+            : ['medium'];
+        },
+        openPicker: (request) => {
+          if ('items' in request) picker = request;
+        },
+      } as unknown as CommandContext);
+
+      assert.equal(calls, 1, 'capabilities must be read once while opening the picker');
+      assert.deepEqual(
+        picker?.items?.map((item) => item.value),
+        ['default', 'low', 'medium', 'high', 'xhigh', 'max', 'plif'],
+      );
+      assert.equal(picker?.selected, 0);
+    } finally {
+      if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
+      else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
   it('applies /effort plif directly instead of reopening the picker', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-effort-plif-'));
     const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
@@ -565,6 +598,23 @@ describe('/effort validation', () => {
     assert.deepEqual(switched, ['z-ai/glm-5.2']);
     assert.equal(result.entries.length, 0);
   });
+
+  it('asks for the Codex FAST tier before applying a typed Codex model', async () => {
+    let question: { text?: string; options?: readonly { value: string; description?: string }[] } | undefined;
+    let switched: unknown;
+    const models = COMMANDS.find((command) => command.name === 'models')!;
+    await models.run(['codex-default'], {
+      engine: { questions: { ask: async (value: typeof question) => {
+        question = value;
+        return 'fast';
+      } } },
+      switchModel: async (selection) => { switched = selection; },
+    } as unknown as CommandContext);
+
+    assert.equal(question?.text, 'Deseja usar o modo FAST?');
+    assert.match(question?.options?.[0]?.description ?? '', /1,5×.*tokens/i);
+    assert.deepEqual(switched, { preset: 'codex', model: 'codex-default', codexFast: true });
+  });
 });
 
 describe('/export', () => {
@@ -585,6 +635,51 @@ describe('/export', () => {
 });
 
 describe('provider model picker', () => {
+  it('discovers live Codex models in /models without making Codex active', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-codex-model-catalog-'));
+    const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
+    const previousCodexCommand = process.env['PLIF_CODEX_COMMAND'];
+    const previousCodexModels = process.env['PLIF_CODEX_MODELS'];
+    process.env['PLIF_CONFIG_PATH'] = path.join(root, 'config.toml');
+    process.env['PLIF_CODEX_COMMAND'] = await fakeCodexCommand(root);
+    process.env['PLIF_CODEX_MODELS'] = 'multiple';
+    await fs.writeFile(process.env['PLIF_CONFIG_PATH'], '');
+    let picker: {
+      items?: readonly {
+        value: string;
+        provider?: string;
+        auth?: string;
+        reasoning?: boolean;
+        tools?: boolean;
+        capabilities?: readonly string[];
+      }[];
+    } | undefined;
+    try {
+      await findCommand('models')!.run([], {
+        openPicker: (request) => {
+          if ('items' in request) picker = request as typeof picker;
+        },
+      } as unknown as CommandContext);
+      const luna = picker?.items?.find((item) => item.value === 'codex:gpt-5.6-luna');
+      const mini = picker?.items?.find((item) => item.value === 'codex:gpt-5.4-mini');
+      assert.ok(luna, 'live Codex models must be present in the global model picker');
+      assert.ok(mini, 'all live Codex models must be present in the global model picker');
+      assert.match(luna.provider ?? '', /OpenAI Codex/i);
+      assert.match(luna.auth ?? '', /ChatGPT sign-in/i);
+      assert.equal(luna.reasoning, true);
+      assert.equal(luna.tools, true);
+      assert.deepEqual(luna.capabilities, ['text', 'vision']);
+    } finally {
+      if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
+      else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
+      if (previousCodexCommand === undefined) delete process.env['PLIF_CODEX_COMMAND'];
+      else process.env['PLIF_CODEX_COMMAND'] = previousCodexCommand;
+      if (previousCodexModels === undefined) delete process.env['PLIF_CODEX_MODELS'];
+      else process.env['PLIF_CODEX_MODELS'] = previousCodexModels;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('keeps /model and /provider as aliases without duplicate command rows', () => {
     assert.equal(findCommand('model')?.name, 'models');
     assert.equal(findCommand('provider')?.name, 'providers');
