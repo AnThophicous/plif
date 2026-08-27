@@ -7,6 +7,7 @@ import { parse as parseToml } from 'smol-toml';
 
 import {
   CONFIG_SCHEMA_URL,
+  activityHudModeOf,
   configSchemaText,
   formatConfigToml,
   globalConfigPath,
@@ -87,6 +88,26 @@ describe('declared vision providers', () => {
     const stored = { model: 'opencode-go/deepseek-v4-flash-vision-exp' };
     assert.equal(modelSupportsImages(stored), true);
     assert.equal(modelSupportsImages({ model: 'opencode-go/qwen3.8-max' }), false);
+  });
+});
+
+describe('activity HUD preference', () => {
+  it('defaults to compact and accepts only persisted HUD modes', () => {
+    assert.equal(activityHudModeOf({}), 'compact');
+    assert.equal(activityHudModeOf({ activityHud: { mode: 'expanded' } }), 'expanded');
+    assert.equal(activityHudModeOf({ activityHud: { mode: 'closed' } }), 'closed');
+    assert.equal(activityHudModeOf({ activityHud: { mode: 'invalid' } }), 'compact');
+  });
+
+  it('round-trips the presentation preference without creating runtime state', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-config-'));
+    const file = path.join(root, 'config.toml');
+    await saveGlobalConfig({ activityHud: { mode: 'expanded' } }, file);
+
+    const read = await loadGlobalConfig(file);
+    assert.equal(activityHudModeOf(read), 'expanded');
+    assert.match(await fs.readFile(file, 'utf8'), /activityHud/);
+    await fs.rm(root, { recursive: true, force: true });
   });
 });
 
