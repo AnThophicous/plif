@@ -3063,6 +3063,13 @@ export function App({
     const snapshotPromise = engine.memory.snapshot(cwd);
     const instructionsPromise = readAgentInstructions(cwd);
     const configPromise = loadStoredConfig(engine.paths);
+    // The transcript queue may create the session lazily on the first user
+    // event. Resolve it in parallel with normal turn setup so native
+    // providers can recover their pointer without creating a second source of
+    // truth for conversation history.
+    const conversationStatePromise = transcript.resolveSession().then(async (activeSession) => {
+      return activeSession?.loadConversationState() ?? null;
+    });
     const containerPromise: Promise<Container> = existingContainer
       ? Promise.resolve(existingContainer)
       : (async () => {
@@ -3078,11 +3085,12 @@ export function App({
           });
         })();
 
-    const [container, snapshot, agentInstructions, profileConfig] = await Promise.all([
+    const [container, snapshot, agentInstructions, profileConfig, conversationState] = await Promise.all([
       containerPromise,
       snapshotPromise,
       instructionsPromise,
       configPromise,
+      conversationStatePromise,
     ]);
     await goalControllerRef.current?.ready();
     goalControllerRef.current?.setMaxRounds(plifModeOf(profileConfig).maxGoalRounds);
@@ -3140,6 +3148,10 @@ export function App({
     const lspForAgent = lspManager.current ? lspTools(lspManager.current) : [];
     const edits = new EditCoordinator();
     const storedConfig = profileConfig;
+    const configuredConversationState = process.env['PLIF_CONVERSATION_STATE'] ?? storedConfig.conversationState;
+    const conversationStateMode = configuredConversationState === 'native' || configuredConversationState === 'replay'
+      ? configuredConversationState
+      : 'auto';
     const directImageSupport = modelSupportsImages(storedConfig, {
       model: providerRef.current.info.id,
       preset: providerIdForConfig(storedConfig),
@@ -3273,6 +3285,8 @@ export function App({
           bus: engine.bus,
           turnId: durableTurnId,
           signal: abort.signal,
+          ...(conversationState ? { conversationState } : {}),
+          conversationStateMode,
           tools: agentTools,
           skillBootstrap: codexSkillBootstrap,
           memory: engine.memory,
@@ -3410,6 +3424,19 @@ export function App({
       // session append is real asynchronous I/O. Commit it before closing the
       // live stream; no sleep is needed because this waits on the actual write.
       await transcript.flushPersistence();
+      if (result.stop === 'complete' && result.conversationState) {
+        // The transcript remains canonical. This sidecar is only a provider
+        // continuation pointer, so a failed optimization write must never
+        // turn a successful model answer into a failed user turn.
+        try {
+          const activeSession = await transcript.resolveSession();
+          await activeSession?.saveConversationState(result.conversationState);
+        } catch {
+          push(entry('notice', 'native conversation state was not saved; transcript replay remains available', {
+            tone: 'warn',
+          }));
+        }
+      }
       const streamed = agentRow.current !== null;
       closeAnswer();
       // Only as a fallback. A provider that streams has already put every word

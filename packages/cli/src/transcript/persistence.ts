@@ -51,6 +51,12 @@ export class TranscriptPersistenceQueue {
     return this.#queue;
   }
 
+  /** Return the current session only after all queued writes are visible. */
+  async session(): Promise<Session | null> {
+    await this.#queue;
+    return this.#session;
+  }
+
   /**
    * Switch the destination without overtaking writes already queued for the
    * previous session. Session changes normally happen while idle, but keeping

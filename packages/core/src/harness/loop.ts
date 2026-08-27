@@ -31,6 +31,11 @@ import type { EventBus } from '../events/bus.js';
 import { safeToolCallArguments } from '../model/provider.js';
 import type { Message, ModelExecutionContext, ModelProvider, ToolCall } from '../model/provider.js';
 import type { Attachment } from '../model/provider.js';
+import type {
+  ConversationState,
+  ConversationStateMetrics,
+  ConversationStateMode,
+} from '../model/conversation-state.js';
 import type { Container } from '../container/container.js';
 import type { QuestionBroker } from './ask.js';
 import { compact, estimateTokens } from './compaction.js';
@@ -131,6 +136,10 @@ export interface LoopOptions {
   readonly workspace?: string;
   /** Permission context inherited from the interactive PLIF host. */
   readonly execution?: ModelExecutionContext;
+  /** Native provider state loaded from this session's sidecar, when available. */
+  readonly conversationState?: ConversationState;
+  /** `auto` prefers native continuation and falls back to local replay. */
+  readonly conversationStateMode?: ConversationStateMode;
   readonly sessionId?: string;
   readonly contextTokens?: number;
   /** Output reservation used by the context budget engine. */
@@ -338,6 +347,9 @@ export interface LoopResult {
   readonly recoveryAttempts: number;
   readonly stagnationState: ProgressSnapshot['stagnationState'];
   readonly tokenUsage?: CanonicalTokenUsage;
+  /** Provider-native continuation state, persisted only after a successful turn. */
+  readonly conversationState?: ConversationState;
+  readonly conversationMetrics?: ConversationStateMetrics;
   readonly error?: PlifError;
 }
 
@@ -606,6 +618,8 @@ async function runLoopInternal(
   let completionTokens = 0;
   let retries = 0;
   let tokenUsage: CanonicalTokenUsage | undefined;
+  let conversationState: ConversationState | undefined;
+  let conversationMetrics: ConversationStateMetrics | undefined;
   let cycle = createHarnessCycle();
   let reviewReminders = 0;
   // A failed capsule provider is disabled for the rest of this loop. Later
@@ -784,6 +798,8 @@ async function runLoopInternal(
           : {}),
         ...(options.signal ? { signal: options.signal } : {}),
         ...(options.execution ? { execution: options.execution } : {}),
+        ...(options.conversationState ? { conversationState: options.conversationState } : {}),
+        ...(options.conversationStateMode ? { conversationStateMode: options.conversationStateMode } : {}),
       })) {
         if (event.kind === 'text') {
           endThinking();
@@ -864,6 +880,9 @@ async function runLoopInternal(
           turnReasoning = '';
           requested.length = 0;
           options.bus.emit('agent.reset', { turnId, reason: 'the endpoint failed part-way through' });
+        } else if (event.kind === 'conversation_state') {
+          conversationState = event.state;
+          conversationMetrics = event.metrics;
         } else {
           turnPromptTokens += event.usage.promptTokens;
           turnCompletionTokens += event.usage.completionTokens;
@@ -1351,6 +1370,8 @@ async function runLoopInternal(
       retries,
       ...progress.snapshot(),
       ...(tokenUsage ? { tokenUsage } : {}),
+      ...(conversationState ? { conversationState } : {}),
+      ...(conversationMetrics ? { conversationMetrics } : {}),
       ...(error ? { error } : {}),
     };
   }

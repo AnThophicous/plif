@@ -54,6 +54,11 @@ values = ["low", "medium", "high", "xhigh", "max", "ultra", "ultracode", "plif"]
 type = "boolean"
 description = "Use Codex's higher-speed service tier; applies only to the Codex provider."
 
+[fields.conversationState]
+type = "string"
+values = ["auto", "native", "replay"]
+description = "Conversation continuation policy. Auto uses native provider state with transcript replay fallback."
+
 [fields.temperature]
 type = "number"
 

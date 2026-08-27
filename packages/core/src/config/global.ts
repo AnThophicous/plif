@@ -6,6 +6,7 @@ import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 
 import { PlifError } from '../errors.js';
 import { BUILTIN_AGENT_PRESETS } from './agent-presets.js';
+import type { ConversationStateMode } from '../model/conversation-state.js';
 
 export type PermissionMode = 'ask' | 'auto-approve' | 'deny';
 
@@ -95,6 +96,8 @@ export interface GlobalConfig {
   readonly effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | 'ultracode' | 'plif';
   /** Opt-in Codex fast service tier; ignored by all other providers. */
   readonly codexFast?: boolean;
+  /** Native continuation policy. Defaults to auto. */
+  readonly conversationState?: ConversationStateMode;
   readonly providers?: unknown;
   /** OpenCode-style custom provider map. `providers` remains accepted. */
   readonly provider?: unknown;

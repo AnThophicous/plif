@@ -2,10 +2,28 @@
 
 All notable changes to plif. This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — 2026-08-25
+## [Unreleased] — 2026-08-26
 
 This branch consolidates the reliability and workspace-flow fixes prepared
 after 0.3.9. It is not a versioned release yet.
+
+### Added
+
+- **Durable provider conversation state.** PLIF now keeps a scoped,
+  non-secret continuation pointer per session, provider, model, endpoint and
+  account instead of confusing local message or database IDs with provider
+  state.
+- **Native Codex continuation.** Codex sessions use a persistent app-server
+  thread with `thread/start`, `thread/resume` and `turn/start`; after a
+  restart, PLIF resumes the thread when it is still valid.
+- **Safe replay fallback and observability.** If native continuation is
+  unavailable or expired, PLIF starts a fresh thread and replays the canonical
+  JSONL history. Conversation metrics now record message count, payload size,
+  token/cache usage, latency and stable fallback reasons.
+- **Configurable continuation policy.** `conversationState = "auto"` is the
+  default, with explicit `"native"` and `"replay"` modes available through
+  `config.toml` or `PLIF_CONVERSATION_STATE`. See
+  [`docs/conversation-state.md`](docs/conversation-state.md).
 
 ### Fixed
 
@@ -36,8 +54,10 @@ after 0.3.9. It is not a versioned release yet.
 ### Validation
 
 - Core harness tests: **37 passed, 0 failed**.
-- Full test suite: **1,123 passed, 0 failed, 20 skipped**.
-- Core TypeScript check: passed.
+- Full test suite: **1,163 passed, 0 failed, 0 cancelled, 20 skipped**
+  (**1,183 tests discovered**).
+- TypeScript check and production build: passed.
+- Lint: no lint script is defined in the root package.
 - `git diff --check`: passed.
 
 ## [0.3.9] — 2026-08-24

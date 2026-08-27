@@ -20,6 +20,7 @@ import { PlifError } from '../errors.js';
 import { globalConfigPath, loadGlobalConfig, saveGlobalConfig } from '../config/global.js';
 import type { StorePaths } from '../store/paths.js';
 import type { ModelPricing, ModelProtocol, ModelRankingHints, StreamSemantics } from './provider.js';
+import type { ConversationStateMode } from './conversation-state.js';
 
 export interface ModelConfig {
   /** Model id as the endpoint knows it, e.g. "gpt-4o-mini", "llama3.1:8b". */
@@ -46,6 +47,8 @@ export interface ModelConfig {
   readonly effort?: Effort;
   /** Use the Codex app-server's higher-speed service tier for this session. */
   readonly codexFast?: boolean;
+  /** Conversation continuation strategy; auto prefers native state with replay fallback. */
+  readonly conversationState?: ConversationStateMode;
 }
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | 'ultracode' | 'plif';
@@ -338,6 +341,8 @@ export interface StoredConfig {
   readonly effort?: Effort;
   /** Opt-in Codex service tier; ignored by every other provider. */
   readonly codexFast?: boolean;
+  /** Native continuation policy. Defaults to auto. */
+  readonly conversationState?: ConversationStateMode;
   readonly autoApprove?: boolean;
   readonly mcpServers?: unknown;
   readonly providers?: unknown;
@@ -704,6 +709,11 @@ export function resolveConfig(
       // Local servers ignore the value but the SDK refuses an empty one.
       (isLocal(baseURL) && !needKey ? 'local' : '');
 
+  const configuredConversationState = env['PLIF_CONVERSATION_STATE'] ?? stored.conversationState;
+  const conversationState: ConversationStateMode = configuredConversationState === 'native' || configuredConversationState === 'replay'
+    ? configuredConversationState
+    : 'auto';
+
   const effort = normalizeEffort(
     stored.effort,
     supportedEfforts(baseURL, model, { providerId }),
@@ -724,6 +734,7 @@ export function resolveConfig(
     timeoutMs: numberFrom(env['PLIF_TIMEOUT_MS']) ?? stored.timeoutMs ?? DEFAULTS.timeoutMs,
     effort,
     ...(providerId === 'codex' ? { codexFast: stored.codexFast === true } : {}),
+    conversationState,
   };
 }
 

@@ -48,6 +48,10 @@ import type {
   ConversationEvent,
   LegacyTranscriptEvent,
 } from './events.js';
+import {
+  isConversationState,
+  type ConversationState,
+} from '../model/conversation-state.js';
 
 // ---------------------------------------------------------------------------
 // Transcript events
@@ -173,6 +177,24 @@ export class Session {
   history(): Promise<ConversationEvent[]> {
     return this.#store.history(this.#meta);
   }
+
+  /** Load the provider-native continuation pointer, if this session has one. */
+  async loadConversationState(): Promise<ConversationState | null> {
+    await this.#queue;
+    return this.#store.loadConversationState(this.#meta);
+  }
+
+  /** Persist only the non-secret continuation pointer after a successful turn. */
+  saveConversationState(state: ConversationState): Promise<void> {
+    this.#queue = this.#queue.then(() => this.#store.saveConversationState(this.#meta, state));
+    return this.#queue;
+  }
+
+  /** Remove a stale native pointer so the next turn uses transcript replay. */
+  clearConversationState(): Promise<void> {
+    this.#queue = this.#queue.then(() => this.#store.clearConversationState(this.#meta));
+    return this.#queue;
+  }
 }
 
 export class SessionStore {
@@ -199,6 +221,10 @@ export class SessionStore {
     return path.join(this.#dir(workspace), `${id}.jsonl`);
   }
 
+  #conversationStateFile(workspace: string, id: string): string {
+    return path.join(this.#dir(workspace), `${id}.state.json`);
+  }
+
   /** Start a new session in this workspace. */
   async create(workspace: string, options: { container?: string } = {}): Promise<Session> {
     const now = new Date().toISOString();
@@ -221,6 +247,56 @@ export class SessionStore {
     const temp = `${target}.tmp`;
     await fs.writeFile(temp, JSON.stringify(meta, null, 2), 'utf8');
     await fs.rename(temp, target);
+  }
+
+  async loadConversationState(meta: SessionMeta): Promise<ConversationState | null> {
+    try {
+      const raw = JSON.parse(await fs.readFile(this.#conversationStateFile(meta.workspace, meta.id), 'utf8')) as unknown;
+      return isConversationState(raw) ? raw : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async saveConversationState(meta: SessionMeta, state: ConversationState): Promise<void> {
+    if (!isConversationState(state)) {
+      throw new PlifError('INVALID_ARGUMENT', 'conversation state is malformed');
+    }
+    const safe: ConversationState = {
+      version: 1,
+      scope: {
+        providerId: state.scope.providerId,
+        model: state.scope.model,
+        endpoint: state.scope.endpoint,
+        ...(state.scope.protocol ? { protocol: state.scope.protocol } : {}),
+        ...(state.scope.account ? { account: state.scope.account } : {}),
+      },
+      mode: state.mode,
+      kind: state.kind,
+      ...(state.threadId ? { threadId: state.threadId } : {}),
+      ...(state.previousResponseId ? { previousResponseId: state.previousResponseId } : {}),
+      ...(state.lastTurnId ? { lastTurnId: state.lastTurnId } : {}),
+      generation: state.generation,
+      updatedAt: state.updatedAt,
+      ...(state.lastFallbackReason ? { lastFallbackReason: state.lastFallbackReason } : {}),
+    };
+    await fs.mkdir(this.#dir(meta.workspace), { recursive: true });
+    const target = this.#conversationStateFile(meta.workspace, meta.id);
+    const current = await this.loadConversationState(meta);
+    if (current && current.generation > safe.generation) return;
+    const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
+    let committed = false;
+    try {
+      await fs.writeFile(temp, JSON.stringify(safe, null, 2), { encoding: 'utf8', mode: 0o600 });
+      await fs.rename(temp, target);
+      committed = true;
+    } finally {
+      if (!committed) await fs.rm(temp, { force: true }).catch(() => undefined);
+    }
+  }
+
+  async clearConversationState(meta: SessionMeta): Promise<void> {
+    await fs.rm(this.#conversationStateFile(meta.workspace, meta.id), { force: true });
   }
 
   /**
@@ -274,7 +350,7 @@ export class SessionStore {
 
     const sessions: SessionMeta[] = [];
     for (const file of files) {
-      if (!file.endsWith('.json')) continue;
+      if (!file.endsWith('.json') || file.endsWith('.state.json')) continue;
       try {
         const raw = await fs.readFile(path.join(this.#dir(workspace), file), 'utf8');
         sessions.push(JSON.parse(raw) as SessionMeta);
@@ -447,7 +523,7 @@ export class SessionStore {
       const dir = path.join(this.#paths.sessions, key);
       let files: string[];
       try {
-        files = (await fs.readdir(dir)).filter((file) => file.endsWith('.json'));
+        files = (await fs.readdir(dir)).filter((file) => file.endsWith('.json') && !file.endsWith('.state.json'));
       } catch {
         continue;
       }
