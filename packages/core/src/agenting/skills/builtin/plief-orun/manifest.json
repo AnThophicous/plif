@@ -1,0 +1,31 @@
+{
+  "name": "Pli'ef Orun",
+  "slug": "plief-orun",
+  "version": "1.1.0-integration",
+  "description": "Resource & knowledge intelligence: discovers, verifies, ranks and recommends component libraries, primitives, animation engines, 3D/motion tooling and design resources via the QueryContract integration surface.",
+  "entry": "SKILL.md",
+  "artifacts": {
+    "produced": [
+      ".plif/artifacts/<task-id>/orun-candidates.json"
+    ],
+    "consumed": [
+      ".plif/artifacts/<surface-id>/selection-query.json",
+      ".plif/artifacts/<surface-id>/design-dna.json"
+    ]
+  },
+  "schemas": [
+    "schemas/item.schema.json",
+    "schemas/source.schema.json",
+    "schemas/concept.schema.json",
+    "schemas/relationship.schema.json",
+    "schemas/selection-query.schema.json",
+    "schemas/selection-record.schema.json"
+  ],
+  "engines_selftest": [
+    "scripts/validate_query_contract.py"
+  ],
+  "notes": [
+    "Integration contract: rules/integration-contract.md resolves historical component-discovery overlap.",
+    "Catalog validators: validate_catalog / build_indexes / detect_duplicates / check_freshness retained."
+  ]
+}

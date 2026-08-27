@@ -1,0 +1,308 @@
+{
+  "animated": [
+    "concept:animated-hero",
+    "concept:animated-marquee"
+  ],
+  "animation": [
+    "concept:animated-hero",
+    "concept:interactive-rive",
+    "concept:modal-transition"
+  ],
+  "hero": [
+    "concept:animated-hero"
+  ],
+  "motion": [
+    "concept:animated-hero"
+  ],
+  "performance": [
+    "concept:3d-interaction",
+    "concept:animated-hero",
+    "concept:scroll-choreography"
+  ],
+  "responsive": [
+    "concept:animated-hero",
+    "concept:carousel",
+    "concept:data-line-chart"
+  ],
+  "autoplay": [
+    "concept:carousel"
+  ],
+  "carousel": [
+    "concept:carousel"
+  ],
+  "drag": [
+    "concept:carousel",
+    "concept:drag-inertia"
+  ],
+  "image": [
+    "concept:carousel",
+    "concept:image-to-procedural-3d"
+  ],
+  "keyboard": [
+    "concept:carousel"
+  ],
+  "navigation": [
+    "concept:carousel"
+  ],
+  "slider": [
+    "concept:carousel"
+  ],
+  "touch": [
+    "concept:carousel",
+    "concept:drag-inertia"
+  ],
+  "close": [
+    "concept:modal-transition"
+  ],
+  "dialog": [
+    "concept:modal-transition"
+  ],
+  "enter": [
+    "concept:modal-transition"
+  ],
+  "exit": [
+    "concept:modal-transition"
+  ],
+  "focus": [
+    "concept:modal-transition"
+  ],
+  "interruption": [
+    "concept:modal-transition"
+  ],
+  "modal": [
+    "concept:modal-transition"
+  ],
+  "open": [
+    "concept:modal-transition"
+  ],
+  "reduced-motion": [
+    "concept:animated-marquee",
+    "concept:modal-transition"
+  ],
+  "transition": [
+    "concept:modal-transition"
+  ],
+  "choreography": [
+    "concept:scroll-choreography"
+  ],
+  "cinematic": [
+    "concept:scroll-choreography"
+  ],
+  "mobile": [
+    "concept:scroll-choreography"
+  ],
+  "pin": [
+    "concept:scroll-choreography"
+  ],
+  "pinning": [
+    "concept:scroll-choreography"
+  ],
+  "scroll": [
+    "concept:scroll-choreography"
+  ],
+  "scrub": [
+    "concept:scroll-choreography"
+  ],
+  "timeline": [
+    "concept:scroll-choreography"
+  ],
+  "trigger": [
+    "concept:scroll-choreography",
+    "concept:text-scramble"
+  ],
+  "accessibility": [
+    "concept:data-line-chart",
+    "concept:text-scramble"
+  ],
+  "axes": [
+    "concept:data-line-chart"
+  ],
+  "chart": [
+    "concept:data-line-chart"
+  ],
+  "data-shape": [
+    "concept:data-line-chart"
+  ],
+  "line": [
+    "concept:data-line-chart"
+  ],
+  "series": [
+    "concept:data-line-chart"
+  ],
+  "time": [
+    "concept:data-line-chart"
+  ],
+  "tooltip": [
+    "concept:data-line-chart"
+  ],
+  "trend": [
+    "concept:data-line-chart"
+  ],
+  "cards": [
+    "concept:animated-marquee"
+  ],
+  "infinite": [
+    "concept:animated-marquee"
+  ],
+  "loop": [
+    "concept:animated-marquee"
+  ],
+  "marquee": [
+    "concept:animated-marquee"
+  ],
+  "moving": [
+    "concept:animated-marquee"
+  ],
+  "pause": [
+    "concept:animated-marquee"
+  ],
+  "speed": [
+    "concept:animated-marquee"
+  ],
+  "ticker": [
+    "concept:animated-marquee"
+  ],
+  "characters": [
+    "concept:text-scramble"
+  ],
+  "duration": [
+    "concept:text-scramble"
+  ],
+  "hacker": [
+    "concept:text-scramble"
+  ],
+  "scramble": [
+    "concept:text-scramble"
+  ],
+  "text": [
+    "concept:text-scramble"
+  ],
+  "3d": [
+    "concept:3d-interaction",
+    "concept:image-to-procedural-3d"
+  ],
+  "animation-ready": [
+    "concept:image-to-procedural-3d"
+  ],
+  "fidelity": [
+    "concept:image-to-procedural-3d"
+  ],
+  "hidden-regions": [
+    "concept:image-to-procedural-3d"
+  ],
+  "hierarchy": [
+    "concept:image-to-procedural-3d"
+  ],
+  "in": [
+    "concept:image-to-procedural-3d"
+  ],
+  "make": [
+    "concept:image-to-procedural-3d"
+  ],
+  "object": [
+    "concept:image-to-procedural-3d"
+  ],
+  "procedural": [
+    "concept:image-to-procedural-3d"
+  ],
+  "quality-gates": [
+    "concept:image-to-procedural-3d"
+  ],
+  "rebuild": [
+    "concept:image-to-procedural-3d"
+  ],
+  "reference": [
+    "concept:image-to-procedural-3d"
+  ],
+  "this": [
+    "concept:image-to-procedural-3d"
+  ],
+  "three.js": [
+    "concept:image-to-procedural-3d"
+  ],
+  "threejs": [
+    "concept:image-to-procedural-3d"
+  ],
+  "to": [
+    "concept:image-to-procedural-3d"
+  ],
+  "asset": [
+    "concept:interactive-rive"
+  ],
+  "events": [
+    "concept:interactive-rive"
+  ],
+  "inputs": [
+    "concept:interactive-rive"
+  ],
+  "interactive": [
+    "concept:interactive-rive"
+  ],
+  "machine": [
+    "concept:interactive-rive"
+  ],
+  "renderer": [
+    "concept:3d-interaction",
+    "concept:interactive-rive"
+  ],
+  "riv": [
+    "concept:interactive-rive"
+  ],
+  "rive": [
+    "concept:interactive-rive"
+  ],
+  "runtime-size": [
+    "concept:interactive-rive"
+  ],
+  "state": [
+    "concept:interactive-rive"
+  ],
+  "state-machine": [
+    "concept:interactive-rive"
+  ],
+  "camera": [
+    "concept:3d-interaction"
+  ],
+  "fallback": [
+    "concept:3d-interaction"
+  ],
+  "interaction": [
+    "concept:3d-interaction"
+  ],
+  "picking": [
+    "concept:3d-interaction"
+  ],
+  "raycast": [
+    "concept:3d-interaction"
+  ],
+  "scene": [
+    "concept:3d-interaction"
+  ],
+  "true": [
+    "concept:3d-interaction"
+  ],
+  "webgl": [
+    "concept:3d-interaction"
+  ],
+  "bounds": [
+    "concept:drag-inertia"
+  ],
+  "inertia": [
+    "concept:drag-inertia"
+  ],
+  "momentum": [
+    "concept:drag-inertia"
+  ],
+  "pointer": [
+    "concept:drag-inertia"
+  ],
+  "throwable": [
+    "concept:drag-inertia"
+  ],
+  "velocity": [
+    "concept:drag-inertia"
+  ],
+  "with": [
+    "concept:drag-inertia"
+  ]
+}

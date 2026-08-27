@@ -26,6 +26,13 @@ export interface Skill {
 const SKILL_FILE = 'SKILL.md';
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,48}$/;
 
+// The vNext Orun package keeps its display spelling in frontmatter. Normalize
+// that one historical spelling to the runtime-safe package slug without
+// changing the source skill body or weakening the skill-name contract.
+const RUNTIME_SKILL_NAME_ALIASES: Readonly<Record<string, string>> = {
+  "pli'ef-orun": 'plief-orun',
+};
+
 export interface ParseSkillOptions {
   readonly loadInstructions?: boolean;
 }
@@ -57,7 +64,10 @@ export function parseSkill(
     if (key) fields.set(key, value);
   }
 
-  const name = fields.get('name') ?? path.basename(path.dirname(file));
+  const rawName = fields.get('name');
+  const name = rawName
+    ? (RUNTIME_SKILL_NAME_ALIASES[rawName] ?? rawName)
+    : path.basename(path.dirname(file));
   const description = fields.get('description') ?? '';
   if (!NAME_PATTERN.test(name) || !description) return null;
 
@@ -245,12 +255,12 @@ export class SkillRegistry {
 }
 
 /** Skills that every provider and every effort must load before proceeding. */
-export const MANDATORY_GLOBAL_SKILLS = ['anti-ai-slop', 'galileu'] as const;
+export const MANDATORY_GLOBAL_SKILLS = ['anti-ai-slop', 'plief-galileu'] as const;
 
 /** Additional skills required by the PLIF effort. */
 export const MANDATORY_PLIF_SKILLS = [
   ...MANDATORY_GLOBAL_SKILLS,
-  'plif-cybersecurity',
+  'plief-argus',
 ] as const;
 
 export function mandatorySkillsForEffort(effort?: string): readonly string[] {

@@ -388,7 +388,7 @@ describe('upper work dock', () => {
     assert.deepEqual(activitySummary([
       { id: 'input', kind: 'input', title: 'inspect', at: 1 },
       { id: 'mcp', kind: 'tool', title: 'Search', toolCategory: 'external', toolTarget: 'github', at: 2 },
-      { id: 'skill', kind: 'tool', title: 'Skill', toolCategory: 'memory', toolTarget: 'galileu', at: 3 },
+      { id: 'skill', kind: 'tool', title: 'Skill', toolCategory: 'memory', toolTarget: 'plief-galileu', at: 3 },
       { id: 'question', kind: 'question', title: 'Which path?', status: 'blocked', at: 4 },
     ] as const satisfies readonly TimelineEntry[]).mcps, ['github']);
 

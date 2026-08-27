@@ -1,0 +1,139 @@
+{
+  "archetypes": {
+    "shadcn-registry": {
+      "discover": [
+        "registry index/search",
+        "source docs"
+      ],
+      "fetch": [
+        "registry item JSON"
+      ],
+      "critical_fields": [
+        "name",
+        "type",
+        "files",
+        "dependencies",
+        "registryDependencies"
+      ],
+      "never_guess": [
+        "slug",
+        "registry URL",
+        "dependencies"
+      ]
+    },
+    "npm": {
+      "discover": [
+        "official docs",
+        "npm metadata"
+      ],
+      "fetch": [
+        "package metadata",
+        "export docs"
+      ],
+      "critical_fields": [
+        "package",
+        "version",
+        "exports",
+        "peerDependencies"
+      ],
+      "never_guess": [
+        "package name",
+        "import path",
+        "peer dependency"
+      ]
+    },
+    "github": {
+      "discover": [
+        "official repository"
+      ],
+      "fetch": [
+        "README",
+        "manifest",
+        "license",
+        "source"
+      ],
+      "critical_fields": [
+        "license",
+        "current structure",
+        "canonical source"
+      ],
+      "never_guess": [
+        "license",
+        "repository lineage"
+      ]
+    },
+    "docs": {
+      "discover": [
+        "official documentation"
+      ],
+      "fetch": [
+        "relevant API/install pages"
+      ],
+      "critical_fields": [
+        "install",
+        "API",
+        "compatibility"
+      ],
+      "never_guess": [
+        "command",
+        "prop",
+        "hook",
+        "version behavior"
+      ]
+    },
+    "gallery": {
+      "discover": [
+        "official gallery/search"
+      ],
+      "fetch": [
+        "item detail page"
+      ],
+      "critical_fields": [
+        "identity",
+        "format",
+        "availability"
+      ],
+      "never_guess": [
+        "code portability",
+        "license"
+      ]
+    },
+    "marketplace": {
+      "discover": [
+        "official marketplace"
+      ],
+      "fetch": [
+        "item detail/licensing/access page"
+      ],
+      "critical_fields": [
+        "artifact type",
+        "price/access",
+        "usage model"
+      ],
+      "never_guess": [
+        "source availability",
+        "portable code"
+      ]
+    },
+    "agent-skill": {
+      "discover": [
+        "official skill/repository"
+      ],
+      "fetch": [
+        "SKILL.md",
+        "scripts",
+        "license"
+      ],
+      "critical_fields": [
+        "workflow",
+        "host requirements",
+        "license",
+        "version"
+      ],
+      "never_guess": [
+        "supported tools",
+        "pipeline guarantees"
+      ]
+    }
+  }
+}

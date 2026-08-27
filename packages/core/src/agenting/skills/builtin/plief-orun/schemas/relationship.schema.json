@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pli'ef Orun Relationship",
+  "type": "object",
+  "required": [
+    "from",
+    "type",
+    "to"
+  ],
+  "properties": {
+    "from": {
+      "type": "string"
+    },
+    "type": {
+      "enum": [
+        "implements",
+        "depends_on",
+        "requires",
+        "alternative_to",
+        "compatible_with",
+        "conflicts_with",
+        "extends",
+        "belongs_to",
+        "succeeded_by",
+        "legacy_of",
+        "inspired_by"
+      ]
+    },
+    "to": {
+      "type": "string"
+    },
+    "evidence": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

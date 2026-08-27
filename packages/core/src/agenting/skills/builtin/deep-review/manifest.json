@@ -1,0 +1,14 @@
+{
+    "artifacts":  {
+                      "consumed":  [
+                                       "_kernel/evidence/ledger.md"
+                                   ],
+                      "produced":  [
+
+                                   ]
+                  },
+    "name":  "deep-review",
+    "version":  "1.0.0",
+    "slug":  "deep-review",
+    "notes":  "peer utility: merged diff-correctness QUICK + adversarial DEEP audit"
+}

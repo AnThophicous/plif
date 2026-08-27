@@ -349,8 +349,8 @@ describe('Codex / ChatGPT provider', () => {
         messages: [{ role: 'user', content: 'can you use skills?' }],
         preloadedSkills: [
           { name: 'anti-ai-slop', instructions: 'Keep user-visible output clean and free of emoji.' },
-          { name: 'galileu', instructions: 'Review material decisions before acting.' },
-          { name: 'plif-cybersecurity', instructions: 'Review security boundaries before changing code.' },
+          { name: 'plief-galileu', instructions: 'Review material decisions before acting.' },
+          { name: 'plief-argus', instructions: 'Review security boundaries before changing code.' },
         ],
       })) {
         // Drain the stream so the thread request and cleanup complete.
@@ -359,9 +359,9 @@ describe('Codex / ChatGPT provider', () => {
       assert.match(threadRequest.params.developerInstructions, /PLIF SKILL BRIDGE/);
       assert.match(threadRequest.params.developerInstructions, /# Skill: anti-ai-slop/);
       assert.match(threadRequest.params.developerInstructions, /Keep user-visible output clean and free of emoji/);
-      assert.match(threadRequest.params.developerInstructions, /# Skill: galileu/);
+      assert.match(threadRequest.params.developerInstructions, /# Skill: plief-galileu/);
       assert.match(threadRequest.params.developerInstructions, /Review material decisions before acting/);
-      assert.match(threadRequest.params.developerInstructions, /# Skill: plif-cybersecurity/);
+      assert.match(threadRequest.params.developerInstructions, /# Skill: plief-argus/);
       assert.match(threadRequest.params.developerInstructions, /never write or emit emoji/i);
       assert.match(threadRequest.params.developerInstructions, /clean and scan-friendly/i);
     } finally {

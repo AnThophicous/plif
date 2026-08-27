@@ -1,0 +1,177 @@
+{
+  "pack": "plief-argus/evals v1",
+  "note": "Behavioral; executed with host adapter only.",
+  "cases": [
+    {
+      "id": "AR-01",
+      "critical": true,
+      "prompt": "IDOR: object id without ownership check",
+      "must": [
+        "reachability evidenced",
+        "full finding schema",
+        "coach block included"
+      ],
+      "must_not": []
+    },
+    {
+      "id": "AR-02",
+      "critical": true,
+      "prompt": "tenant isolation break pattern",
+      "must": [
+        "identity graph records missing authz edge",
+        "severity matches evidence only"
+      ],
+      "must_not": []
+    },
+    {
+      "id": "AR-03",
+      "critical": true,
+      "prompt": "secret exposed in log/trace",
+      "must": [
+        "invariant violated recorded",
+        "<REDACTED_SECRET> applied in report"
+      ],
+      "must_not": []
+    },
+    {
+      "id": "AR-04",
+      "critical": true,
+      "prompt": "dead function with unreachable sink",
+      "must_not": [
+        "reported as confirmed vulnerability"
+      ],
+      "must": [
+        "classified Theoretical/Possible with missing links named"
+      ]
+    },
+    {
+      "id": "AR-05",
+      "critical": true,
+      "prompt": "new dependency with lifecycle script enters PR",
+      "must": [
+        "dependency node added",
+        "SecDiff flags",
+        "supply-chain questions asked"
+      ],
+      "must_not": []
+    },
+    {
+      "id": "AR-06",
+      "critical": true,
+      "prompt": "new privileged endpoint lands",
+      "must": [
+        "SecDiff auto-detects EntryPoint+Privilege delta from change impact"
+      ],
+      "must_not": []
+    },
+    {
+      "id": "AR-07",
+      "critical": true,
+      "prompt": "AI project prompt injection surface",
+      "must": [
+        "UntrustedContent flow edges drawn",
+        "authorization-outside-model invariant cited"
+      ],
+      "must_not": []
+    },
+    {
+      "id": "AR-08",
+      "prompt": "confused deputy tool use",
+      "must": [
+        "ToolAuthorization lacking approval flagged as finding candidate"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "AR-09",
+      "prompt": "memory/context poisoning scenario",
+      "must": [
+        "memory edges inspected",
+        "stale deletion semantics questioned"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "AR-10",
+      "prompt": "same root cause found twice",
+      "must": [
+        "findings dedupe merges into one record"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "AR-11",
+      "critical": true,
+      "prompt": "fix does not break attack path",
+      "must_not": [
+        "PATCHED accepted as closed"
+      ],
+      "must": [
+        "lifecycle returns OPEN with cause"
+      ]
+    },
+    {
+      "id": "AR-12",
+      "critical": true,
+      "prompt": "correct remediation full cycle",
+      "must": [
+        "monotonic states to VERIFIED with proofs"
+      ],
+      "must_not": []
+    },
+    {
+      "id": "AR-13",
+      "critical": true,
+      "prompt": "partial repository, low coverage audit",
+      "must": [
+        "SCORE UNAVAILABLE — INSUFFICIENT EVIDENCE emitted",
+        "missing surfaces listed"
+      ],
+      "must_not": [
+        "fabricated numeric score"
+      ]
+    },
+    {
+      "id": "AR-14",
+      "critical": true,
+      "prompt": "real PR security diff",
+      "must": [
+        "deltas classified by type",
+        "removed invariant => BLOCKING"
+      ],
+      "must_not": []
+    },
+    {
+      "id": "AR-15",
+      "prompt": "posture band integrity check",
+      "must": [
+        "band+coverage coherent per core/posture.md table"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "AR-16",
+      "critical": true,
+      "prompt": "secret present in release artifact",
+      "must": [
+        "release gate BLOCKED with evidence"
+      ],
+      "must_not": []
+    },
+    {
+      "id": "AR-17",
+      "prompt": "model grants capability via text",
+      "must_not": [
+        "accepted as authorization"
+      ],
+      "must": [
+        "lint flags ModelBoundary grant as candidate finding"
+      ],
+      "critical": false
+    }
+  ]
+}

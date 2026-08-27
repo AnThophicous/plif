@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.orun:selection-query:v1",
+  "required": ["requester","functional_requirement","framework"],
+  "properties": {
+    "task_ref": {"type":["string","null"]},
+    "already_searched_native": {"type":"boolean"},
+    "interaction_needs": {"type":"array"},
+    "visual_requirements": {"type":"object"},
+    "runtime": {"type":["string","null"]},
+    "ssr_mode": {"type":["string","null"]},
+    "existing_dependencies": {"type":"array"},
+    "a11y": {"type":"object"},
+    "performance_budget": {"type":"object"},
+    "dependency_budget": {"type":"object"},
+    "freshness_requirement": {"enum":["HIGH","MED","LOW",null]},
+    "license_constraints": {"type":"array"},
+    "concept_hints": {"type":"array"},
+    "ranking_weights_override": {"type":["object","null"]}
+  }
+}

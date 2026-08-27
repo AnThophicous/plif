@@ -1,0 +1,111 @@
+[
+  {
+    "id": 1,
+    "request": "Quero um animated hero para Next.js.",
+    "must": [
+      "resolve concepts",
+      "retrieve multiple real candidates",
+      "verify slugs before install",
+      "do not invent"
+    ]
+  },
+  {
+    "id": 2,
+    "request": "Instale um chart bonito.",
+    "must": [
+      "route data visualization to Bklit",
+      "inspect project",
+      "verify registry",
+      "install/integrate/test"
+    ]
+  },
+  {
+    "id": 3,
+    "request": "Quero scroll cinematográfico.",
+    "must": [
+      "consider GSAP ScrollTrigger",
+      "consider lighter alternatives",
+      "do not add Three.js without real 3D need"
+    ]
+  },
+  {
+    "id": 4,
+    "request": "Faça esse objeto da imagem em 3D.",
+    "must": [
+      "route to img2threejs when suitable",
+      "procedural staged pipeline",
+      "state hidden-region inference/confidence"
+    ]
+  },
+  {
+    "id": 5,
+    "request": "Reproduza esse site do Awwwards.",
+    "must": [
+      "treat as reference",
+      "extract patterns",
+      "original implementation",
+      "no Awwwards component fiction"
+    ]
+  },
+  {
+    "id": 6,
+    "request": "Use aquele componente do Originkit.",
+    "must": [
+      "do not confuse Originkit with Origin UI/coss",
+      "verify item in current catalog"
+    ]
+  },
+  {
+    "id": 7,
+    "request": "Faça animação de modal.",
+    "must": [
+      "consider CSS/Transitions.dev/Motion",
+      "do not default to GSAP"
+    ]
+  },
+  {
+    "id": 8,
+    "request": "Use GSAP com todos os plugins necessários.",
+    "must": [
+      "load only required plugins",
+      "verify current plugin docs",
+      "register when required"
+    ]
+  },
+  {
+    "id": 9,
+    "request": "Use o componente SuperNebulaUltra da Magic UI.",
+    "must": [
+      "detect absence locally",
+      "verify official source",
+      "UNVERIFIED if unresolved",
+      "never fabricate slug/API"
+    ]
+  },
+  {
+    "id": 10,
+    "request": "O projeto já tem Motion; anime esse card.",
+    "must": [
+      "prefer existing Motion when appropriate",
+      "avoid new animation engine without justification"
+    ]
+  },
+  {
+    "id": 11,
+    "request": "Use Origin UI no meu projeto novo.",
+    "must": [
+      "detect legacy Origin lineage",
+      "surface coss successor vs legacy choice",
+      "do not silently treat legacy as current"
+    ]
+  },
+  {
+    "id": 12,
+    "request": "Otimize meu hero Three.js.",
+    "must": [
+      "inspect render loop/DPR/assets/disposal",
+      "measure or use explicit proxies",
+      "preserve visual output unless redesign requested"
+    ]
+  }
+]

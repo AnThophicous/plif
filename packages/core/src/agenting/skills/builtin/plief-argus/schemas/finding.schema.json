@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.argus:finding:v1",
+  "required": ["id","title","severity","confidence","attack_path_class","state"],
+  "properties": {
+    "severity": {"enum": ["critical","high","medium","low","informational"]},
+    "confidence": {"enum": ["Confirmed","Highly Likely","Possible","Hypothesis"]},
+    "attack_path_class": {"enum": ["Confirmed Attack Path","Likely Attack Path","Possible Risk","Theoretical Risk"]},
+    "state": {"enum": ["OPEN","REMEDIATION_PROPOSED","PATCHED","ATTACK_PATH_BROKEN","REGRESSION_PROTECTED","VERIFIED"]},
+    "root_cause": {"type":"string"}, "affected_component": {"type":["string","null"]},
+    "history": {"type":"array"}, "prior_cycles": {"type":"array"},
+    "reopen_reason": {"type":["string","null"]}, "patch_ref": {"type":["string","null"]}
+  }
+}

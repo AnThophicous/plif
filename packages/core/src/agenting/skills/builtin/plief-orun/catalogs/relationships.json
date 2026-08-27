@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "relationships": [
+    {
+      "from": "origin-ui",
+      "type": "legacy_of",
+      "to": "coss-ui-lineage",
+      "evidence": "https://coss.com/ui/docs/roadmap"
+    },
+    {
+      "from": "origin-ui",
+      "type": "succeeded_by",
+      "to": "coss-ui-lineage",
+      "evidence": "https://coss.com/ui/docs/roadmap"
+    },
+    {
+      "from": "kokonut:shape-hero",
+      "type": "implements",
+      "to": "concept:animated-hero",
+      "evidence": null
+    },
+    {
+      "from": "aceternity:hero-parallax",
+      "type": "implements",
+      "to": "concept:animated-hero",
+      "evidence": null
+    },
+    {
+      "from": "watermelon:hero-4",
+      "type": "implements",
+      "to": "concept:animated-hero",
+      "evidence": null
+    },
+    {
+      "from": "originkit:magnetic-carousel",
+      "type": "implements",
+      "to": "concept:carousel",
+      "evidence": null
+    },
+    {
+      "from": "transitions:modal-open-close",
+      "type": "implements",
+      "to": "concept:modal-transition",
+      "evidence": null
+    },
+    {
+      "from": "motion:animate-presence",
+      "type": "implements",
+      "to": "concept:modal-transition",
+      "evidence": null
+    },
+    {
+      "from": "gsap:scrolltrigger",
+      "type": "implements",
+      "to": "concept:scroll-choreography",
+      "evidence": null
+    },
+    {
+      "from": "motion:use-scroll",
+      "type": "implements",
+      "to": "concept:scroll-choreography",
+      "evidence": null
+    },
+    {
+      "from": "bklit:line-chart",
+      "type": "implements",
+      "to": "concept:data-line-chart",
+      "evidence": null
+    },
+    {
+      "from": "bklit:grid",
+      "type": "implements",
+      "to": "concept:data-line-chart",
+      "evidence": null
+    },
+    {
+      "from": "bklit:tooltip",
+      "type": "implements",
+      "to": "concept:data-line-chart",
+      "evidence": null
+    },
+    {
+      "from": "bklit:legend",
+      "type": "implements",
+      "to": "concept:data-line-chart",
+      "evidence": null
+    },
+    {
+      "from": "aceternity:infinite-moving-cards",
+      "type": "implements",
+      "to": "concept:animated-marquee",
+      "evidence": null
+    },
+    {
+      "from": "originkit:scramble-text",
+      "type": "implements",
+      "to": "concept:text-scramble",
+      "evidence": null
+    },
+    {
+      "from": "gsap:scrambletext",
+      "type": "implements",
+      "to": "concept:text-scramble",
+      "evidence": null
+    },
+    {
+      "from": "img2threejs:pipeline",
+      "type": "implements",
+      "to": "concept:image-to-procedural-3d",
+      "evidence": null
+    },
+    {
+      "from": "rive:react-webgl2",
+      "type": "implements",
+      "to": "concept:interactive-rive",
+      "evidence": null
+    },
+    {
+      "from": "rive:webgl2",
+      "type": "implements",
+      "to": "concept:interactive-rive",
+      "evidence": null
+    },
+    {
+      "from": "three:scene",
+      "type": "implements",
+      "to": "concept:3d-interaction",
+      "evidence": null
+    },
+    {
+      "from": "three:object3d",
+      "type": "implements",
+      "to": "concept:3d-interaction",
+      "evidence": null
+    },
+    {
+      "from": "three:raycaster",
+      "type": "implements",
+      "to": "concept:3d-interaction",
+      "evidence": null
+    },
+    {
+      "from": "gsap:draggable",
+      "type": "implements",
+      "to": "concept:drag-inertia",
+      "evidence": null
+    },
+    {
+      "from": "gsap:inertia",
+      "type": "implements",
+      "to": "concept:drag-inertia",
+      "evidence": null
+    },
+    {
+      "from": "anime:draggable",
+      "type": "implements",
+      "to": "concept:drag-inertia",
+      "evidence": null
+    },
+    {
+      "from": "bklit:tooltip",
+      "type": "belongs_to",
+      "to": "bklit-ui",
+      "evidence": "https://ui.bklit.com/docs/utility/tooltip"
+    },
+    {
+      "from": "kokonut:smooth-drawer",
+      "type": "depends_on",
+      "to": "motion",
+      "evidence": "https://github.com/kokonut-labs/kokonutui/blob/main/registry.json"
+    },
+    {
+      "from": "rive:react-webgl2",
+      "type": "belongs_to",
+      "to": "rive",
+      "evidence": "https://rive.app/docs/runtimes/react/react"
+    },
+    {
+      "from": "img2threejs:pipeline",
+      "type": "requires",
+      "to": "threejs",
+      "evidence": "https://github.com/img2threejs/img2threejs/blob/main/SKILL.md"
+    }
+  ]
+}

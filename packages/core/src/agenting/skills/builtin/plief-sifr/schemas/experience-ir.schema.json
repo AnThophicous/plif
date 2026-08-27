@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.sifr:experience-ir:v1",
+  "title": "ExperienceIR",
+  "type": "object",
+  "required": ["schema_version", "product_frame", "information_architecture",
+               "accessibility_contract"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "product_frame": {"type": "object"},
+    "user_jobs": {"type": "array"},
+    "constraints": {"type": "object"},
+    "existing_system": {"type": "object"},
+    "invariants": {"type": "array"},
+    "information_architecture": {"type": "object"},
+    "design_dna": {"type": "string"},
+    "component_graph": {
+      "type": "array",
+      "items": {"type": "object", "required": ["component"]}
+    },
+    "interaction_graph": {"type": "array"},
+    "responsive_contract": {"$ref": "./responsive-contract.schema.json"},
+    "accessibility_contract": {"type": "object"},
+    "perf_budget": {"type": "object"},
+    "orun_selections": {"type": "array"},
+    "evidence_refs": {"type": "array"},
+    "verification_state": {"type": "object"}
+  }
+}

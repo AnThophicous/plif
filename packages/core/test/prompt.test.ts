@@ -62,11 +62,11 @@ describe('modular system prompt', () => {
     assert.match(plif, /evaluator-optimizer/i);
   });
 
-  it('requires anti-AI-slop and Galileu globally, plus PLIF Cybersecurity in the Plif effort', () => {
+  it('requires anti-AI-slop and Pli\'ef Galileu globally, plus Argus in the Plif effort', () => {
     const skills = [
       '- anti-ai-slop: Clean, human-readable output without generated-sounding prose',
-      '- galileu: Socratic decision review',
-      '- plif-cybersecurity: Principal security engineering',
+      '- plief-galileu: Socratic decision review',
+      '- plief-argus: Principal security engineering',
     ].join('\n');
     const tools = [{ name: 'skill', description: 'Load a skill.', parameters: {} }];
     const normal = buildSystemPrompt({ ...base, effort: 'high', skills, tools });
@@ -74,12 +74,12 @@ describe('modular system prompt', () => {
 
     assert.match(normal, /## Mandatory anti-AI-slop and Galileu review/);
     assert.match(normal, /skill.*name.*anti-ai-slop/s);
-    assert.match(normal, /skill.*name.*galileu/s);
-    assert.doesNotMatch(normal, /plif-cybersecurity.*must be loaded now/i);
+    assert.match(normal, /skill.*name.*plief-galileu/s);
+    assert.doesNotMatch(normal, /plief-argus.*must be loaded now/i);
     assert.match(plif, /## Mandatory PLIF skills and review checkpoint/);
     assert.match(plif, /skill.*name.*anti-ai-slop/s);
-    assert.match(plif, /skill.*name.*galileu/s);
-    assert.match(plif, /skill.*name.*plif-cybersecurity/s);
+    assert.match(plif, /skill.*name.*plief-galileu/s);
+    assert.match(plif, /skill.*name.*plief-argus/s);
     assert.match(plif, /before answering.*using another tool/i);
     assert.match(plif, /wait for all requested results/i);
     assert.match(plif, /do not print gate narration/i);
@@ -88,27 +88,27 @@ describe('modular system prompt', () => {
   it('does not ask PLIF to reload skills that are already in the carried session', () => {
     const skills = [
       '- anti-ai-slop: Clean, human-readable output without generated-sounding prose',
-      '- galileu: Socratic decision review',
-      '- plif-cybersecurity: Principal security engineering',
+      '- plief-galileu: Socratic decision review',
+      '- plief-argus: Principal security engineering',
     ].join('\n');
     const prompt = buildSystemPrompt({
       ...base,
       effort: 'plif',
       skills,
       tools: [{ name: 'skill', description: 'Load a skill.', parameters: {} }],
-      loadedSkills: ['anti-ai-slop', 'galileu', 'plif-cybersecurity'],
+      loadedSkills: ['anti-ai-slop', 'plief-galileu', 'plief-argus'],
     });
 
     assert.match(prompt, /already loaded successfully in this session/i);
     assert.match(prompt, /do not call the `skill` tool again/i);
-    assert.doesNotMatch(prompt, /call the skill tool for \{ "name": "galileu" \}/i);
+    assert.doesNotMatch(prompt, /call the skill tool for \{ "name": "plief-galileu" \}/i);
   });
 
   it('uses native Codex preloading instead of asking for the unavailable host skill tool', () => {
     const skills = [
       '- anti-ai-slop: Clean, human-readable output without generated-sounding prose',
-      '- galileu: Socratic decision review',
-      '- plif-cybersecurity: Principal security engineering',
+      '- plief-galileu: Socratic decision review',
+      '- plief-argus: Principal security engineering',
     ].join('\n');
     const prompt = buildSystemPrompt({
       ...base,
@@ -118,9 +118,9 @@ describe('modular system prompt', () => {
       tools: [{ name: 'skill', description: 'Load a skill.', parameters: {} }],
     });
 
-    assert.match(prompt, /native Codex adapter must preload anti-ai-slop and galileu and plif-cybersecurity/i);
+    assert.match(prompt, /native Codex adapter must preload anti-ai-slop and plief-galileu and plief-argus/i);
     assert.match(prompt, /do not try to call the host-only skill tool/i);
-    assert.doesNotMatch(prompt, /call the skill tool for \{ "name": "galileu" \}/i);
+    assert.doesNotMatch(prompt, /call the skill tool for \{ "name": "plief-galileu" \}/i);
   });
 
   it('fails closed when Plif cannot see a mandatory skill catalogue entry', () => {
@@ -133,8 +133,8 @@ describe('modular system prompt', () => {
 
     assert.match(prompt, /this session is misconfigured/i);
     assert.match(prompt, /anti-ai-slop.*not present in the catalogue/i);
-    assert.match(prompt, /galileu.*not present in the catalogue/i);
-    assert.match(prompt, /plif-cybersecurity.*not present in the catalogue/i);
+    assert.match(prompt, /plief-galileu.*not present in the catalogue/i);
+    assert.match(prompt, /plief-argus.*not present in the catalogue/i);
   });
 
   it('loads research guidance whenever discovery exists and degrades opening honestly', () => {
@@ -332,7 +332,7 @@ describe('modular system prompt', () => {
     const prompt = buildSystemPrompt({
       ...base,
       tools: [{ name: 'skill', description: 'Load a skill.', parameters: {} }],
-      skills: '- dme-front-end-spynx-edition: build frontend interfaces',
+      skills: '- plief-sifr: build frontend interfaces',
     });
 
     assert.match(prompt, /user does not need\s+to mention a skill/i);

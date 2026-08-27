@@ -1,0 +1,14 @@
+{
+    "artifacts":  {
+                      "consumed":  [
+                                       "_kernel/evidence/ledger.md"
+                                   ],
+                      "produced":  [
+
+                                   ]
+                  },
+    "name":  "anti-ai-slop",
+    "version":  "1.0.0",
+    "slug":  "anti-ai-slop",
+    "notes":  "peer utility: copy quality standards for authored strings"
+}

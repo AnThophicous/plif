@@ -24,12 +24,12 @@ import type { Message } from '../src/model/provider.js';
 const context = {} as ToolContext;
 
 describe('mandatory skill policy', () => {
-  it('requires anti-AI-slop and Galileu for every effort, with PLIF Cybersecurity added to Plif', () => {
-    assert.deepEqual(mandatorySkillsForEffort('low'), ['anti-ai-slop', 'galileu']);
+  it('requires anti-AI-slop and Pli\'ef Galileu for every effort, with Argus added to Plif', () => {
+    assert.deepEqual(mandatorySkillsForEffort('low'), ['anti-ai-slop', 'plief-galileu']);
     assert.deepEqual(mandatorySkillsForEffort('plif'), [
       'anti-ai-slop',
-      'galileu',
-      'plif-cybersecurity',
+      'plief-galileu',
+      'plief-argus',
     ]);
   });
 });
@@ -70,14 +70,14 @@ describe('parseSkill', () => {
 
 it('can read builtin metadata without retaining the skill body', () => {
   const skill = parseSkill(
-    '---\nname: dme-test\ndescription: test\npackage: dme-skill\npackage-name: DME Skill\n---\n\nbody',
-    '/x/dme-test/SKILL.md',
+    '---\nname: sample-test\ndescription: test\npackage: sample-package\npackage-name: Sample package\n---\n\nbody',
+    '/x/sample-test/SKILL.md',
     'builtin',
     { loadInstructions: false },
   );
 
   assert.equal(skill?.instructions, '');
-  assert.deepEqual(skill?.package, { id: 'dme-skill', name: 'DME Skill' });
+  assert.deepEqual(skill?.package, { id: 'sample-package', name: 'Sample package' });
 });
 
 describe('SkillRegistry', () => {
@@ -121,8 +121,8 @@ describe('SkillRegistry', () => {
   });
 
   it('keeps builtin skills as individual disk-backed files', () => {
-    assert.ok(BUILTIN_SKILLS.length >= 18);
-    const frontend = BUILTIN_SKILLS.find((skill) => skill.name === 'dme-front-end-spynx-edition');
+    assert.ok(BUILTIN_SKILLS.length >= 12);
+    const frontend = BUILTIN_SKILLS.find((skill) => skill.name === 'plief-sifr');
     assert.ok(frontend);
     assert.equal(typeof Object.getOwnPropertyDescriptor(frontend, 'instructions')?.get, 'function');
     for (const skill of BUILTIN_SKILLS) {
@@ -130,60 +130,53 @@ describe('SkillRegistry', () => {
       assert.match(skill.file, /agenting[\\/]skills[\\/]builtin[\\/]/);
     }
 
-    const dmeSkills = BUILTIN_SKILLS.filter((skill) => skill.name.startsWith('dme-'));
-    assert.equal(dmeSkills.length, 7);
-    for (const skill of dmeSkills) assert.equal(skill.package, undefined);
+    assert.equal(BUILTIN_SKILLS.some((skill) => skill.name.startsWith('dme-')), false);
+    assert.ok(BUILTIN_SKILLS.some((skill) => skill.name === 'plief-orun'));
+    assert.equal(BUILTIN_SKILLS.some((skill) => skill.name === "pli'ef-orun"), false);
   });
 
-  it('carries the writing, design and authoring builtins', () => {
+  it('carries the vNext writing, design and authoring builtins', () => {
     const names = BUILTIN_SKILLS.map((skill) => skill.name);
     assert.ok(names.includes('anti-ai-slop'));
     for (const name of [
-      'dme-front-end-spynx-edition',
-      'dme-design-system-spynx-edition',
-      'dme-wireframe-spynx-edition',
-      'dme-ui-options-spynx-edition',
-      'dme-interactive-prototype-spynx-edition',
-      'dme-visual-verification-spynx-edition',
-      'dme-spyx-component-picker',
+      'plief-sifr',
+      'plief-orun',
+      'plief-galileu',
+      'plief-argus',
     ]) {
-      assert.ok(names.includes(name), `${name} is missing from the DME package`);
+      assert.ok(names.includes(name), `${name} is missing from the vNext builtin set`);
     }
     assert.ok(names.includes('skill-creator'));
-    assert.ok(names.includes('deep-engineering-audit'));
+    assert.ok(names.includes('deep-review'));
   });
 
-  it('shows the Spynx DME skills as individual builtin entries', async () => {
+  it('shows the vNext frontend system as individual builtin entries', async () => {
     const registry = await SkillRegistry.load({ workspace, root });
     const catalogue = registry.catalogue();
 
-    assert.match(catalogue, /- dme-front-end-spynx-edition:/);
-    assert.match(catalogue, /- dme-design-system-spynx-edition:/);
-    assert.match(catalogue, /- dme-ui-options-spynx-edition:/);
-    assert.match(catalogue, /- dme-spyx-component-picker:/);
+    assert.match(catalogue, /- plief-sifr:/);
+    assert.match(catalogue, /- plief-orun:/);
+    assert.match(catalogue, /- plief-galileu:/);
     assert.equal(catalogue.includes('The failure it exists to prevent'), false);
   });
 
-  it('ships the Spyx picker with its routed references and bridge tool', async () => {
+  it('ships Sifr and Orun with their routed references and catalogs', async () => {
     const registry = await SkillRegistry.load({ workspace, root });
-    const skill = registry.get('dme-spyx-component-picker');
-    assert.ok(skill);
-    assert.match(skill.instructions, /references\/COMPONENT_DNA\.md/);
-    assert.match(skill.instructions, /references\/SPYX_BRIDGE\.md/);
+    const sifr = registry.get('plief-sifr');
+    const orun = registry.get('plief-orun');
+    assert.ok(sifr);
+    assert.ok(orun);
+    assert.match(sifr.instructions, /ExperienceIR/);
+    assert.match(orun.instructions, /BRAIN → MEMORY → EYES → HANDS → JUDGE/);
 
-    const skillRoot = path.dirname(skill.file);
-    const [dna, provider, bridge, bridgeTool, manifest] = await Promise.all([
-      fs.readFile(path.join(skillRoot, 'references', 'COMPONENT_DNA.md'), 'utf8'),
-      fs.readFile(path.join(skillRoot, 'references', 'PROVIDER_ENGINE.md'), 'utf8'),
-      fs.readFile(path.join(skillRoot, 'references', 'SPYX_BRIDGE.md'), 'utf8'),
-      fs.readFile(path.join(skillRoot, 'tools', 'spyx-bridge.mjs'), 'utf8'),
-      fs.readFile(path.join(skillRoot, 'extension', '21st-unlocked', 'manifest.json'), 'utf8'),
+    const [sifrSchema, orunCatalog, orunManifest] = await Promise.all([
+      fs.readFile(path.join(path.dirname(sifr.file), 'schemas', 'experience-ir.schema.json'), 'utf8'),
+      fs.readFile(path.join(path.dirname(orun.file), 'catalogs', 'items.json'), 'utf8'),
+      fs.readFile(path.join(path.dirname(orun.file), 'manifest.json'), 'utf8'),
     ]);
-    assert.match(dna, /Transplant invariant/);
-    assert.match(provider, /Acquisition budget/);
-    assert.match(bridge, /dme-spyx-capsule\/v1/);
-    assert.match(bridgeTool, /127\.0\.0\.1/);
-    assert.match(manifest, /DME Spyx Bridge/);
+    assert.match(sifrSchema, /experience-ir/);
+    assert.match(orunCatalog, /\"items\"/);
+    assert.match(orunManifest, /\"plief-orun\"/);
   });
 
   it('loads the EDS skills from the Markdown-native agenting tree', async () => {
@@ -192,10 +185,10 @@ describe('SkillRegistry', () => {
     for (const name of [
       'context-ingestion',
       'create-slide-deck',
-      'deep-engineering-audit',
-      'galileu',
+      'deep-review',
+      'plief-galileu',
       'office-render',
-      'plif-cybersecurity',
+      'plief-argus',
     ]) {
       const skill = registry.get(name);
       assert.ok(skill, `${name} is missing from the registry`);
@@ -204,19 +197,19 @@ describe('SkillRegistry', () => {
     }
   });
 
-  it('ships the complete PLIF cybersecurity skill with its selective reference', async () => {
+  it('ships the complete Argus security skill with its selective reference', async () => {
     const registry = await SkillRegistry.load({ workspace, root });
-    const skill = registry.get('plif-cybersecurity');
+    const skill = registry.get('plief-argus');
     assert.ok(skill);
     assert.match(skill.instructions, /Default mode/);
     assert.match(skill.instructions, /Authorization boundary/);
-    assert.match(skill.instructions, /Attack Path Engine/);
-    assert.match(skill.instructions, /Release Security Gate/);
+    assert.match(skill.instructions, /attack-path/i);
+    assert.match(skill.instructions, /release/i);
 
-    const reference = path.join(path.dirname(skill.file), 'references', 'assessment-matrix.md');
+    const reference = path.join(path.dirname(skill.file), 'schemas', 'security-ir.schema.json');
     const referenceText = await fs.readFile(reference, 'utf8');
-    assert.match(referenceText, /Project classification/);
-    assert.match(referenceText, /AI security routing/);
+    assert.match(referenceText, /security-ir/);
+    assert.match(referenceText, /nodes/);
   });
 
   it('writes a skill and makes it loadable in the same session', async () => {
@@ -331,31 +324,31 @@ describe('SkillRegistry', () => {
   });
 
   it('recognizes successful mandatory skill results without treating failed loads as loaded', () => {
-    const messages: Message[] = [
+      const messages: Message[] = [
       {
         role: 'assistant',
         content: '',
         toolCalls: [
-          { id: 'g', name: 'skill', arguments: '{"name":"galileu"}' },
-          { id: 'c', name: 'skill', arguments: '{"name":"plif-cybersecurity"}' },
+          { id: 'g', name: 'skill', arguments: '{"name":"plief-galileu"}' },
+          { id: 'c', name: 'skill', arguments: '{"name":"plief-argus"}' },
         ],
       },
-      { role: 'tool', toolCallId: 'g', content: '# Skill: galileu\nbody' },
-      { role: 'tool', toolCallId: 'c', content: 'No skill named "plif-cybersecurity".' },
+      { role: 'tool', toolCallId: 'g', content: '# Skill: plief-galileu\nbody' },
+      { role: 'tool', toolCallId: 'c', content: 'No skill named "plief-argus".' },
     ];
 
-    assert.deepEqual(loadedSkillNames(messages), ['galileu']);
+    assert.deepEqual(loadedSkillNames(messages), ['plief-galileu']);
   });
 
-  it('loads one DME child without loading the entire package', async () => {
+  it('loads one Sifr child without loading the entire package', async () => {
     const registry = await SkillRegistry.load({ workspace, root });
-    const result = await skillTool(registry).run({ name: 'dme-wireframe-spynx-edition' }, context);
+    const result = await skillTool(registry).run({ name: 'plief-sifr' }, context);
 
     assert.equal(result.ok, true);
     assert.doesNotMatch(result.output, /Skill package:/);
-    assert.match(result.output, /Skill: dme-wireframe-spynx-edition/);
-    assert.match(result.output, /Produce 2–4 options only when comparison will change a decision/i);
-    assert.doesNotMatch(result.output, /Skill: dme-interactive-prototype-spynx-edition/);
+    assert.match(result.output, /Skill: plief-sifr/);
+    assert.match(result.output, /ExperienceIR/);
+    assert.doesNotMatch(result.output, /Skill: plief-orun/);
   });
 
   it('lists what exists when asked for a skill that does not', async () => {
@@ -690,8 +683,8 @@ describe('system prompt', () => {
     for (const name of [
       'context-ingestion',
       'create-slide-deck',
-      'deep-engineering-audit',
-      'galileu',
+      'deep-review',
+      'plief-galileu',
       'office-render',
     ]) {
       assert.ok(names.includes(name), `missing builtin skill: ${name}`);

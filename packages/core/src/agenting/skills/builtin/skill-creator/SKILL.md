@@ -24,6 +24,20 @@ a way of working that is about the person, not the project.
 When both would work, choose project. A skill that lives next to the code it
 describes stays true longer than one that does not.
 
+## PLI'EF vNext conventions (mandatory)
+
+- Flagship naming is `Pli'ef <Codename>` display / `plief-<codename>` slug;
+  the three historical brand tokens (quoted here solely as the retired-name
+  list: "dme", "spynx", "plif-") are retired as primary names. (retired-name quote)
+- New skills ship a `manifest.json` declaring `name/slug/version/description`,
+  `artifacts.produced[]` / `artifacts.consumed[]`, and `schemas[]` when they
+  exist. Conformance (`_kernel/scripts/package_conformance.py`) checks this.
+- Cross-skill concepts (evidence states, capability protocol, R0–R3 risk,
+  artifact paths) are NEVER restated locally — reference `_kernel/`.
+- Every relative path mentioned must resolve (no silent fallback), and eval
+  cases live under `evals/cases/*.json` with id/prompt/must/must_not/critical.
+
+
 ## The description is the whole routing decision
 
 The body is invisible until something loads it. The description is the only

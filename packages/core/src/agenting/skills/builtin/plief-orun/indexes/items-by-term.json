@@ -1,0 +1,639 @@
+{
+  "data": [
+    "kibo:gantt"
+  ],
+  "functional-ui": [
+    "kibo:gantt"
+  ],
+  "gantt": [
+    "kibo:gantt"
+  ],
+  "timeline": [
+    "anime:timeline",
+    "kibo:gantt"
+  ],
+  "area": [
+    "bklit:area-chart"
+  ],
+  "area-chart": [
+    "bklit:area-chart"
+  ],
+  "chart": [
+    "bklit:area-chart",
+    "bklit:grid",
+    "bklit:legend",
+    "bklit:line-chart",
+    "bklit:tooltip"
+  ],
+  "visualization": [
+    "bklit:area-chart",
+    "bklit:line-chart"
+  ],
+  "line": [
+    "bklit:line-chart"
+  ],
+  "line-chart": [
+    "bklit:line-chart"
+  ],
+  "grid": [
+    "bklit:grid"
+  ],
+  "utility": [
+    "bklit:grid",
+    "bklit:legend"
+  ],
+  "legend": [
+    "bklit:legend"
+  ],
+  "chart-tooltip": [
+    "bklit:tooltip"
+  ],
+  "charttooltip": [
+    "bklit:tooltip"
+  ],
+  "crosshair": [
+    "bklit:tooltip"
+  ],
+  "interaction": [
+    "anime:draggable",
+    "bklit:tooltip",
+    "gsap:draggable",
+    "originkit:gravity-gallery",
+    "originkit:magnetic-carousel",
+    "originkit:user-cursor",
+    "three:raycaster"
+  ],
+  "tooltip": [
+    "aceternity:animated-tooltip",
+    "bklit:tooltip"
+  ],
+  "ai": [
+    "kokonut:ai-prompt"
+  ],
+  "ai-interface": [
+    "kokonut:ai-prompt"
+  ],
+  "ai-prompt": [
+    "kokonut:ai-prompt"
+  ],
+  "input": [
+    "gsap:observer",
+    "kokonut:ai-prompt"
+  ],
+  "selector": [
+    "kokonut:ai-prompt"
+  ],
+  "button": [
+    "kokonut:command-button"
+  ],
+  "command": [
+    "kokonut:command-button"
+  ],
+  "command-button": [
+    "kokonut:command-button"
+  ],
+  "animation": [
+    "aceternity:animated-tooltip",
+    "aceternity:aurora-background",
+    "aceternity:infinite-moving-cards",
+    "anime:animation",
+    "anime:layout",
+    "kokonut:card-flip",
+    "motion:motion-component"
+  ],
+  "card": [
+    "aceternity:3d-card-effect",
+    "kokonut:card-flip",
+    "transitions:card-resize"
+  ],
+  "card-flip": [
+    "kokonut:card-flip"
+  ],
+  "flip": [
+    "gsap:flip",
+    "kokonut:card-flip"
+  ],
+  "drawer": [
+    "kokonut:smooth-drawer"
+  ],
+  "motion": [
+    "gsap:motionpath",
+    "kokonut:shape-hero",
+    "kokonut:smooth-drawer",
+    "motion:motion-component"
+  ],
+  "smooth": [
+    "kokonut:smooth-drawer"
+  ],
+  "smooth-drawer": [
+    "kokonut:smooth-drawer"
+  ],
+  "background": [
+    "aceternity:aurora-background",
+    "kokonut:shape-hero",
+    "originkit:black-hole"
+  ],
+  "hero": [
+    "aceternity:hero-parallax",
+    "kokonut:shape-hero",
+    "watermelon:hero-4"
+  ],
+  "shape-hero": [
+    "kokonut:shape-hero"
+  ],
+  "shapes": [
+    "kokonut:shape-hero"
+  ],
+  "4": [
+    "watermelon:hero-4"
+  ],
+  "hero-4": [
+    "watermelon:hero-4"
+  ],
+  "10": [
+    "watermelon:footer-10"
+  ],
+  "footer": [
+    "watermelon:footer-10"
+  ],
+  "footer-10": [
+    "watermelon:footer-10"
+  ],
+  "5": [
+    "watermelon:navigation-5"
+  ],
+  "navbar": [
+    "watermelon:navigation-5"
+  ],
+  "navigation": [
+    "gsap:scrollto",
+    "watermelon:navigation-5"
+  ],
+  "navigation-5": [
+    "watermelon:navigation-5"
+  ],
+  "3": [
+    "watermelon:widget-3"
+  ],
+  "dashboard": [
+    "watermelon:widget-3"
+  ],
+  "widget": [
+    "watermelon:widget-3"
+  ],
+  "widget-3": [
+    "watermelon:widget-3"
+  ],
+  "1": [
+    "watermelon:faq-1"
+  ],
+  "faq": [
+    "watermelon:faq-1"
+  ],
+  "faq-1": [
+    "watermelon:faq-1"
+  ],
+  "black": [
+    "originkit:black-hole"
+  ],
+  "hole": [
+    "originkit:black-hole"
+  ],
+  "interactive": [
+    "originkit:black-hole"
+  ],
+  "carousel": [
+    "originkit:magnetic-carousel"
+  ],
+  "magnetic": [
+    "originkit:magnetic-carousel"
+  ],
+  "drag": [
+    "anime:draggable",
+    "gsap:draggable",
+    "gsap:inertia",
+    "originkit:gravity-gallery"
+  ],
+  "gallery": [
+    "originkit:gravity-gallery"
+  ],
+  "gravity": [
+    "originkit:gravity-gallery"
+  ],
+  "scramble": [
+    "gsap:scrambletext",
+    "originkit:scramble-text"
+  ],
+  "text": [
+    "aceternity:text-generate-effect",
+    "gsap:scrambletext",
+    "gsap:splittext",
+    "originkit:scramble-text",
+    "transitions:number-pop-in",
+    "transitions:text-states-swap"
+  ],
+  "text-animation": [
+    "aceternity:text-generate-effect",
+    "originkit:scramble-text"
+  ],
+  "cursor": [
+    "originkit:user-cursor"
+  ],
+  "user": [
+    "originkit:user-cursor"
+  ],
+  "3d-like": [
+    "originkit:particle-sphere"
+  ],
+  "particle": [
+    "originkit:particle-sphere"
+  ],
+  "particles": [
+    "originkit:particle-sphere"
+  ],
+  "sphere": [
+    "originkit:particle-sphere"
+  ],
+  "3d": [
+    "aceternity:3d-card-effect",
+    "aceternity:3d-pin",
+    "getlayers:3d-scenes",
+    "three:buffergeometry",
+    "three:object3d",
+    "three:raycaster",
+    "three:scene"
+  ],
+  "effect": [
+    "aceternity:3d-card-effect",
+    "aceternity:text-generate-effect"
+  ],
+  "perspective": [
+    "aceternity:3d-card-effect",
+    "aceternity:3d-pin"
+  ],
+  "pin": [
+    "aceternity:3d-pin"
+  ],
+  "animated": [
+    "aceternity:animated-tooltip"
+  ],
+  "aurora": [
+    "aceternity:aurora-background"
+  ],
+  "parallax": [
+    "aceternity:hero-parallax"
+  ],
+  "scroll": [
+    "aceternity:hero-parallax",
+    "gsap:observer",
+    "gsap:scrollsmoother",
+    "gsap:scrollto",
+    "gsap:scrolltrigger",
+    "motion:use-scroll"
+  ],
+  "cards": [
+    "aceternity:infinite-moving-cards"
+  ],
+  "infinite": [
+    "aceternity:infinite-moving-cards"
+  ],
+  "marquee": [
+    "aceternity:infinite-moving-cards"
+  ],
+  "moving": [
+    "aceternity:infinite-moving-cards"
+  ],
+  "generate": [
+    "aceternity:text-generate-effect"
+  ],
+  "component": [
+    "motion:motion-component"
+  ],
+  "react": [
+    "gsap:usegsap",
+    "motion:animate-presence",
+    "motion:motion-component",
+    "rive:react-webgl2"
+  ],
+  "animatepresence": [
+    "motion:animate-presence"
+  ],
+  "enter-exit": [
+    "motion:animate-presence"
+  ],
+  "motion-value": [
+    "motion:use-scroll",
+    "motion:use-spring",
+    "motion:use-transform"
+  ],
+  "usescroll": [
+    "motion:use-scroll"
+  ],
+  "mapping": [
+    "motion:use-transform"
+  ],
+  "usetransform": [
+    "motion:use-transform"
+  ],
+  "spring": [
+    "motion:use-spring"
+  ],
+  "usespring": [
+    "motion:use-spring"
+  ],
+  "imperative": [
+    "motion:use-animate"
+  ],
+  "sequence": [
+    "anime:timeline",
+    "motion:use-animate"
+  ],
+  "useanimate": [
+    "motion:use-animate"
+  ],
+  "accessibility": [
+    "motion:use-reduced-motion"
+  ],
+  "reduced-motion": [
+    "motion:use-reduced-motion"
+  ],
+  "usereducedmotion": [
+    "motion:use-reduced-motion"
+  ],
+  "draggable": [
+    "anime:draggable",
+    "gsap:draggable"
+  ],
+  "layout": [
+    "anime:layout",
+    "gsap:flip"
+  ],
+  "lifecycle": [
+    "anime:scope"
+  ],
+  "scope": [
+    "anime:scope"
+  ],
+  "browser": [
+    "anime:waapi"
+  ],
+  "waapi": [
+    "anime:waapi"
+  ],
+  "pinning": [
+    "gsap:scrolltrigger"
+  ],
+  "scrolltrigger": [
+    "gsap:scrolltrigger"
+  ],
+  "trigger": [
+    "gsap:scrolltrigger"
+  ],
+  "scrollsmoother": [
+    "gsap:scrollsmoother"
+  ],
+  "smoothing": [
+    "gsap:scrollsmoother"
+  ],
+  "scrolltoplugin": [
+    "gsap:scrollto"
+  ],
+  "split": [
+    "gsap:splittext"
+  ],
+  "splittext": [
+    "gsap:splittext"
+  ],
+  "scrambletextplugin": [
+    "gsap:scrambletext"
+  ],
+  "drawing": [
+    "gsap:drawsvg"
+  ],
+  "drawsvgplugin": [
+    "gsap:drawsvg"
+  ],
+  "svg": [
+    "gsap:drawsvg",
+    "gsap:morphsvg",
+    "gsap:motionpath",
+    "gsap:motionpathhelper"
+  ],
+  "morph": [
+    "gsap:morphsvg"
+  ],
+  "morphsvgplugin": [
+    "gsap:morphsvg"
+  ],
+  "motionpathplugin": [
+    "gsap:motionpath"
+  ],
+  "path": [
+    "gsap:motionpath"
+  ],
+  "development": [
+    "gsap:gsdevtools",
+    "gsap:motionpathhelper"
+  ],
+  "motionpathhelper": [
+    "gsap:motionpathhelper"
+  ],
+  "inertia": [
+    "gsap:inertia"
+  ],
+  "inertiaplugin": [
+    "gsap:inertia"
+  ],
+  "gesture": [
+    "gsap:observer"
+  ],
+  "observer": [
+    "gsap:observer"
+  ],
+  "physics": [
+    "gsap:physics2d",
+    "gsap:physicsprops"
+  ],
+  "physics2dplugin": [
+    "gsap:physics2d"
+  ],
+  "physicspropsplugin": [
+    "gsap:physicsprops"
+  ],
+  "gsdevtools": [
+    "gsap:gsdevtools"
+  ],
+  "ecosystem": [
+    "gsap:easel",
+    "gsap:pixi"
+  ],
+  "pixi": [
+    "gsap:pixi"
+  ],
+  "pixiplugin": [
+    "gsap:pixi"
+  ],
+  "easeljs": [
+    "gsap:easel"
+  ],
+  "easelplugin": [
+    "gsap:easel"
+  ],
+  "customease": [
+    "gsap:customease"
+  ],
+  "easing": [
+    "gsap:custombounce",
+    "gsap:customease",
+    "gsap:customwiggle",
+    "gsap:easepack"
+  ],
+  "easepack": [
+    "gsap:easepack"
+  ],
+  "customwiggle": [
+    "gsap:customwiggle"
+  ],
+  "custombounce": [
+    "gsap:custombounce"
+  ],
+  "hook": [
+    "gsap:usegsap"
+  ],
+  "usegsap": [
+    "gsap:usegsap"
+  ],
+  "resize": [
+    "transitions:card-resize"
+  ],
+  "transition": [
+    "transitions:card-resize",
+    "transitions:menu-dropdown",
+    "transitions:modal-open-close",
+    "transitions:notification-badge",
+    "transitions:number-pop-in",
+    "transitions:panel-reveal",
+    "transitions:text-states-swap"
+  ],
+  "number": [
+    "transitions:number-pop-in"
+  ],
+  "pop-in": [
+    "transitions:number-pop-in"
+  ],
+  "badge": [
+    "transitions:notification-badge"
+  ],
+  "notification": [
+    "transitions:notification-badge"
+  ],
+  "states": [
+    "transitions:text-states-swap"
+  ],
+  "swap": [
+    "transitions:text-states-swap"
+  ],
+  "dropdown": [
+    "transitions:menu-dropdown"
+  ],
+  "menu": [
+    "transitions:menu-dropdown"
+  ],
+  "modal": [
+    "transitions:modal-open-close"
+  ],
+  "open/close": [
+    "transitions:modal-open-close"
+  ],
+  "panel": [
+    "transitions:panel-reveal"
+  ],
+  "reveal": [
+    "transitions:panel-reveal"
+  ],
+  "rive": [
+    "rive:react-webgl2",
+    "rive:webgl2"
+  ],
+  "runtime": [
+    "rive:react-webgl2",
+    "rive:webgl2"
+  ],
+  "state-machine": [
+    "rive:react-webgl2"
+  ],
+  "webgl2": [
+    "rive:react-webgl2",
+    "rive:webgl2"
+  ],
+  "wasm": [
+    "rive:webgl2"
+  ],
+  "web": [
+    "rive:webgl2"
+  ],
+  "scene": [
+    "getlayers:3d-scenes",
+    "three:scene"
+  ],
+  "object3d": [
+    "three:object3d"
+  ],
+  "scene-graph": [
+    "three:object3d"
+  ],
+  "buffergeometry": [
+    "three:buffergeometry"
+  ],
+  "geometry": [
+    "three:buffergeometry"
+  ],
+  "picking": [
+    "three:raycaster"
+  ],
+  "raycaster": [
+    "three:raycaster"
+  ],
+  "image": [
+    "img2threejs:pipeline"
+  ],
+  "image-to-3d": [
+    "img2threejs:pipeline"
+  ],
+  "pipeline": [
+    "img2threejs:pipeline"
+  ],
+  "procedural": [
+    "img2threejs:pipeline"
+  ],
+  "quality-gates": [
+    "img2threejs:pipeline"
+  ],
+  "three.js": [
+    "img2threejs:pipeline"
+  ],
+  "threejs": [
+    "img2threejs:pipeline"
+  ],
+  "prompt": [
+    "getlayers:3d-scenes"
+  ],
+  "scenes": [
+    "getlayers:3d-scenes"
+  ],
+  "source-file": [
+    "getlayers:3d-scenes"
+  ],
+  "landing-page": [
+    "getlayers:templates"
+  ],
+  "nextjs": [
+    "getlayers:templates"
+  ],
+  "template": [
+    "getlayers:templates"
+  ],
+  "templates": [
+    "getlayers:templates"
+  ]
+}

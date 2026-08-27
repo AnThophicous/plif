@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.argus:security-ir:v1",
+  "type": "object",
+  "required": ["schema_version", "nodes"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "meta": {"type": "object", "properties": {"ai_system": {"type": "boolean"}}},
+    "nodes": {"type": "array", "items": {"type": "object",
+      "required": ["id","type","provenance","confidence","verified"]}},
+    "edges": {"type": "array", "items": {"type": "object",
+      "required": ["type","from","to"], "properties": {
+        "type": {"enum": ["contains","crosses","accesses","protected_by","delegates_to","trusts","grants","requires","approval_of","mitigates"]}
+      }}},
+    "invariants_registry": {"type": "array"}
+  }
+}

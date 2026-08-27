@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pli'ef Orun Item",
+  "type": "object",
+  "required": [
+    "id",
+    "source",
+    "canonical_name",
+    "type",
+    "official_reference",
+    "last_verified",
+    "verification_status",
+    "confidence"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "canonical_name": {
+      "type": "string"
+    },
+    "slug": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "type": {
+      "type": "string"
+    },
+    "category": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "official_reference": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "availability": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "free_or_paid": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "install": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "import": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "files": {
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "dependencies": {
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "registry_dependencies": {
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "props": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "api": {
+      "type": [
+        "object",
+        "array",
+        "null"
+      ]
+    },
+    "hooks": {
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "composition": {
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "client_requirement": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "framework": {
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "tailwind_requirement": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "css_requirement": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "animation_engine": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "accessibility": {
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "responsive_behavior": {
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "performance_notes": {
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "example_patterns": {
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "compatible_with": {
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "conflicts_with": {
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "version_verified": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_verified": {
+      "type": "string"
+    },
+    "verification_status": {
+      "enum": [
+        "VERIFIED_CURRENT",
+        "VERIFIED_BUT_VERSION_UNKNOWN",
+        "STALE",
+        "UNVERIFIED",
+        "DEPRECATED",
+        "REMOVED"
+      ]
+    },
+    "confidence": {
+      "enum": [
+        "HIGH",
+        "MEDIUM",
+        "LOW"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true
+}

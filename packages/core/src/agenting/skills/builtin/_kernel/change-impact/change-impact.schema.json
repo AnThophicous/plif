@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.kernel:change-impact:v1",
+  "title": "ChangeImpact",
+  "type": "object",
+  "required": ["schema_version", "diff_stats", "blast_radius", "rollback_complexity", "verification_obligations"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "diff_stats": {
+      "type": "object",
+      "properties": {
+        "added": {"type": "integer"}, "modified": {"type": "integer"},
+        "deleted": {"type": "integer"}, "renamed": {"type": "integer"}
+      }
+    },
+    "files": {"type": "array"},
+    "affected_components": {"type": "array"},
+    "affected_callers": {"type": "array"},
+    "affected_contracts": {"type": "array"},
+    "affected_tests": {"type": "array"},
+    "security_impact_candidates": {"type": "array", "items": {"type": "string"}},
+    "frontend_impact": {"type": "array"},
+    "migration_needed": {"type": ["boolean", "object"]},
+    "blast_radius": {"enum": ["local", "feature", "system-wide"]},
+    "rollback_complexity": {"enum": ["trivial", "easy", "costly", "destructive"]},
+    "verification_obligations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind"],
+        "properties": {
+          "kind": {"enum": ["render_matrix", "sec_diff", "update_tests", "integration_run"]},
+          "detail": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "inferred": {"type": "array", "items": {"type": "string"}}
+  }
+}

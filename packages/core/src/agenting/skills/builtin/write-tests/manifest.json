@@ -1,0 +1,14 @@
+{
+    "artifacts":  {
+                      "consumed":  [
+                                       "_kernel/evidence/ledger.md"
+                                   ],
+                      "produced":  [
+
+                                   ]
+                  },
+    "name":  "write-tests",
+    "version":  "1.0.0",
+    "slug":  "write-tests",
+    "notes":  "peer utility: regression-first test authoring"
+}

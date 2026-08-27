@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.kernel:repository-map:v1",
+  "title": "RepositoryMap",
+  "type": "object",
+  "required": ["schema_version", "meta", "stack_profile"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "meta": {
+      "type": "object",
+      "required": ["repo_fingerprint", "built_at"],
+      "properties": {
+        "repo_fingerprint": {"type": "string"},
+        "built_at": {"type": "string"},
+        "depth": {"enum": ["fast", "standard"]},
+        "coverage_note": {"type": ["string", "null"]}
+      }
+    },
+    "stack_profile": {
+      "type": "object",
+      "properties": {
+        "languages": {"type": "array", "items": {"type": "string"}},
+        "frameworks": {"type": "array", "items": {"type": "object"}},
+        "package_manager": {"type": ["string", "null"]},
+        "lockfile": {"type": ["string", "null"]},
+        "typescript": {"type": ["boolean", "null"]},
+        "build_tooling": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "packages": {"type": "array"},
+    "entry_points": {"type": "array"},
+    "routes": {"type": "array"},
+    "styling_system": {"type": "object"},
+    "component_inventory": {"type": "object"},
+    "data_stores": {"type": "array"},
+    "external_integrations": {"type": "array"},
+    "tests_owners": {"type": "object"},
+    "conventions": {"type": "object"}
+  }
+}

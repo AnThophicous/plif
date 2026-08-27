@@ -1,0 +1,14 @@
+{
+    "artifacts":  {
+                      "consumed":  [
+                                       "_kernel/evidence/ledger.md"
+                                   ],
+                      "produced":  [
+
+                                   ]
+                  },
+    "name":  "skill-creator",
+    "version":  "1.0.0",
+    "slug":  "skill-creator",
+    "notes":  "peer utility: way-of-working distiller with vNext packaging conventions"
+}

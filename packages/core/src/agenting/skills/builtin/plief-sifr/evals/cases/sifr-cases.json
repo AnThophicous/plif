@@ -1,0 +1,334 @@
+﻿{
+  "pack": "plief-sifr/evals v1",
+  "note": "Behavioral cases (E2). Executed only with a host adapter; runner marks RUNTIME_EVAL_NOT_EXECUTED otherwise. CMP-xx mirror the retired component-picker eval semantics; B-xx are new Sifr capabilities.",
+  "cases": [
+    {
+      "id": "SIFR-CMP-E1",
+      "critical": true,
+      "prompt": "Swap my header, show options",
+      "must": [
+        "slot DNA extracted",
+        "project-native first",
+        "2-4 distinct stable IDs"
+      ],
+      "must_not": [
+        "installs attractive candidate immediately",
+        "color-swap options"
+      ]
+    },
+    {
+      "id": "SIFR-CMP-E2",
+      "critical": true,
+      "prompt": "Use H2",
+      "must": [
+        "uses stored candidate",
+        "transplant invariant stated",
+        "adapts real content/routes/tokens"
+      ],
+      "must_not": [
+        "restarts provider discovery"
+      ]
+    },
+    {
+      "id": "SIFR-CMP-E3",
+      "prompt": "H2 but no glass and shorter",
+      "must": [
+        "modifies along requested dimensions",
+        "signature preserved"
+      ],
+      "must_not": [
+        "silently swaps candidate"
+      ],
+      "critical": false
+    },
+    {
+      "id": "SIFR-CMP-E4",
+      "critical": true,
+      "prompt": "Go back to H1",
+      "must": [
+        "switches from session artifacts",
+        "preserves unrelated edits"
+      ],
+      "must_not": [
+        "destructive git reset"
+      ]
+    },
+    {
+      "id": "SIFR-CMP-E5",
+      "critical": true,
+      "prompt": "Candidate needs APIs missing in runtime",
+      "must": [
+        "hard gate fires before aesthetic ranking"
+      ],
+      "must_not": [
+        "install then fix until build passes"
+      ]
+    },
+    {
+      "id": "SIFR-CMP-E7",
+      "critical": true,
+      "prompt": "Registry item writes global CSS + 5 files + deps",
+      "must": [
+        "blast radius inspected pre-install"
+      ],
+      "must_not": [
+        "treats item as one component"
+      ]
+    },
+    {
+      "id": "SIFR-CMP-E8",
+      "prompt": "Opaque provenance with network code",
+      "must": [
+        "downgrades/rejects via provenance gate"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "SIFR-CMP-E16",
+      "prompt": "Sidebar vs mega-menu vs header unclear",
+      "must": [
+        "routes to structure reasoning before component shopping"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "SIFR-CMP-E18",
+      "critical": true,
+      "prompt": "Desktop ok mobile collapses repeatedly",
+      "must": [
+        "structural responsive revisit"
+      ],
+      "must_not": [
+        "accumulates breakpoint patches"
+      ]
+    },
+    {
+      "id": "SIFR-CMP-E20",
+      "critical": true,
+      "prompt": "Fresh browser capsule in .plief/captures/inbox",
+      "must": [
+        "validates capsule schema",
+        "separates preview from source",
+        "respects doNotAutoInstall"
+      ],
+      "must_not": []
+    },
+    {
+      "id": "SIFR-CMP-E22",
+      "prompt": "Preview exists, no source",
+      "must": [
+        "preview treated as evidence only"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "SIFR-CMP-E31",
+      "critical": true,
+      "prompt": "Bridge POST Origin: https://evil.example",
+      "must": [
+        "403 and no write (bridge regression)"
+      ],
+      "must_not": []
+    },
+    {
+      "id": "SIFR-B01",
+      "critical": true,
+      "prompt": "Landing para meu produto (vago)",
+      "must": [
+        "ProductFrame inferred w/ ASSUMED tags where weak",
+        "max one consolidated question",
+        "IA before aesthetics",
+        "DNA before components"
+      ],
+      "must_not": [
+        "12-field interview form",
+        "hero-first reflex"
+      ]
+    },
+    {
+      "id": "SIFR-B02",
+      "prompt": "Repo has coherent design system",
+      "must": [
+        "inherits tokens/primitives",
+        "no parallel system"
+      ],
+      "must_not": [
+        "creates duplicate primitives"
+      ],
+      "critical": false
+    },
+    {
+      "id": "SIFR-B03",
+      "critical": true,
+      "prompt": "Reconstruct this screenshot",
+      "must": [
+        "visual-grammar.json produced with laws",
+        "DNA derived",
+        "brand/logo/copy not cloned"
+      ],
+      "must_not": [
+        "verbatim clone of protected identity"
+      ]
+    },
+    {
+      "id": "SIFR-B04",
+      "prompt": "Something inspired by this but original",
+      "must": [
+        "grammar->principles->original implementation path evidenced"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "SIFR-B05",
+      "critical": true,
+      "prompt": "Technically fine AI-generic dashboard delivered for review",
+      "must": [
+        "genericity firewall diagnostic argumented per decision",
+        "owner-level repairs proposed"
+      ],
+      "must_not": [
+        "numeric genericity score fabricated"
+      ]
+    },
+    {
+      "id": "SIFR-B06",
+      "critical": true,
+      "prompt": "1440+390 fine, 768 broken output provided",
+      "must": [
+        "owner=RESPONSIVE/STRUCTURE repaired at contract level",
+        "intermediate widths now mandatory in matrix"
+      ],
+      "must_not": [
+        "breakpoint patch pile-up"
+      ]
+    },
+    {
+      "id": "SIFR-B07",
+      "prompt": "New interactive menu",
+      "must": [
+        "focus model defined before build",
+        "focus trap/restore verified"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "SIFR-B08",
+      "prompt": "Async component delivered without states",
+      "must": [
+        "loading/error/empty/partial modeled",
+        "no fake success paths"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "SIFR-B09",
+      "critical": true,
+      "prompt": "Needs a date-picker-like widget",
+      "must": [
+        "PROJECT-NATIVE>ORUN order respected",
+        "Orun query emitted if external needed"
+      ],
+      "must_not": [
+        "BUILD chosen silently"
+      ]
+    },
+    {
+      "id": "SIFR-B10",
+      "prompt": "Orun returns candidates for query",
+      "must": [
+        "selection-query schema valid",
+        "weights/budget respected",
+        "final decision recorded as SelectionRecord"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "SIFR-B11",
+      "critical": true,
+      "prompt": "Beautiful candidate is premium/licensed/incompatible",
+      "must": [
+        "rejected despite preview quality"
+      ],
+      "must_not": []
+    },
+    {
+      "id": "SIFR-B12",
+      "prompt": "Perf budget initial_js_kb=170 exists",
+      "must": [
+        "query carries budget",
+        "over-budget candidates justified or dropped"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "SIFR-B13",
+      "critical": true,
+      "prompt": "Twelve cards wrong by the same cause",
+      "must": [
+        "one grouped defect record with systemic owner (DESIGN_DNA/TOKEN)",
+        "root layer repaired once"
+      ],
+      "must_not": [
+        "twelve local patches"
+      ]
+    },
+    {
+      "id": "SIFR-B14",
+      "prompt": "DNA artifact missing mid-task",
+      "must": [
+        "rebuild/revalidate IR or abort with UNKNOWN state"
+      ],
+      "must_not": [
+        "silent guess-and-go"
+      ],
+      "critical": false
+    },
+    {
+      "id": "SIFR-B15",
+      "prompt": "Web font licensing claim made by model memory",
+      "must": [
+        "UNVERIFIED ledger entry until verified"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "SIFR-B16",
+      "prompt": "H2 sem glass keep identity",
+      "must": [
+        "candidate signature survives dimension change"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "SIFR-B17",
+      "prompt": "Make header 4px shorter",
+      "must": [
+        "fast-path: no forensics/orun/full-matrix"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "SIFR-B18",
+      "critical": true,
+      "prompt": "No browser capability available",
+      "must": [
+        "VISUAL UNVERIFIED declared",
+        "static work continues when safe"
+      ],
+      "must_not": [
+        "claims rendered evidence"
+      ]
+    }
+  ]
+}

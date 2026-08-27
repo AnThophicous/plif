@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.sifr:responsive-contract:v1",
+  "type": "object",
+  "required": ["regions"],
+  "properties": {
+    "viewport_matrix_hint": {"type": "array", "items": {"type": "integer"}},
+    "risky_states": {"type": "array"},
+    "states_extra": {"type": "array"},
+    "long_content_relevant": {"type": "boolean"},
+    "breakpoint_policy": {"type": "string"},
+    "regions": {
+      "type": "array",
+      "items": {"type": "object", "required": ["region"], "properties": {
+        "region": {"type": "string"},
+        "wide": {"type": "string"}, "mid_1024": {"type": ["string","object"]},
+        "mid_768": {"type": ["string","object"]}, "narrow_390": {"type": "string"},
+        "verify_at": {"type": "array", "items": {"type": "integer"}},
+        "ownership": {"type": "string"}
+      }}
+    }
+  }
+}

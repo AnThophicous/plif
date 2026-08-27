@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.sifr:design-dna:v1",
+  "title": "DesignDNA",
+  "required": ["geometry_law", "spacing_rhythm", "container_law", "radius_law",
+               "border_law", "elevation_law", "type_roles", "chroma_budget",
+               "icon_family", "motion_character", "signature_move", "counter_default"],
+  "properties": {
+    "direction": {"type": "string"}, "tone": {"type": "string"},
+    "density": {"enum": ["sparse", "balanced", "compact"]},
+    "geometry_law": {"type": ["string", "object"]},
+    "spacing_rhythm": {"type": ["string", "object"]},
+    "container_law": {"type": ["string", "object"]},
+    "radius_law": {"type": ["string", "object"]},
+    "border_law": {"type": ["string", "object"]},
+    "elevation_law": {"type": ["string", "object"]},
+    "type_roles": {"type": "array", "minItems": 1},
+    "chroma_budget": {"type": ["string", "object"]},
+    "icon_family": {"type": "string"},
+    "motion_character": {"type": ["string", "object"]},
+    "signature_move": {"type": ["string", "object"]},
+    "counter_default": {"type": "string"},
+    "visual_tension_notes": {"type": "string"}
+  }
+}

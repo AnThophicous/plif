@@ -1,0 +1,26 @@
+{
+  "name": "Pli'ef Galileu",
+  "slug": "plief-galileu",
+  "version": "1.0.0",
+  "description": "Decision Intelligence Engine: living DecisionGraph, Assumption Ledger, contradiction handling with partial reopen, env-before-ask question ladder, counterfactual/premortem triggers and persistent machine-readable Decision Records.",
+  "entry": "SKILL.md",
+  "artifacts": {
+    "produced": [
+      ".plif/artifacts/<task-id>/decision-graph.json",
+      ".plif/artifacts/<task-id>/assumptions.jsonl",
+      ".plif/artifacts/<task-id>/decision-record.json"
+    ],
+    "consumed": [
+      ".plif/artifacts/<surface-id>/selection-record.json",
+      "_kernel/evidence/ledger.md",
+      "_kernel/risk/autonomy.md",
+      ".kernel evidence ledgers"
+    ]
+  },
+  "schemas": [
+    "schemas/decision-graph.schema.json",
+    "schemas/assumption.schema.json",
+    "schemas/decision-record.schema.json"
+  ],
+  "engines_selftest": ["tools/galileu_lint.py", "tools/reopen.py"]
+}
