@@ -1,22 +1,21 @@
 /**
- * PTY provider backed by a small Python bridge.
+ * PTY providers, native-first.
  *
- * `node-pty` needs a C toolchain that is not present on every machine, so the
- * real pseudo-terminal is allocated by the Python standard library instead
- * (`pty.openpty`). This module only spawns that bridge and wires its four
- * channels:
+ * The preferred provider is `node-pty` — the canonical Node PTY (VS Code, ttyd):
+ * direct bytes, no extra hop, cross-platform. It is an *optional* dependency
+ * because installing it needs a C toolchain (or a matching prebuild); on
+ * machines where it cannot build, we fall back to a Python standard-library
+ * bridge (`bridge/pty-bridge.py`, `pty.openpty`) so `plif web` still works
+ * everywhere with nothing to compile.
  *
- *   bridge stdin  <- bytes to write to the PTY
- *   bridge stdout -> bytes read from the PTY
- *   bridge stderr -> diagnostics
- *   fd 3          <- control channel ("resize <cols> <rows>\n")
- *
- * The surface mirrors the small part of the node-pty API the server uses.
+ * The server only sees the small `PtyProcess` surface below, so swapping or
+ * adding providers stays contained in this file.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createRequire } from 'node:module';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { StringDecoder } from 'node:string_decoder';
+import { fileURLToPath } from 'node:url';
 
 export interface PtySpawnOptions {
   readonly cols: number;
@@ -33,11 +32,77 @@ export interface PtyProcess {
   kill(signal?: NodeJS.Signals): void;
 }
 
+/** Structural view of node-pty; avoids a hard compile-time type dependency. */
+interface NativePtyModule {
+  spawn(
+    file: string,
+    args: string[],
+    options: {
+      name: string;
+      cols: number;
+      rows: number;
+      cwd: string;
+      env: Record<string, string>;
+    },
+  ): PtyProcess;
+}
+
+const localRequire = createRequire(import.meta.url);
+
+function loadNative(): NativePtyModule | null {
+  try {
+    return localRequire('node-pty') as NativePtyModule;
+  } catch {
+    // Not installed (optional dependency skipped) or native binary missing.
+    return null;
+  }
+}
+
+const native = loadNative();
+
+/** Which backend `spawnPty` uses; logged at server start for diagnostics. */
+export function ptyProvider(): 'node-pty' | 'python-bridge' {
+  return native === null ? 'python-bridge' : 'node-pty';
+}
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 /** bridge/pty-bridge.py sits at the package root, above both src/ and dist/. */
 const BRIDGE_PATH = path.resolve(here, '..', 'bridge', 'pty-bridge.py');
 
 export function spawnPty(
+  command: string,
+  args: readonly string[],
+  options: PtySpawnOptions,
+): PtyProcess {
+  if (native !== null) {
+    const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+    for (const [key, value] of Object.entries(options.env ?? {})) {
+      if (value !== undefined) env[key] = value;
+    }
+    env['TERM'] = 'xterm-256color';
+    env['COLORTERM'] = 'truecolor';
+    return native.spawn(command, [...args], {
+      name: 'xterm-256color',
+      cols: options.cols,
+      rows: options.rows,
+      cwd: options.cwd,
+      env,
+    });
+  }
+  return spawnBridge(command, args, options);
+}
+
+/**
+ * Fallback provider backed by the Python bridge.
+ *
+ * Channel layout (set up here, consumed by the bridge):
+ *
+ *   bridge stdin  <- bytes to write to the PTY
+ *   bridge stdout -> bytes read from the PTY
+ *   bridge stderr -> diagnostics
+ *   fd 3          <- control channel ("resize <cols> <rows>\n")
+ */
+function spawnBridge(
   command: string,
   args: readonly string[],
   options: PtySpawnOptions,

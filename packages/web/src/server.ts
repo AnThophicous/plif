@@ -25,7 +25,7 @@ import type { AddressInfo } from 'node:net';
 
 import { WebSocketServer, type WebSocket } from 'ws';
 
-import { spawnPty, type PtyProcess } from './pty.js';
+import { ptyProvider, spawnPty, type PtyProcess } from './pty.js';
 
 export interface WebServerOptions {
   /** TCP port to listen on. */
@@ -172,6 +172,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
   const { port, host, command, args, cwd } = options;
   const maxSessions = options.maxSessions ?? 4;
   const token = randomBytes(16).toString('hex');
+  log(`pty provider: ${ptyProvider()}`);
 
   let boundPort = port;
 

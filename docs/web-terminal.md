@@ -76,23 +76,28 @@ A toolbar também oferece botões **Copiar**, **Colar** e **Interromper**.
 Browser (xterm.js)
     │  WebSocket JSON (/pty?token=...)
     ▼
-@plif/web — server.ts
-    │  stdin/stdout via bridge Python
-    ▼
-bridge/pty-bridge.py (stdlib pty)
-    │  PTY real
+@plif/web — server.ts → pty.ts (provider duplo)
+    │  prefere node-pty (nativo, opcional)
+    │  fallback: bridge Python (stdlib pty)
     ▼
 plif CLI (intocada)
 ```
 
-O PTY é alocado pela stdlib do Python (`pty.openpty`), evitando dependência
-de módulos nativos Node (node-gyp). Requer apenas `python3` no PATH.
+O provider preferido é o `node-pty` (nativo — o mesmo usado por VS Code e
+ttyd): bytes diretos, sem hop extra. Como ele é **dependência opcional**,
+máquinas sem toolchain C caem automaticamente no bridge Python
+(`bridge/pty-bridge.py`, `pty.openpty`) e `plif web` continua funcionando sem
+nada para compilar. O provider ativo aparece no log do servidor:
+`plif web: pty provider: node-pty` ou `python-bridge`.
+
+Para compilar o node-pty em host sem toolchain (usa Docker): `npm run build:pty`.
 
 ## Requisitos
 
 - Node >= 20.11
-- Python 3 (para o bridge de PTY)
 - Navegador moderno (xterm.js requer ES2020+)
+- PTY: `node-pty` (opcional, nativo) ou `python3` no PATH (bridge fallback;
+  `PLIF_PYTHON` sobrescreve o interpretador)
 
 ## Solução de problemas
 
@@ -104,3 +109,4 @@ de módulos nativos Node (node-gyp). Requer apenas `python3` no PATH.
 | WebSocket 503 | Limite de sessões atingido | Feche abas antigas ou aumente `--max-sessions` |
 | "Reconectando" após restart do servidor | Cookie de sessão expirou ou JS antigo em cache | Recarregue a aba (F5) uma vez; o frontend volta para o login sozinho |
 | Tela preta | `python3` não encontrado | Verifique `which python3`; ou defina `PLIF_PYTHON=/caminho/python3` |
+| Log mostra `pty provider: python-bridge` | `node-pty` sem binário no host | Normal sem toolchain C; para ativar o nativo, `npm run build:pty` |
