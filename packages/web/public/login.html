@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>plif — web</title>
+  <style>
+    :root {
+      --bg: #16161c;
+      --panel: #1c1c22;
+      --border: #aab8cc;
+      --text: #cdd6f4;
+      --muted: #89959e;
+      --accent: #e8a8c9;
+      --surface: #2c2d2e;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      overflow: hidden;
+    }
+    .app { display: flex; flex-direction: column; height: 100%; }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      background: var(--panel);
+      border-bottom: 1px solid #2c2d2e;
+      user-select: none;
+    }
+    .brand {
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      color: var(--accent);
+      margin-right: auto;
+    }
+    .brand span { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 6px; }
+    .status {
+      font-size: 11px;
+      color: var(--muted);
+      margin-right: 8px;
+    }
+    .login-area {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px 32px;
+      width: 320px;
+      text-align: center;
+    }
+    .card h2 { margin: 0 0 8px; font-size: 16px; color: var(--accent); }
+    .card p { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+    .card input {
+      width: 100%;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid #3a3b3d;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 13px;
+      margin-bottom: 12px;
+      outline: none;
+    }
+    .card input:focus { border-color: var(--accent); }
+    .btn {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid #3a3b3d;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 12px;
+      cursor: pointer;
+      width: 100%;
+      transition: border-color 120ms ease, color 120ms ease;
+    }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn:active { transform: translateY(1px); }
+    .error { color: #e88a8a; font-size: 12px; margin: -6px 0 12px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="toolbar">
+      <div class="brand">plif<span>web terminal</span></div>
+      <div class="status">autenticação necessária</div>
+    </div>
+    <div class="login-area">
+      <form class="card" method="post" action="/login">
+        <h2>Acesso restrito</h2>
+        <p>Digite a senha para abrir o terminal.</p>
+        <!--ERROR-->
+        <input type="password" name="password" placeholder="Senha" autofocus required />
+        <button class="btn" type="submit">Entrar</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

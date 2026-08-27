@@ -51,6 +51,8 @@ async function main(): Promise<void> {
       return await (await import('./commands/skills.js')).runSkills(invocation);
     case 'mcp':
       return await (await import('./commands/mcp.js')).runMcp(invocation);
+    case 'web':
+      return await (await import('./commands/web.js')).runWeb(invocation);
     case 'prompt':
       return await (await import('./commands/prompt.js')).runPrompt(invocation);
     case 'continue':

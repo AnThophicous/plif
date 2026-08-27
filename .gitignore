@@ -34,3 +34,6 @@ packages/*/README.md
 History.txt
 *-this-session-is-being-continued-*.txt
 packages/cli/*-local-command-*.txt
+
+# Local development notes and working documents — not part of the repo.
+docs/dev/

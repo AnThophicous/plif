@@ -7,5 +7,5 @@
     "lib": ["ES2023", "DOM"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "references": [{ "path": "../core" }, { "path": "../sandbox" }]
+  "references": [{ "path": "../core" }, { "path": "../sandbox" }, { "path": "../web" }]
 }

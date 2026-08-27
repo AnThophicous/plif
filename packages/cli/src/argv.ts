@@ -70,6 +70,14 @@ export type Invocation =
     }
   | { readonly kind: 'skills'; readonly flags: GlobalFlags }
   | { readonly kind: 'mcp'; readonly flags: GlobalFlags }
+  /** `plif web` — open the interactive CLI in a browser via a PTY bridge. */
+  | {
+      readonly kind: 'web';
+      readonly flags: GlobalFlags;
+      readonly port: number;
+      readonly host: string;
+      readonly maxSessions: number;
+    }
   | { readonly kind: 'help'; readonly topic: string | null }
   | { readonly kind: 'version' }
   | { readonly kind: 'error'; readonly message: string; readonly hint?: string };
@@ -83,6 +91,7 @@ const COMMANDS = [
   'model',
   'skills',
   'mcp',
+  'web',
   'help',
   'version',
 ] as const;
@@ -161,7 +170,18 @@ function stringFlag(flags: Map<string, string | true>, name: string): string | u
 }
 
 /** Flags that consume the following token. Everything else is boolean. */
-const VALUED_FLAGS = new Set(['root', 'workspace', 'C', 'model', 'base-url', 'preset', 'api-key']);
+const VALUED_FLAGS = new Set([
+  'root',
+  'workspace',
+  'C',
+  'model',
+  'base-url',
+  'preset',
+  'api-key',
+  'port',
+  'host',
+  'max-sessions',
+]);
 
 export function parseArgv(argv: readonly string[], cwd: string): Invocation {
   const { positional, flags } = partition(argv);
@@ -256,6 +276,18 @@ export function parseArgv(argv: readonly string[], cwd: string): Invocation {
       return { kind: 'model', flags: flagSet, action };
     }
 
+    case 'web': {
+      // Defaults keep the adapter local-only; a remote PTY needs an explicit host.
+      const rawPort = stringFlag(flags, 'port');
+      const parsedPort = rawPort === undefined ? Number.NaN : Number.parseInt(rawPort, 10);
+      const port = Number.isInteger(parsedPort) && parsedPort > 0 && parsedPort < 65536 ? parsedPort : 4173;
+      const host = stringFlag(flags, 'host') ?? '127.0.0.1';
+      const rawMax = stringFlag(flags, 'max-sessions');
+      const parsedMax = rawMax === undefined ? Number.NaN : Number.parseInt(rawMax, 10);
+      const maxSessions = Number.isInteger(parsedMax) && parsedMax > 0 && parsedMax <= 64 ? parsedMax : 4;
+      return { kind: 'web', flags: flagSet, port, host, maxSessions };
+    }
+
     case 'help':
       return { kind: 'help', topic: rest[0] ?? null };
 
@@ -277,6 +309,10 @@ plif — container-native AI agent core
   plif mcp                      Connect to configured MCP servers and report
   plif model [show|list|check|set]
                                 Inspect, test or pin the model configuration
+  plif web [--port N] [--host H] [--max-sessions N]
+                                Open the interactive CLI in a browser (PTY
+                                bridge). Binds to 127.0.0.1:4173 by default and
+                                prints a one-shot token URL to open.
   plif help [topic]             Show this, or detail on a topic
   plif version
 
