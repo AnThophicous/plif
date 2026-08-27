@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.sifr:component-contract:v1",
+  "type": "object",
+  "required": ["role", "anatomy", "states"],
+  "properties": {
+    "role": {"type": "string"}, "anatomy": {"type": "array"},
+    "states": {"type": "array", "items": {"type": "string"}},
+    "variants": {"type": "array"}, "sizes": {"type": "array"},
+    "content_behavior": {"type": "string"}, "a11y_contract": {"type": "object"},
+    "keyboard_behavior": {"type": "string"}, "responsive_behavior": {"type": "string"},
+    "composition_rules": {"type": "array"}, "forbidden_combinations": {"type": "array"},
+    "extension_points": {"type": "array"},
+    "source": {"enum": ["native", "transplant", "orun-adapted", "composed", "built"]},
+    "source_record_ref": {"type": ["string","null"]},
+    "invariant": {"type": ["string","null"]}
+  }
+}

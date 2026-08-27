@@ -1,0 +1,390 @@
+{
+  "gantt": [
+    "kibo:gantt"
+  ],
+  "data": [
+    "kibo:gantt"
+  ],
+  "timeline": [
+    "anime:timeline",
+    "kibo:gantt"
+  ],
+  "functional-ui": [
+    "kibo:gantt"
+  ],
+  "chart": [
+    "bklit:area-chart",
+    "bklit:grid",
+    "bklit:legend",
+    "bklit:line-chart",
+    "bklit:tooltip"
+  ],
+  "area": [
+    "bklit:area-chart"
+  ],
+  "visualization": [
+    "bklit:area-chart",
+    "bklit:line-chart"
+  ],
+  "line": [
+    "bklit:line-chart"
+  ],
+  "grid": [
+    "bklit:grid"
+  ],
+  "utility": [
+    "bklit:grid",
+    "bklit:legend"
+  ],
+  "legend": [
+    "bklit:legend"
+  ],
+  "tooltip": [
+    "aceternity:animated-tooltip",
+    "bklit:tooltip"
+  ],
+  "crosshair": [
+    "bklit:tooltip"
+  ],
+  "interaction": [
+    "anime:draggable",
+    "bklit:tooltip",
+    "gsap:draggable",
+    "originkit:gravity-gallery",
+    "originkit:magnetic-carousel",
+    "originkit:user-cursor",
+    "three:raycaster"
+  ],
+  "ai-interface": [
+    "kokonut:ai-prompt"
+  ],
+  "input": [
+    "gsap:observer",
+    "kokonut:ai-prompt"
+  ],
+  "button": [
+    "kokonut:command-button"
+  ],
+  "command": [
+    "kokonut:command-button"
+  ],
+  "card": [
+    "aceternity:3d-card-effect",
+    "kokonut:card-flip",
+    "transitions:card-resize"
+  ],
+  "flip": [
+    "gsap:flip",
+    "kokonut:card-flip"
+  ],
+  "animation": [
+    "aceternity:animated-tooltip",
+    "aceternity:aurora-background",
+    "aceternity:infinite-moving-cards",
+    "anime:animation",
+    "anime:layout",
+    "kokonut:card-flip",
+    "motion:motion-component"
+  ],
+  "drawer": [
+    "kokonut:smooth-drawer"
+  ],
+  "motion": [
+    "gsap:motionpath",
+    "kokonut:shape-hero",
+    "kokonut:smooth-drawer"
+  ],
+  "hero": [
+    "aceternity:hero-parallax",
+    "kokonut:shape-hero",
+    "watermelon:hero-4"
+  ],
+  "background": [
+    "aceternity:aurora-background",
+    "kokonut:shape-hero",
+    "originkit:black-hole"
+  ],
+  "footer": [
+    "watermelon:footer-10"
+  ],
+  "navigation": [
+    "gsap:scrollto",
+    "watermelon:navigation-5"
+  ],
+  "navbar": [
+    "watermelon:navigation-5"
+  ],
+  "widget": [
+    "watermelon:widget-3"
+  ],
+  "dashboard": [
+    "watermelon:widget-3"
+  ],
+  "faq": [
+    "watermelon:faq-1"
+  ],
+  "interactive": [
+    "originkit:black-hole"
+  ],
+  "carousel": [
+    "originkit:magnetic-carousel"
+  ],
+  "magnetic": [
+    "originkit:magnetic-carousel"
+  ],
+  "gallery": [
+    "originkit:gravity-gallery"
+  ],
+  "drag": [
+    "anime:draggable",
+    "gsap:draggable",
+    "gsap:inertia",
+    "originkit:gravity-gallery"
+  ],
+  "text-animation": [
+    "aceternity:text-generate-effect",
+    "originkit:scramble-text"
+  ],
+  "scramble": [
+    "gsap:scrambletext",
+    "originkit:scramble-text"
+  ],
+  "cursor": [
+    "originkit:user-cursor"
+  ],
+  "particles": [
+    "originkit:particle-sphere"
+  ],
+  "3d-like": [
+    "originkit:particle-sphere"
+  ],
+  "3d": [
+    "aceternity:3d-card-effect",
+    "aceternity:3d-pin",
+    "getlayers:3d-scenes",
+    "three:buffergeometry",
+    "three:object3d",
+    "three:raycaster",
+    "three:scene"
+  ],
+  "perspective": [
+    "aceternity:3d-card-effect",
+    "aceternity:3d-pin"
+  ],
+  "parallax": [
+    "aceternity:hero-parallax"
+  ],
+  "scroll": [
+    "aceternity:hero-parallax",
+    "gsap:observer",
+    "gsap:scrollsmoother",
+    "gsap:scrollto",
+    "gsap:scrolltrigger",
+    "motion:use-scroll"
+  ],
+  "cards": [
+    "aceternity:infinite-moving-cards"
+  ],
+  "marquee": [
+    "aceternity:infinite-moving-cards"
+  ],
+  "react": [
+    "gsap:usegsap",
+    "motion:animate-presence",
+    "motion:motion-component",
+    "rive:react-webgl2"
+  ],
+  "enter-exit": [
+    "motion:animate-presence"
+  ],
+  "motion-value": [
+    "motion:use-scroll",
+    "motion:use-spring",
+    "motion:use-transform"
+  ],
+  "mapping": [
+    "motion:use-transform"
+  ],
+  "spring": [
+    "motion:use-spring"
+  ],
+  "imperative": [
+    "motion:use-animate"
+  ],
+  "sequence": [
+    "anime:timeline",
+    "motion:use-animate"
+  ],
+  "accessibility": [
+    "motion:use-reduced-motion"
+  ],
+  "reduced-motion": [
+    "motion:use-reduced-motion"
+  ],
+  "layout": [
+    "anime:layout",
+    "gsap:flip"
+  ],
+  "scope": [
+    "anime:scope"
+  ],
+  "lifecycle": [
+    "anime:scope"
+  ],
+  "waapi": [
+    "anime:waapi"
+  ],
+  "browser": [
+    "anime:waapi"
+  ],
+  "trigger": [
+    "gsap:scrolltrigger"
+  ],
+  "pinning": [
+    "gsap:scrolltrigger"
+  ],
+  "smoothing": [
+    "gsap:scrollsmoother"
+  ],
+  "text": [
+    "gsap:scrambletext",
+    "gsap:splittext",
+    "transitions:number-pop-in",
+    "transitions:text-states-swap"
+  ],
+  "split": [
+    "gsap:splittext"
+  ],
+  "svg": [
+    "gsap:drawsvg",
+    "gsap:morphsvg",
+    "gsap:motionpath",
+    "gsap:motionpathhelper"
+  ],
+  "drawing": [
+    "gsap:drawsvg"
+  ],
+  "morph": [
+    "gsap:morphsvg"
+  ],
+  "path": [
+    "gsap:motionpath"
+  ],
+  "development": [
+    "gsap:gsdevtools",
+    "gsap:motionpathhelper"
+  ],
+  "inertia": [
+    "gsap:inertia"
+  ],
+  "gesture": [
+    "gsap:observer"
+  ],
+  "physics": [
+    "gsap:physics2d",
+    "gsap:physicsprops"
+  ],
+  "pixi": [
+    "gsap:pixi"
+  ],
+  "ecosystem": [
+    "gsap:easel",
+    "gsap:pixi"
+  ],
+  "easeljs": [
+    "gsap:easel"
+  ],
+  "easing": [
+    "gsap:custombounce",
+    "gsap:customease",
+    "gsap:customwiggle",
+    "gsap:easepack"
+  ],
+  "hook": [
+    "gsap:usegsap"
+  ],
+  "transition": [
+    "transitions:card-resize",
+    "transitions:menu-dropdown",
+    "transitions:modal-open-close",
+    "transitions:notification-badge",
+    "transitions:number-pop-in",
+    "transitions:panel-reveal",
+    "transitions:text-states-swap"
+  ],
+  "resize": [
+    "transitions:card-resize"
+  ],
+  "number": [
+    "transitions:number-pop-in"
+  ],
+  "badge": [
+    "transitions:notification-badge"
+  ],
+  "menu": [
+    "transitions:menu-dropdown"
+  ],
+  "modal": [
+    "transitions:modal-open-close"
+  ],
+  "panel": [
+    "transitions:panel-reveal"
+  ],
+  "rive": [
+    "rive:react-webgl2",
+    "rive:webgl2"
+  ],
+  "webgl2": [
+    "rive:react-webgl2",
+    "rive:webgl2"
+  ],
+  "state-machine": [
+    "rive:react-webgl2"
+  ],
+  "web": [
+    "rive:webgl2"
+  ],
+  "wasm": [
+    "rive:webgl2"
+  ],
+  "scene": [
+    "getlayers:3d-scenes",
+    "three:scene"
+  ],
+  "scene-graph": [
+    "three:object3d"
+  ],
+  "geometry": [
+    "three:buffergeometry"
+  ],
+  "picking": [
+    "three:raycaster"
+  ],
+  "image-to-3d": [
+    "img2threejs:pipeline"
+  ],
+  "threejs": [
+    "img2threejs:pipeline"
+  ],
+  "procedural": [
+    "img2threejs:pipeline"
+  ],
+  "quality-gates": [
+    "img2threejs:pipeline"
+  ],
+  "prompt": [
+    "getlayers:3d-scenes"
+  ],
+  "source-file": [
+    "getlayers:3d-scenes"
+  ],
+  "template": [
+    "getlayers:templates"
+  ],
+  "landing-page": [
+    "getlayers:templates"
+  ],
+  "nextjs": [
+    "getlayers:templates"
+  ]
+}

@@ -480,6 +480,7 @@ export {
   configSchemaText,
   formatConfigToml,
   agentsOf,
+  activityHudModeOf,
   mcpServersOf,
   globalConfigPath,
   legacyGlobalConfigPath,
@@ -497,7 +498,15 @@ export {
   plifModeOf,
 } from './config/global.js';
 export { stripJsonComments } from './config/global.js';
-export type { AgentConfig, GlobalConfig, PermissionMode, ProfileConfig, PlifModeConfig } from './config/global.js';
+export type {
+  ActivityHudConfig,
+  ActivityHudMode,
+  AgentConfig,
+  GlobalConfig,
+  PermissionMode,
+  ProfileConfig,
+  PlifModeConfig,
+} from './config/global.js';
 
 export {
   DEVELOPER_POLICY,

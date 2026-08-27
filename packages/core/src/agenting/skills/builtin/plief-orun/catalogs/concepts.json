@@ -1,0 +1,229 @@
+{
+  "schema_version": 1,
+  "concepts": [
+    {
+      "id": "concept:animated-hero",
+      "name": "Animated hero",
+      "intent_terms": [
+        "animated hero",
+        "motion hero",
+        "hero animation"
+      ],
+      "dimensions": [
+        "hero",
+        "motion",
+        "responsive",
+        "performance"
+      ],
+      "implementation_ids": [
+        "kokonut:shape-hero",
+        "aceternity:hero-parallax",
+        "watermelon:hero-4"
+      ]
+    },
+    {
+      "id": "concept:carousel",
+      "name": "Carousel",
+      "intent_terms": [
+        "carousel",
+        "slider",
+        "image carousel"
+      ],
+      "dimensions": [
+        "navigation",
+        "drag",
+        "autoplay",
+        "touch",
+        "keyboard",
+        "responsive"
+      ],
+      "implementation_ids": [
+        "originkit:magnetic-carousel"
+      ]
+    },
+    {
+      "id": "concept:modal-transition",
+      "name": "Modal transition",
+      "intent_terms": [
+        "modal animation",
+        "dialog transition",
+        "modal open close"
+      ],
+      "dimensions": [
+        "enter",
+        "exit",
+        "focus",
+        "reduced-motion",
+        "interruption"
+      ],
+      "implementation_ids": [
+        "transitions:modal-open-close",
+        "motion:animate-presence"
+      ]
+    },
+    {
+      "id": "concept:scroll-choreography",
+      "name": "Scroll choreography",
+      "intent_terms": [
+        "cinematic scroll",
+        "scroll choreography",
+        "scroll pinning"
+      ],
+      "dimensions": [
+        "trigger",
+        "scrub",
+        "pin",
+        "timeline",
+        "mobile",
+        "performance"
+      ],
+      "implementation_ids": [
+        "gsap:scrolltrigger",
+        "motion:use-scroll"
+      ]
+    },
+    {
+      "id": "concept:data-line-chart",
+      "name": "Line chart",
+      "intent_terms": [
+        "line chart",
+        "time series chart",
+        "trend chart"
+      ],
+      "dimensions": [
+        "data-shape",
+        "axes",
+        "tooltip",
+        "accessibility",
+        "responsive"
+      ],
+      "implementation_ids": [
+        "bklit:line-chart",
+        "bklit:grid",
+        "bklit:tooltip",
+        "bklit:legend"
+      ]
+    },
+    {
+      "id": "concept:animated-marquee",
+      "name": "Animated marquee",
+      "intent_terms": [
+        "marquee",
+        "infinite moving cards",
+        "ticker"
+      ],
+      "dimensions": [
+        "loop",
+        "speed",
+        "pause",
+        "reduced-motion"
+      ],
+      "implementation_ids": [
+        "aceternity:infinite-moving-cards"
+      ]
+    },
+    {
+      "id": "concept:text-scramble",
+      "name": "Text scramble",
+      "intent_terms": [
+        "scramble text",
+        "text scramble",
+        "hacker text"
+      ],
+      "dimensions": [
+        "trigger",
+        "duration",
+        "characters",
+        "accessibility"
+      ],
+      "implementation_ids": [
+        "originkit:scramble-text",
+        "gsap:scrambletext"
+      ]
+    },
+    {
+      "id": "concept:image-to-procedural-3d",
+      "name": "Image to procedural 3D",
+      "intent_terms": [
+        "image to threejs",
+        "make this object 3d",
+        "rebuild image in three.js"
+      ],
+      "dimensions": [
+        "reference",
+        "fidelity",
+        "hidden-regions",
+        "hierarchy",
+        "animation-ready",
+        "quality-gates"
+      ],
+      "implementation_ids": [
+        "img2threejs:pipeline"
+      ]
+    },
+    {
+      "id": "concept:interactive-rive",
+      "name": "Interactive Rive asset",
+      "intent_terms": [
+        "rive animation",
+        "state machine animation",
+        "interactive .riv"
+      ],
+      "dimensions": [
+        "asset",
+        "renderer",
+        "state-machine",
+        "inputs",
+        "events",
+        "runtime-size"
+      ],
+      "implementation_ids": [
+        "rive:react-webgl2",
+        "rive:webgl2"
+      ]
+    },
+    {
+      "id": "concept:3d-interaction",
+      "name": "True 3D interaction",
+      "intent_terms": [
+        "3d scene",
+        "webgl interaction",
+        "raycast"
+      ],
+      "dimensions": [
+        "scene",
+        "camera",
+        "renderer",
+        "picking",
+        "performance",
+        "fallback"
+      ],
+      "implementation_ids": [
+        "three:scene",
+        "three:object3d",
+        "three:raycaster"
+      ]
+    },
+    {
+      "id": "concept:drag-inertia",
+      "name": "Drag with inertia",
+      "intent_terms": [
+        "drag inertia",
+        "momentum drag",
+        "throwable drag"
+      ],
+      "dimensions": [
+        "pointer",
+        "touch",
+        "bounds",
+        "velocity",
+        "inertia"
+      ],
+      "implementation_ids": [
+        "gsap:draggable",
+        "gsap:inertia",
+        "anime:draggable"
+      ]
+    }
+  ]
+}

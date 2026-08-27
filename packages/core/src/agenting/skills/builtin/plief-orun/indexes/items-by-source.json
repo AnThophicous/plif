@@ -1,0 +1,111 @@
+{
+  "kibo-ui": [
+    "kibo:gantt"
+  ],
+  "bklit-ui": [
+    "bklit:area-chart",
+    "bklit:grid",
+    "bklit:legend",
+    "bklit:line-chart",
+    "bklit:tooltip"
+  ],
+  "kokonut-ui": [
+    "kokonut:ai-prompt",
+    "kokonut:card-flip",
+    "kokonut:command-button",
+    "kokonut:shape-hero",
+    "kokonut:smooth-drawer"
+  ],
+  "watermelon-ui": [
+    "watermelon:faq-1",
+    "watermelon:footer-10",
+    "watermelon:hero-4",
+    "watermelon:navigation-5",
+    "watermelon:widget-3"
+  ],
+  "originkit": [
+    "originkit:black-hole",
+    "originkit:gravity-gallery",
+    "originkit:magnetic-carousel",
+    "originkit:particle-sphere",
+    "originkit:scramble-text",
+    "originkit:user-cursor"
+  ],
+  "aceternity-ui": [
+    "aceternity:3d-card-effect",
+    "aceternity:3d-pin",
+    "aceternity:animated-tooltip",
+    "aceternity:aurora-background",
+    "aceternity:hero-parallax",
+    "aceternity:infinite-moving-cards",
+    "aceternity:text-generate-effect"
+  ],
+  "motion": [
+    "motion:animate-presence",
+    "motion:motion-component",
+    "motion:use-animate",
+    "motion:use-reduced-motion",
+    "motion:use-scroll",
+    "motion:use-spring",
+    "motion:use-transform"
+  ],
+  "animejs": [
+    "anime:animation",
+    "anime:draggable",
+    "anime:layout",
+    "anime:scope",
+    "anime:timeline",
+    "anime:waapi"
+  ],
+  "gsap": [
+    "gsap:custombounce",
+    "gsap:customease",
+    "gsap:customwiggle",
+    "gsap:draggable",
+    "gsap:drawsvg",
+    "gsap:easel",
+    "gsap:easepack",
+    "gsap:flip",
+    "gsap:gsdevtools",
+    "gsap:inertia",
+    "gsap:morphsvg",
+    "gsap:motionpath",
+    "gsap:motionpathhelper",
+    "gsap:observer",
+    "gsap:physics2d",
+    "gsap:physicsprops",
+    "gsap:pixi",
+    "gsap:scrambletext",
+    "gsap:scrollsmoother",
+    "gsap:scrollto",
+    "gsap:scrolltrigger",
+    "gsap:splittext",
+    "gsap:usegsap"
+  ],
+  "transitions-dev": [
+    "transitions:card-resize",
+    "transitions:menu-dropdown",
+    "transitions:modal-open-close",
+    "transitions:notification-badge",
+    "transitions:number-pop-in",
+    "transitions:panel-reveal",
+    "transitions:text-states-swap"
+  ],
+  "rive": [
+    "rive:react-webgl2",
+    "rive:webgl2"
+  ],
+  "threejs": [
+    "three:buffergeometry",
+    "three:object3d",
+    "three:raycaster",
+    "three:scene"
+  ],
+  "img2threejs": [
+    "img2threejs:pipeline"
+  ],
+  "getlayers": [
+    "getlayers:3d-scenes",
+    "getlayers:templates"
+  ]
+}

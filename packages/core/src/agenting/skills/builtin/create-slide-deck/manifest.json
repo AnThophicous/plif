@@ -1,0 +1,14 @@
+{
+    "artifacts":  {
+                      "consumed":  [
+                                       "_kernel/evidence/ledger.md"
+                                   ],
+                      "produced":  [
+
+                                   ]
+                  },
+    "name":  "create-slide-deck",
+    "version":  "1.0.0",
+    "slug":  "create-slide-deck",
+    "notes":  "peer utility: requirements/research/design workflow for decks"
+}

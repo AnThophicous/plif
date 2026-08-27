@@ -1,0 +1,14 @@
+{
+    "artifacts":  {
+                      "consumed":  [
+                                       "_kernel/evidence/ledger.md"
+                                   ],
+                      "produced":  [
+
+                                   ]
+                  },
+    "name":  "context-ingestion",
+    "version":  "1.0.0",
+    "slug":  "context-ingestion",
+    "notes":  "peer utility: stateless source-attribution boundary"
+}

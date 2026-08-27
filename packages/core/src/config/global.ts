@@ -10,6 +10,12 @@ import type { ConversationStateMode } from '../model/conversation-state.js';
 
 export type PermissionMode = 'ask' | 'auto-approve' | 'deny';
 
+export type ActivityHudMode = 'closed' | 'compact' | 'expanded';
+
+export interface ActivityHudConfig {
+  readonly mode?: ActivityHudMode;
+}
+
 /**
  * A named agent, the way OpenCode declares one.
  *
@@ -74,6 +80,8 @@ export interface GlobalConfig {
   /** Whether the primary agent may choose named agents without explicit user direction. */
   readonly agentAutoLaunch?: boolean;
   readonly plif?: PlifModeConfig;
+  /** Presentation preference for the runtime activity HUD. */
+  readonly activityHud?: ActivityHudConfig;
   readonly activeProfile?: string;
   /** Provider-qualified model chosen explicitly for future image delegation. */
   readonly visionModel?: string;
@@ -119,6 +127,11 @@ export function plifModeOf(config: GlobalConfig): PlifModeConfig {
   const value = (config as Record<string, unknown>)['plif'];
   if (!value || typeof value !== 'object') return {};
   return value as PlifModeConfig;
+}
+
+export function activityHudModeOf(config: GlobalConfig): ActivityHudMode {
+  const mode = config.activityHud?.mode;
+  return mode === 'closed' || mode === 'expanded' ? mode : 'compact';
 }
 
 export const CONFIG_SCHEMA_URL =

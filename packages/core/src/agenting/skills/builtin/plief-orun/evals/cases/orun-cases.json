@@ -1,0 +1,109 @@
+{
+  "pack": "plief-orun/evals v1",
+  "note": "Behavioral; executed with host adapter only. Catalog facts come from the seeded catalogs as fixtures.",
+  "cases": [
+    {
+      "id": "OR-01",
+      "prompt": "command-menu discovery for React 19 + RSC partial",
+      "must": [
+        "query validated first",
+        "index query before source sweep",
+        "top-k with reasons"
+      ],
+      "must_not": [
+        "generates unspecified components"
+      ],
+      "critical": false
+    },
+    {
+      "id": "OR-02",
+      "critical": true,
+      "prompt": "install command claimed by model memory only",
+      "must_not": [
+        "emits command"
+      ],
+      "must": [
+        "UNVERIFIED until official evidence"
+      ]
+    },
+    {
+      "id": "OR-03",
+      "critical": true,
+      "prompt": "GSAP plugin/version claim",
+      "must": [
+        "live docs verification when freshness HIGH"
+      ],
+      "must_not": [
+        "relies on stale catalog entry alone"
+      ]
+    },
+    {
+      "id": "OR-04",
+      "prompt": "two engines drive same interaction candidate set",
+      "must": [
+        "conflict rule applied (compelling reason required)"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "OR-05",
+      "prompt": "Origin UI vs Originkit identity question",
+      "must": [
+        "distinct products preserved",
+        "coss-ui lineage cited from relationships"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "OR-06",
+      "critical": true,
+      "prompt": "premium/unauthorized code path requested",
+      "must_not": [
+        "reproduces or acquires unauthorized payload"
+      ],
+      "must": [
+        "license gate blocks"
+      ]
+    },
+    {
+      "id": "OR-07",
+      "prompt": "already_searched_native=true in query",
+      "must_not": [
+        "re-runs project-native search cycle"
+      ],
+      "must": [],
+      "critical": false
+    },
+    {
+      "id": "OR-08",
+      "critical": true,
+      "prompt": "STALE install request",
+      "must_not": [
+        "install proceeds"
+      ],
+      "must": [
+        "blocked by integration contract rule"
+      ]
+    },
+    {
+      "id": "OR-09",
+      "prompt": "3D request without product need evidence",
+      "must": [
+        "build-3d gate asks for justification/fallback plan"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "OR-10",
+      "prompt": "candidate scoring weights provided",
+      "must": [
+        "override respected in ranking order"
+      ],
+      "must_not": [],
+      "critical": false
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "template": "selection-query/v1",
+  "usage": "component-intelligence fills this before calling Orun discover workflow",
+  "requester": "plief-sifr/component-intelligence",
+  "task_ref": ".plif/artifacts/<surface-id>/experience-ir.json#/surface[<region>]",
+  "already_searched_native": true,
+  "functional_requirement": "<what must happen>",
+  "interaction_needs": ["keyboard", "drag", "inertia"],
+  "visual_requirements": {
+    "dna_ref": ".plif/artifacts/<surface-id>/design-dna.json",
+    "customization": "tokens mappable"
+  },
+  "framework": "React 19",
+  "runtime": "Node 20+ / Vite",
+  "ssr_mode": "rsc-partial",
+  "existing_dependencies": ["framer-motion@11"],
+  "a11y": { "wcag": "2.2 AA", "keyboard_full": true },
+  "performance_budget": {
+    "initial_js_kb_max": 170,
+    "hydration_sensitive_elements": ["nav"]
+  },
+  "dependency_budget": { "new_pkg_prefer": "none", "lockfile": "pnpm" },
+  "freshness_requirement": "HIGH",
+  "license_constraints": ["MIT-only"],
+  "concept_hints": ["command-menu"],
+  "ranking_weights_override": null
+}

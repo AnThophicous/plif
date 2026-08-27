@@ -104,6 +104,15 @@ values = "Map of agent names to agent definitions."
 type = "boolean"
 description = "Allow the primary agent to launch configured named agents when their role matches a task."
 
+[fields.activityHud]
+type = "table"
+description = "Presentation preference for the runtime Activity HUD."
+
+[fields."activityHud.mode"]
+type = "string"
+values = ["closed", "compact", "expanded"]
+description = "Persisted HUD view mode; compact is the default."
+
 [fields.profiles]
 type = "table"
 

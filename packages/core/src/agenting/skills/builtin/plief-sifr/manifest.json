@@ -1,0 +1,42 @@
+﻿{
+  "name": "Pli'ef Sifr",
+  "slug": "plief-sifr",
+  "version": "1.0.0",
+  "description": "Frontend Intelligence & Experience Engineering System: product frame, structure, visual grammar/DNA, design system, component intelligence (Orun-integrated), interaction/motion/responsive/a11y/perf contracts, implementation and rendered repair loop over ExperienceIR.",
+  "entry": "SKILL.md",
+  "artifacts": {
+    "produced": [
+      ".plif/artifacts/<surface-id>/experience-ir.json",
+      ".plif/artifacts/<surface-id>/design-dna.json",
+      ".plif/artifacts/<surface-id>/visual-grammar.json",
+      ".plif/artifacts/<surface-id>/defect-report.json",
+      ".plif/artifacts/<surface-id>/selection-query.json",
+      ".plif/artifacts/<surface-id>/selection-record.json"
+    ],
+    "consumed": [
+      ".plif/artifacts/repository-map.json",
+      "_kernel/capabilities/map.md",
+      "_kernel/evidence/ledger.md",
+      "_kernel/risk/autonomy.md"
+    ]
+  },
+  "schemas": [
+    "schemas/experience-ir.schema.json",
+    "schemas/design-dna.schema.json",
+    "schemas/state-graph.schema.json",
+    "schemas/responsive-contract.schema.json",
+    "schemas/component-contract.schema.json",
+    "schemas/perf-budget.schema.json",
+    "schemas/defect-record.schema.json"
+  ],
+  "engines_selftest": [
+    "engines/ir_validate.py",
+    "engines/matrix_expand.py",
+    "engines/defect_classify.py"
+  ],
+  "stable_contracts": [
+    "plief-capsule/v1 (adapters/plief-capture-bridge.mjs)",
+    "POST http://127.0.0.1:17321/plief/ingest"
+  ],
+  "contract_adapters_from": "eight retired standalone frontend packages plus two shared core docs (full mapping archived in _backup_pre_vnext.zip)"
+}

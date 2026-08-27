@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.sifr:state-graph:v1",
+  "title": "InteractionGraph entry",
+  "type": "object",
+  "required": ["states", "event", "next_state"],
+  "properties": {
+    "states": {"type": "array", "items": {"type": "string"}},
+    "event": {"type": "string"},
+    "guard": {"type": "string"},
+    "next_state": {"type": "string"},
+    "side_effect": {"type": "string"},
+    "settlement": {"type": "string"},
+    "render_consequence": {"type": "string"}
+  }
+}

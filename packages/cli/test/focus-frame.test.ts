@@ -3,14 +3,23 @@ import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { describe, it } from 'node:test';
 
-import type { TaskSnapshot } from '@plif/core';
+import type { McpServerStatus, TaskSnapshot } from '@plif/core';
 import { Box, render, Text } from 'ink';
 import React from 'react';
 
 import { FocusFrame, focusRule, infinityCells, infinityFrame } from '../src/components/FocusFrame.js';
 import { PlifDock, plifDockHeight } from '../src/components/PlifDock.js';
 import { plifGlowCells } from '../src/components/PlifGlow.js';
-import { ACTIVITY_PANEL_ROWS, WorkDock, activitySummary, operationalEntries, workDockHeight } from '../src/components/WorkDock.js';
+import {
+  ACTIVITY_PANEL_ROWS,
+  MCP_DETAIL_LIMIT,
+  WorkDock,
+  activitySummary,
+  capabilityCounts,
+  mcpStatusCounts,
+  operationalEntries,
+  workDockHeight,
+} from '../src/components/WorkDock.js';
 import type { SubagentView, TimelineEntry } from '../src/session.js';
 import { displayWidth } from '../src/text.js';
 import { applyEffortPalette } from '../src/theme.js';
@@ -145,8 +154,8 @@ async function renderDock(width: number, model: string): Promise<string> {
   return stdout.output.replace(ANSI, '').replace(/\r/g, '');
 }
 
-async function renderActivity(width: number): Promise<string> {
-  const stdout = new CaptureStdout(width, 6);
+async function renderActivity(width: number, mcpStatuses: readonly McpServerStatus[] = []): Promise<string> {
+  const stdout = new CaptureStdout(width, 20);
   const entries = [
     { id: 'input', kind: 'input', title: 'inspect the project', at: 1 },
     { id: 'tool', kind: 'tool', title: 'Read', status: 'active', at: 2 },
@@ -159,10 +168,11 @@ async function renderActivity(width: number): Promise<string> {
         tasks: [],
         subagents: [],
         subagentFocus: 0,
-        expanded: true,
+        mode: 'expanded',
         width,
         now: 3,
         entries,
+        mcpStatuses,
       }),
     ),
     {
@@ -173,7 +183,13 @@ async function renderActivity(width: number): Promise<string> {
   );
   await new Promise<void>((resolve) => setTimeout(resolve, 20));
   app.unmount();
-  return stdout.output.replace(ANSI, '').replace(/\r/g, '');
+  // Ink clears and redraws the screen on the first external-store commit.
+  // Tests should inspect the final frame, not concatenate terminal frames.
+  const lastFrame = stdout.output.lastIndexOf('\u001b[2J\u001b[3J\u001b[H');
+  return stdout.output
+    .slice(lastFrame >= 0 ? lastFrame : 0)
+    .replace(ANSI, '')
+    .replace(/\r/g, '');
 }
 
 const task: TaskSnapshot = {
@@ -329,13 +345,26 @@ describe('Plif focus frame', () => {
 });
 
 describe('upper work dock', () => {
-  it('disappears at rest and grows when active work is expanded', () => {
+  it('disappears at rest and grows through compact and expanded modes', () => {
     assert.equal(workDockHeight([], [], false), 0);
-    assert.equal(workDockHeight([task], [], false), 1);
-    assert.equal(workDockHeight([task], [], true), 2);
+    assert.equal(workDockHeight([task], [], 'closed'), 1);
+    assert.equal(workDockHeight([task], [], 'compact'), ACTIVITY_PANEL_ROWS);
+    assert.equal(workDockHeight([task], [], 'expanded'), 8);
     assert.ok(workDockHeight([task], [subagent], true) > workDockHeight([task], [subagent], false));
-    // Header, task row, agent row, and the navigation hint row.
-    assert.equal(workDockHeight([task], [subagent], true), 4);
+    // Header, task row, agent row, runtime facts, and controls.
+    assert.equal(workDockHeight([task], [subagent], 'expanded'), 9);
+    assert.equal(
+      workDockHeight([task], [], 'expanded', [], {
+        mcpStatuses: Array.from({ length: MCP_DETAIL_LIMIT + 1 }, (_, index) => ({
+          name: `server-${index}`,
+          transport: 'http' as const,
+          connected: true,
+          toolCount: index,
+          detail: 'ready',
+        })),
+      }),
+      8 + MCP_DETAIL_LIMIT + 1,
+    );
   });
 
   it('keeps the operational dock to real inputs and commands from the latest turn', () => {
@@ -347,27 +376,40 @@ describe('upper work dock', () => {
       { id: 'new-tool', kind: 'tool', title: 'run command', status: 'active', at: 5 },
     ] as const;
     assert.deepEqual(operationalEntries(entries).map((item) => item.title), ['new', 'run command']);
-    assert.equal(workDockHeight([], [], true, entries), ACTIVITY_PANEL_ROWS);
+    assert.equal(workDockHeight([], [], 'compact', entries), ACTIVITY_PANEL_ROWS);
   });
 
-  it('renders Activity across the useful width instead of as a narrow corner box', async () => {
+  it('renders the expanded Activity HUD with bounded, factual rows', async () => {
     const rendered = await renderActivity(80);
-    const border = rendered.split('\n').find((line) => line.includes('╭'));
-    assert.ok(border, 'Activity should render a bordered panel');
-    assert.ok(displayWidth(border) >= 76, 'Activity should use the terminal width');
-    assert.match(rendered, /ACTIVITY[\s\S]*live/);
-    assert.match(rendered, /input inspect the project/);
+    assert.match(rendered, /ACTIVITY[\s\S]*expanded/);
+    assert.match(rendered, /activity input inspect the project/);
+    assert.match(rendered, /LSP unavailable/);
+    assert.doesNotMatch(rendered, /tokens/);
     assert.deepEqual(activitySummary([
       { id: 'input', kind: 'input', title: 'inspect', at: 1 },
       { id: 'mcp', kind: 'tool', title: 'Search', toolCategory: 'external', toolTarget: 'github', at: 2 },
-      { id: 'skill', kind: 'tool', title: 'Skill', toolCategory: 'memory', toolTarget: 'galileu', at: 3 },
+      { id: 'skill', kind: 'tool', title: 'Skill', toolCategory: 'memory', toolTarget: 'plief-galileu', at: 3 },
       { id: 'question', kind: 'question', title: 'Which path?', status: 'blocked', at: 4 },
     ] as const satisfies readonly TimelineEntry[]).mcps, ['github']);
+
+    assert.equal(capabilityCounts(null), null);
+    assert.deepEqual(mcpStatusCounts([
+      { name: 'up', transport: 'http', connected: true, toolCount: 2, detail: 'ready' },
+      { name: 'down', transport: 'stdio', connected: false, toolCount: 0, detail: 'offline' },
+      { name: 'broken', transport: 'http', connected: false, toolCount: 0, detail: 'handshake failed' },
+    ]), { connected: 1, disconnected: 1, error: 1 });
+
+    const withMcp = await renderActivity(120, [
+      { name: 'github', transport: 'http', connected: true, toolCount: 3, detail: 'ready' },
+      { name: 'local-files', transport: 'stdio', connected: false, toolCount: 0, detail: 'offline' },
+    ]);
+    assert.match(withMcp, /github.*connected.*3 tools.*ready/);
+    assert.match(withMcp, /local-files.*disconnected.*0 tools.*offline/);
 
     for (const width of [24, 160]) {
       const narrowOrWide = await renderActivity(width);
       const lines = narrowOrWide.split('\n').filter(Boolean);
-      assert.equal(lines.length, ACTIVITY_PANEL_ROWS, `Activity should keep four rows at ${width} columns`);
+      assert.equal(lines.length, width < 48 ? 2 : 7, `Activity should keep bounded rows at ${width} columns`);
       assert.ok(
         lines.every((line) => displayWidth(line) <= width),
         `Activity should not overflow a ${width}-column terminal`,

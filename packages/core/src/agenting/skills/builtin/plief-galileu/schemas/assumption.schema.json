@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.galileu:assumption:v1",
+  "type": "object",
+  "required": ["id","kind","statement","state"],
+  "properties": {
+    "kind": {"enum": ["FACT","INFERENCE","ASSUMPTION","PREFERENCE","CONSTRAINT","UNKNOWN"]},
+    "confidence": {"enum": ["low","med","high"]},
+    "state": {"enum": ["OPEN","VERIFIED","FALSIFIED","SUPERSEDED"]},
+    "depends_on": {"type": "array"},
+    "how_to_verify": {"type": ["string","null"]},
+    "impact_if_false": {"enum": ["minor","material","critical",null]},
+    "source": {"type": ["string","null"]}
+  }
+}

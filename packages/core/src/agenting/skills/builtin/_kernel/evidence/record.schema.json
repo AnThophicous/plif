@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.kernel:evidence-record:v1",
+  "title": "Evidence Record",
+  "type": "object",
+  "required": ["id", "claim", "state", "provenance", "captured_at"],
+  "properties": {
+    "id": {"type": "string"},
+    "claim": {"type": "string"},
+    "state": {
+      "enum": ["VERIFIED", "INFERRED", "ASSUMED", "UNKNOWN", "CONTRADICTED", "STALE"]
+    },
+    "provenance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "ref"],
+        "properties": {
+          "kind": {"enum": ["code", "config", "test", "runtime", "web", "user", "model-inference", "artifact"]},
+          "ref": {"type": "string"}
+        }
+      }
+    },
+    "captured_at": {"type": "string"},
+    "verification_method": {"type": ["string", "null"]},
+    "contradicts": {"type": "array", "items": {"type": "string"}},
+    "stale_if": {"type": "array", "items": {"type": "string"}},
+    "note": {"type": ["string", "null"]}
+  }
+}

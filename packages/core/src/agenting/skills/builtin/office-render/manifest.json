@@ -1,0 +1,14 @@
+{
+    "artifacts":  {
+                      "consumed":  [
+                                       "_kernel/evidence/ledger.md"
+                                   ],
+                      "produced":  [
+
+                                   ]
+                  },
+    "name":  "office-render",
+    "version":  "1.0.0",
+    "slug":  "office-render",
+    "notes":  "peer utility: contract routing layer to pptx/docx/xlsx renderers"
+}

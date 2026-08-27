@@ -60,6 +60,7 @@ import {
   sourceUrl,
   globalConfigPath,
   loadGlobalConfig,
+  activityHudModeOf,
   plifModeOf,
   loadTokenSplitConfig,
   loadedSkillNames,
@@ -99,6 +100,7 @@ import type {
   CodexLoginFlow,
   EffortCapabilityCache,
   GoalState as PlifGoalState,
+  LspStatus,
 } from '@plif/core';
 import type { SandboxCapabilityReport } from '@plif/sandbox';
 
@@ -123,7 +125,12 @@ import { PlifActivation, PLIF_ACTIVATION_DURATION_MS } from './components/PlifAc
 import { terminalSurfaceLayout } from './components/TerminalSurface.js';
 import { LoadingStatus } from './components/LoadingStatus.js';
 import { visibleTasks } from './components/TaskIndicator.js';
-import { WorkDock, operationalEntries, workDockHeight } from './components/WorkDock.js';
+import {
+  DEFAULT_ACTIVITY_HUD_MODE,
+  WorkDock,
+  workDockHeight,
+} from './components/WorkDock.js';
+import type { ActivityHudMode } from './components/WorkDock.js';
 import {
   Timeline,
   TimelineRow,
@@ -593,6 +600,8 @@ export function App({
   const plifActivationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [interruptArmed, setInterruptArmed] = useState(false);
   const [effort, setEffortState] = useState<Effort | undefined>(initialEffort);
+  const [activityHudMode, setActivityHudModeState] = useState<ActivityHudMode>(DEFAULT_ACTIVITY_HUD_MODE);
+  const activityHudSaveQueue = useRef<Promise<void>>(Promise.resolve());
   useEffect(() => () => {
     if (plifActivationTimer.current) clearTimeout(plifActivationTimer.current);
   }, []);
@@ -602,6 +611,39 @@ export function App({
   useEffect(() => {
     applyEffortPalette(effort);
   }, [effort]);
+
+  // The HUD mode is a presentation preference, not runtime state. Load it
+  // once and serialize writes so rapid Ctrl+S presses cannot race two atomic
+  // config renames against each other.
+  useEffect(() => {
+    let cancelled = false;
+    void loadGlobalConfig()
+      .then((config) => {
+        if (!cancelled) setActivityHudModeState(activityHudModeOf(config));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const setActivityHudMode = useCallback((mode: ActivityHudMode): void => {
+    setActivityHudModeState(mode);
+    activityHudSaveQueue.current = activityHudSaveQueue.current
+      .catch(() => undefined)
+      .then(async () => {
+        const config = await loadGlobalConfig();
+        await saveGlobalConfig(
+          {
+            ...config,
+            activityHud: { ...(config.activityHud ?? {}), mode },
+          },
+          globalConfigPath(),
+          { preserveProviderKeys: false },
+        );
+      })
+      .catch(() => undefined);
+  }, []);
 
   // Provider catalogs evolve independently of PLIF releases. Warm the cache
   // once after startup, then refresh at a controlled low frequency. This is a
@@ -640,6 +682,7 @@ export function App({
   // must not reconcile the whole Ink tree just to update one number.
   const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
   const [tasksOpen, setTasksOpen] = useState(false);
+  const [lspStatuses, setLspStatuses] = useState<readonly LspStatus[] | null>(null);
   const taskOutputRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshTasks = useCallback((): void => {
     setTasks(visibleTasks(taskManager.current?.list() ?? []));
@@ -3122,6 +3165,7 @@ export function App({
         await previousLsp.stop();
         if (lspManager.current === previousLsp) lspManager.current = null;
       }
+      setLspStatuses(null);
       taskManager.current = new TaskManager({
         container,
         bus: engine.bus,
@@ -3138,7 +3182,12 @@ export function App({
       // LSP is useful to later tool calls but is not a prerequisite for the
       // first model request. Its client manager initializes lazily if a tool
       // asks for a language server before this warmup completes.
-      void nextLsp.warmup().catch(() => undefined);
+      void nextLsp.warmup()
+        .then(async () => {
+          if (lspManager.current !== nextLsp) return;
+          setLspStatuses(await nextLsp.statuses());
+        })
+        .catch(() => undefined);
     }
     const activeProfileName = typeof profileConfig.activeProfile === 'string' ? profileConfig.activeProfile : undefined;
     const activeProfile = activeProfileName ? profilesOf(profileConfig)[activeProfileName] : undefined;
@@ -3915,6 +3964,16 @@ export function App({
     }
   }
 
+  function cycleActivityHud(): void {
+    const next: ActivityHudMode = activityHudMode === 'closed'
+      ? 'compact'
+      : activityHudMode === 'compact'
+        ? 'expanded'
+        : 'compact';
+    setActivityHudMode(next);
+    setWorkDockOpen(next === 'expanded');
+  }
+
   function pastedTextAtMouse(mouse: { readonly column: number; readonly row: number }): string | null {
     if (pasted.length === 0) return null;
 
@@ -4150,8 +4209,8 @@ export function App({
       });
       return;
     }
-    if (key.ctrl && char === 's' && (tasks.length > 0 || state.subagents.length > 0)) {
-      setWorkDockOpen(!workDockOpen);
+    if (key.ctrl && char === 's' && (state.busy || tasks.length > 0 || state.subagents.length > 0)) {
+      cycleActivityHud();
       return;
     }
     if (key.ctrl && char === 'x' && state.subagents.length > 0) {
@@ -4166,7 +4225,8 @@ export function App({
       return;
     }
 
-    if (key.escape && workDockOpen) {
+    if (key.escape && (workDockOpen || (state.busy && activityHudMode !== 'closed'))) {
+      setActivityHudMode('closed');
       setWorkDockOpen(false);
       return;
     }
@@ -5328,20 +5388,31 @@ export function App({
   // Compaction takes it over too: both are "the agent is busy", but only one of
   // them can say what it is busy *with* and how far along it is, so the vaguer
   // one steps aside rather than the two stacking.
-  const operational = useMemo(
-    () => operationalEntries(state.entries),
-    [state.entries],
-  );
   // Activity is a live work surface, not a second copy of the transcript.
-  // Once a turn is finished its input/tool rows belong to history and should
-  // not keep a floating panel alive forever.
-  const activityOpen = state.busy && operational.length > 0;
+  // Keep the HUD alive for the whole active turn, including the short window
+  // before the first tool/input row exists; once the turn ends, its history
+  // remains in the transcript and the floating HUD retires.
+  const activityOpen = state.busy;
   const dockEntries = activityOpen || workDockOpen ? state.entries : [];
+  const activityWarnings = useMemo(
+    () => [
+      ...report.degradations,
+      ...(providerProblem ? [providerProblem] : []),
+    ],
+    [providerProblem, report.degradations],
+  );
   const workRows = workDockHeight(
     tasks,
     state.subagents,
-    workDockOpen || activityOpen,
+    activityHudMode,
     dockEntries,
+    {
+      active: state.busy,
+      warnings: activityWarnings,
+      lspStatuses,
+      mcpStatuses,
+      width: surface.contentWidth,
+    },
   );
   const expandedTool = useMemo(
     () => state.expandedToolId === null
@@ -5687,10 +5758,19 @@ export function App({
                 tasks={tasks}
                 subagents={state.subagents}
                 subagentFocus={state.subagentFocus}
-                expanded={workDockOpen || activityOpen}
+                mode={activityHudMode}
+                active={state.busy}
                 width={surface.contentWidth}
-                now={now}
+                now={activityHudMode === 'expanded' ? now : 0}
                 entries={dockEntries}
+                contextUsed={state.contextUsed}
+                contextMax={state.contextMax}
+                mcpStatuses={mcpStatuses}
+                capabilities={report}
+                lspStatuses={lspStatuses}
+                sessionName={transcript.session?.meta.title ?? session?.meta.title ?? null}
+                goal={goalRef.current?.condition ?? null}
+                warnings={activityWarnings}
               />
               {working && (
                 <Box paddingX={layout.gutter}>

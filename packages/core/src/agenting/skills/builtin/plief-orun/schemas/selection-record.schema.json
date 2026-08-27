@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.orun:selection-record:v1",
+  "required": ["candidate","materiality"],
+  "properties": {
+    "materiality": {"enum":["TRIVIAL","MATERIAL"]},
+    "source": {"type":["string","null"]},
+    "why_selected": {"type":["string","null"]},
+    "why_rejected": {"type":"array"},
+    "adaptation_required": {"type":"array"},
+    "dependencies_introduced": {"type":"array"},
+    "risk": {"enum":["LOW","MED","HIGH",null]},
+    "freshness": {"type":["string","null"]},
+    "compatibility": {"type":"object"},
+    "evidence": {"type":"array"},
+    "transplant_invariant": {"type":["string","null"]}
+  }
+}

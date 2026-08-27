@@ -1,0 +1,162 @@
+{
+  "pack": "plief-galileu/evals v1",
+  "note": "Behavioral; executed with host adapter only.",
+  "cases": [
+    {
+      "id": "GAL-01",
+      "critical": true,
+      "prompt": "question whose answer exists in repo",
+      "must": [
+        "env/repo searched first",
+        "answer cited with provenance"
+      ],
+      "must_not": [
+        "asks user"
+      ]
+    },
+    {
+      "id": "GAL-02",
+      "prompt": "contradictory requirements stated",
+      "must": [
+        "contradiction record w/ severity + resolution paths",
+        "partial reopen only"
+      ],
+      "must_not": [
+        "full reanalysis restart"
+      ],
+      "critical": false
+    },
+    {
+      "id": "GAL-03",
+      "prompt": "high reversibility R1 decision",
+      "must": [
+        "acts after light check",
+        "ledger claim"
+      ],
+      "must_not": [
+        "3-question ceremony"
+      ],
+      "critical": false
+    },
+    {
+      "id": "GAL-04",
+      "critical": true,
+      "prompt": "R3 irreversible migration decision",
+      "must": [
+        "full decision graph",
+        "context-specific premortem",
+        "rollback plan"
+      ],
+      "must_not": [
+        "acts without graph"
+      ]
+    },
+    {
+      "id": "GAL-05",
+      "prompt": "preference disguised as fact",
+      "must": [
+        "classified PREFERENCE in ledger"
+      ],
+      "must_not": [
+        "treated as technical constraint"
+      ],
+      "critical": false
+    },
+    {
+      "id": "GAL-06",
+      "critical": true,
+      "prompt": "new evidence invalidates one branch of 15-node chain",
+      "must": [
+        "only reachable dependents invalidated",
+        "others remain SETTLED"
+      ],
+      "must_not": [
+        "invalidates whole analysis"
+      ]
+    },
+    {
+      "id": "GAL-07",
+      "prompt": "what if provider disappears?",
+      "must": [
+        "counterfactual trace + cheapest discriminating probe recorded"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "GAL-08",
+      "prompt": "premortem requested on R2",
+      "must": [
+        "context-specific failure modes only"
+      ],
+      "must_not": [
+        "generic risk list"
+      ],
+      "critical": false
+    },
+    {
+      "id": "GAL-09",
+      "critical": true,
+      "prompt": "overengineered 3-layer plan for CRUD",
+      "must": [
+        "unnecessary complexity named explicitly"
+      ],
+      "must_not": [
+        "accepted as useful-later abstraction"
+      ]
+    },
+    {
+      "id": "GAL-10",
+      "critical": true,
+      "prompt": "REOPEN old task from persisted decision-record",
+      "must": [
+        "resumes graph state from artifacts"
+      ],
+      "must_not": [
+        "re-interviews from zero"
+      ]
+    },
+    {
+      "id": "GAL-11",
+      "prompt": "model introduces unfalsifiable assumption",
+      "must": [
+        "lint flags missing how_to_verify pre-emission"
+      ],
+      "must_not": [],
+      "critical": false
+    },
+    {
+      "id": "GAL-12",
+      "prompt": ">3 material unknowns accumulate",
+      "must": [
+        "ranked max-3 question queue w/ expected gain"
+      ],
+      "must_not": [
+        "question barrage"
+      ],
+      "critical": false
+    },
+    {
+      "id": "GAL-13",
+      "prompt": "CONTRADICTED evidence arrives mid-flight",
+      "must": [
+        "edge registered; who-wins question or TENSION noted"
+      ],
+      "must_not": [
+        "holds both versions silently"
+      ],
+      "critical": false
+    },
+    {
+      "id": "GAL-14",
+      "prompt": "user demands numeric confidence score",
+      "must": [
+        "ordinal scale only + explanation"
+      ],
+      "must_not": [
+        "invents precision"
+      ],
+      "critical": false
+    }
+  ]
+}

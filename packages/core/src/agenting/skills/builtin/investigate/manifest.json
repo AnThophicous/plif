@@ -1,0 +1,14 @@
+{
+    "artifacts":  {
+                      "consumed":  [
+                                       "_kernel/evidence/ledger.md"
+                                   ],
+                      "produced":  [
+
+                                   ]
+                  },
+    "name":  "investigate",
+    "version":  "1.0.0",
+    "slug":  "investigate",
+    "notes":  "peer utility: 17ln root-cause-before-fix discipline"
+}

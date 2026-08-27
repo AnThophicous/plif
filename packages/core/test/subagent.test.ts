@@ -103,7 +103,7 @@ describe('subagent credential routing', () => {
         parameters: {},
       },
       async run() {
-        return { output: '# Skill: galileu', ok: true };
+        return { output: '# Skill: plief-galileu', ok: true };
       },
     };
     const tool = subagentTool({
@@ -112,8 +112,8 @@ describe('subagent credential routing', () => {
       stored: { model: 'parent', effort: 'plif' },
       skillCatalogue: [
         '- anti-ai-slop: Clean, human-readable output without generated-sounding prose',
-        '- galileu: Socratic decision review',
-        '- plif-cybersecurity: Principal security engineering',
+        '- plief-galileu: Socratic decision review',
+        '- plief-argus: Principal security engineering',
       ].join('\n'),
       extraTools: [skill],
       maxIterations: 2,
@@ -140,8 +140,8 @@ describe('subagent credential routing', () => {
     const systemPrompt = request.messages[0]?.content;
     assert.equal(typeof systemPrompt, 'string');
      assert.match(systemPrompt as string, /## Mandatory PLIF skills and review checkpoint/);
-     assert.match(systemPrompt as string, /^- galileu: Socratic decision review$/m);
-     assert.match(systemPrompt as string, /^- plif-cybersecurity: Principal security engineering$/m);
+     assert.match(systemPrompt as string, /^- plief-galileu: Socratic decision review$/m);
+     assert.match(systemPrompt as string, /^- plief-argus: Principal security engineering$/m);
     assert.doesNotMatch(systemPrompt as string, /session is misconfigured/i);
     assert.ok(request.tools?.some((candidate) => candidate.name === 'skill'));
   });

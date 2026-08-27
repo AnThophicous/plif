@@ -1,0 +1,1306 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-26",
+  "sources": [
+    {
+      "id": "origin-ui",
+      "name": "Origin UI",
+      "type": [
+        "legacy copy-paste component collection",
+        "historical shadcn-style collection"
+      ],
+      "official_source": "https://coss.com/origin",
+      "repository": "https://github.com/cosscom/coss",
+      "documentation": "https://coss.com/ui/docs/roadmap",
+      "package": null,
+      "registry": null,
+      "cli": null,
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "React"
+      ],
+      "language": [
+        "TypeScript"
+      ],
+      "styling": [
+        "Tailwind CSS"
+      ],
+      "runtime": [
+        "React"
+      ],
+      "installation_model": "legacy copy-paste / preserved registry lineage",
+      "license": null,
+      "free_or_paid": "free legacy collection",
+      "categories": [
+        "application UI",
+        "forms",
+        "navigation",
+        "data display"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Origin UI is now a legacy snapshot under coss ui; active development moved to coss ui.",
+        "The legacy Origin collection remains accessible at coss.com/origin with limited support/maintenance.",
+        "Do not confuse with Originkit."
+      ],
+      "verification_status": "DEPRECATED",
+      "confidence": "HIGH",
+      "collector_archetype": "docs+github",
+      "evidence": [
+        {
+          "url": "https://coss.com/ui/docs/roadmap",
+          "authority": "official docs",
+          "claim": "coss ui is the evolution of Origin UI; legacy collection remains during transition."
+        },
+        {
+          "url": "https://github.com/cosscom/coss",
+          "authority": "official repository",
+          "claim": "repository contains apps/origin as legacy Origin UI snapshot; active development is coss ui."
+        }
+      ]
+    },
+    {
+      "id": "mvpblocks",
+      "name": "MVPBlocks",
+      "type": [
+        "component collection",
+        "blocks library",
+        "CLI/registry"
+      ],
+      "official_source": "https://blocks.mvp-subha.me/",
+      "repository": "https://github.com/subhadeeproy3902/mvpblocks",
+      "documentation": "https://blocks.mvp-subha.me/docs/introduction",
+      "package": "mvpblocks",
+      "registry": null,
+      "cli": "mvpblocks",
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "Next.js",
+        "React/Vite workflows"
+      ],
+      "language": [
+        "TypeScript"
+      ],
+      "styling": [
+        "Tailwind CSS",
+        "shadcn/ui"
+      ],
+      "runtime": [
+        "React"
+      ],
+      "installation_model": "CLI or manual copy-paste",
+      "license": "BSD-3-Clause",
+      "free_or_paid": "free/open source",
+      "categories": [
+        "UI components",
+        "blocks",
+        "hooks",
+        "library utilities"
+      ],
+      "dependencies": [
+        "Framer Motion (source-level, item dependent)"
+      ],
+      "integration_notes": [
+        "Use `list`, `search`, `categories`, or `info` before emitting item names/commands.",
+        "A block can include components, hooks and utilities; do not model it as a primitive."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "docs+github",
+      "evidence": [
+        {
+          "url": "https://blocks.mvp-subha.me/docs/cli",
+          "authority": "official docs",
+          "claim": "CLI supports add/list/search/categories/info."
+        },
+        {
+          "url": "https://github.com/subhadeeproy3902/mvpblocks",
+          "authority": "official repository",
+          "claim": "Open-source Next.js/Tailwind collection; BSD-3-Clause license."
+        }
+      ]
+    },
+    {
+      "id": "shsf-ui",
+      "name": "SHSF UI",
+      "type": [
+        "motion-first UI component source"
+      ],
+      "official_source": "https://www.shsfui.com/",
+      "repository": null,
+      "documentation": null,
+      "package": null,
+      "registry": null,
+      "cli": null,
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "React",
+        "Next.js"
+      ],
+      "language": [
+        "TypeScript"
+      ],
+      "styling": [
+        "Tailwind CSS",
+        "shadcn/ui"
+      ],
+      "runtime": [
+        "React"
+      ],
+      "installation_model": null,
+      "license": null,
+      "free_or_paid": null,
+      "categories": [
+        "motion-first UI"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Official product identity is corroborated by the owner's SHSF Work site, but the primary site timed out during verification.",
+        "Do not promote secondary-source component/API claims to executable facts without JIT verification."
+      ],
+      "verification_status": "UNVERIFIED",
+      "confidence": "MEDIUM",
+      "collector_archetype": "docs",
+      "evidence": [
+        {
+          "url": "https://www.shsf.work/",
+          "authority": "author/owner site",
+          "claim": "Lists SHSF UI as a motion-first UI library with elegant React components."
+        },
+        {
+          "url": "https://www.shsfui.com/",
+          "authority": "official source",
+          "claim": "Primary source endpoint; unavailable during this verification run."
+        }
+      ]
+    },
+    {
+      "id": "kibo-ui",
+      "name": "Kibo UI",
+      "type": [
+        "shadcn registry",
+        "composable component library"
+      ],
+      "official_source": "https://www.kibo-ui.com/",
+      "repository": null,
+      "documentation": "https://www.kibo-ui.com/docs",
+      "package": null,
+      "registry": "shadcn-compatible custom registry",
+      "cli": "kibo-ui",
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "React 18+",
+        "Next.js"
+      ],
+      "language": [
+        "TypeScript"
+      ],
+      "styling": [
+        "Tailwind CSS",
+        "shadcn CSS variables"
+      ],
+      "runtime": [
+        "React"
+      ],
+      "installation_model": "Kibo CLI or shadcn CLI",
+      "license": null,
+      "free_or_paid": "free/open source",
+      "categories": [
+        "functional components",
+        "AI UI",
+        "data interaction",
+        "file/input components"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Requires shadcn/ui setup; official setup says CSS Variables mode only.",
+        "Inspect subcomponents and per-item dependencies before installation."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "shadcn-registry+docs",
+      "evidence": [
+        {
+          "url": "https://www.kibo-ui.com/docs",
+          "authority": "official docs",
+          "claim": "Custom registry built on shadcn/ui; composable accessible React components."
+        },
+        {
+          "url": "https://www.kibo-ui.com/docs/setup",
+          "authority": "official docs",
+          "claim": "Node 18+, React 18+, shadcn setup; Kibo CLI and shadcn CLI supported."
+        }
+      ]
+    },
+    {
+      "id": "skiper-ui",
+      "name": "Skiper UI",
+      "type": [
+        "shadcn registry",
+        "motion-heavy component collection",
+        "premium/free mixed source"
+      ],
+      "official_source": "https://skiper-ui.com/",
+      "repository": null,
+      "documentation": "https://skiper-ui.com/docs/quick-start",
+      "package": null,
+      "registry": "https://skiper-ui.com/r/{name}.json",
+      "cli": "shadcn",
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "React",
+        "Next.js"
+      ],
+      "language": [
+        "TypeScript"
+      ],
+      "styling": [
+        "Tailwind CSS",
+        "shadcn/ui"
+      ],
+      "runtime": [
+        "React"
+      ],
+      "installation_model": "shadcn registry; authenticated registry for Pro items",
+      "license": "custom site usage terms",
+      "free_or_paid": "mixed free/premium",
+      "categories": [
+        "interactive UI",
+        "motion",
+        "product UI"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Item dependencies vary and may include motion/framer-motion, GSAP, lucide-react, next-themes, media-chrome, etc.",
+        "Never reproduce Pro source without legitimate access; verify item free/pro status first."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "shadcn-registry+docs",
+      "evidence": [
+        {
+          "url": "https://skiper-ui.com/docs/quick-start",
+          "authority": "official docs",
+          "claim": "Trusted shadcn registry workflow and Pro authentication; free and paid items."
+        },
+        {
+          "url": "https://skiper-ui.com/",
+          "authority": "official site",
+          "claim": "106+ components and mixed premium/free catalog."
+        }
+      ]
+    },
+    {
+      "id": "magic-ui",
+      "name": "Magic UI",
+      "type": [
+        "animated component collection",
+        "shadcn-style registry",
+        "premium/free mixed source"
+      ],
+      "official_source": "https://magicui.design/",
+      "repository": null,
+      "documentation": "https://magicui.design/docs",
+      "package": null,
+      "registry": "shadcn-compatible; Pro uses @magicui-pro registry",
+      "cli": "shadcn",
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "React"
+      ],
+      "language": [
+        "TypeScript"
+      ],
+      "styling": [
+        "Tailwind CSS"
+      ],
+      "runtime": [
+        "React",
+        "Motion"
+      ],
+      "installation_model": "copy-paste / shadcn-style installation",
+      "license": null,
+      "free_or_paid": "free open-source components + Pro",
+      "categories": [
+        "animated components",
+        "effects",
+        "blocks",
+        "templates",
+        "marketing UI"
+      ],
+      "dependencies": [
+        "Motion (many components; item dependent)"
+      ],
+      "integration_notes": [
+        "Verify exact current registry slug and dependencies per item.",
+        "Pro registry requires a token and must not be copied without access."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "shadcn-registry+docs",
+      "evidence": [
+        {
+          "url": "https://magicui.design/",
+          "authority": "official site",
+          "claim": "150+ free/open-source animated React/TypeScript/Tailwind/Motion components and effects."
+        },
+        {
+          "url": "https://pro.magicui.design/docs/installation",
+          "authority": "official Pro docs",
+          "claim": "Pro uses authenticated @magicui-pro registry."
+        }
+      ]
+    },
+    {
+      "id": "bklit-ui",
+      "name": "Bklit UI",
+      "type": [
+        "shadcn registry",
+        "data visualization component library",
+        "studio product"
+      ],
+      "official_source": "https://bklit.com/",
+      "repository": "https://github.com/bklit/bklit-ui",
+      "documentation": "https://bklit.com/docs",
+      "package": null,
+      "registry": "https://ui.bklit.com/r/{name}.json / @bklit namespace",
+      "cli": "shadcn",
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "React"
+      ],
+      "language": [
+        "TypeScript"
+      ],
+      "styling": [
+        "shadcn/ui"
+      ],
+      "runtime": [
+        "React"
+      ],
+      "installation_model": "shadcn registry; Studio is separate hosted product",
+      "license": "MIT for chart components; Studio proprietary",
+      "free_or_paid": "open-source charts + proprietary Studio",
+      "categories": [
+        "charts",
+        "data visualization",
+        "chart utilities"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Do not conflate registry chart components with Studio licensing.",
+        "Use data-story needs to choose chart type; inspect per-chart API and dependencies."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "shadcn-registry+github",
+      "evidence": [
+        {
+          "url": "https://bklit.com/docs/installation",
+          "authority": "official docs",
+          "claim": "@bklit shadcn registry and install flow."
+        },
+        {
+          "url": "https://github.com/bklit/bklit-ui",
+          "authority": "official repository",
+          "claim": "Chart components are MIT; Studio is proprietary."
+        }
+      ]
+    },
+    {
+      "id": "kokonut-ui",
+      "name": "Kokonut UI",
+      "type": [
+        "shadcn registry",
+        "animated component collection"
+      ],
+      "official_source": "https://kokonutui.com/",
+      "repository": "https://github.com/kokonut-labs/kokonutui",
+      "documentation": "https://kokonut-labs-kokonutui.mintlify.app/",
+      "package": null,
+      "registry": "https://kokonutui.com/r/{name}.json",
+      "cli": "shadcn",
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "React",
+        "Next.js"
+      ],
+      "language": [
+        "TypeScript"
+      ],
+      "styling": [
+        "Tailwind CSS v4",
+        "shadcn/ui"
+      ],
+      "runtime": [
+        "React",
+        "Motion where item requires"
+      ],
+      "installation_model": "shadcn registry, source copied into project",
+      "license": "MIT",
+      "free_or_paid": "free/open source",
+      "categories": [
+        "AI UI",
+        "buttons",
+        "cards",
+        "text effects",
+        "backgrounds",
+        "navigation",
+        "inputs",
+        "loaders",
+        "utilities"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Inspect `dependencies` and `registryDependencies` per item; not every component requires Motion."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "shadcn-registry+github",
+      "evidence": [
+        {
+          "url": "https://github.com/kokonut-labs/kokonutui/blob/main/registry.json",
+          "authority": "official registry source",
+          "claim": "Per-item dependencies and registryDependencies are explicitly listed."
+        },
+        {
+          "url": "https://github.com/kokonut-labs/kokonutui",
+          "authority": "official repository",
+          "claim": "Tailwind/shadcn/Motion collection; MIT license."
+        }
+      ]
+    },
+    {
+      "id": "watermelon-ui",
+      "name": "Watermelon UI",
+      "type": [
+        "shadcn registry",
+        "component/block/dashboard catalog"
+      ],
+      "official_source": "https://ui.watermelon.sh/",
+      "repository": "https://github.com/WatermelonCorp/watermelon-platform",
+      "documentation": "https://ui.watermelon.sh/",
+      "package": null,
+      "registry": "https://registry.watermelon.sh/r/{name}.json",
+      "cli": "shadcn",
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "React"
+      ],
+      "language": [
+        "TypeScript"
+      ],
+      "styling": [
+        "Tailwind CSS 4",
+        "shadcn/ui"
+      ],
+      "runtime": [
+        "React"
+      ],
+      "installation_model": "shadcn registry or copy source",
+      "license": null,
+      "free_or_paid": null,
+      "categories": [
+        "animated",
+        "components",
+        "blocks",
+        "dashboards",
+        "templates"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "The live catalog uses registry.watermelon.sh/r/<slug>.json for block installs.",
+        "Items can be removed; verify registry existence JIT rather than trusting historical indexes."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "shadcn-registry+github",
+      "evidence": [
+        {
+          "url": "https://ui.watermelon.sh/block/hero-4",
+          "authority": "official catalog",
+          "claim": "Example live block with registry install URL."
+        },
+        {
+          "url": "https://github.com/WatermelonCorp/watermelon-platform",
+          "authority": "official repository",
+          "claim": "Registry platform built with Vite/TypeScript/shadcn and Tailwind 4."
+        }
+      ]
+    },
+    {
+      "id": "originkit",
+      "name": "Originkit",
+      "type": [
+        "animated component library",
+        "CLI/MCP-capable source"
+      ],
+      "official_source": "https://www.originkit.dev/",
+      "repository": null,
+      "documentation": "https://www.originkit.dev/",
+      "package": "originkit (current CLI name; verify before use)",
+      "registry": null,
+      "cli": "originkit",
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "React",
+        "Next.js",
+        "Vite",
+        "Framer"
+      ],
+      "language": [
+        "TypeScript"
+      ],
+      "styling": [
+        "CSS",
+        "Tailwind",
+        "CSS Modules"
+      ],
+      "runtime": [
+        "React/Framer depending target"
+      ],
+      "installation_model": "browse/search + source fetch; CLI/MCP integrations",
+      "license": null,
+      "free_or_paid": "public free library; exact reuse terms must be verified",
+      "categories": [
+        "text",
+        "button",
+        "image",
+        "image gallery",
+        "cursor",
+        "interactive elements",
+        "animations",
+        "background"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Do not confuse with Origin UI.",
+        "The old scoped npm package @originkit/cli is deprecated in favor of unscoped `originkit`; re-verify before command execution.",
+        "Browse/search can precede code fetch; exact licensing remains a JIT check."
+      ],
+      "verification_status": "VERIFIED_BUT_VERSION_UNKNOWN",
+      "confidence": "HIGH",
+      "collector_archetype": "docs+npm",
+      "evidence": [
+        {
+          "url": "https://www.originkit.dev/",
+          "authority": "official site",
+          "claim": "Animated component catalog and categories."
+        },
+        {
+          "url": "https://www.npmjs.com/package/@originkit/cli",
+          "authority": "official npm metadata",
+          "claim": "Scoped CLI package deprecated; message says use `npx originkit@latest`."
+        }
+      ]
+    },
+    {
+      "id": "aceternity-ui",
+      "name": "Aceternity UI",
+      "type": [
+        "animated component library",
+        "blocks/templates source",
+        "shadcn-compatible source"
+      ],
+      "official_source": "https://ui.aceternity.com/",
+      "repository": null,
+      "documentation": "https://ui.aceternity.com/",
+      "package": null,
+      "registry": "shadcn-compatible installation where documented per item; verify JIT",
+      "cli": "shadcn where documented per item; verify JIT",
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "React"
+      ],
+      "language": [
+        "TypeScript"
+      ],
+      "styling": [
+        "Tailwind CSS"
+      ],
+      "runtime": [
+        "React",
+        "Motion"
+      ],
+      "installation_model": "copy-paste / registry for supported items",
+      "license": null,
+      "free_or_paid": "free components + All-Access premium blocks/templates",
+      "categories": [
+        "animated components",
+        "layout",
+        "backgrounds",
+        "cards",
+        "navigation",
+        "text effects",
+        "3D/perspective",
+        "blocks",
+        "templates"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Free and premium surfaces coexist; inspect access status per item.",
+        "Verify exact registry command, item slug and dependency data before installation."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "shadcn-registry+docs",
+      "evidence": [
+        {
+          "url": "https://ui.aceternity.com/",
+          "authority": "official site",
+          "claim": "200+ React/Tailwind/Motion components, blocks/templates; free + premium."
+        }
+      ]
+    },
+    {
+      "id": "uiverse",
+      "name": "Uiverse",
+      "type": [
+        "community-generated UI gallery"
+      ],
+      "official_source": "https://uiverse.io/",
+      "repository": "https://github.com/uiverse-io/galaxy",
+      "documentation": "https://uiverse.io/",
+      "package": null,
+      "registry": null,
+      "cli": null,
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "HTML/CSS",
+        "React",
+        "Figma export context"
+      ],
+      "language": [
+        "HTML",
+        "CSS",
+        "JavaScript/React as item format"
+      ],
+      "styling": [
+        "CSS",
+        "Tailwind"
+      ],
+      "runtime": [
+        "browser/React depending item"
+      ],
+      "installation_model": "copy/adapt per community item",
+      "license": "site states free personal/commercial use; verify item/source terms when material",
+      "free_or_paid": "free community library",
+      "categories": [
+        "buttons",
+        "loaders",
+        "cards",
+        "forms",
+        "tooltips",
+        "patterns",
+        "effects"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Treat each item as independent community code; inspect format and dependencies before adaptation.",
+        "Do not assume architecture consistency between items."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "gallery",
+      "evidence": [
+        {
+          "url": "https://uiverse.io/",
+          "authority": "official site",
+          "claim": "Community-built UI; copy as HTML/CSS, Tailwind, React and Figma; site states personal/commercial use."
+        }
+      ]
+    },
+    {
+      "id": "motion",
+      "name": "Motion",
+      "type": [
+        "animation library",
+        "React animation system"
+      ],
+      "official_source": "https://motion.dev/",
+      "repository": null,
+      "documentation": "https://motion.dev/docs/react",
+      "package": "motion",
+      "registry": null,
+      "cli": null,
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "React",
+        "JavaScript",
+        "Vue documented"
+      ],
+      "language": [
+        "TypeScript/JavaScript"
+      ],
+      "styling": null,
+      "runtime": [
+        "browser",
+        "React"
+      ],
+      "installation_model": "npm package",
+      "license": null,
+      "free_or_paid": "core + Motion+ paid features",
+      "categories": [
+        "animation",
+        "layout",
+        "gestures",
+        "drag",
+        "scroll",
+        "motion values"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Current React docs use `motion/react`; RSC-specific import is `motion/react-client`.",
+        "Prefer CSS for simple self-contained transitions; use Motion where React/gesture/layout model adds value."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "npm+docs",
+      "evidence": [
+        {
+          "url": "https://motion.dev/docs/react",
+          "authority": "official docs",
+          "claim": "Install `motion`; React imports from `motion/react`; docs list current hooks/components."
+        }
+      ]
+    },
+    {
+      "id": "animejs",
+      "name": "Anime.js",
+      "type": [
+        "animation engine"
+      ],
+      "official_source": "https://animejs.com/",
+      "repository": null,
+      "documentation": "https://animejs.com/documentation/",
+      "package": null,
+      "registry": null,
+      "cli": null,
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "browser JavaScript"
+      ],
+      "language": [
+        "JavaScript"
+      ],
+      "styling": null,
+      "runtime": [
+        "browser"
+      ],
+      "installation_model": "package/script depending official setup",
+      "license": null,
+      "free_or_paid": null,
+      "categories": [
+        "Animation",
+        "Timeline",
+        "Animatable",
+        "Draggable",
+        "Layout",
+        "Scope",
+        "Events",
+        "SVG",
+        "Text",
+        "Utilities",
+        "Easings",
+        "WAAPI",
+        "Engine",
+        "Adapters"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Choose for its imperative engine model, not merely because animation is requested.",
+        "Verify current import/package instructions JIT before implementation."
+      ],
+      "verification_status": "VERIFIED_BUT_VERSION_UNKNOWN",
+      "confidence": "HIGH",
+      "collector_archetype": "docs+npm",
+      "evidence": [
+        {
+          "url": "https://animejs.com/documentation/",
+          "authority": "official docs",
+          "claim": "Current documentation sections include Animation, Timeline, Draggable, Layout, Scope, SVG, Text, WAAPI, Engine and Adapters."
+        }
+      ]
+    },
+    {
+      "id": "gsap",
+      "name": "GSAP",
+      "type": [
+        "animation engine",
+        "plugin ecosystem"
+      ],
+      "official_source": "https://gsap.com/",
+      "repository": null,
+      "documentation": "https://gsap.com/docs/v3/",
+      "package": "gsap",
+      "registry": null,
+      "cli": null,
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "browser JavaScript",
+        "React via @gsap/react/useGSAP"
+      ],
+      "language": [
+        "JavaScript"
+      ],
+      "styling": null,
+      "runtime": [
+        "browser"
+      ],
+      "installation_model": "npm/CDN; plugins imported as needed",
+      "license": null,
+      "free_or_paid": "all plugins available on npm according to current official install docs",
+      "categories": [
+        "timeline",
+        "scroll",
+        "SVG",
+        "text",
+        "interaction",
+        "physics",
+        "easing",
+        "React"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Official install docs state all plugins are freely available on npm and advise GSAP 3.13+.",
+        "Register plugins when required; never load every plugin by default."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "npm+docs",
+      "evidence": [
+        {
+          "url": "https://gsap.com/docs/v3/Installation/",
+          "authority": "official docs",
+          "claim": "Install gsap from npm; all plugins available on npm; legacy private repo no longer maintained."
+        },
+        {
+          "url": "https://gsap.com/docs/v3/Plugins/",
+          "authority": "official docs",
+          "claim": "Current plugin catalog and registerPlugin guidance."
+        }
+      ]
+    },
+    {
+      "id": "transitions-dev",
+      "name": "Transitions.dev",
+      "type": [
+        "product-motion pattern library",
+        "agent skill source"
+      ],
+      "official_source": "https://transitions.dev/",
+      "repository": null,
+      "documentation": "https://transitions.dev/",
+      "package": null,
+      "registry": null,
+      "cli": null,
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "web"
+      ],
+      "language": [
+        "CSS/JavaScript/React depending transition"
+      ],
+      "styling": [
+        "CSS"
+      ],
+      "runtime": [
+        "browser"
+      ],
+      "installation_model": "copy/pattern/agent skill",
+      "license": null,
+      "free_or_paid": "free + Pro",
+      "categories": [
+        "UI transitions",
+        "effects",
+        "text",
+        "agent workflows"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Index transitions by trigger and motion parameters; reuse timing/behavior patterns rather than inventing arbitrary motion."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "gallery+docs",
+      "evidence": [
+        {
+          "url": "https://transitions.dev/",
+          "authority": "official site",
+          "claim": "Collection of essential UI transitions for web apps with copy/paste and agent skill."
+        }
+      ]
+    },
+    {
+      "id": "rive",
+      "name": "Rive",
+      "type": [
+        "animation asset format",
+        "runtime ecosystem",
+        "state-machine animation system"
+      ],
+      "official_source": "https://rive.app/",
+      "repository": null,
+      "documentation": "https://rive.app/docs/runtimes/getting-started",
+      "package": "@rive-app/* runtime packages",
+      "registry": null,
+      "cli": null,
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "Web",
+        "React",
+        "React Native",
+        "Apple",
+        "Android",
+        "Flutter",
+        "Unity",
+        "Unreal"
+      ],
+      "language": [
+        "JavaScript/TypeScript for web"
+      ],
+      "styling": null,
+      "runtime": [
+        "Canvas",
+        "WebGL2",
+        "WASM"
+      ],
+      "installation_model": "runtime package + .riv asset",
+      "license": "runtime libraries are open source; asset/project licensing separate",
+      "free_or_paid": "runtime open source; editor/assets may have plan constraints",
+      "categories": [
+        "state machines",
+        "playback",
+        "events",
+        "data binding",
+        "interactive animation"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Recommended React option in current docs is @rive-app/react-webgl2 for advanced renderer features; canvas variants exist.",
+        "Canvas size/lifecycle/WASM/network weight are material performance concerns."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "npm+docs",
+      "evidence": [
+        {
+          "url": "https://rive.app/docs/runtimes/react/react",
+          "authority": "official docs",
+          "claim": "React runtime options, useRive hook, WebGL2 recommendation."
+        },
+        {
+          "url": "https://rive.app/docs/runtimes/runtime-sizes",
+          "authority": "official docs",
+          "claim": "Runtime size guidance and renderer tradeoffs."
+        }
+      ]
+    },
+    {
+      "id": "threejs",
+      "name": "Three.js",
+      "type": [
+        "3D engine"
+      ],
+      "official_source": "https://threejs.org/",
+      "repository": null,
+      "documentation": "https://threejs.org/docs/",
+      "package": "three",
+      "registry": null,
+      "cli": null,
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "browser JavaScript"
+      ],
+      "language": [
+        "JavaScript"
+      ],
+      "styling": null,
+      "runtime": [
+        "WebGL/WebGPU ecosystem depending renderer"
+      ],
+      "installation_model": "npm/module or official distribution",
+      "license": null,
+      "free_or_paid": "open source",
+      "categories": [
+        "scene graph",
+        "camera",
+        "renderer",
+        "geometry",
+        "materials",
+        "textures",
+        "loaders",
+        "lights",
+        "raycasting",
+        "animation",
+        "post-processing",
+        "shaders"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Three.js requires explicit disposal of many GPU resources; removing a mesh is not disposal.",
+        "Responsive rendering must manage drawing-buffer size and camera aspect; do not blindly use maximum device DPR for heavy scenes."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "npm+docs",
+      "evidence": [
+        {
+          "url": "https://threejs.org/docs/",
+          "authority": "official docs",
+          "claim": "Current core API catalog includes Object3D, BufferGeometry, Raycaster, cameras, animation, etc."
+        },
+        {
+          "url": "https://threejs.org/manual/en/how-to-dispose-of-objects.html",
+          "authority": "official manual",
+          "claim": "Geometries/materials/textures and other resources require explicit disposal."
+        },
+        {
+          "url": "https://threejs.org/manual/en/responsive.html",
+          "authority": "official manual",
+          "claim": "Responsive canvas/camera sizing and pixel-ratio considerations."
+        }
+      ]
+    },
+    {
+      "id": "img2threejs",
+      "name": "img2threejs",
+      "type": [
+        "agent skill",
+        "procedural image-to-Three.js pipeline"
+      ],
+      "official_source": "https://img2threejs.org/skill",
+      "repository": "https://github.com/img2threejs/img2threejs",
+      "documentation": "https://github.com/img2threejs/img2threejs/blob/main/SKILL.md",
+      "package": null,
+      "registry": null,
+      "cli": null,
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "agent-agnostic coding agents with vision/browser equivalents"
+      ],
+      "language": [
+        "Python",
+        "TypeScript output"
+      ],
+      "styling": null,
+      "runtime": [
+        "Three.js output"
+      ],
+      "installation_model": "agent skill checkout",
+      "license": "Apache-2.0",
+      "free_or_paid": "open source skill; hosted product separate",
+      "categories": [
+        "image-to-3D",
+        "procedural modeling",
+        "quality-gated reconstruction"
+      ],
+      "dependencies": [
+        "Python 3.10+ stdlib for pipeline scripts"
+      ],
+      "integration_notes": [
+        "Current skill explicitly describes itself as agent-agnostic and code-only procedural reconstruction.",
+        "Hidden sides cannot be known from a single image; preserve confidence/inference reporting."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "agent-skill+github",
+      "evidence": [
+        {
+          "url": "https://github.com/img2threejs/img2threejs/blob/main/SKILL.md",
+          "authority": "official skill source",
+          "claim": "Agent-agnostic staged procedural Three.js pipeline with hard gates."
+        },
+        {
+          "url": "https://github.com/img2threejs/img2threejs",
+          "authority": "official repository",
+          "claim": "Apache-2.0, code-only procedural reconstruction."
+        }
+      ]
+    },
+    {
+      "id": "getlayers",
+      "name": "GetLayers",
+      "type": [
+        "AI design layer library",
+        "prompt library",
+        "source-file library",
+        "3D scene source",
+        "MCP/skill ecosystem"
+      ],
+      "official_source": "https://www.getlayers.ai/",
+      "repository": null,
+      "documentation": "https://www.getlayers.ai/docs",
+      "package": null,
+      "registry": null,
+      "cli": null,
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "stack-agnostic prompt output",
+        "Next.js source for some categories",
+        "standalone HTML for 3D scenes"
+      ],
+      "language": [
+        "HTML/JavaScript/Next.js depending artifact"
+      ],
+      "styling": null,
+      "runtime": [
+        "browser",
+        "Three.js for some scenes"
+      ],
+      "installation_model": "copy prompt, download category-specific source, or MCP/skill",
+      "license": "plan/category specific; premium commercial license stated on premium layer pages",
+      "free_or_paid": "mixed free/premium",
+      "categories": [
+        "templates",
+        "3D scenes",
+        "sections",
+        "backgrounds"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Prompts and source files are distinct deliverables.",
+        "Official docs say templates/sections source is Next.js, 3D scene source is standalone HTML, video backgrounds are files; do not model everything as React components.",
+        "MCP requires eligible subscription."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "gallery+marketplace+docs",
+      "evidence": [
+        {
+          "url": "https://www.getlayers.ai/docs",
+          "authority": "official docs",
+          "claim": "Defines layer model, prompt vs source, category-specific formats and stack portability."
+        },
+        {
+          "url": "https://www.getlayers.ai/mcp",
+          "authority": "official docs",
+          "claim": "MCP/skill integration and subscription requirement."
+        }
+      ]
+    },
+    {
+      "id": "framer-community",
+      "name": "Framer Community / Marketplace",
+      "type": [
+        "marketplace",
+        "template source",
+        "component source",
+        "design/interaction reference"
+      ],
+      "official_source": "https://www.framer.com/marketplace/",
+      "repository": null,
+      "documentation": "https://www.framer.com/help/articles/how-templates-work/",
+      "package": null,
+      "registry": null,
+      "cli": null,
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": [
+        "Framer"
+      ],
+      "language": null,
+      "styling": null,
+      "runtime": [
+        "Framer"
+      ],
+      "installation_model": "use/remix/purchase within Framer ecosystem",
+      "license": "creator/item specific",
+      "free_or_paid": "mixed free/premium",
+      "categories": [
+        "templates",
+        "components",
+        "plugins",
+        "vectors",
+        "inspiration"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "A Framer project/component is not automatically portable React source.",
+        "For external-stack recreation, extract visual/interaction patterns and build an original implementation unless portable source rights are explicit."
+      ],
+      "verification_status": "VERIFIED_CURRENT",
+      "confidence": "HIGH",
+      "collector_archetype": "marketplace",
+      "evidence": [
+        {
+          "url": "https://www.framer.com/marketplace/",
+          "authority": "official marketplace",
+          "claim": "Marketplace includes templates, plugins and components from the community."
+        },
+        {
+          "url": "https://www.framer.com/help/articles/how-templates-work/",
+          "authority": "official help",
+          "claim": "Templates are Framer projects; free templates are copied into account, paid templates via creator purchase/remix flow."
+        }
+      ]
+    },
+    {
+      "id": "awwwards",
+      "name": "Awwwards",
+      "type": [
+        "design inspiration source",
+        "awards/gallery"
+      ],
+      "official_source": "https://www.awwwards.com/",
+      "repository": null,
+      "documentation": "https://www.awwwards.com/websites/",
+      "package": null,
+      "registry": null,
+      "cli": null,
+      "current_version": null,
+      "last_verified": "2026-08-26",
+      "framework_support": null,
+      "language": null,
+      "styling": null,
+      "runtime": null,
+      "installation_model": "reference/research only",
+      "license": "site/creator rights; not a component license",
+      "free_or_paid": "public browsing + paid products/membership where applicable",
+      "categories": [
+        "web design",
+        "interaction",
+        "typography",
+        "creative direction",
+        "experimental",
+        "navigation",
+        "motion"
+      ],
+      "dependencies": null,
+      "integration_notes": [
+        "Never emit an 'Awwwards install' command.",
+        "Treat sites as reference material; extract patterns, not proprietary code."
+      ],
+      "verification_status": "VERIFIED_BUT_VERSION_UNKNOWN",
+      "confidence": "HIGH",
+      "collector_archetype": "gallery",
+      "evidence": [
+        {
+          "url": "https://www.awwwards.com/websites/",
+          "authority": "official gallery",
+          "claim": "Website awards/gallery with categories, nominees, Site of the Day, Developer Award and related design discovery."
+        }
+      ]
+    }
+  ]
+}

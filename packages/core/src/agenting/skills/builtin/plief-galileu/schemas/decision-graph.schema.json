@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.galileu:decision-graph:v1",
+  "type": "object",
+  "required": ["schema_version", "objective", "decisions"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "objective": {"type": "string"},
+    "decisions": {"type": "array", "items": {"type": "object", "required": ["id","question","status"]}},
+    "options": {"type": "array", "items": {"type": "object", "required": ["id","decision","thesis"]}},
+    "constraints": {"type": "array"}, "evidence": {"type": "array"},
+    "risks": {"type": "array"}, "consequences": {"type": "array"},
+    "edges": {"type": "array", "items": {"type": "object", "required": ["type","from","to"], "properties": {
+      "type": {"enum": ["DEPENDS_ON","SUPPORTS","CONTRADICTS","CONSTRAINS","INVALIDATES","MITIGATES","IMPLIES","SELECTS"]}
+    }}}
+  }
+}

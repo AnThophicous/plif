@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.sifr:perf-budget:v1",
+  "type": "object",
+  "properties": {
+    "initial_js_kb": {"type": "number", "exclusiveMinimum": 0},
+    "animation_cap_ms": {"type": "number", "exclusiveMinimum": 0},
+    "image_strategy": {"type": "string"}, "font_budget": {"type": ["string","object"]},
+    "third_party_kb": {"type": ["number","null"]},
+    "hydration_sensitive_elements": {"type": "array"},
+    "lcp_element": {"type": ["string","null"]},
+    "interaction_latency_concerns": {"type": "array"}
+  }
+}

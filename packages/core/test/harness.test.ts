@@ -803,13 +803,13 @@ describe('loop context budget', () => {
         tools: [],
         enableHarnessCycle: true,
         maxIterations: 1,
-        plifTelemetry: { reviewPasses: 3, skillsLoaded: ['galileu'] },
+        plifTelemetry: { reviewPasses: 3, skillsLoaded: ['plief-galileu'] },
       });
 
       assert.equal(result.stop, 'complete');
       assert.equal(budgets.length, 1);
       assert.ok(budgets[0]! >= 1);
-      assert.deepEqual(modes, [{ mode: 'plif', reviewPasses: 3, skillsLoaded: ['galileu'] }]);
+      assert.deepEqual(modes, [{ mode: 'plif', reviewPasses: 3, skillsLoaded: ['plief-galileu'] }]);
     } finally {
       if (previous === undefined) delete process.env['PLIF_REASONING_BUDGET_MS'];
       else process.env['PLIF_REASONING_BUDGET_MS'] = previous;

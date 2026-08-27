@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.galileu:decision-record:v1",
+  "type": "object",
+  "required": ["schema_version","objective","decisions"],
+  "properties": {
+    "decisions": {"type": "array"},
+    "selected": {"type": "object", "properties": {
+      "option_id": {"type":"string"}, "reasons": {"type":"array"},
+      "rejecting_reasons": {"type": "object"}}},
+    "risks": {"type": "array"},
+    "assumption_ids": {"type": "array"},
+    "deferred": {"type": "array"},
+    "next_steps": {"type": "array"}
+  }
+}

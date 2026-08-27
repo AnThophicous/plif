@@ -1,0 +1,19 @@
+{
+  "template": "selection-record/v1",
+  "materiality_gate": "TRIVIAL decisions collapse to one-liner 'why_selected'; full record required at R2+ (new dependency or structural swap)",
+  "materiality": "MATERIAL",
+  "candidate": "kibo:command-menu",
+  "source": "kibo-ui",
+  "why_selected": "a11y-complete + direct token map",
+  "why_rejected": [
+    {"candidate": "cmdk-direct", "reason": "styling rework exceeds adaptation budget"},
+    {"candidate": "BUILD", "reason": "cost/risk does not beat verified reuse"}
+  ],
+  "adaptation_required": ["relabel i18n strings"],
+  "dependencies_introduced": [],
+  "risk": "LOW",
+  "freshness": "VERIFIED_CURRENT",
+  "compatibility": {},
+  "evidence": ["https://official-docs.example/command-menu v2.3"],
+  "transplant_invariant": "instant mobile command-sheet transition survives token remap"
+}

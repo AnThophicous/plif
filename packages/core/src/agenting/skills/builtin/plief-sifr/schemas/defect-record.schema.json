@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$id": "plief.sifr:defect-record:v1",
+  "type": "object",
+  "required": ["group_id", "symptom", "owner_candidate", "severity_hint"],
+  "properties": {
+    "group_id": {"type": "string"},
+    "symptom": {"type": "string"},
+    "viewport": {"type": ["string","null"]}, "state": {"type": ["string","null"]},
+    "user_impact": {"type": ["string","null"]},
+    "occurrences": {"type": "integer"},
+    "grouped_systemic": {"type": "boolean"},
+    "owner_candidate": {"enum": ["PRODUCT","STRUCTURE","DESIGN_DNA","TOKEN","COMPONENT",
+                                  "STATE","RESPONSIVE","ACCESSIBILITY","PERFORMANCE","CONTENT"]},
+    "severity_hint": {"enum": ["critical","high","medium","low"]},
+    "evidence_refs": {"type": "array"}, "viewports": {"type": "array"}
+  }
+}
