@@ -80,6 +80,18 @@
     }
     .overlay-card h2 { margin: 0 0 8px; font-size: 16px; color: var(--accent); }
     .overlay-card p { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+    .swatches { display: flex; gap: 6px; align-items: center; }
+    .swatch {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1px solid #3a3b3d;
+      cursor: pointer;
+      padding: 0;
+      transition: border-color 120ms ease, transform 120ms ease;
+    }
+    .swatch:hover { border-color: var(--accent); }
+    .swatch.active { border-color: var(--accent); transform: scale(1.15); }
   </style>
 </head>
 <body>
@@ -90,6 +102,11 @@
       <button class="btn" id="btn-copy" title="Copiar seleção (Ctrl+Shift+C)">Copiar</button>
       <button class="btn" id="btn-paste" title="Colar (Ctrl+Shift+V)">Colar</button>
       <button class="btn" id="btn-interrupt" title="Enviar Ctrl+C (SIGINT)">Interromper</button>
+      <div class="swatches" role="group" aria-label="Cor de fundo">
+        <button class="swatch" data-bg="#16161c" style="background:#16161c" title="Fundo #16161c"></button>
+        <button class="swatch" data-bg="#2c2d2e" style="background:#2c2d2e" title="Fundo #2c2d2e"></button>
+        <button class="swatch" data-bg="#303030" style="background:#303030" title="Fundo #303030"></button>
+      </div>
     </div>
     <div id="terminal"></div>
   </div>
@@ -110,18 +127,24 @@
       const params = new URLSearchParams(location.search);
       const token = params.get('token') || '';
 
+      const storeGet = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
+      const storeSet = (key, value) => { try { localStorage.setItem(key, value); } catch { /* storage unavailable */ } };
+      const savedBg = storeGet('plif-web-bg');
+
+      const baseTheme = {
+        background: savedBg || '#16161c',
+        foreground: '#cdd6f4',
+        cursor: '#e8a8c9',
+        cursorAccent: savedBg || '#16161c',
+        selectionBackground: 'rgba(232, 168, 201, 0.25)',
+      };
+
       const term = new window.Terminal({
         cursorBlink: true,
         fontSize: 14,
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
         allowProposedApi: true,
-        theme: {
-          background: '#16161c',
-          foreground: '#cdd6f4',
-          cursor: '#e8a8c9',
-          cursorAccent: '#16161c',
-          selectionBackground: 'rgba(232, 168, 201, 0.25)',
-        },
+        theme: baseTheme,
       });
 
       const fit = new window.FitAddon.FitAddon();
@@ -246,6 +269,20 @@
       document.getElementById('btn-copy').addEventListener('click', copySelection);
       document.getElementById('btn-paste').addEventListener('click', pasteClipboard);
       document.getElementById('btn-interrupt').addEventListener('click', () => send({ t: 'in', d: '\u0003' }));
+
+      // Background selector: dark variants only — the CLI ink is designed for dark surfaces.
+      const applyBackground = (bg) => {
+        term.options.theme = Object.assign({}, baseTheme, { background: bg, cursorAccent: bg });
+        document.documentElement.style.setProperty('--bg', bg);
+        storeSet('plif-web-bg', bg);
+        document.querySelectorAll('.swatch').forEach((el) => {
+          el.classList.toggle('active', el.getAttribute('data-bg') === bg);
+        });
+      };
+      document.querySelectorAll('.swatch').forEach((el) => {
+        el.addEventListener('click', () => applyBackground(el.getAttribute('data-bg')));
+      });
+      applyBackground(savedBg || '#16161c');
 
       term.attachCustomKeyEventHandler((ev) => {
         if (ev.type !== 'keydown') return true;
