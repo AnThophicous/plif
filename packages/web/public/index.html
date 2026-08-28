@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>plif — web</title>
+  <link rel="stylesheet" href="/vendor/xterm.css" />
+  <style>
+    :root {
+      --bg: #16161c;
+      --panel: #1c1c22;
+      --border: #aab8cc;
+      --text: #cdd6f4;
+      --muted: #89959e;
+      --accent: #e8a8c9;
+      --surface: #2c2d2e;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      overflow: hidden;
+    }
+    .app { display: flex; flex-direction: column; height: 100%; }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      background: var(--panel);
+      border-bottom: 1px solid #2c2d2e;
+      user-select: none;
+    }
+    .brand {
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      color: var(--accent);
+      margin-right: auto;
+    }
+    .brand span { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 6px; }
+    .btn {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid #3a3b3d;
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color 120ms ease, color 120ms ease;
+    }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn:active { transform: translateY(1px); }
+    .status {
+      font-size: 11px;
+      color: var(--muted);
+      margin-right: 8px;
+    }
+    .status.live { color: var(--accent); }
+    .status.reconnecting { color: #e8c86a; }
+    #terminal { flex: 1; padding: 8px; min-height: 0; }
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(22, 22, 28, 0.85);
+      z-index: 10;
+    }
+    .overlay.visible { display: flex; }
+    .overlay-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px 32px;
+      text-align: center;
+    }
+    .overlay-card h2 { margin: 0 0 8px; font-size: 16px; color: var(--accent); }
+    .overlay-card p { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+    .swatches { display: flex; gap: 6px; align-items: center; }
+    .swatch {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1px solid #3a3b3d;
+      cursor: pointer;
+      padding: 0;
+      transition: border-color 120ms ease, transform 120ms ease;
+    }
+    .swatch:hover { border-color: var(--accent); }
+    .swatch.active { border-color: var(--accent); transform: scale(1.15); }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="toolbar">
+      <div class="brand">plif<span>web terminal</span></div>
+      <div class="status" id="status">conectando…</div>
+      <button class="btn" id="btn-copy" title="Copiar seleção (Ctrl+Shift+C)">Copiar</button>
+      <button class="btn" id="btn-paste" title="Colar (Ctrl+Shift+V)">Colar</button>
+      <button class="btn" id="btn-interrupt" title="Enviar Ctrl+C (SIGINT)">Interromper</button>
+      <div class="swatches" role="group" aria-label="Cor de fundo">
+        <button class="swatch" data-bg="#16161c" style="background:#16161c" title="Fundo #16161c"></button>
+        <button class="swatch" data-bg="#2c2d2e" style="background:#2c2d2e" title="Fundo #2c2d2e"></button>
+        <button class="swatch" data-bg="#303030" style="background:#303030" title="Fundo #303030"></button>
+      </div>
+    </div>
+    <div id="terminal"></div>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <div class="overlay-card">
+      <h2 id="overlay-title">Sessão encerrada</h2>
+      <p id="overlay-message">O processo terminou.</p>
+      <button class="btn" onclick="location.reload()">Reiniciar</button>
+    </div>
+  </div>
+
+  <script src="/vendor/xterm.js"></script>
+  <script src="/vendor/addon-fit.js"></script>
+  <script src="/vendor/addon-web-links.js"></script>
+  <script>
+    (function () {
+      const params = new URLSearchParams(location.search);
+      const token = params.get('token') || '';
+
+      const storeGet = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
+      const storeSet = (key, value) => { try { localStorage.setItem(key, value); } catch { /* storage unavailable */ } };
+      const savedBg = storeGet('plif-web-bg');
+
+      const baseTheme = {
+        background: savedBg || '#16161c',
+        foreground: '#cdd6f4',
+        cursor: '#e8a8c9',
+        cursorAccent: savedBg || '#16161c',
+        selectionBackground: 'rgba(232, 168, 201, 0.25)',
+      };
+
+      const term = new window.Terminal({
+        cursorBlink: true,
+        fontSize: 14,
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+        allowProposedApi: true,
+        theme: baseTheme,
+      });
+
+      const fit = new window.FitAddon.FitAddon();
+      term.loadAddon(fit);
+      term.loadAddon(new window.WebLinksAddon.WebLinksAddon());
+      term.open(document.getElementById('terminal'));
+      fit.fit();
+
+      const statusEl = document.getElementById('status');
+      const overlay = document.getElementById('overlay');
+      const overlayTitle = document.getElementById('overlay-title');
+      const overlayMessage = document.getElementById('overlay-message');
+
+      let socket = null;
+      let sessionExited = false;
+      let reconnectAttempts = 0;
+      const MAX_RECONNECT = 5;
+
+      const setStatus = (text, cls) => {
+        statusEl.textContent = text;
+        statusEl.className = 'status' + (cls ? ' ' + cls : '');
+      };
+
+      const send = (payload) => {
+        if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload));
+      };
+
+      function connect() {
+        const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsUrl = protocol + '://' + location.host + '/pty?token=' + encodeURIComponent(token);
+        socket = new WebSocket(wsUrl);
+
+        socket.onopen = () => {
+          reconnectAttempts = 0;
+          setStatus('conectado', 'live');
+          overlay.classList.remove('visible');
+          fit.fit();
+          send({ t: 'resize', cols: term.cols, rows: term.rows });
+        };
+
+        socket.onmessage = (event) => {
+          let msg;
+          try { msg = JSON.parse(event.data); } catch { return; }
+          if (msg.t === 'out') term.write(msg.d);
+          else if (msg.t === 'exit') {
+            sessionExited = true;
+            overlayTitle.textContent = 'Sessão encerrada';
+            overlayMessage.textContent = 'O processo saiu com código ' + msg.code + '.';
+            overlay.classList.add('visible');
+          }
+        };
+
+        socket.onclose = () => {
+          setStatus('desconectado', '');
+          if (sessionExited) {
+            overlayTitle.textContent = 'Sessão encerrada';
+            overlayMessage.textContent = 'O processo terminou.';
+            overlay.classList.add('visible');
+            return;
+          }
+          // If the session is no longer valid (server restarted, stale cookie),
+          // reload so the server serves the login page instead of looping.
+          const sessionUrl = '/session' + (token ? '?token=' + encodeURIComponent(token) : '');
+          fetch(sessionUrl, { credentials: 'same-origin' })
+            .then((res) => {
+              if (res.status === 401) location.reload();
+              else scheduleReconnect();
+            })
+            .catch(scheduleReconnect);
+        };
+
+        function scheduleReconnect() {
+          if (reconnectAttempts < MAX_RECONNECT) {
+            reconnectAttempts++;
+            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 10000);
+            setStatus('reconectando (' + reconnectAttempts + '/' + MAX_RECONNECT + ')…', 'reconnecting');
+            setTimeout(connect, delay);
+          } else {
+            overlayTitle.textContent = 'Conexão perdida';
+            overlayMessage.textContent = 'Não foi possível reconectar após ' + MAX_RECONNECT + ' tentativas.';
+            overlay.classList.add('visible');
+          }
+        }
+
+        socket.onerror = () => { socket.close(); };
+      }
+
+      connect();
+
+      term.onData((data) => send({ t: 'in', d: data }));
+
+      const doResize = () => {
+        fit.fit();
+        send({ t: 'resize', cols: term.cols, rows: term.rows });
+      };
+      new ResizeObserver(doResize).observe(document.getElementById('terminal'));
+      window.addEventListener('resize', doResize);
+
+      // Clipboard helpers (Opção A: Ctrl+Shift+C/V + toolbar buttons).
+      const copySelection = () => {
+        const text = term.getSelection();
+        if (text) navigator.clipboard.writeText(text);
+      };
+      const pasteClipboard = async () => {
+        try {
+          const text = await navigator.clipboard.readText();
+          if (text) term.paste(text);
+        } catch { /* clipboard permission denied */ }
+      };
+
+      // Auto-copy on mouse-up selection (Konsole-style).
+      term.onSelectionChange(() => {
+        const text = term.getSelection();
+        if (text && text.length > 0) {
+          // Only auto-copy when selection ends (not during drag).
+          setTimeout(() => {
+            const final = term.getSelection();
+            if (final && final.length > 0) navigator.clipboard.writeText(final).catch(() => {});
+          }, 50);
+        }
+      });
+
+      document.getElementById('btn-copy').addEventListener('click', copySelection);
+      document.getElementById('btn-paste').addEventListener('click', pasteClipboard);
+      document.getElementById('btn-interrupt').addEventListener('click', () => send({ t: 'in', d: '\u0003' }));
+
+      // Background selector: dark variants only — the CLI ink is designed for dark surfaces.
+      const applyBackground = (bg) => {
+        term.options.theme = Object.assign({}, baseTheme, { background: bg, cursorAccent: bg });
+        document.documentElement.style.setProperty('--bg', bg);
+        storeSet('plif-web-bg', bg);
+        document.querySelectorAll('.swatch').forEach((el) => {
+          el.classList.toggle('active', el.getAttribute('data-bg') === bg);
+        });
+      };
+      document.querySelectorAll('.swatch').forEach((el) => {
+        el.addEventListener('click', () => applyBackground(el.getAttribute('data-bg')));
+      });
+      applyBackground(savedBg || '#16161c');
+
+      term.attachCustomKeyEventHandler((ev) => {
+        if (ev.type !== 'keydown') return true;
+        if (ev.ctrlKey && ev.shiftKey && (ev.key === 'C' || ev.key === 'c')) {
+          copySelection();
+          return false;
+        }
+        if (ev.ctrlKey && ev.shiftKey && (ev.key === 'V' || ev.key === 'v')) {
+          pasteClipboard();
+          return false;
+        }
+        // Plain Ctrl+C is forwarded to the PTY as SIGINT, like a real terminal.
+        return true;
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -21,10 +21,11 @@
     "clean": "tsc --build --clean",
     "dev": "node --import tsx packages/cli/src/main.tsx",
     "typecheck": "tsc --build --force",
-    "test": "node --import tsx --test packages/core/test/*.test.ts packages/sandbox/test/*.test.ts packages/cli/test/*.test.ts",
+    "test": "node --import tsx --test packages/core/test/*.test.ts packages/sandbox/test/*.test.ts packages/cli/test/*.test.ts packages/web/test/*.test.ts",
     "preview": "node --import tsx packages/cli/dev/preview.mts",
     "link": "npm run build && npm link --workspace @plif/cli",
-    "unlink": "npm unlink -g @plif/cli"
+    "unlink": "npm unlink -g @plif/cli",
+    "build:pty": "node scripts/build-pty.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

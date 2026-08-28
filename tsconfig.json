@@ -4,6 +4,7 @@
     { "path": "./packages/core" },
     { "path": "./packages/sandbox" },
     { "path": "./packages/cli" },
-    { "path": "./packages/acp" }
+    { "path": "./packages/acp" },
+    { "path": "./packages/web" }
   ]
 }

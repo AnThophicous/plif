@@ -1,0 +1,33 @@
+{
+  "name": "@plif/web",
+  "version": "0.3.9",
+  "description": "Web terminal adapter for plif: runs the interactive CLI in a browser over a PTY bridge.",
+  "license": "Apache-2.0",
+  "author": "Anthophicous",
+  "homepage": "https://github.com/AnThophicous/plif",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnThophicous/plif.git",
+    "directory": "packages/web"
+  },
+  "bugs": "https://github.com/AnThophicous/plif/issues",
+  "keywords": ["plif", "web", "terminal", "pty", "xterm"],
+  "type": "module",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "main": "./dist/index.js",
+  "files": ["dist", "public", "bridge", "README.md", "LICENSE", "NOTICE"],
+  "scripts": {
+    "prepack": "node ../../scripts/prepack.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "optionalDependencies": {
+    "node-pty": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13"
+  }
+}
