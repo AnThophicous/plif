@@ -24,6 +24,20 @@ plif web:   http://127.0.0.1:4173/?token=a1b2c3d4...
 Abra essa URL no navegador. O token é secreto — qualquer pessoa com ele tem
 acesso ao terminal.
 
+## Variáveis de Ambiente
+
+Você pode configurar valores padrão via variáveis de ambiente no seu `~/.bashrc` ou ambiente do sistema:
+
+| Variável | Padrão | Descrição |
+|---|---|---|
+| `PLIF_WEB_HOST` | `127.0.0.1` | Interface de rede padrão (ex: `0.0.0.0` para expor na rede/VM) |
+| `PLIF_WEB_PORT` | `4173` | Porta TCP padrão do servidor |
+| `PLIF_WEB_PASSWORD` | *(nenhuma)* | Senha para login via navegador |
+| `PLIF_WEB_MAX_SESSIONS` | `4` | Limite de sessões simultâneas |
+| `PLIF_PYTHON` | `python3` | Caminho do executável Python (se usar fallback do bridge PTY) |
+
+*Nota: As flags de linha de comando (`--host`, `--port`, `--max-sessions`) têm precedência sobre as variáveis de ambiente.*
+
 ## Login por senha (`PLIF_WEB_PASSWORD`)
 
 Para um servidor sempre ativo com URL fixa — sem depender do token exibido no

@@ -12,6 +12,7 @@
  */
 
 import path from 'node:path';
+import process from 'node:process';
 
 export interface GlobalFlags {
   /** Override the store location. Defaults to `~/.plif`. */
@@ -277,14 +278,20 @@ export function parseArgv(argv: readonly string[], cwd: string): Invocation {
     }
 
     case 'web': {
-      // Defaults keep the adapter local-only; a remote PTY needs an explicit host.
-      const rawPort = stringFlag(flags, 'port');
+      // Defaults keep the adapter local-only; a remote PTY needs an explicit host or env var.
+      const envPort = process.env['PLIF_WEB_PORT'];
+      const rawPort = stringFlag(flags, 'port') ?? (envPort && envPort !== '' ? envPort : undefined);
       const parsedPort = rawPort === undefined ? Number.NaN : Number.parseInt(rawPort, 10);
       const port = Number.isInteger(parsedPort) && parsedPort > 0 && parsedPort < 65536 ? parsedPort : 4173;
-      const host = stringFlag(flags, 'host') ?? '127.0.0.1';
-      const rawMax = stringFlag(flags, 'max-sessions');
+
+      const envHost = process.env['PLIF_WEB_HOST'];
+      const host = stringFlag(flags, 'host') ?? (envHost && envHost !== '' ? envHost : '127.0.0.1');
+
+      const envMax = process.env['PLIF_WEB_MAX_SESSIONS'];
+      const rawMax = stringFlag(flags, 'max-sessions') ?? (envMax && envMax !== '' ? envMax : undefined);
       const parsedMax = rawMax === undefined ? Number.NaN : Number.parseInt(rawMax, 10);
       const maxSessions = Number.isInteger(parsedMax) && parsedMax > 0 && parsedMax <= 64 ? parsedMax : 4;
+
       return { kind: 'web', flags: flagSet, port, host, maxSessions };
     }
 

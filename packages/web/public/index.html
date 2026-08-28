@@ -207,7 +207,8 @@
           }
           // If the session is no longer valid (server restarted, stale cookie),
           // reload so the server serves the login page instead of looping.
-          fetch('/session', { credentials: 'same-origin' })
+          const sessionUrl = '/session' + (token ? '?token=' + encodeURIComponent(token) : '');
+          fetch(sessionUrl, { credentials: 'same-origin' })
             .then((res) => {
               if (res.status === 401) location.reload();
               else scheduleReconnect();

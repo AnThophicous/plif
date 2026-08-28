@@ -11,7 +11,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import type { Invocation } from '../argv.js';
+import type { GlobalFlags, Invocation } from '../argv.js';
 
 interface ResolvedEntrypoint {
   readonly command: string;
@@ -26,6 +26,15 @@ interface ResolvedEntrypoint {
  */
 function resolveEntrypoint(): ResolvedEntrypoint {
   const here = path.dirname(fileURLToPath(import.meta.url));
+  const isTsSource = import.meta.url.endsWith('.ts') || import.meta.url.endsWith('.tsx');
+
+  if (isTsSource) {
+    const source = path.resolve(here, '..', 'main.tsx');
+    if (existsSync(source)) {
+      return { command: process.execPath, args: ['--import', 'tsx', source] };
+    }
+  }
+
   const built = path.resolve(here, '..', 'main.js');
   if (existsSync(built)) {
     return { command: process.execPath, args: [built] };
@@ -37,10 +46,24 @@ function resolveEntrypoint(): ResolvedEntrypoint {
   throw new Error('plif web: could not locate the interactive CLI entrypoint');
 }
 
+function buildForwardedArgs(flags: GlobalFlags): string[] {
+  const args: string[] = [];
+  if (flags.model) args.push('--model', flags.model);
+  if (flags.baseURL) args.push('--base-url', flags.baseURL);
+  if (flags.preset) args.push('--preset', flags.preset);
+  if (flags.apiKey) args.push('--api-key', flags.apiKey);
+  if (flags.root) args.push('--root', flags.root);
+  if (flags.strict) args.push('--strict');
+  if (flags.write) args.push('--write');
+  if (flags.yes) args.push('--yes');
+  return args;
+}
+
 export async function runWeb(invocation: Extract<Invocation, { kind: 'web' }>): Promise<void> {
   const { startWebServer } = await import('@plif/web');
 
-  const { command, args } = resolveEntrypoint();
+  const { command, args: baseArgs } = resolveEntrypoint();
+  const args = [...baseArgs, ...buildForwardedArgs(invocation.flags)];
   const password = process.env['PLIF_WEB_PASSWORD'] ?? '';
 
   const handle = await startWebServer({

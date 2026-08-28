@@ -215,4 +215,39 @@ describe('web server — origin check', () => {
       setTimeout(resolve, 3000);
     });
   });
+
+  it('accepts a LAN Origin when bound to 0.0.0.0 and Host header matches', async () => {
+    const handle0 = await startWebServer({
+      port: TEST_PORT + 4,
+      host: '0.0.0.0',
+      command: '/bin/sh',
+      args: [],
+      cwd: process.cwd(),
+    });
+
+    try {
+      const ws = new WebSocket(`ws://127.0.0.1:${TEST_PORT + 4}/pty?token=${handle0.token}`, {
+        headers: {
+          Host: `192.168.1.50:${TEST_PORT + 4}`,
+          Origin: `http://192.168.1.50:${TEST_PORT + 4}`,
+        },
+      });
+
+      const result = await new Promise<string>((resolve) => {
+        ws.on('open', () => resolve('open'));
+        ws.on('unexpected-response', (_req, res) => resolve(`http:${res.statusCode}`));
+        ws.on('error', (err) => resolve(`error:${err.message}`));
+        setTimeout(() => resolve('timeout'), 5000);
+      });
+
+      assert.equal(result, 'open');
+      ws.send(JSON.stringify({ t: 'in', d: 'exit\n' }));
+      await new Promise<void>((resolve) => {
+        ws.on('close', resolve);
+        setTimeout(resolve, 3000);
+      });
+    } finally {
+      await handle0.close();
+    }
+  });
 });

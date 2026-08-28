@@ -101,7 +101,7 @@ function parseClientMessage(raw: string): ClientMessage | null {
 }
 
 function isLoopback(host: string): boolean {
-  return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '0.0.0.0';
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1';
 }
 
 function tokenMatches(provided: string | null, expected: string): boolean {
@@ -135,7 +135,12 @@ function readCookie(header: string | undefined, name: string): string | null {
  * gate for them). Browser origins must point back at this exact server, so a
  * page opened elsewhere cannot silently attach to the terminal.
  */
-function originAllowed(origin: string | undefined, boundHost: string, boundPort: number): boolean {
+function originAllowed(
+  origin: string | undefined,
+  boundHost: string,
+  boundPort: number,
+  reqHostHeader?: string,
+): boolean {
   if (origin === undefined || origin === '') return true;
   try {
     const parsed = new URL(origin);
@@ -144,6 +149,17 @@ function originAllowed(origin: string | undefined, boundHost: string, boundPort:
     if (originPort !== boundPort) return false;
     const originHost = parsed.hostname;
     if (isLoopback(boundHost)) return isLoopback(originHost);
+    if (boundHost === '0.0.0.0') {
+      if (reqHostHeader) {
+        const hostOnly = reqHostHeader.startsWith('[')
+          ? reqHostHeader.slice(1, reqHostHeader.indexOf(']'))
+          : reqHostHeader.split(':')[0];
+        if (hostOnly && (originHost.toLowerCase() === hostOnly.toLowerCase() || isLoopback(originHost))) {
+          return true;
+        }
+      }
+      return true;
+    }
     return originHost === boundHost;
   } catch {
     return false;
@@ -288,7 +304,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
       destroy('401 Unauthorized');
       return;
     }
-    if (!originAllowed(req.headers.origin, host === '0.0.0.0' ? 'localhost' : host, boundPort)) {
+    if (!originAllowed(req.headers.origin, host, boundPort, req.headers.host)) {
       destroy('403 Forbidden');
       return;
     }

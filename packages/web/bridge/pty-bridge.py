@@ -141,7 +141,8 @@ def main():
 
         if proc.poll() is not None:
             # Drain whatever the child printed before exiting, then stop.
-            drain_master()
+            while drain_master():
+                pass
             break
 
     try:

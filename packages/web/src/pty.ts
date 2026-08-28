@@ -133,6 +133,20 @@ function spawnBridge(
   const dataListeners: Array<(data: string) => void> = [];
   const exitListeners: Array<(event: { readonly exitCode: number }) => void> = [];
 
+  child.on('error', (err: Error) => {
+    process.stderr.write(`plif web: failed to spawn PTY bridge (${pythonBin}): ${err.message}\n`);
+    for (const listener of dataListeners) {
+      listener(`\r\n\x1b[31mplif web: failed to spawn PTY bridge (${pythonBin}): ${err.message}\x1b[0m\r\n`);
+    }
+    for (const listener of exitListeners) {
+      listener({ exitCode: 1 });
+    }
+  });
+
+  child.stderr?.on('data', (chunk: Buffer) => {
+    process.stderr.write(`plif web [bridge]: ${chunk.toString('utf8')}`);
+  });
+
   child.stdout?.on('data', (chunk: Buffer) => {
     const text = decoder.write(chunk);
     if (text.length === 0) return;
