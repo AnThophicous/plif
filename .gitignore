@@ -25,6 +25,7 @@ packages/*/README.md
 # Credentials, in any of the shapes people reach for.
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 
