@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 
 import { Meter } from './Meter.js';
 import { useSpinnerFrame } from './Spinner.js';

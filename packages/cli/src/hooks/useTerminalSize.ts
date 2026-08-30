@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useStdout } from 'ink';
+import { useStdout } from '../ui.js';
 import { nextTerminalSize } from '../terminal-resize.js';
 import type { TerminalSize } from '../terminal-resize.js';
 

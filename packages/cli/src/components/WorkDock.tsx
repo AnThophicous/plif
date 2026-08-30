@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 
 import type { LspStatus, McpServerStatus, TaskSnapshot } from '@plif/core';
 import type { SandboxCapabilityReport } from '@plif/sandbox';

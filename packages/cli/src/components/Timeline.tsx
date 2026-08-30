@@ -1,11 +1,11 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 
 import { diffHeight } from './Diff.js';
 import { Markdown } from './Markdown.js';
 import { ToolCall, searchResultsHeight } from './ToolCall.js';
 import { BLOOM_MARK, useSpinnerFrame } from './Spinner.js';
-import { activityGlyphAt, activityKindForLabel, activityVisual, GradientText } from '../activity-visuals.js';
+import { activityGlyphAt, activityKindForLabel, activityVisual } from '../activity-visuals.js';
 import { ANIMATION_INTERVAL_MS, useAnimationFrame } from '../hooks/useAnimationClock.js';
 import type { EntryStatus, TimelineEntry } from '../session.js';
 import {
@@ -14,7 +14,6 @@ import {
   transcriptReducer,
 } from '../transcript/reducer.js';
 import type { TranscriptCell } from '../transcript/types.js';
-import { toneBetween } from '../pulse.js';
 import { color, formatDuration, formatWorkedDuration, glyph, layout, truncate } from '../theme.js';
 import { clusterLength, displayWidth } from '../text.js';
 
@@ -656,10 +655,10 @@ function ThinkingIndicator({
     <Box>
       <Text color={color(thinking ? 'accent' : 'ghost')}>{thinking ? pulse : glyph.step} </Text>
       {thinking ? (
-        <GradientText value={activityLabel} from={visual.gradient[0]} to={visual.gradient[1]} bold />
+        <Text color={color('muted')} bold>[ Thinking ]</Text>
       ) : (
-        <Text color={color('faint')}>
-          {expand ? `${label}:` : `thought ${formatDuration(durationMs ?? 0)}`}
+        <Text color={color('muted')} bold>
+          {expand ? `[- Thinked for ${formatDuration(durationMs ?? 0)}]` : `[+ Thinked for ${formatDuration(durationMs ?? 0)}]`}
         </Text>
       )}
       <Text color={color('ghost')}>
@@ -716,7 +715,7 @@ function ThinkingRow({
             return (
               <Box key={index}>
                 <Text color={color('ghost')}>{`  ${last ? '  ' : glyph.rail} ${glyph.branch} `}</Text>
-                <Text color={toneBetween(plif ? 'accent' : 'brand', plif ? 'accentBright' : 'accent', (index + 1) / live.length)}>{line}</Text>
+                <Text color={color('faint')}>{line}</Text>
                 {last
                   ? <Text color={color('muted')}>{' '.repeat(gap)}…</Text>
                   : <Text color={color('accentBorder')}>{' '.repeat(gap)}✓</Text>}

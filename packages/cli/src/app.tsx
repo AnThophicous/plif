@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { Box, Static, Text, useApp, useInput, useStdin, useStdout } from 'ink';
-import type { Key } from 'ink';
+import { Box, Static, Text, useApp, useInput, useStdin, useStdout } from './ui.js';
+import type { Key } from './ui.js';
 
 import {
   adoptProvider,

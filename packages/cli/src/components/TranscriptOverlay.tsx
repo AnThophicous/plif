@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 
 import { TranscriptCells, measureTranscriptCell, measureTranscriptCells } from './Timeline.js';
 import { visibleTranscriptSlice } from '../transcript/scroll.js';

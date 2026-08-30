@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 
 import type { ConfigSetting } from '../configuration.js';
 import type { ConfigEditState } from '../session.js';

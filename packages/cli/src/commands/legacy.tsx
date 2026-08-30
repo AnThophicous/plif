@@ -888,7 +888,11 @@ export async function runInteractive(
     return;
   }
 
-  const [{ render }, { App }] = await Promise.all([import('ink'), import('../app.js')]);
+  const [{ render }, { App }, slate] = await Promise.all([
+    import('ink'),
+    import('../app.js'),
+    import('@slate-terminal/core'),
+  ]);
 
   const startupAppearance = await loadGlobalConfig();
   invocation = {
@@ -1008,6 +1012,8 @@ export async function runInteractive(
   const resizeListenersBefore = new Set(
     process.stdout.listeners('resize') as Array<(...args: unknown[]) => void>,
   );
+  slate.enableRawMode();
+  slate.enableMouseCapture();
   enableBracketedPaste();
   const instance = render(
     <App
@@ -1053,6 +1059,8 @@ export async function runInteractive(
   }
   await done();
   } finally {
+    slate.disableMouseCapture();
+    slate.disableRawMode();
     await tempWorkspace.cleanup();
   }
 }

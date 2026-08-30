@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 
 import { ToolCall } from './ToolCall.js';
 import type { TimelineEntry } from '../session.js';
