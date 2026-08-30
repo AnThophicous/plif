@@ -43,10 +43,10 @@ interface UiContextValue {
   readonly stdin: NodeJS.ReadStream;
   readonly stdout: NodeJS.WriteStream;
   readonly input: EventEmitter;
+  readonly subscribeInput: (handler: (char: string, key: Key) => void) => () => void;
 }
 
 const context = createContext<UiContextValue | null>(null);
-const inputListeners = new Set<(char: string, key: Key) => void>();
 
 export interface Key {
   readonly upArrow: boolean;
@@ -113,10 +113,11 @@ export function useStdout(): { readonly stdout: NodeJS.WriteStream } {
 }
 
 export function useInput(handler: (char: string, key: Key) => void): void {
+  const value = useContext(context);
+  if (!value) throw new Error('useInput must be used inside the Slate terminal');
   useEffect(() => {
-    inputListeners.add(handler);
-    return () => { inputListeners.delete(handler); };
-  }, [handler]);
+    return value.subscribeInput(handler);
+  }, [handler, value]);
 }
 
 function normalizeStyle(props: UiProps): Record<string, unknown> {
@@ -400,7 +401,11 @@ function keyForRaw(char: string): Key {
   });
 }
 
-function dispatchRawInput(raw: string, input: EventEmitter): void {
+function dispatchRawInput(
+  raw: string,
+  input: EventEmitter,
+  inputListeners: ReadonlySet<(char: string, key: Key) => void>,
+): void {
   let cursor = 0;
   while (cursor < raw.length) {
     let char = raw[cursor] ?? '';
@@ -434,7 +439,16 @@ function mouseSequence(event: SlateEvent): string {
   return `\u001b[<${button | action};${Math.max(1, event.x ?? 0) + 1};${Math.max(1, event.y ?? 0) + 1}${suffix}`;
 }
 
-function dispatchSlateEvent(event: SlateEvent, input: EventEmitter, stdout: NodeJS.WriteStream): void {
+function dispatchSlateEvent(
+  event: SlateEvent,
+  input: EventEmitter,
+  stdout: NodeJS.WriteStream,
+  inputListeners: ReadonlySet<(char: string, key: Key) => void>,
+): void {
+  // The native source reports both key press and key release. Ink's useInput
+  // contract exposes a key once, so releases must never become a second
+  // printable character in the composer.
+  if (event.kind === 'key' && event.phase === 'release') return;
   if (event.kind === 'resize') {
     if (event.width !== undefined) (stdout as NodeJS.WriteStream & { columns?: number }).columns = event.width;
     if (event.height !== undefined) (stdout as NodeJS.WriteStream & { rows?: number }).rows = event.height;
@@ -530,6 +544,11 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
   const stdout = options.stdout ?? process.stdout;
   const stdin = options.stdin ?? process.stdin;
   const input = new EventEmitter();
+  const inputListeners = new Set<(char: string, key: Key) => void>();
+  const subscribeInput = (handler: (char: string, key: Key) => void): (() => void) => {
+    inputListeners.add(handler);
+    return () => { inputListeners.delete(handler); };
+  };
   let resolveExit!: () => void;
   let paintScheduled = false;
   let skipNextRepaint = false;
@@ -568,13 +587,18 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
     stdin,
     stdout,
     input,
+    subscribeInput,
   };
   reconciler.updateContainer(React.createElement(context.Provider, { value }, element), container, null, undefined);
   // React's passive-effect queue is normally drained by a browser host. A CLI
   // renderer has no browser scheduler, so flush the first batch here; this
   // starts input listeners and animation clocks before render() returns.
   reconciler.flushPassiveEffects?.();
-  const onData = (chunk: Buffer | string): void => dispatchRawInput(typeof chunk === 'string' ? chunk : chunk.toString('utf8'), input);
+  const onData = (chunk: Buffer | string): void => dispatchRawInput(
+    typeof chunk === 'string' ? chunk : chunk.toString('utf8'),
+    input,
+    inputListeners,
+  );
   if (stdin !== process.stdin) stdin.on('data', onData);
 
   // Let Slate's own controller be the sole owner of both native polling and
@@ -587,7 +611,7 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
       width: event.width ?? stdout.columns ?? 80,
       height: event.height ?? stdout.rows ?? 24,
     });
-    dispatchSlateEvent(event, input, stdout);
+    dispatchSlateEvent(event, input, stdout, inputListeners);
     return 'consumed';
   });
   slate.setViewport({ width: stdout.columns ?? 80, height: stdout.rows ?? 24 });
