@@ -74,7 +74,12 @@ async function renderConstrainedPrompt(): Promise<string> {
 
   await new Promise<void>((resolve) => setTimeout(resolve, 20));
   app.unmount();
-  return stdout.output.replace(ANSI, '').replace(/\r/g, '');
+  return stdout.output
+    .replace(ANSI, '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+    .join('\n');
 }
 
 async function renderCompactDock(width: number): Promise<string> {
@@ -101,7 +106,12 @@ async function renderCompactDock(width: number): Promise<string> {
   );
   await new Promise<void>((resolve) => setTimeout(resolve, 20));
   app.unmount();
-  return stdout.output.replace(ANSI, '').replace(/\r/g, '');
+  return stdout.output
+    .replace(ANSI, '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+    .join('\n');
 }
 
 async function renderNarrowFrame(width: number): Promise<string[]> {
@@ -124,7 +134,8 @@ async function renderNarrowFrame(width: number): Promise<string[]> {
     .replace(ANSI, '')
     .replace(/\r/g, '')
     .split('\n')
-    .filter(Boolean);
+    .filter((line) => line.trim().length > 0)
+    .slice(0, 3);
 }
 
 async function renderDock(width: number, model: string): Promise<string> {
@@ -183,13 +194,14 @@ async function renderActivity(width: number, mcpStatuses: readonly McpServerStat
   );
   await new Promise<void>((resolve) => setTimeout(resolve, 20));
   app.unmount();
-  // Ink clears and redraws the screen on the first external-store commit.
-  // Tests should inspect the final frame, not concatenate terminal frames.
-  const lastFrame = stdout.output.lastIndexOf('\u001b[2J\u001b[3J\u001b[H');
+  // Slate paints a complete viewport. Tests should inspect the occupied rows
+  // of that frame, not count the terminal's reserved blank rows.
   return stdout.output
-    .slice(lastFrame >= 0 ? lastFrame : 0)
     .replace(ANSI, '')
-    .replace(/\r/g, '');
+    .replace(/\r/g, '')
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+    .join('\n');
 }
 
 const task: TaskSnapshot = {

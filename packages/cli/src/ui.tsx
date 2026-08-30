@@ -5,11 +5,12 @@ import { DefaultEventPriority } from 'react-reconciler/constants.js';
 import {
   createSlateApp,
   createElement as createSlateElement,
+  createTerminalController,
   Fragment as slateFragment,
   type SlateChild,
   type SlateEvent,
 } from '@slate-terminal/react';
-import { enableMouseCapture, pollEvent } from '@slate-terminal/core';
+import { createInputSource, enableMouseCapture } from '@slate-terminal/core';
 import { displayWidth } from './text.js';
 
 /** React host backed by Slate's flex and ANSI renderer. */
@@ -450,14 +451,18 @@ function dispatchSlateEvent(event: SlateEvent, input: EventEmitter, stdout: Node
   for (const listener of [...inputListeners]) listener(char, key);
 }
 
-function compactAnsiFrame(frame: string, height: number): string {
+function normalizeSlateFrame(frame: string): string {
   const lines = frame.split('\n');
-  // Slate separates its control prelude with newlines for readability. Those
-  // newlines are cursor movement in a real terminal, so collapse the prelude
-  // before writing it and keep only the rows occupied by the root layout.
-  const prefix = lines.slice(0, 3).join('');
-  const body = lines.slice(3, 3 + Math.max(0, Math.floor(height)));
-  return prefix + body.join('\n');
+  // Slate's ANSI renderer separates control codes with newlines for readable
+  // captured output. In a real terminal those newlines move the cursor, so
+  // collapse only the control prelude and retain the complete viewport body.
+  // The built-in terminal controller owns frame deduplication and the
+  // clear-once policy; this adapter only normalizes the wire representation.
+  let preludeEnd = 0;
+  while (preludeEnd < lines.length && /^(?:\u001b\[[0-?]*[ -/]*[@-~])+$/.test(lines[preludeEnd] ?? '')) {
+    preludeEnd += 1;
+  }
+  return lines.slice(0, preludeEnd).join('') + lines.slice(preludeEnd).join('\n');
 }
 
 const hostConfig = {
@@ -527,12 +532,18 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
   const input = new EventEmitter();
   let resolveExit!: () => void;
   let paintScheduled = false;
+  let skipNextRepaint = false;
+  let terminalController: ReturnType<typeof createTerminalController> | null = null;
   const exited = new Promise<void>((resolve) => { resolveExit = resolve; });
   const root: UiRoot = { children: [], repaint: () => {
     if (paintScheduled) return;
     paintScheduled = true;
     queueMicrotask(() => {
       paintScheduled = false;
+      if (skipNextRepaint) {
+        skipNextRepaint = false;
+        return;
+      }
       // React owns the logical dimensions through useTerminalSize while
       // Slate owns the physical viewport. Keep both in lockstep for resize
       // events delivered by custom streams as well as the native poller.
@@ -541,11 +552,6 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
         height: stdout.rows ?? 24,
       });
       slate.flush();
-      const layout = slate.getLayout();
-      stdout.write(compactAnsiFrame(
-        slate.renderAnsi({ clear: true, hideCursor: true }),
-        layout?.layout.height ?? stdout.rows ?? 24,
-      ));
     });
   } };
   const slate = createSlateApp(() => treeFor(root), {
@@ -554,7 +560,15 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
     frameRate: 0,
   });
   const container = reconciler.createContainer(root, 0, null, false, null, 'plif', () => undefined, null);
-  const value = { exit: () => { reconciler.updateContainer(null, container, null, resolveExit); }, stdin, stdout, input };
+  const value = {
+    exit: () => {
+      terminalController?.stop();
+      reconciler.updateContainer(null, container, null, resolveExit);
+    },
+    stdin,
+    stdout,
+    input,
+  };
   reconciler.updateContainer(React.createElement(context.Provider, { value }, element), container, null, undefined);
   // React's passive-effect queue is normally drained by a browser host. A CLI
   // renderer has no browser scheduler, so flush the first batch here; this
@@ -562,27 +576,39 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
   reconciler.flushPassiveEffects?.();
   const onData = (chunk: Buffer | string): void => dispatchRawInput(typeof chunk === 'string' ? chunk : chunk.toString('utf8'), input);
   if (stdin !== process.stdin) stdin.on('data', onData);
-  // Native polling belongs only to the real process terminal. A custom
-  // stdout is used by previews/tests and must not receive resize events from
-  // whichever terminal happens to host the test runner.
-  const timer = stdout === process.stdout && stdin === process.stdin
-    ? setInterval(() => {
-      let event: SlateEvent | null;
-      do {
-        event = pollEvent(0) as SlateEvent | null;
-        if (event) {
-          if (event.kind === 'resize') slate.setViewport({
-            width: event.width ?? stdout.columns ?? 80,
-            height: event.height ?? stdout.rows ?? 24,
-          });
-          dispatchSlateEvent(event, input, stdout);
-        }
-      } while (event);
-    }, 8)
-    : null;
+
+  // Let Slate's own controller be the sole owner of both native polling and
+  // terminal writes. React still supplies the legacy component tree, while
+  // Slate now handles clear-once, full-viewport repainting and event routing.
+  // A no-op source keeps previews/tests on their injected stdin stream and
+  // prevents a real terminal's native queue from leaking into them.
+  slate.subscribeInput((event) => {
+    if (event.kind === 'resize') slate.setViewport({
+      width: event.width ?? stdout.columns ?? 80,
+      height: event.height ?? stdout.rows ?? 24,
+    });
+    dispatchSlateEvent(event, input, stdout);
+    return 'consumed';
+  });
+  slate.setViewport({ width: stdout.columns ?? 80, height: stdout.rows ?? 24 });
+  slate.flush();
+  // updateContainer scheduled one host repaint before the controller existed;
+  // the explicit flush above already mounted that tree. Drop only that stale
+  // callback so the controller produces exactly one initial frame.
+  skipNextRepaint = true;
+  const nativeTerminal = stdout === process.stdout && stdin === process.stdin;
+  const source = nativeTerminal ? createInputSource() : { poll: () => null };
+  terminalController = createTerminalController(
+    slate,
+    source,
+    { write: (frame) => stdout.write(normalizeSlateFrame(frame)) },
+    { intervalMs: 8, animationFps: 0, render: { hideCursor: true } },
+  );
+  terminalController.start();
   return {
     unmount: () => {
-      if (timer !== null) clearInterval(timer);
+      terminalController?.dispose();
+      terminalController = null;
       if (stdin !== process.stdin) stdin.off('data', onData);
       slate.unmount();
       reconciler.updateContainer(null, container, null, resolveExit);

@@ -51,7 +51,7 @@ describe('CLI header', () => {
     assert.ok(cells.some((row) => row.some((cell) => cell.glyph === '▄')));
   });
 
-  it('reports its real footprint so the input frame stays in the viewport', async () => {
+  it('reports its real footprint while Slate paints the full viewport', async () => {
     assert.equal(headerHeight(96), 10);
     assert.equal(headerHeight(74), 10);
     assert.equal(headerHeight(16), 10);
@@ -68,7 +68,11 @@ describe('CLI header', () => {
       app.unmount();
 
       const output = stdout.output.replace(ANSI, '').replace(/\r/g, '');
-      assert.equal(output.slice(0, -1).split('\n').length, headerHeight(width));
+      // Slate's terminal controller intentionally paints the complete
+      // viewport on every frame, so stale rows cannot survive a repaint. The
+      // component itself still owns the same ten-row footprint at the top.
+      assert.ok(output.split('\n').length >= headerHeight(width));
+      assert.ok(output.split('\n').slice(0, headerHeight(width)).some((line) => line.includes('PLIF')));
     }
   });
 

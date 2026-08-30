@@ -35,7 +35,7 @@ import { detachImmediateInkResize } from '../src/terminal-resize.js';
 import { activateTheme, loadThemes } from '../src/themes.js';
 import { VERSION } from '../src/version.js';
 
-/** A writable that keeps every frame Ink paints instead of clearing them. */
+/** A writable that records every full-viewport frame Slate paints. */
 class FakeStdout extends EventEmitter {
   columns: number;
   rows: number;
@@ -990,17 +990,18 @@ function latestFrame(): string {
   );
 }
 
-/** Strip erase/home codes so captured frames stack instead of wiping each other. */
+/** Strip cursor movement codes so a captured Slate frame reads like a screen. */
 function flatten(frame: string): string {
-  return frame.replace(/\x1b\[[0-9]*[JHK]/g, '').replace(/\x1b\[\d*[AG]/g, '');
+  return frame
+    .replace(/\x1b\[(?:2J|H|\?25[lh])/g, '')
+    .replace(/\x1b\[\d*[AG]/g, '');
 }
 
 /**
  * The first substantial write.
  *
- * Ink emits `<Static>` content once, on its own, and never repaints it — so the
- * banner never appears in the final frame and would be invisible to this
- * harness without being captured separately.
+ * The first Slate frame already contains the complete viewport, including the
+ * banner and live prompt.
  */
 function firstFrame(): string {
   return (
@@ -1010,27 +1011,9 @@ function firstFrame(): string {
   );
 }
 
-/**
- * Everything that scrolled past, in order.
- *
- * Most of a session now lives in `<Static>`: rows are printed once, above the
- * live frame, and never repainted. `latestFrame` cannot see any of it, so
- * without this a preview would show four rows and imply the rest was lost.
- *
- * Telling a static write from a frame is done by content, not by escapes: the
- * first frame of a run carries no erase sequence either, so the escapes alone
- * are not a reliable signal. Every frame ends in the footer — key hints when a
- * dialog owns the keyboard, the identity summary otherwise — and no committed
- * row ever contains either.
- */
-const FOOTER_HINT = /(Enter|Esc|Ctrl\+C|Tab|y\/a|type):[a-z]|effort: (default|plif|low|medium|high|xhigh|max|ultra|ultracode)/;
-
+/** Slate keeps history and the live prompt in the same full-viewport tree. */
 function scrollback(): string {
-  return stdout.frames
-    .filter((chunk) => !chunk.includes(CLEAR_TERMINAL))
-    .filter((chunk) => !FOOTER_HINT.test(chunk))
-    .filter((chunk) => chunk.replace(/\x1b\[[\d;?]*[a-zA-Z]/g, '').trim().length > 0)
-    .join('');
+  return '(Slate keeps the session in one full-viewport tree; there is no separate static write.)\n';
 }
 
 const captures: { label: string; frame: string }[] = [];
@@ -1071,7 +1054,7 @@ for (const { label, frame } of captures) {
  * occurrence is one visible duplicate of the entire conversation. Counting them
  * turns "as mensagens repetem" from something you squint at into a number.
  */
-const repaints = stdout.frames.filter((frame) => frame.includes(CLEAR_TERMINAL)).length;
+const initialClears = stdout.frames.filter((frame) => frame.includes(CLEAR_TERMINAL)).length;
 
 /**
  * The height Ink compares against `rows` — at or above it, the repaint fires.
@@ -1088,20 +1071,18 @@ if (process.env['PREVIEW_DEBUG']) {
   });
 }
 
-const tallest = stdout.frames.reduce((peak, frame) => {
-  if (frame.includes(CLEAR_TERMINAL)) return peak;
-  // Static writes are not measured against `rows`, and a committed answer can
-  // be eighty lines long — reporting that as the frame height would look like
-  // a failure where there is none.
-  if (!FOOTER_HINT.test(frame)) return peak;
+const renderedFrames = stdout.frames.filter(
+  (frame) => frame.replace(/\x1b\[[\d;?]*[a-zA-Z]/g, '').trim().length > 40,
+);
+const tallest = renderedFrames.reduce((peak, frame) => {
   const height = frame.replace(/\x1b\[[\d;?]*[a-zA-Z]/g, '').split('\n').length;
   return Math.max(peak, height);
 }, 0);
 
 process.stdout.write(
   `\n${rule}\nscenario: ${scenarioName}  ·  ${columns}x${rows}  ·  ` +
-    `${stdout.frames.length} frames  ·  ${repaints} full repaints  ·  ` +
-    `tallest frame ${tallest} lines  ·  ${stdout.overflows.length} over-wide lines\n`,
+    `${stdout.frames.length} frames  ·  ${initialClears} initial clears  ·  ` +
+    `tallest viewport ${tallest} lines  ·  ${stdout.overflows.length} over-wide lines\n`,
 );
 
 // Any of these is a ghost copy waiting to happen, so name them rather than
