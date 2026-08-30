@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { describe, it } from 'node:test';
 
 import { checkForUpdate, isNewer } from '../src/update/check.js';
@@ -11,12 +12,38 @@ async function scratch(): Promise<string> {
   return path.join(root, 'update-check.json');
 }
 
+function packageTarball(version: string): Uint8Array {
+  const contents = `# Changelog\n\n## [${version}]\n\n- Test release.\n`;
+  const body = Buffer.from(contents, 'utf8');
+  const header = Buffer.alloc(512);
+  header.write('package/CHANGELOG.md', 0, 'utf8');
+  header.write('0000644', 100, 'ascii');
+  header.write('0000000', 108, 'ascii');
+  header.write('0000000', 116, 'ascii');
+  header.write(body.length.toString(8).padStart(11, '0') + '\0', 124, 'ascii');
+  header.write('00000000000\0', 136, 'ascii');
+  header.fill(0x20, 148, 156);
+  header.write('0', 156, 'ascii');
+  header.write('ustar\0', 257, 'ascii');
+  const checksum = header.reduce((total, value) => total + value, 0);
+  header.write(checksum.toString(8).padStart(6, '0') + '\0 ', 148, 'ascii');
+  const padded = Buffer.alloc(Math.ceil(body.length / 512) * 512);
+  body.copy(padded);
+  return gzipSync(Buffer.concat([header, padded, Buffer.alloc(1024)]));
+}
+
 const served = (version: unknown, status = 200): typeof fetch =>
-  (async () =>
-    new Response(JSON.stringify({ version }), {
+  (async (input) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    if (url.endsWith('.tgz')) return new Response(packageTarball(String(version)), { status: 200 });
+    const metadata = typeof version === 'string'
+      ? { version, dist: { tarball: 'https://registry.npmjs.org/@plif/cli/-/cli.tgz', integrity: 'sha512-AAAAAAAAAAAAAAAA' } }
+      : { version };
+    return new Response(JSON.stringify(metadata), {
       status,
       headers: { 'content-type': 'application/json' },
-    })) as unknown as typeof fetch;
+    });
+  }) as unknown as typeof fetch;
 
 describe('comparing versions', () => {
   it('orders the parts numerically, not as text', () => {
@@ -109,7 +136,9 @@ describe('checking for an update', () => {
     let requests = 0;
     const counting = (async () => {
       requests += 1;
-      return new Response(JSON.stringify({ version: '0.3.0' }));
+      return requests % 2 === 1
+        ? new Response(JSON.stringify({ version: '0.3.0', dist: { tarball: 'https://registry.npmjs.org/@plif/cli/-/cli.tgz' } }))
+        : new Response(packageTarball('0.3.0'));
     }) as unknown as typeof fetch;
 
     const first = await checkForUpdate({
@@ -127,7 +156,7 @@ describe('checking for an update', () => {
 
     assert.equal(first?.latest, '0.3.0');
     assert.equal(second?.latest, '0.3.0');
-    assert.equal(requests, 1, 'launching plif must not be an npm request every time');
+    assert.equal(requests, 2, 'launching plif must not be an npm request every time');
   });
 
   it('goes back to the registry once the cache is stale', async () => {
@@ -135,7 +164,9 @@ describe('checking for an update', () => {
     let requests = 0;
     const counting = (async () => {
       requests += 1;
-      return new Response(JSON.stringify({ version: '0.3.0' }));
+      return requests % 2 === 1
+        ? new Response(JSON.stringify({ version: '0.3.0', dist: { tarball: 'https://registry.npmjs.org/@plif/cli/-/cli.tgz' } }))
+        : new Response(packageTarball('0.3.0'));
     }) as unknown as typeof fetch;
 
     await checkForUpdate({ current: '0.1.0', cacheFile, environment: {}, fetchImpl: counting });
@@ -147,6 +178,6 @@ describe('checking for an update', () => {
       ttlMs: 0,
     });
 
-    assert.equal(requests, 2);
+    assert.equal(requests, 4);
   });
 });

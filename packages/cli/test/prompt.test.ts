@@ -81,6 +81,31 @@ describe('multiline prompt layout', () => {
     assert.match(output, /╰.*╯/);
   });
 
+  it('paints an inline ghost suffix without changing the draft', async () => {
+    const stdout = new CaptureStdout();
+    const app = render(
+      React.createElement(Prompt, {
+        value: 'plea',
+        cursor: 4,
+        inlineSuggestion: 'se',
+        placeholder: 'describe a task',
+        focused: true,
+        busy: false,
+        busyLabel: '',
+        width: 40,
+      }),
+      {
+        stdout: stdout as unknown as NodeJS.WriteStream,
+        exitOnCtrlC: false,
+        patchConsole: false,
+      },
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    app.unmount();
+    const output = stdout.output.replace(ANSI, '').replace(/\r/g, '');
+    assert.match(output, /plea se/);
+  });
+
   it('uses the whole available width before soft-wrapping', () => {
     assert.deepEqual(layoutPrompt('abcdefghij', 10, 5).map((row) => row.text), ['abcde', 'fghij']);
   });

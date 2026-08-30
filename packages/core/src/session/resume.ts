@@ -61,6 +61,11 @@ export function conversationFromTranscript(
       case 'user.message':
         if (event.text.trim()) messages.push({ role: 'user', content: event.text });
         break;
+      case 'command.input':
+      case 'command.completed':
+      case 'terminal.output':
+      case 'queued.input':
+        break;
       case 'assistant.message':
         if (event.text.trim() || event.toolCalls?.length) {
           messages.push({

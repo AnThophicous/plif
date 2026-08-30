@@ -133,6 +133,7 @@ export interface LoopOptions {
   };
   readonly signal?: AbortSignal;
   readonly memory?: MemoryStore;
+  readonly readOnlyMemory?: boolean;
   readonly workspace?: string;
   /** Permission context inherited from the interactive PLIF host. */
   readonly execution?: ModelExecutionContext;
@@ -562,7 +563,9 @@ async function runLoopInternal(
       return { output: results.join('\n'), ok: true, toolCallCount: raw.length };
     },
   };
-  const tools = options.runScript === false ? baseTools : [...baseTools, runScriptTool];
+  const tools = [
+    ...(options.runScript === false ? baseTools : [...baseTools, runScriptTool]),
+  ];
   registry = toolRegistry(tools);
   const specs = stableToolSpecs(toolSpecs(tools));
   // The review cycle is a PLIF policy, not a property of having mutation tools.
@@ -1666,6 +1669,16 @@ function learningContext(reason: string): string {
     .slice(0, 96);
 }
 
+function redactToolText(container: Container, text: string): string {
+  // A few embedders provide a deliberately tiny Container-shaped test double.
+  // Keep the loop compatible with those while real containers always expose
+  // the redaction boundary.
+  const redactor = (container as Container & {
+    redactSensitiveOutput?: (value: string) => string;
+  }).redactSensitiveOutput;
+  return typeof redactor === 'function' ? redactor.call(container, text) : text;
+}
+
 async function executeCall(input: {
   call: ToolCall;
   parsed: Record<string, unknown>;
@@ -1675,24 +1688,29 @@ async function executeCall(input: {
 }): Promise<{ output: string; ok: boolean; diff?: string; display?: string; toolCallCount?: number }> {
   const { call, parsed, parseError, registry, options } = input;
 
-  if (parseError) return { output: `Error: ${parseError}`, ok: false };
+  if (parseError) {
+    return { output: redactToolText(options.container, `Error: ${parseError}`), ok: false };
+  }
 
   const tool = registry.get(call.name);
   if (!tool) {
     return {
-      output: `Error: no tool named "${call.name}". Available: ${[...registry.keys()].join(', ')}`,
+      output: redactToolText(options.container,
+        `Error: no tool named "${call.name}". Available: ${[...registry.keys()].join(', ')}`,
+      ),
       ok: false,
     };
   }
 
   try {
-    return await tool.run(parsed, {
+    const result = await tool.run(parsed, {
       container: options.container,
       questions: options.questions,
       signal: options.signal,
       bus: options.bus,
       callId: call.id,
       ...(options.memory ? { memory: options.memory } : {}),
+      ...(options.readOnlyMemory ? { readOnlyMemory: true } : {}),
       ...(options.workspace ? { workspace: options.workspace } : {}),
       ...(options.execution ? { execution: options.execution } : {}),
       ...(options.tasks ? { tasks: options.tasks } : {}),
@@ -1706,12 +1724,29 @@ async function executeCall(input: {
       ...(options.sessions ? { sessions: options.sessions } : {}),
       ...(options.attachments?.length ? { attachments: options.attachments } : {}),
     });
+    // A tool may be supplied by an extension or MCP server rather than the
+    // built-in exec path. Apply the same session-secret boundary to every
+    // result before it can enter the transcript, event bus, spill files, or
+    // model context.
+    return {
+      ...result,
+      output: redactToolText(options.container, result.output),
+      ...(result.display !== undefined
+        ? { display: redactToolText(options.container, result.display) }
+        : {}),
+      ...(result.diff !== undefined
+        ? { diff: redactToolText(options.container, result.diff) }
+        : {}),
+    };
   } catch (error) {
     // A denied action, a bad path, a blown quota — all of these are information
     // the model can act on, so they go back as a tool result rather than
     // unwinding the loop. Only a model-transport failure ends the run.
     const plif = toPlifError(error);
     const hint = plif.hint ? ` (${plif.hint})` : '';
-    return { output: `Error: ${plif.message}${hint}`, ok: false };
+    return {
+      output: redactToolText(options.container, `Error: ${plif.message}${hint}`),
+      ok: false,
+    };
   }
 }

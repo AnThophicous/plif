@@ -70,6 +70,9 @@ describe('config registry', () => {
     assert.match(value.find((setting) => setting.id === 'providerPermissions')?.description ?? '', /Codex.*inherit/i);
     assert.ok(ids.includes('model'));
     assert.ok(ids.includes('effort'));
+    assert.ok(ids.includes('autocomplete'));
+    assert.equal(ids.includes('spellcheck'), false);
+    assert.equal(ids.includes('autocorrect'), false);
     assert.doesNotMatch(JSON.stringify(value), /this-must-never-be-rendered|another-secret/);
     assert.deepEqual(configCategoryStarts(value).map((item) => item.category), [
       'Interface', 'Behavior', 'Runtime', 'Integrations', 'Storage',

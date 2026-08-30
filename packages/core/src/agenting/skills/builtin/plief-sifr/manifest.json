@@ -1,8 +1,8 @@
 ﻿{
   "name": "Pli'ef Sifr",
   "slug": "plief-sifr",
-  "version": "1.0.0",
-  "description": "Frontend Intelligence & Experience Engineering System: product frame, structure, visual grammar/DNA, design system, component intelligence (Orun-integrated), interaction/motion/responsive/a11y/perf contracts, implementation and rendered repair loop over ExperienceIR.",
+  "version": "1.1.0",
+  "description": "Frontend intelligence system for product framing, deliberate art direction, strong visual identity, design systems, components, motion, responsive behavior, accessibility, performance, video, 3D/WebGL, shaders, implementation and rendered repair over ExperienceIR.",
   "entry": "SKILL.md",
   "artifacts": {
     "produced": [
@@ -24,6 +24,8 @@
     "schemas/experience-ir.schema.json",
     "schemas/design-dna.schema.json",
     "schemas/state-graph.schema.json",
+    "schemas/motion-contract.schema.json",
+    "schemas/media-contract.schema.json",
     "schemas/responsive-contract.schema.json",
     "schemas/component-contract.schema.json",
     "schemas/perf-budget.schema.json",

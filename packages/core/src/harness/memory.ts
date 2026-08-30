@@ -7,11 +7,14 @@ import { workspaceKey } from '../session/store.js';
 import type { StorePaths } from '../store/paths.js';
 import { assess, guide } from './learning.js';
 import type { Context, Guidance, Outcome, Strategy } from './learning.js';
+import { MemoryRepository } from './memory-repository.js';
 
 export type FactKind = 'fact' | 'failure';
+export type MemoryScope = 'global' | 'workspace';
 
 export interface Fact {
   readonly id: string;
+  readonly scope: MemoryScope;
   readonly kind: FactKind;
   readonly text: string;
   readonly workspace: string;
@@ -31,12 +34,22 @@ export interface MemorySnapshot {
 }
 
 const FACT_STALE_AFTER_CONTRADICTIONS = 2;
+const CREDENTIAL_LIKE_TEXT = /(?:^|[^A-Za-z0-9_])sk_[A-Za-z0-9_-]{16,}/;
+
+function rejectCredentialLikeText(text: string): void {
+  if (CREDENTIAL_LIKE_TEXT.test(text)) {
+    throw new PlifError('INVALID_ARGUMENT', 'credentials cannot be stored in memory; use /env instead');
+  }
+}
 
 export class MemoryStore {
   #paths: StorePaths;
+  #repository: Promise<MemoryRepository>;
+  #legacyChecked = new Set<string>();
 
   constructor(paths: StorePaths) {
     this.#paths = paths;
+    this.#repository = MemoryRepository.open(paths.memoryDb);
   }
 
   #dir(workspace: string): string {
@@ -68,7 +81,8 @@ export class MemoryStore {
   }
 
   async strategies(workspace: string): Promise<Strategy[]> {
-    return await this.#readJson<Strategy[]>(this.#file(workspace, 'strategies.json'), []);
+    await this.#migrateLegacy(workspace);
+    return (await this.#repository).strategies(workspace);
   }
 
   async recordOutcome(input: {
@@ -81,40 +95,13 @@ export class MemoryStore {
     note?: string;
     durationMs?: number;
   }): Promise<Strategy> {
-    const strategies = await this.strategies(input.workspace);
-    const id = strategyId(input.goal, input.approach);
-
-    const outcome: Outcome = {
-      ok: input.ok,
-      at: new Date().toISOString(),
-      context: input.context,
-      sessionId: input.sessionId,
-      ...(input.note ? { note: input.note } : {}),
-      ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
-    };
-
-    const existing = strategies.find((strategy) => strategy.id === id);
-    const updated: Strategy = existing
-      ? { ...existing, outcomes: [...existing.outcomes, outcome].slice(-40) }
-      : {
-          id,
-          goal: input.goal,
-          approach: input.approach,
-          workspace: path.resolve(input.workspace),
-          createdAt: new Date().toISOString(),
-          outcomes: [outcome],
-        };
-
-    const next = existing
-      ? strategies.map((strategy) => (strategy.id === id ? updated : strategy))
-      : [...strategies, updated];
-
-    await this.#writeJson(this.#file(input.workspace, 'strategies.json'), next);
-    return updated;
+    await this.#migrateLegacy(input.workspace);
+    return (await this.#repository).recordOutcome(input);
   }
 
   async facts(workspace: string): Promise<Fact[]> {
-    return await this.#readJson<Fact[]>(this.#file(workspace, 'facts.json'), []);
+    await this.#migrateLegacy(workspace);
+    return (await this.#repository).facts(workspace, false);
   }
 
   async remember(input: {
@@ -122,66 +109,32 @@ export class MemoryStore {
     kind: FactKind;
     text: string;
     tags?: readonly string[];
+    scope?: MemoryScope;
   }): Promise<Fact> {
-    const facts = await this.facts(input.workspace);
-    const normalized = input.text.trim();
-    const existing = facts.find(
-      (fact) => fact.kind === input.kind && fact.text.trim() === normalized,
-    );
-
-    const now = new Date().toISOString();
-    const updated: Fact = existing
-      ? { ...existing, updatedAt: now, confirmations: existing.confirmations + 1 }
-      : {
-          id: randomUUID().slice(0, 8),
-          kind: input.kind,
-          text: normalized,
-          workspace: path.resolve(input.workspace),
-          createdAt: now,
-          updatedAt: now,
-          confirmations: 1,
-          contradictions: 0,
-          tags: input.tags ?? [],
-        };
-
-    const next = existing
-      ? facts.map((fact) => (fact.id === existing.id ? updated : fact))
-      : [...facts, updated];
-
-    await this.#writeJson(this.#file(input.workspace, 'facts.json'), next);
-    return updated;
+    rejectCredentialLikeText(input.text);
+    await this.#migrateLegacy(input.workspace);
+    return (await this.#repository).remember({
+      workspace: input.workspace,
+      scope: input.scope ?? 'workspace',
+      kind: input.kind,
+      text: input.text,
+      tags: input.tags ?? [],
+    });
   }
 
   async contradict(workspace: string, id: string): Promise<Fact | null> {
-    const facts = await this.facts(workspace);
-    const target = facts.find((fact) => fact.id === id);
-    if (!target) return null;
-
-    const updated: Fact = {
-      ...target,
-      contradictions: target.contradictions + 1,
-      updatedAt: new Date().toISOString(),
-    };
-    const next = facts
-      .map((fact) => (fact.id === id ? updated : fact))
-      .filter((fact) => fact.contradictions < FACT_STALE_AFTER_CONTRADICTIONS);
-
-    await this.#writeJson(this.#file(workspace, 'facts.json'), next);
-    return updated;
+    await this.#migrateLegacy(workspace);
+    return (await this.#repository).contradict(workspace, id);
   }
 
   async notes(workspace: string): Promise<string> {
-    try {
-      return await fs.readFile(this.#file(workspace, 'notes.md'), 'utf8');
-    } catch {
-      return '';
-    }
+    await this.#migrateLegacy(workspace);
+    return (await this.#repository).notes(workspace);
   }
 
   async writeNotes(workspace: string, contents: string): Promise<void> {
-    const file = this.#file(workspace, 'notes.md');
-    await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(file, contents, 'utf8');
+    await this.#migrateLegacy(workspace);
+    await (await this.#repository).writeNotes(workspace, contents);
   }
 
   async appendNote(workspace: string, line: string): Promise<void> {
@@ -193,8 +146,8 @@ export class MemoryStore {
 
   async snapshot(workspace: string): Promise<MemorySnapshot> {
     const [strategies, facts, notes] = await Promise.all([
-      this.strategies(workspace),
-      this.facts(workspace),
+      this.#allStrategies(workspace),
+      this.#allFacts(workspace),
       this.notes(workspace),
     ]);
 
@@ -208,7 +161,48 @@ export class MemoryStore {
   }
 
   async forget(workspace: string): Promise<void> {
-    await fs.rm(this.#dir(workspace), { recursive: true, force: true });
+    await (await this.#repository).forget(workspace);
+  }
+
+  async globalFacts(): Promise<Fact[]> {
+    return (await this.#repository).facts('', false);
+  }
+
+  async rememberGlobal(input: { kind: FactKind; text: string; tags?: readonly string[] }): Promise<Fact> {
+    rejectCredentialLikeText(input.text);
+    return (await this.#repository).remember({ workspace: '', scope: 'global', kind: input.kind, text: input.text, tags: input.tags ?? [] });
+  }
+
+  async readOnlySnapshot(workspace: string): Promise<MemorySnapshot> {
+    return this.snapshot(workspace);
+  }
+
+  async #allFacts(workspace: string): Promise<Fact[]> {
+    await this.#migrateLegacy(workspace);
+    return (await this.#repository).facts(workspace, true);
+  }
+
+  async #allStrategies(workspace: string): Promise<Strategy[]> {
+    await this.#migrateLegacy(workspace);
+    return (await this.#repository).strategies(workspace, true);
+  }
+
+  async #migrateLegacy(workspace: string): Promise<void> {
+    const key = workspaceKey(workspace);
+    if (this.#legacyChecked.has(key)) return;
+    const facts = await this.#readJson<Fact[]>(this.#file(workspace, 'facts.json'), []);
+    const strategies = await this.#readJson<Strategy[]>(this.#file(workspace, 'strategies.json'), []);
+    const notes = await this.#readJsonFile(this.#file(workspace, 'notes.md'));
+    await (await this.#repository).importLegacy({ workspace: path.resolve(workspace), facts, strategies, notes });
+    this.#legacyChecked.add(key);
+  }
+
+  async #readJsonFile(file: string): Promise<string> {
+    try {
+      return await fs.readFile(file, 'utf8');
+    } catch {
+      return '';
+    }
   }
 }
 

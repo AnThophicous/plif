@@ -1,6 +1,6 @@
 {
   "name": "@plif/cli",
-  "version": "0.3.9",
+  "version": "0.4.0",
   "description": "A container-native coding agent for your terminal. Bring your own model.",
   "license": "Apache-2.0",
   "author": "Anthophicous",
@@ -20,13 +20,13 @@
     "plif": "dist/main.js"
   },
   "main": "./dist/main.js",
-  "files": ["dist", "assets", "README.md", "LICENSE", "NOTICE"],
+  "files": ["dist", "assets", "README.md", "CHANGELOG.md", "LICENSE", "NOTICE"],
   "scripts": {
     "prepack": "node ../../scripts/prepack.mjs"
   },
   "dependencies": {
-    "@plif/core": "0.3.9",
-    "@plif/sandbox": "0.3.9",
+    "@plif/core": "0.4.0",
+    "@plif/sandbox": "0.4.0",
     "chalk": "^5.6.2",
     "ink": "5.2.1",
     "react": "^18.3.1",

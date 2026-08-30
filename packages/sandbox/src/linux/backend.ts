@@ -10,12 +10,15 @@ import type {
   SandboxCapabilityReport,
   SandboxJail,
   SandboxMount,
+  SandboxTerminal,
   SpawnOptions,
   SpawnResult,
+  TerminalOptions,
 } from '../backend.js';
 import { consoleDecoder, decoderDescription } from '../encoding.js';
 import type { Decoder } from '../encoding.js';
 import { captureOutput } from '../output.js';
+import { PipeTerminal } from '../terminal.js';
 import { probeSystemdCgroups, SystemdCgroupJail } from './cgroup.js';
 
 interface PreparedMount extends SandboxMount {
@@ -172,6 +175,53 @@ class LinuxJail implements SandboxJail {
     }
   }
 
+  async openTerminal(options: TerminalOptions): Promise<SandboxTerminal> {
+    if (this.#disposed) throw new Error('jail ' + this.id + ' is disposed');
+    if (options.argv.length === 0) throw new Error('terminal requires at least one argv element');
+    const sandboxArgs = this.#arguments(options);
+    let execRoot: string | undefined;
+    let child: ReturnType<typeof spawnProcess>;
+    this.#starting += 1;
+    try {
+      execRoot = await this.#cgroup?.createExec();
+      if (this.#disposed) throw new Error('jail ' + this.id + ' is disposed');
+      const executable = execRoot ? '/bin/sh' : 'bwrap';
+      const args = execRoot
+        ? this.#cgroup?.launcher(execRoot, 'bwrap', sandboxArgs) ?? sandboxArgs
+        : sandboxArgs;
+      child = spawnProcess(executable, args, {
+        cwd: this.root,
+        env: { PATH: process.env['PATH'] ?? '/usr/bin:/bin' },
+        shell: false,
+        detached: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      this.#live.add(child);
+      if (execRoot) this.#execRoots.set(child, execRoot);
+      this.#totalProcesses += 1;
+    } catch (error) {
+      if (execRoot) await this.#cgroup?.releaseExec(execRoot).catch(() => undefined);
+      throw error;
+    } finally {
+      this.#starting -= 1;
+      if (this.#starting === 0) {
+        for (const resolve of this.#startWaiters.splice(0)) resolve();
+      }
+    }
+
+    return new PipeTerminal(
+      child,
+      options,
+      this.#decode,
+      async () => {
+        this.#live.delete(child);
+        this.#execRoots.delete(child);
+        if (execRoot) await this.#cgroup?.releaseExec(execRoot);
+      },
+      (signal) => killGroup(child, signal),
+    );
+  }
+
   async stats(): Promise<JailStats> {
     if (this.#cgroup) return await this.#cgroup.stats(this.#totalProcesses);
     return {
@@ -231,7 +281,7 @@ class LinuxJail implements SandboxJail {
     await this.dispose();
   }
 
-  #arguments(options: SpawnOptions): string[] {
+  #arguments(options: Pick<SpawnOptions, 'argv' | 'virtualCwd' | 'env'>): string[] {
     const args = [
       '--unshare-user',
       '--disable-userns',
@@ -518,13 +568,13 @@ function systemFiles(network: boolean): string[] {
   return files;
 }
 
-function killGroup(child: ReturnType<typeof spawnProcess>): void {
+function killGroup(child: ReturnType<typeof spawnProcess>, signal: NodeJS.Signals = 'SIGKILL'): void {
   if (child.pid === undefined) return;
   try {
-    process.kill(-child.pid, 'SIGKILL');
+    process.kill(-child.pid, signal);
   } catch {
     try {
-      child.kill('SIGKILL');
+      child.kill(signal);
     } catch {}
   }
 }

@@ -16,7 +16,9 @@ dist/
 packages/*/LICENSE
 packages/*/NOTICE
 packages/*/README.md
+packages/*/CHANGELOG.md
 *.tgz
+/updater/target/
 
 # The local store: containers, layers, sessions, audit log.
 .plif/

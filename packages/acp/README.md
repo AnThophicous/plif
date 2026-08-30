@@ -2,6 +2,10 @@
 
 Adaptador **Agent Client Protocol** para a plif, versão **host não-confiável**. Mesmas funcionalidades do PR original (sessões, modos de permissão, seletor de modelo, skills como slash commands, MCP stdio/http/sse) com um modelo de confiança endurecido.
 
+`@plif/acp` é um pacote público do workspace e acompanha a versão estável do
+CLI, core e sandbox. A versão atual do workspace é `0.3.9`; o binário instalado
+é `plif-acp`.
+
 ## Modelo de ameaça
 
 O processo host (ex.: AionUi) é tratado como **NÃO confiável por padrão**. Tudo que ele podia se conceder no PR original agora exige um **opt-in local** explícito. Sem opt-in, as capacidades ficam negadas — não por convenção, por código.
@@ -9,12 +13,19 @@ O processo host (ex.: AionUi) é tratado como **NÃO confiável por padrão**. T
 ## Instalação
 
 ```powershell
-# dentro do workspace da plif
-npm install @agentclientprotocol/sdk
-# compilar e registrar o binário
+# usando o pacote publicado
+npm install @plif/acp@0.3.9
+
+# a partir de um clone do repositório
+npm ci
 npm run build
-npm link                                    # ou: npm run link
+npm pack --workspace @plif/acp --dry-run
 ```
+
+O `npm run link` da raiz registra a CLI `plif`, não o adaptador ACP. Para
+experimentar este binário a partir do checkout, use o link específico do
+workspace (`npm link --workspace @plif/acp`) e remova-o depois com
+`npm unlink --workspace @plif/acp`.
 
 ## Política de segurança (`~/.plif/acp-security.json`)
 

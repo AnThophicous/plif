@@ -12,7 +12,11 @@ export interface Win32Bindings {
   readonly koffi: Koffi;
 }
 
-interface Koffi {
+export interface Win32CredentialBindings extends Win32Bindings {
+  readonly advapi32: Record<string, unknown>;
+}
+
+export interface Koffi {
   alloc(type: unknown, count?: number): Buffer;
   // koffi's runtime surface we actually touch; kept narrow deliberately.
   [key: string]: unknown;
@@ -133,6 +137,7 @@ export const OFF_ACTIVE_PROCESSES = 40;
 
 let cached: Win32Bindings | null | undefined;
 let loadError: string | undefined;
+let credentialCached: Win32CredentialBindings | null | undefined;
 
 /**
  * Returns the bindings, or null if this machine cannot provide them. The reason
@@ -194,6 +199,26 @@ export async function loadWin32(): Promise<Win32Bindings | null> {
 
 export function win32LoadError(): string | undefined {
   return loadError;
+}
+
+export async function loadWindowsCredentialManager(): Promise<Win32CredentialBindings | null> {
+  if (credentialCached !== undefined) return credentialCached;
+  const base = await loadWin32();
+  if (!base) {
+    credentialCached = null;
+    return null;
+  }
+  try {
+    const library = (base.koffi as unknown as { load(path: string): Record<string, unknown> }).load(
+      'advapi32.dll',
+    );
+    credentialCached = { ...base, advapi32: library };
+    return credentialCached;
+  } catch (error) {
+    loadError = error instanceof Error ? error.message : String(error);
+    credentialCached = null;
+    return null;
+  }
 }
 
 /** 100-nanosecond FILETIME ticks, as written into job accounting structs. */

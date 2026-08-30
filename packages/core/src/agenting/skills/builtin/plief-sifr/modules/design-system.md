@@ -8,6 +8,8 @@ Locate true sources (CSS vars/theme files, utility config, primitives APIs, font
 
 ## Layer model & token admission
 
+For a new or substantially reshaped system, consume the strict DesignDNA art-direction fields before token work. Tokens operationalize the visual thesis; they must not become a substitute for composition, asset direction or product-specific identity.
+
 `primitive values → semantic tokens → component contracts → compositions`. A token exists only if the decision recurs, has semantic meaning, consumers must coordinate, or central change is useful. Reject token theater (per-pixel tokens, hundreds of unconsumed aliases, names restating values, semantic aliases hiding exceptions). Names should survive redesign better than raw implementations do.
 
 ## Subsystems
@@ -19,6 +21,8 @@ Locate true sources (CSS vars/theme files, utility config, primitives APIs, font
 - Icons: existing family first, single coherent library second, custom SVG for brand/diagrams/bespoke needs; normalize optical weight; no mixed families casually.
 
 ## Component inventory & API quality
+
+Material/light roles describe what is flat, grouped, floating, luminous, translucent or spatial and which background/light conditions they assume. Name tokens by semantic role, not trends such as `glass-card` or `magic-gradient`; preserve an opaque reduced-transparency path. Asset treatment can be systemic (crop ratios, focal behavior, color grade, illustration stroke, poster/frame relation, 3D material palette) without tokenizing each asset; point to IR `media_contracts[]` when media carries identity.
 
 Build components the PRODUCT uses with full contracts (role/anatomy/states/variants/density/content/a11y contract/keyboard/responsive/composition rules/forbidden combos/extension points). Semantic variant axes over styling-trivia props; adapters for external primitives preserve proven behavior/accessibility while mapping into product semantics without leaking provider vocabulary.
 

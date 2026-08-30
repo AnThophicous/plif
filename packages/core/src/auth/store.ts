@@ -79,26 +79,70 @@ const PROTECT_SCRIPT =
 const UNPROTECT_SCRIPT =
   '$v=[Console]::In.ReadToEnd();$s=ConvertTo-SecureString $v;$p=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($s);try{[Console]::Out.Write([Runtime.InteropServices.Marshal]::PtrToStringBSTR($p))}finally{[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($p)}';
 
+const CREDENTIAL_COMMAND_TIMEOUT_MS = 30_000;
+
+/** Run a credential helper with one idempotent completion path and a timeout. */
+function runCredentialCommand(
+  command: string,
+  args: readonly string[],
+  input: string,
+  description: string,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, [...args], {
+      shell: false,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let output = '';
+    let settled = false;
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        // The process may already have exited between the timer and kill.
+      }
+      finish(new PlifError('INTERNAL', `${description} timed out`));
+    }, CREDENTIAL_COMMAND_TIMEOUT_MS);
+    timer.unref?.();
+
+    const finish = (error?: PlifError): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(output);
+    };
+
+    child.stdout.setEncoding('utf8').on('data', (part: string) => (output += part));
+    // Helper diagnostics can contain command input or other sensitive context;
+    // consume them, but never copy them into a PlifError or audit record.
+    child.stderr.resume();
+    child.once('error', (error) => finish(new PlifError('INTERNAL', `${description} failed`, { cause: error })));
+    child.once('close', (code) => {
+      if (code === 0) finish();
+      else finish(new PlifError('INTERNAL', `${description} failed`));
+    });
+    child.stdin.end(input);
+  });
+}
+
 export async function runWindowsDpapi(mode: 'protect' | 'unprotect', input: string): Promise<string> {
   if (process.platform !== 'win32') {
     throw new PlifError('INTERNAL', 'Windows DPAPI is unavailable on this platform');
   }
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      'powershell.exe',
-      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', mode === 'protect' ? PROTECT_SCRIPT : UNPROTECT_SCRIPT],
-      { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
-    );
-    let output = '';
-    child.stdout.setEncoding('utf8').on('data', (part: string) => (output += part));
-    child.stderr.resume();
-    child.once('error', (error) => reject(new PlifError('INTERNAL', 'Windows DPAPI failed', { cause: error })));
-    child.once('close', (code) => {
-      if (code === 0) resolve(output);
-      else reject(new PlifError('INTERNAL', 'Windows DPAPI failed'));
-    });
-    child.stdin.end(input);
-  });
+  return runCredentialCommand(
+    'powershell.exe',
+    [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      mode === 'protect' ? PROTECT_SCRIPT : UNPROTECT_SCRIPT,
+    ],
+    input,
+    'Windows DPAPI',
+  );
 }
 
 export async function runSystemdCreds(
@@ -109,26 +153,10 @@ export async function runSystemdCreds(
   if (process.platform !== 'linux') {
     throw new PlifError('INTERNAL', 'systemd credentials are unavailable on this platform');
   }
-  return await new Promise((resolve, reject) => {
-    const args = mode === 'protect'
-      ? ['encrypt', '--with-key=host', `--name=${name}`, '-', '-']
-      : ['decrypt', `--name=${name}`, '-', '-'];
-    const child = spawn('systemd-creds', args, {
-      shell: false,
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    let output = '';
-    let errors = '';
-    child.stdout.setEncoding('utf8').on('data', (part: string) => (output += part));
-    child.stderr.setEncoding('utf8').on('data', (part: string) => (errors += part));
-    child.once('error', (error) => reject(new PlifError('INTERNAL', 'systemd-creds failed', { cause: error })));
-    child.once('close', (code) => {
-      if (code === 0) resolve(output);
-      else reject(new PlifError('INTERNAL', errors.trim() || 'systemd-creds failed'));
-    });
-    child.stdin.end(input);
-  });
+  const args = mode === 'protect'
+    ? ['encrypt', '--with-key=host', `--name=${name}`, '-', '-']
+    : ['decrypt', `--name=${name}`, '-', '-'];
+  return runCredentialCommand('systemd-creds', args, input, 'systemd credentials');
 }
 
 export function canUseSystemdCreds(): boolean {

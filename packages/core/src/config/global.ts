@@ -55,6 +55,14 @@ export interface ProfileConfig {
   readonly systemPrompt: string;
 }
 
+export interface ComposerConfig {
+  readonly autocomplete?: boolean;
+  readonly language?: string;
+  /** Legacy disk fields are accepted for config migration but ignored. */
+  readonly spellcheck?: boolean;
+  readonly autocorrect?: boolean;
+}
+
 export interface GlobalConfig {
   readonly $schema?: string;
   readonly autoApprove?: boolean;
@@ -106,6 +114,7 @@ export interface GlobalConfig {
   readonly codexFast?: boolean;
   /** Native continuation policy. Defaults to auto. */
   readonly conversationState?: ConversationStateMode;
+  readonly composer?: ComposerConfig;
   readonly providers?: unknown;
   /** OpenCode-style custom provider map. `providers` remains accepted. */
   readonly provider?: unknown;

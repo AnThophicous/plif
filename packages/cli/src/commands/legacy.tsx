@@ -685,6 +685,8 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
             skills: skills.catalogue(),
             loadedSkills: codexSkillBootstrap.map((skill) => skill.name),
             providerId: provider.info.providerId,
+            modelId: provider.info.id,
+            endpointRoute: provider.info.endpoint,
             mcpServers: mcp.catalogue(),
             guidance: snapshot.guidance,
             memory: summariseMemory(snapshot),

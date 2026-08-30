@@ -548,6 +548,9 @@ async function main() {
       capabilities: session.container.capabilities,
       isolation: eng.sandboxReport.isolation,
       contextTokens: provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+      modelId: provider.info.id,
+      providerId: provider.info.providerId,
+      endpointRoute: provider.info.endpoint,
       tools: tools.map((t) => t.spec),
       ...(session.skills ? { skills: session.skills.catalogue() } : {}),
       ...(session.mcp && session.mcp.connectedCount > 0

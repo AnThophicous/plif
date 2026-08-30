@@ -57,8 +57,41 @@ describe('TOML language server', () => {
   });
 });
 
+describe('project-owned language servers', () => {
+  it('requires an explicit trust decision before resolving one', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-untrusted-lsp-'));
+    const bin = path.join(root, 'node_modules', '.bin');
+    const executable = path.join(bin, process.platform === 'win32' ? 'untrusted-lsp.cmd' : 'untrusted-lsp');
+    await fs.mkdir(bin, { recursive: true });
+    await fs.writeFile(executable, 'repository-controlled executable\n');
+    const spec: ServerSpec = {
+      id: 'untrusted',
+      label: 'Untrusted',
+      languageIds: ['untrusted'],
+      extensions: ['.untrusted'],
+      markers: [],
+      bin: 'untrusted-lsp',
+      args: [],
+      install: 'none',
+    };
+
+    try {
+      assert.equal(
+        await resolveServer(spec, root, undefined, { allowProjectExecutable: false }),
+        null,
+      );
+      assert.equal(
+        (await resolveServer(spec, root, undefined, { allowProjectExecutable: true }))?.source,
+        'project',
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+});
+
 describe('Windows language-server shims', () => {
-  it('launches a .cmd shim through cmd.exe without losing quoted arguments', async () => {
+  it('does not trust a project-owned language server by default', async () => {
     if (process.platform !== 'win32') return;
 
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif lsp shim-'));
@@ -82,7 +115,14 @@ describe('Windows language-server shims', () => {
     };
 
     try {
-      const resolved = await resolveServer(spec, root);
+      const denied = await resolveServer(spec, root, undefined, {
+        allowProjectExecutable: false,
+      });
+      assert.equal(denied, null);
+
+      const resolved = await resolveServer(spec, root, undefined, {
+        allowProjectExecutable: true,
+      });
       assert.ok(resolved);
       assert.equal(resolved.source, 'project');
       assert.equal(resolved.command.toLowerCase(), (process.env['ComSpec'] ?? process.env['COMSPEC'] ?? 'cmd.exe').toLowerCase());

@@ -25,6 +25,8 @@ export interface PromptProps {
   readonly busyLabel: string;
   readonly busySince?: number;
   readonly width: number;
+  /** Ghost suffix painted inside the active input; accepted by Tab only. */
+  readonly inlineSuggestion?: string;
   /** Maximum number of input rows to paint; the complete value remains editable. */
   readonly maxRows?: number;
   /** Live operational state shown in the lower compartment of the frame. */
@@ -149,6 +151,7 @@ export const Prompt = React.memo(function Prompt({
   plif = false,
   effort,
   width,
+  inlineSuggestion,
   maxRows,
   status,
   frameFooter,
@@ -206,7 +209,17 @@ export const Prompt = React.memo(function Prompt({
         rows.map((row, index) => (
           <Box key={`${row.start}:${row.end}`} width="100%">
             <PromptGlyph continuation={index !== 0} />
-            <CursorRow row={row} focused={focused} plif={plif} elapsed={elapsed} />
+            <CursorRow
+              row={row}
+              focused={focused}
+              plif={plif}
+              elapsed={elapsed}
+              ghostText={
+                focused && cursor === value.length && index === rows.length - 1 && inlineSuggestion
+                  ? truncate(inlineSuggestion, Math.max(0, available - displayWidth(row.text)))
+                  : ''
+              }
+            />
           </Box>
         ))
       )}
@@ -246,6 +259,7 @@ export const Prompt = React.memo(function Prompt({
   previous.plif === next.plif &&
   previous.effort === next.effort &&
   previous.width === next.width &&
+  previous.inlineSuggestion === next.inlineSuggestion &&
   previous.maxRows === next.maxRows &&
   previous.status === next.status &&
   previous.frameFooter === next.frameFooter &&
@@ -262,11 +276,13 @@ function CursorRow({
   focused,
   plif,
   elapsed,
+  ghostText = '',
 }: {
   row: PromptRow;
   focused: boolean;
   plif: boolean;
   elapsed: number;
+  ghostText?: string;
 }): React.ReactElement {
   // The slow clock, not the fast one: an idle caret must breathe, and a
   // 33 ms repaint forever is the expensive kind of alive.
@@ -291,6 +307,7 @@ function CursorRow({
       {plif ? <PlifGlow value={before} elapsedMs={elapsed} /> : <Text color={color('text')}>{before}</Text>}
       <Text backgroundColor={block} color={color('panel')}>{at}</Text>
       {plif ? <PlifGlow value={after} elapsedMs={elapsed} /> : <Text color={color('text')}>{after}</Text>}
+      {ghostText && <Text color={color('ghost')}>{ghostText}</Text>}
     </Text>
   );
 }

@@ -8,16 +8,17 @@
     as administrator and nothing is written outside npm's own global prefix, so
     `npm uninstall -g @plif/cli` is a complete removal.
 
-    npm is the delivery mechanism on purpose: it already solves integrity
-    checking, version pinning, PATH shims on every platform, and rollback. A
-    bespoke downloader would reimplement all four, worse.
+    npm is the delivery mechanism on purpose: it provides registry integrity
+    metadata, version selection, PATH shims and rollback. The repository's
+    lockfile is used by development and CI; this script is a convenience
+    wrapper around npm, not a signature for the remote script.
 
 .EXAMPLE
     irm https://raw.githubusercontent.com/AnThophicous/plif/main/install.ps1 | iex
 
 .EXAMPLE
-    # A specific version, or a rollback.
-    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/AnThophicous/plif/main/install.ps1))) -Version 0.1.0
+    # A specific version, or a rollback to a version published on npm.
+    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/AnThophicous/plif/main/install.ps1))) -Version latest
 
 .EXAMPLE
     & ([scriptblock]::Create((irm https://raw.githubusercontent.com/AnThophicous/plif/main/install.ps1))) -Uninstall
@@ -25,7 +26,7 @@
 
 [CmdletBinding()]
 param(
-    # An npm version or dist-tag. Defaults to the latest release.
+    # An npm version or dist-tag. Defaults to the current stable release.
     [string] $Version = 'latest',
 
     # Remove plif.
@@ -37,8 +38,6 @@ Set-StrictMode -Version Latest
 
 $Package = '@plif/cli'
 $MinimumNode = [Version]'20.11.0'
-$Release = '0.3.0'
-
 function Write-Step { param([string] $Message) Write-Host "  > $Message" -ForegroundColor Cyan }
 function Write-Done { param([string] $Message) Write-Host "  [ok] $Message" -ForegroundColor Green }
 function Write-Note { param([string] $Message) Write-Host "  $Message" -ForegroundColor DarkGray }
@@ -51,7 +50,7 @@ function Write-Banner {
     Write-Host '/ ____/ /___/ ___ /__/ /' -ForegroundColor Blue
     Write-Host '/_/   /_____/_/  |_/____/' -ForegroundColor Blue
     Write-Host ''
-    Write-Host "  Plif $Release  |  terminal coding agent" -ForegroundColor White
+    Write-Host '  Plif  |  terminal coding agent' -ForegroundColor White
     Write-Host '  Bring your model. Keep control of your workspace.' -ForegroundColor DarkGray
     Write-Host ''
 }
@@ -118,6 +117,57 @@ if ($LASTEXITCODE -ne 0) {
     Fail 'npm could not install plif.' "Run it directly to see why: npm install -g $Package@$Version"
 }
 
+$globalNpmRoot = (& npm root -g --silent).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $globalNpmRoot) {
+    Fail 'npm installed plif but did not reveal its global package directory.' 'Run npm root -g and inspect the installation before starting plif.'
+}
+$packageRoot = Join-Path $globalNpmRoot '@plif\cli'
+$manifestFile = Join-Path $packageRoot 'package.json'
+$changelogFile = Join-Path $packageRoot 'CHANGELOG.md'
+if (-not (Test-Path -LiteralPath $manifestFile) -or -not (Test-Path -LiteralPath $changelogFile)) {
+    Fail 'the published package is missing package.json or CHANGELOG.md.' 'The install was stopped because every release must ship its versioned changelog.'
+}
+$installedVersion = [string]((Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json).version)
+$changelogLines = @(Get-Content -LiteralPath $changelogFile)
+$headingPattern = '^##\s+\[?v?' + [regex]::Escape($installedVersion) + '(\]|\s|$)'
+$changelogStart = -1
+for ($index = 0; $index -lt $changelogLines.Count; $index++) {
+    if ($changelogLines[$index].Trim() -match $headingPattern) {
+        $changelogStart = $index
+        break
+    }
+}
+if ($changelogStart -lt 0) {
+    Fail "CHANGELOG.md has no section for installed version $installedVersion." 'The install was stopped because the release cannot be reviewed safely.'
+}
+$changelogEnd = $changelogLines.Count
+for ($index = $changelogStart + 1; $index -lt $changelogLines.Count; $index++) {
+    if ($changelogLines[$index].Trim() -match '^##\s+') {
+        $changelogEnd = $index
+        break
+    }
+}
+Write-Host ''
+Write-Host "  What's new in Plif $installedVersion" -ForegroundColor White
+for ($index = $changelogStart; $index -lt $changelogEnd; $index++) {
+    Write-Host "  $($changelogLines[$index])" -ForegroundColor Gray
+}
+
+$preferenceRoot = if ($env:PLIF_DATA_DIR) { $env:PLIF_DATA_DIR } else { Join-Path $env:USERPROFILE '.plif' }
+$preferenceFile = Join-Path $preferenceRoot 'update-preferences.json'
+$automaticUpdates = $true
+if (-not $env:PLIF_NO_UPDATE_PROMPT -and $Host.Name -ne 'ServerRemoteHost') {
+    $answer = Read-Host '  Run the automatic NPM update checker when new versions are published? [Y/n]'
+    if ($answer -match '^(?i:n|no)$') { $automaticUpdates = $false }
+}
+New-Item -ItemType Directory -Path $preferenceRoot -Force | Out-Null
+$preferenceTemporary = "$preferenceFile.$PID.tmp"
+Set-Content -LiteralPath $preferenceTemporary -Value (@{
+    enabled = $automaticUpdates
+    disabledVersions = @()
+} | ConvertTo-Json -Compress) -Encoding UTF8
+Move-Item -LiteralPath $preferenceTemporary -Destination $preferenceFile -Force
+
 $installed = Get-Command plif -ErrorAction SilentlyContinue
 if (-not $installed) {
     Write-Host ''
@@ -133,7 +183,7 @@ Write-Host ''
 Write-Done $reported.Trim()
 Write-Host ''
 Write-Host '  Welcome to Plif.' -ForegroundColor White
-Write-Host '  You just installed a cleaner, more adaptive 0.3.0.' -ForegroundColor Gray
+Write-Host "  Installed version: $($reported.Trim())." -ForegroundColor Gray
 Write-Host '  Your sessions, memory and configuration stay yours.' -ForegroundColor Gray
 Write-Host ''
 Write-Host '  Start it:' -ForegroundColor White

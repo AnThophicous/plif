@@ -91,6 +91,14 @@ export class StorePaths {
     return path.join(this.root, 'sessions');
   }
 
+  get historyDb(): string {
+    return path.join(this.root, 'history.db');
+  }
+
+  get memoryDb(): string {
+    return path.join(this.root, 'memory.db');
+  }
+
   get audit(): string {
     return path.join(this.root, 'audit');
   }
@@ -98,6 +106,10 @@ export class StorePaths {
   /** When the registry was last asked whether a newer plif exists. */
   get updateCheck(): string {
     return path.join(this.root, 'update-check.json');
+  }
+
+  get updatePreferences(): string {
+    return path.join(this.root, 'update-preferences.json');
   }
 
   auditFile(date: Date): string {

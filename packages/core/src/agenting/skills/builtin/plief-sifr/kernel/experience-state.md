@@ -13,11 +13,11 @@ The ExperienceIR is Sifr's shared working memory. Everything another phase (or t
 
 | Mode | Sections written |
 |---|---|
-| DISCOVER | product_frame, user_jobs, constraints, existing_system, invariants |
+| DISCOVER | product_frame (including experience archetype), user_jobs, constraints, existing_system, invariants |
 | STRUCTURE | information_architecture (nav model, obligations, hierarchy), responsive regions skeleton |
-| VISUALIZE | visual grammar file + design_dna ref |
+| VISUALIZE | visual grammar file + design_dna ref (including art-direction thesis) |
 | SYSTEMIZE | design-system mapping inside existing_system + DNA materialization notes |
-| BUILD | component_graph, interaction_graph, motion, responsive_contract fills, perf_budget, accessibility_contract, orun_selections |
+| BUILD | component_graph, interaction_graph, motion, media_contracts when used, responsive_contract fills, perf_budget, accessibility_contract, orun_selections |
 | REPAIR/VERIFY | verification_state.rendered_matrix + defect records; owners resolved |
 
 ## Rules

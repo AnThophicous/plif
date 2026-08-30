@@ -73,6 +73,32 @@ Design DNA is the source of truth for later choices.
 **Authenticity test:** hierarchy still feels designed with color and effects removed.  
 **Reject when:** whitespace harms density, tiny gray type replaces hierarchy, or black/white emptiness is mistaken for identity.
 
+Minimalism is high-accountability art direction: alignment, type metrics, copy, crop, material edges and spacing carry the identity. If removing decoration reveals a standard component stack with generous whitespace, the design is unfinished rather than minimal.
+
+### Refined / Luxury
+**Use when:** fashion, hospitality, premium services, cultural products and high-trust launches with real material/content quality.
+**Signals:** controlled proportion, typographic contrast, exceptional imagery, deliberate silence, scarce accents and slow moments only where contemplation matters.
+**Authenticity test:** value is visible in content, craft and pacing without gold, serif or black as shortcuts.
+**Failure:** “luxury” reduced to thin type, huge whitespace and delayed interactions.
+
+### Industrial / Utilitarian
+**Use when:** infrastructure, hardware, logistics, engineering, operations or technically direct brands.
+**Signals:** exposed structure, precise labels, functional color, strong alignment, robust controls, measured density, material honesty.
+**Authenticity test:** the visual language improves operation and trust under real data volume.
+**Failure:** faux warning stripes, terminal cosplay or cramped controls without an operational reason.
+
+### Playful / Toy-like
+**Use when:** education, creative consumer tools, family products or brands whose interaction is exploratory.
+**Signals:** tactile state change, characterful shapes/type, elastic but controlled motion, clear rewards and forgiving recovery.
+**Authenticity test:** play makes the product easier to learn or more rewarding, while important actions remain obvious.
+**Failure:** random color, childish copy, confetti everywhere or motion that obstructs completion.
+
+### Controlled Maximalism
+**Use when:** culture, campaigns, music, fashion, entertainment or experimental portfolios can support high expressive density.
+**Signals:** one hierarchy under many layers, repeated motifs, intentional collision, choreographed type/image, controlled chroma and a rest rhythm.
+**Authenticity test:** squinting still reveals a focal order and removing any layer has a named compositional effect.
+**Failure:** effect accumulation, equal emphasis, unreadable type or “chaos” without a repeatable system.
+
 ### Swiss / International / Editorial
 **Use when:** content-heavy products, documentation, research, premium corporate, portfolios, publishing.  
 **Signals:** explicit grid, alignment, asymmetric composition when useful, typography-led hierarchy, modular rhythm, restrained chroma.  
@@ -139,6 +165,8 @@ Reason about:
 - reduced-transparency strategy;
 - GPU/filter cost.
 Do not cover dense content hierarchy in glass.
+
+On Apple platforms, prefer native system components/material behavior; on the web, describe custom work as liquid-glass-inspired unless it truly implements the platform system. Keep glass on the top interaction/navigation layer, separate it from content, use color sparingly in controls, and test its adaptation over every relevant background. A frozen translucent card is glassmorphism, not automatically Liquid Glass.
 
 ### Bento / Modular
 **Use when:** content genuinely benefits from heterogeneous modular grouping and scanable regions.  

@@ -19,12 +19,51 @@ import type {
   SandboxBackend,
   SandboxCapabilityReport,
   SandboxJail,
+  SandboxTerminal,
   SpawnOptions,
   SpawnResult,
+  TerminalOptions,
 } from '../backend.js';
 import { captureOutput } from '../output.js';
 import { consoleDecoder, decoderDescription } from '../encoding.js';
 import type { Decoder } from '../encoding.js';
+import { PipeTerminal } from '../terminal.js';
+
+/**
+ * The portable backend must provide ordinary process plumbing such as PATH,
+ * but it must not turn its lack of OS isolation into an accidental dump of the
+ * host environment. Keep this list deliberately boring and explicit. Secrets
+ * and application-specific variables arrive only through the already-filtered
+ * `SpawnOptions.env` supplied by core.
+ */
+const SAFE_INHERITED_ENV = new Set([
+  'PATH',
+  'SYSTEMROOT',
+  'SYSTEMDRIVE',
+  'COMSPEC',
+  'PATHEXT',
+  'NUMBER_OF_PROCESSORS',
+  'PROCESSOR_ARCHITECTURE',
+  'PROCESSOR_ARCHITEW6432',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'TZ',
+  'TERM',
+  'COLORTERM',
+]);
+
+function portableEnvironment(overrides: Readonly<Record<string, string>>): Record<string, string> {
+  const environment: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && SAFE_INHERITED_ENV.has(key.toUpperCase())) {
+      environment[key] = value;
+    }
+  }
+  // Core's map is the final, intentional allowlist: this is where session
+  // environments and image-specific variables are added, never process.env.
+  return { ...environment, ...overrides };
+}
 
 class PortableJail implements SandboxJail {
   readonly id: string;
@@ -66,7 +105,7 @@ class PortableJail implements SandboxJail {
     const started = Date.now();
     const child = spawnProcess(command, args, {
       cwd: options.cwd,
-      env: { ...options.env },
+      env: portableEnvironment(options.env),
       shell: false,
       windowsHide: true,
       // A detached group on POSIX lets us signal the whole tree with -pid.
@@ -128,6 +167,41 @@ class PortableJail implements SandboxJail {
       options.signal?.removeEventListener('abort', onAbort);
       this.#live.delete(child);
     }
+  }
+
+  async openTerminal(options: TerminalOptions): Promise<SandboxTerminal> {
+    if (this.#disposed) throw new Error('jail ' + this.id + ' is disposed');
+    const [command, ...args] = options.argv;
+    if (command === undefined) throw new Error('terminal requires at least one argv element');
+    const child = spawnProcess(command, args, {
+      cwd: options.cwd,
+      env: portableEnvironment(options.env),
+      shell: false,
+      windowsHide: true,
+      detached: process.platform !== 'win32',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    this.#live.add(child);
+    this.#totalProcesses += 1;
+    return new PipeTerminal(
+      child,
+      options,
+      this.#decode,
+      () => {
+        this.#live.delete(child);
+      },
+      (signal) => {
+        if (child.pid === undefined) return;
+        if (process.platform !== 'win32') {
+          try {
+            process.kill(-child.pid, signal);
+            return;
+          } catch {
+          }
+        }
+        child.kill(signal);
+      },
+    );
   }
 
   async stats(): Promise<JailStats> {

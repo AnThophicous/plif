@@ -1,22 +1,36 @@
 {
   "name": "@plif/acp",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "Secure ACP (Agent Client Protocol) adapter for plif — untrusted-host model.",
   "license": "Apache-2.0",
+  "author": "Anthophicous",
+  "homepage": "https://github.com/AnThophicous/plif",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnThophicous/plif.git",
+    "directory": "packages/acp"
+  },
+  "bugs": "https://github.com/AnThophicous/plif/issues",
+  "keywords": ["ai", "agent", "acp", "agent-client-protocol", "security"],
   "type": "module",
   "bin": {
     "plif-acp": "dist/index.js"
   },
   "main": "./dist/index.js",
-  "files": ["dist", "README.md", "SECURITY.md"],
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": ["dist", "README.md", "SECURITY.md", "LICENSE", "NOTICE"],
   "engines": {
     "node": ">=20.11"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",
-    "@plif/core": "0.3.9"
+    "@plif/core": "0.4.0"
   },
   "scripts": {
+    "prepack": "node ../../scripts/prepack.mjs",
     "build": "tsc -p tsconfig.json"
   }
 }

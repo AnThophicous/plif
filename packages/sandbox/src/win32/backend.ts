@@ -29,8 +29,10 @@ import type {
   SandboxBackend,
   SandboxCapabilityReport,
   SandboxJail,
+  SandboxTerminal,
   SpawnOptions,
   SpawnResult,
+  TerminalOptions,
 } from '../backend.js';
 import {
   ACCOUNTING_SIZE,
@@ -64,6 +66,7 @@ import {
 } from './ffi.js';
 import type { Win32Bindings } from './ffi.js';
 import { captureOutput } from '../output.js';
+import { PipeTerminal } from '../terminal.js';
 import { consoleDecoder, decoderDescription } from '../encoding.js';
 import type { Decoder } from '../encoding.js';
 
@@ -128,6 +131,31 @@ class Win32Jail implements SandboxJail {
     }
 
     return await this.#collect(child, options, started, assigned);
+  }
+
+  async openTerminal(options: TerminalOptions): Promise<SandboxTerminal> {
+    if (this.#disposed) throw new Error('jail ' + this.id + ' is disposed');
+    const [command, ...args] = options.argv;
+    if (command === undefined) throw new Error('terminal requires at least one argv element');
+    const child = spawnProcess(command, args, {
+      cwd: options.cwd,
+      env: { ...options.env },
+      windowsHide: true,
+      shell: false,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const assigned = typeof child.pid === 'number' ? this.#assign(child.pid) : false;
+    return new PipeTerminal(child, options, this.#decode, undefined, (signal) => {
+      if (assigned) {
+        if (signal === 'SIGKILL') {
+          void this.kill('terminal signal');
+        } else {
+          child.kill(signal);
+        }
+        return;
+      }
+      child.kill(signal);
+    });
   }
 
   #assign(pid: number): boolean {

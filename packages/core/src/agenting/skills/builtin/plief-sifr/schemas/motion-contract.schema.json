@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plief.sifr:motion-contract:v1",
+  "title": "MotionContract",
+  "type": "object",
+  "required": ["purpose", "hierarchy", "sequences", "reduced_motion"],
+  "properties": {
+    "purpose": {"type": "string", "minLength": 1},
+    "tempo": {"type": ["string", "object"]},
+    "spatial_model": {"type": ["string", "object"]},
+    "hierarchy": {
+      "type": "object",
+      "required": ["signature_sequence", "recurring_motifs", "microfeedback"],
+      "properties": {
+        "signature_sequence": {"type": ["string", "null"]},
+        "recurring_motifs": {"type": "array", "items": {"type": "string"}},
+        "microfeedback": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "sequences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "trigger", "purpose", "beats", "interruption", "settlement", "reduced_motion"],
+        "properties": {
+          "id": {"type": "string"},
+          "trigger": {"type": "string"},
+          "purpose": {"type": "string"},
+          "beats": {"type": "array", "minItems": 1},
+          "easing": {"type": ["string", "object"]},
+          "interruption": {"type": "string"},
+          "settlement": {"type": "string"},
+          "reduced_motion": {"type": "string"},
+          "verification_keyframes": {"type": "array"}
+        }
+      }
+    },
+    "engine_boundaries": {"type": "array"},
+    "reduced_motion": {"type": ["string", "object"]}
+  }
+}

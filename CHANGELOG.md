@@ -2,7 +2,114 @@
 
 All notable changes to plif. This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — 2026-08-26
+## [0.4.0] — Unreleased
+
+This release is under development. The following improvements define the
+0.4.0 scope and are being implemented together as one cohesive runtime,
+installation and session experience.
+
+### Planned
+
+- **NPM-first installation and updates.** `npm install -g @plif/cli@latest`
+  remains the primary installation path. Windows also gets a guided
+  PowerShell installer, and Linux gets a Bash installer with matching
+  preflight and post-install behavior.
+- **Isolated cross-platform updater.** PLIF gains a standalone updater built
+  in pure Rust for Windows and Linux. It is isolated from the main CLI, does
+  not require a C# DLL, and is responsible only for safely applying an
+  approved update and restarting PLIF when appropriate.
+- **Runtime NPM update notifications.** While PLIF is running, it checks the
+  NPM registry for a newer published `@plif/cli` version. Git is never used as
+  the update source. When a new version exists, PLIF displays the matching
+  changelog and lets the user update now, postpone the update, or stop asking.
+- **Changelog-gated releases.** `CHANGELOG.md` at the project root is the
+  canonical release document and is included in the published CLI package.
+  A release must contain the target version and its changelog before it can
+  be published. The updater reads the changelog from the NPM package before
+  installing it, so the user can review what is changing first.
+- **Durable complete history.** Conversation history remains append-only and
+  preserves user messages, assistant messages, commands, tool calls, tool
+  outputs, approvals, questions, failures, interruptions and other agent
+  actions. The transcript and resumed sessions reconstruct that canonical
+  history instead of silently dropping actions from the interface.
+- **Dedicated subagent histories.** Every subagent becomes an independent,
+  main-like session with its own ID, event history, transcript and lifecycle.
+  Its work is inspectable in a dedicated history view and is never mixed into
+  the parent conversation; the parent receives the result and a reference.
+- **Stable context forks.** The first subagent request receives an immutable,
+  bounded fork of the main chat context at a checkpoint, including the task,
+  relevant messages, answers and tool results. The fork is identified in the
+  child session as `Forked from ID-UUID`, so the child knows where it came
+  from without sharing a live transcript with the parent.
+- **Persistent interactive terminals.** The main agent and its isolated
+  subagents can keep a terminal process alive, receive its prompts, send input
+  and read output across multiple tool calls. Linux uses a PTY and Windows
+  uses ConPTY, so interactive commands no longer depend on a one-shot stdin
+  buffer.
+- **Follow-up turns for existing subagents.** The parent can send another
+  instruction to a persisted subagent instead of closing it and spawning a
+  replacement. Queued inputs are routed to the correct isolated session and
+  delivered with the next tool-call batch at a safe turn boundary.
+- **Scoped persistent memory.** PLIF adds a real SQLite-backed memory store
+  with two scopes: persistent global memory for information that should be
+  available in every session, and folder memory tied to the canonical active
+  workspace. Folder memory is shared by sessions opened in that folder and is
+  not loaded when PLIF starts in another folder.
+- **Intentional memory writes.** The agent gets one lightweight `remember`
+  tool and decides what is worth retaining instead of automatically saving
+  the entire conversation. Memory scope remains explicit so global facts do
+  not accidentally leak from a workspace.
+- **Read-only memory for subagents.** Isolated subagents can read and use the
+  global and active-folder memory that applies to their fork, but cannot write,
+  change or delete memories. Memory writes remain controlled by the main
+  agent.
+- **Secret detection before send.** The composer detects token-like values
+  beginning with `sk_` locally before they reach a model provider. PLIF shows
+  an English warning that directs the user to `/env`, where the secret can be
+  stored outside the conversation for the agent to use without exposing its
+  value. A second explicit confirmation is required before a user can send
+  the secret anyway. The final warning can save a redacted copy of the prompt
+  and cancel, optionally copying only that redacted version to the clipboard;
+  the up-arrow input history restores the safe draft after `/env` is used.
+  If the user explicitly chooses to send anyway, PLIF proceeds with the
+  original prompt and its normal persistence behavior.
+- **Defense-in-depth credential policy.** Harness instructions treat secrets
+  pasted into chat as compromised and forbid the agent from using, repeating
+  or forwarding them, including for shell, database, SSH, cloud or privileged
+  commands. The agent directs the user to `/env` for approved secret access;
+  even after `Send Anyway`, it refuses to use the exposed value and tells the
+  user to revoke or rotate it because the provider may have received it.
+- **Accurate model identity.** Runtime provider and model metadata is included
+  in the harness context. When asked what model is running, PLIF identifies
+  the actual provider and model instead of claiming that PLIF itself is the
+  model; if metadata is unavailable, it says so without inventing an answer.
+- **Bootstrap environment secrets.** Values managed through `/env` are loaded
+  into PLIF's controlled runtime environment during startup, making them
+  available to the commands and providers that need them without placing
+  their values in the model context, prompts, transcript or status output.
+- **Project-isolated environment.** `/env` data is scoped to the active project
+  boundary and is never inherited by a session opened in another project.
+- **OS-backed environment storage.** Windows uses Windows Credential Manager
+  and Linux uses Secret Service by default for `/env` values. The project
+  boundary remains part of the storage key, so credentials from one project
+  cannot be loaded by another. If the native backend is unavailable, PLIF
+  falls back to an encrypted local store with an explicit reduced-protection
+  warning; plaintext storage is never used. The fallback is unlocked with a
+  user-provided passphrase that is never persisted; one local vault passphrase
+  can unlock project-separated records without merging their values.
+- **Local writing assistance.** An optional CPU-based contextual predictor learns
+  word transitions from recent prompts and project vocabulary without sending
+  draft text to a remote service. The best completion is painted as ghost text
+  inside the input and Tab accepts it; Enter always submits the draft and
+  nothing is autocorrected.
+- **Expanded emoji completion.** The existing lightweight shortcode menu gains
+  a broader catalogue and aliases while preserving `:name:` input, keyboard
+  navigation and `Tab` insertion. Selected emojis are expanded into ordinary
+  Unicode text before submission; they are sent to the model as text, never as
+  file attachments.
+
+The current development baseline below remains part of this unreleased
+0.4.0 cycle.
 
 This branch consolidates the reliability and workspace-flow fixes prepared
 after 0.3.9. It is not a versioned release yet.

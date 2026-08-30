@@ -1,11 +1,12 @@
 import {
   PRESETS,
-  type CustomProvider,
+  customProvidersOf,
   type ModelCapability,
   type ModelCost,
   type StoredConfig,
 } from './config.js';
 import type { ModelPricing, ModelProtocol, ModelRankingHints, ProviderModel, StreamSemantics } from './provider.js';
+import { normalizeStoredCustomProvider } from './provider-definitions.js';
 
 /** A model exposed by the provider catalog. */
 export interface ModelCatalogModel {
@@ -55,10 +56,12 @@ export interface ModelCatalogProvider {
   readonly origin: ModelCatalogOrigin;
   readonly preset: string;
   readonly endpoint: string;
-  /** Authentication owned by a local provider bridge, not an API key. */
-  readonly auth?: 'codex';
+  /** Authentication policy; Codex is owned by a local provider bridge. */
+  readonly auth?: 'api-key' | 'none' | 'codex';
   /** Curated ids, most used first. Used for ranking and when listing fails. */
   readonly models: readonly ModelCatalogModel[];
+  /** Provider-declared default, when one was explicitly configured. */
+  readonly defaultModel?: string;
   /** True when the endpoint serves models to callers with no credential. */
   readonly anonymous?: boolean;
   readonly product?: string;
@@ -440,35 +443,44 @@ export function providerForModel(
  * missing from the picker because they guessed the other.
  */
 export function userCatalog(config: StoredConfig): readonly ModelCatalogProvider[] {
-  const declared: Record<string, CustomProvider> = {
-    ...asProviders(config.providers),
-    ...asProviders(config.provider),
-  };
-  return Object.entries(declared).map(([id, entry]) => ({
-    id,
-    label: entry.name ?? id,
-    description: entry.options?.baseURL ?? 'custom provider',
-    origin: 'user' as const,
-    preset: id,
-    endpoint: entry.options?.baseURL ?? '',
-    models: Object.entries(entry.models ?? {}).map(([modelId, metadata]) =>
-      model(modelId, metadata.name ?? modelId, entry.name ?? id, ['yours'], metadata.modalities, {
-        ...(metadata.aliases === undefined ? {} : { aliases: metadata.aliases }),
-        ...(metadata.contextWindow === undefined ? {} : { contextWindow: metadata.contextWindow }),
-        ...(metadata.maxInputTokens === undefined ? {} : { maxInputTokens: metadata.maxInputTokens }),
-        ...(metadata.maxOutputTokens === undefined ? {} : { maxOutputTokens: metadata.maxOutputTokens }),
-        ...(metadata.reasoning === undefined ? {} : { reasoning: metadata.reasoning }),
-        ...(metadata.tools === undefined ? {} : { tools: metadata.tools }),
-        ...(metadata.cost === undefined ? {} : { cost: metadata.cost }),
-        ...(metadata.pricing === undefined ? {} : { pricing: metadata.pricing }),
-        ...(metadata.ranking === undefined ? {} : { ranking: metadata.ranking }),
-        ...(metadata.protocol === undefined ? {} : { protocol: metadata.protocol }),
-        ...(metadata.streamSemantics === undefined ? {} : { streamSemantics: metadata.streamSemantics }),
-        metadataSource: 'config' as const,
-      }),
-    ),
-    ...((entry.options?.needKey === false || entry.options?.NeedKey === false) ? { anonymous: true } : {}),
-  }));
+  return Object.entries(customProvidersOf(config)).map(([id, entry]) => {
+    // This is the same normalization path the model/config helpers expose to
+    // the TUI. Legacy entries may omit a baseURL because resolveConfig can use
+    // the root fallback, so the catalogue opts into the compatibility mode.
+    const normalized = normalizeStoredCustomProvider(id, entry);
+    return {
+      id: normalized.id,
+      label: normalized.label,
+      description: normalized.description,
+      origin: 'user' as const,
+      preset: normalized.id,
+      endpoint: normalized.baseURL,
+      auth: normalized.auth,
+      models: normalized.models.map((metadata) => model(
+        metadata.id,
+        metadata.label,
+        metadata.description || normalized.description,
+        ['yours'],
+        metadata.modalities,
+        {
+          ...(metadata.aliases === undefined ? {} : { aliases: metadata.aliases }),
+          ...(metadata.contextWindow === undefined ? {} : { contextWindow: metadata.contextWindow }),
+          ...(metadata.maxInputTokens === undefined ? {} : { maxInputTokens: metadata.maxInputTokens }),
+          ...(metadata.maxOutputTokens === undefined ? {} : { maxOutputTokens: metadata.maxOutputTokens }),
+          ...(metadata.reasoning === undefined ? {} : { reasoning: metadata.reasoning }),
+          ...(metadata.tools === undefined ? {} : { tools: metadata.tools }),
+          ...(metadata.cost === undefined ? {} : { cost: metadata.cost }),
+          ...(metadata.pricing === undefined ? {} : { pricing: metadata.pricing }),
+          ...(metadata.ranking === undefined ? {} : { ranking: metadata.ranking }),
+          ...(metadata.protocol ?? normalized.protocol ? { protocol: metadata.protocol ?? normalized.protocol } : {}),
+          ...(metadata.streamSemantics === undefined ? {} : { streamSemantics: metadata.streamSemantics }),
+          metadataSource: 'config' as const,
+        },
+      )),
+      ...(normalized.needKey === false || normalized.auth === 'none' ? { anonymous: true } : {}),
+      ...(normalized.defaultModel ? { defaultModel: normalized.defaultModel } : {}),
+    };
+  });
 }
 
 /**
@@ -618,11 +630,4 @@ export function rankModelIds(providerId: string, ids: readonly string[]): string
 export function catalogSelection(providerId: string, modelId: string): ModelSelection | null {
   if (!providerId || !modelId) return null;
   return { preset: providerId, model: modelId };
-}
-
-function asProviders(value: unknown): Record<string, CustomProvider> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  return Object.fromEntries(
-    Object.entries(value).filter(([, entry]) => entry && typeof entry === 'object'),
-  ) as Record<string, CustomProvider>;
 }

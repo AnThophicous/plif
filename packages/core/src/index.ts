@@ -81,10 +81,61 @@ export {
   mcpOAuthKey,
 } from './auth/store.js';
 export type { McpOAuthStore, OAuthCredentialScope, StoredMcpOAuthState, SystemdCredsRunner } from './auth/store.js';
+export {
+  SessionEnvironmentStore,
+  normalizeEnvironmentMap,
+  normalizeEnvironmentNames,
+  parseDotEnv,
+  personalSessionEnvironmentPath,
+  platformSessionEnvironmentStore,
+  serializeDotEnv,
+  validateEnvironmentName,
+} from './auth/session-env.js';
+export type {
+  EnvironmentMap,
+  EnvironmentNameSelection,
+  SessionEnvironmentBackend,
+  SessionEnvironmentScope,
+  SessionEnvironmentStatus,
+  SessionEnvironmentStoreOptions,
+} from './auth/session-env.js';
+export {
+  ProjectEnvironmentStore,
+  personalProjectEnvironmentPath,
+} from './auth/project-env.js';
+export {
+  LinuxSecretServiceBackend,
+  WindowsCredentialManagerBackend,
+  platformProjectSecretBackend,
+} from './auth/credential-backends.js';
+export type {
+  ProjectEnvironmentBackend,
+  ProjectEnvironmentScope,
+  ProjectEnvironmentStatus,
+  ProjectEnvironmentStoreOptions,
+} from './auth/project-env.js';
+export type { ProjectSecretBackend } from './auth/credential-backends.js';
+export { securityInstructions } from './harness/security-instructions.js';
 export type { Question, QuestionChoice } from './harness/ask.js';
 export type { QuestionOption } from './events/bus.js';
 export { runLoop, runCompaction, RUN_SCRIPT_SPEC } from './harness/loop.js';
+export { DEFAULT_CODE_MODE_LIMITS, runCodeMode } from './harness/code-mode.js';
+export type { CodeModeLimits, CodeModeOptions, CodeModeResult } from './harness/code-mode.js';
 export type { CompactionRun } from './harness/loop.js';
+export {
+  DEFAULT_BTW_CONTEXT_TOKENS,
+  DEFAULT_BTW_MAX_TOKENS,
+  DEFAULT_BTW_TIMEOUT_MS,
+  runBtw,
+} from './harness/btw.js';
+export type {
+  BtwExecutionContext,
+  BtwFinishReason,
+  BtwRequest,
+  BtwResult,
+  BtwSnapshot,
+  BtwStatus,
+} from './harness/btw.js';
 export {
   ActionLoopDetector,
   DEFAULT_AGENT_EXECUTION_POLICY,
@@ -155,7 +206,7 @@ export type {
   ContextPressure,
 } from './harness/context-budget.js';
 export { MemoryStore, rankFacts, strategyId, strategyStatus, summariseMemory } from './harness/memory.js';
-export type { Fact, FactKind, MemorySnapshot } from './harness/memory.js';
+export type { Fact, FactKind, MemoryScope, MemorySnapshot } from './harness/memory.js';
 export { DEFAULT_CONTEXT_TOKENS, answerDanglingToolCalls } from './harness/loop.js';
 export type { LoopOptions, LoopResult, LoopStop, SkillBootstrap } from './harness/loop.js';
 export { GoalController } from './harness/goals.js';
@@ -197,6 +248,12 @@ export {
   sessionSearch,
   runCommand,
   shellCommand,
+  terminalStart,
+  terminalWrite,
+  terminalRead,
+  terminalResize,
+  terminalSignal,
+  terminalClose,
   toolsForEnvironment,
   formatExecToolResult,
   toolRegistry,
@@ -404,6 +461,36 @@ export type {
   VisionCandidate,
   ProviderOffer,
 } from './model/config.js';
+export {
+  CUSTOM_PROVIDER_AUTHS,
+  CUSTOM_PROVIDER_PROTOCOLS,
+  customProviderDefinitionToStored,
+  mergeCustomProviderAliases,
+  mergeCustomProviderConfig,
+  mergeCustomProviderDefinition,
+  mergeCustomProviderModels,
+  normalizeCustomModelDefinition,
+  normalizeCustomProviderDefinition,
+  normalizeStoredCustomProvider,
+  ProviderDefinitionError,
+  validateCustomModelDefinition,
+  validateCustomProviderDefinition,
+} from './model/provider-definitions.js';
+export type {
+  CustomModelCapabilities,
+  CustomModelCollectionInput,
+  CustomModelDefinition,
+  CustomModelDefinitionInput,
+  CustomProviderAuth,
+  CustomProviderDefinition,
+  CustomProviderDefinitionInput,
+  CustomProviderProtocol,
+  NormalizedCustomModelDefinition,
+  NormalizedCustomProviderDefinition,
+  ProviderDefinitionValidation,
+  ProviderDefinitionValidationFailure,
+  ProviderDefinitionValidationSuccess,
+} from './model/provider-definitions.js';
 export { EFFORT_LEVELS } from './model/config.js';
 export {
   AGENT_PRESET_KEYS,
@@ -463,10 +550,27 @@ export type {
 export { declaredServers, manifestBaseUrls } from './marketplace/catalog.js';
 export { checkForUpdate, isNewer } from './update/check.js';
 export type { UpdateStatus, UpdateCheckOptions } from './update/check.js';
+export {
+  assertChangelogSection,
+  changelogFromNpmTarball,
+  changelogSection,
+  readChangelog,
+} from './update/changelog.js';
+export type { ChangelogSection } from './update/changelog.js';
+export { disableVersion, readUpdatePreferences, writeUpdatePreferences } from './update/preferences.js';
+export type { UpdatePreferences } from './update/preferences.js';
+export type { ComposerConfig } from './config/global.js';
 export { conversationFromTranscript } from './session/resume.js';
 export type { ResumeOptions } from './session/resume.js';
 export { Container } from './container/container.js';
-export type { ContainerDeps } from './container/container.js';
+export type {
+  ContainerDeps,
+  ContainerEnvironmentBinding,
+  RuntimeEnvironmentStatus,
+  TerminalChunk,
+  TerminalStartRequest,
+} from './container/container.js';
+export { TerminalSession } from './container/terminal-session.js';
 export { generateName, isValidName } from './container/names.js';
 
 export { EventBus } from './events/bus.js';

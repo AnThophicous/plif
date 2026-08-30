@@ -17,6 +17,9 @@ export interface PromptContext {
   readonly mode?: PromptMode;
   /** Native provider identity, used to describe provider-specific skill loading. */
   readonly providerId?: string;
+  readonly modelId?: string;
+  readonly modelDisplayName?: string;
+  readonly endpointRoute?: string;
   readonly effort?: Effort;
   /** Provider context capacity, used to select full or compact instruction layers. */
   readonly contextTokens?: number;

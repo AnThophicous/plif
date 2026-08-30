@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plief.sifr:media-contract:v1",
+  "title": "MediaContract",
+  "type": "object",
+  "required": ["id", "role", "medium", "purpose", "source", "loading", "accessibility", "performance", "fallback"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "role": {
+      "enum": ["evidence", "identity", "story", "comprehension", "atmosphere", "navigation", "manipulation", "data"]
+    },
+    "medium": {"enum": ["css", "svg", "canvas", "image", "video", "shader", "3d"]},
+    "purpose": {"type": "string", "minLength": 1},
+    "cheaper_alternative_rejected": {"type": ["string", "null"]},
+    "source": {
+      "type": "object",
+      "required": ["provenance", "license_status"],
+      "properties": {
+        "provenance": {"type": "string"},
+        "license_status": {
+          "enum": ["project-owned", "user-provided", "verified", "unverified", "not-applicable"]
+        },
+        "source_ref": {"type": ["string", "null"]}
+      }
+    },
+    "art_direction": {
+      "type": "object",
+      "properties": {
+        "focal_subject": {"type": ["string", "null"]},
+        "crop_behavior": {"type": ["string", "null"]},
+        "palette_treatment": {"type": ["string", "null"]},
+        "material_light": {"type": ["string", "null"]}
+      }
+    },
+    "loading": {
+      "type": "object",
+      "required": ["priority", "dimensions_reserved"],
+      "properties": {
+        "priority": {"enum": ["critical", "deferred", "interaction-triggered"]},
+        "dimensions_reserved": {"type": "boolean"},
+        "poster": {"type": ["string", "null"]},
+        "preload": {"type": ["string", "null"]}
+      }
+    },
+    "accessibility": {
+      "type": "object",
+      "required": ["equivalent", "reduced_motion"],
+      "properties": {
+        "equivalent": {"type": ["string", "null"]},
+        "alt": {"type": ["string", "null"]},
+        "captions": {"type": ["string", "null"]},
+        "transcript": {"type": ["string", "null"]},
+        "reduced_motion": {"type": "string"},
+        "reduced_transparency": {"type": ["string", "null"]},
+        "reduced_data": {"type": ["string", "null"]}
+      }
+    },
+    "performance": {
+      "type": "object",
+      "properties": {
+        "initial_kb_max": {"type": ["number", "null"], "minimum": 0},
+        "frame_budget_ms": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "dpr_cap": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "offscreen_pause": {"type": "boolean"},
+        "cleanup_owner": {"type": ["string", "null"]}
+      }
+    },
+    "fallback": {
+      "type": "object",
+      "required": ["failure", "unsupported"],
+      "properties": {
+        "failure": {"type": "string"},
+        "unsupported": {"type": "string"},
+        "non_gpu": {"type": ["string", "null"]}
+      }
+    },
+    "video_policy": {
+      "type": "object",
+      "properties": {
+        "ambient": {"type": "boolean"},
+        "autoplay": {"type": "boolean"},
+        "muted": {"type": "boolean"},
+        "controls": {"type": "boolean"},
+        "pause_offscreen": {"type": "boolean"}
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "engine": {"type": "string"},
+        "client_boundary": {"type": ["string", "null"]},
+        "context_loss": {"type": ["string", "null"]},
+        "interaction": {"type": ["string", "null"]}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"medium": {"const": "video"}}, "required": ["medium"]},
+      "then": {"required": ["video_policy"]}
+    },
+    {
+      "if": {"properties": {"medium": {"enum": ["shader", "3d"]}}, "required": ["medium"]},
+      "then": {
+        "required": ["runtime"],
+        "properties": {
+          "fallback": {"required": ["non_gpu"]},
+          "performance": {"required": ["frame_budget_ms", "dpr_cap", "offscreen_pause"]}
+        }
+      }
+    }
+  ]
+}

@@ -16,10 +16,19 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import type { SandboxBackend, SandboxJail } from '@plif/sandbox';
+import type { SandboxBackend, SandboxJail, TerminalSignal } from '@plif/sandbox';
 import { isolationAtLeast } from '@plif/sandbox';
 
 import type { AuditLog } from '../audit/log.js';
+import {
+  normalizeEnvironmentMap,
+  normalizeEnvironmentNames,
+  type EnvironmentMap,
+  type EnvironmentNameSelection,
+  type SessionEnvironmentScope,
+  type SessionEnvironmentStatus,
+  type SessionEnvironmentStore,
+} from '../auth/session-env.js';
 import { PlifError } from '../errors.js';
 import type { EventBus } from '../events/bus.js';
 import { commit as commitOverlay, materialize } from '../fs/overlay.js';
@@ -30,6 +39,7 @@ import type { PolicyAction, PolicyEngine, TrustTier } from '../policy/policy.js'
 import type { ContentStore } from '../store/content.js';
 import type { ImageStore, LayerStore } from '../store/images.js';
 import type { StorePaths } from '../store/paths.js';
+import { TerminalSession } from './terminal-session.js';
 import type {
   CapabilitySet,
   ContainerSpec,
@@ -52,6 +62,25 @@ const TRUST_FLOOR: Record<TrustTier, Parameters<typeof isolationAtLeast>[1]> = {
   untrusted: 'namespace',
 };
 
+const REDACTED_ENVIRONMENT_VALUE = '[secret omitted]';
+
+function environmentSecrets(values: Readonly<Record<string, string>>): string[] {
+  return Object.values(values)
+    .filter((value) => value.length > 0)
+    .sort((left, right) => right.length - left.length);
+}
+
+function redactEnvironmentValues(text: string, secrets: readonly string[]): string {
+  let redacted = text;
+  for (const secret of secrets) {
+    // Splitting avoids a regular-expression interpretation of tokens such as
+    // `a+b` or `key[0]`. Empty values are filtered above so this always makes
+    // progress and cannot loop.
+    redacted = redacted.split(secret).join(REDACTED_ENVIRONMENT_VALUE);
+  }
+  return redacted;
+}
+
 export interface ContainerDeps {
   readonly paths: StorePaths;
   readonly content: ContentStore;
@@ -62,6 +91,34 @@ export interface ContainerDeps {
   readonly audit: AuditLog;
   readonly approvals: ApprovalBroker;
   readonly policy: PolicyEngine;
+  /** Optional session binding. Omit it for containers not owned by a session. */
+  readonly sessionEnvironment?: ContainerEnvironmentBinding;
+}
+
+export interface ContainerEnvironmentBinding {
+  readonly store: SessionEnvironmentStore;
+  readonly scope: SessionEnvironmentScope;
+}
+
+/** Safe runtime view; environment values never appear here. */
+export interface RuntimeEnvironmentStatus {
+  readonly count: number;
+  readonly names: readonly string[];
+}
+
+export interface TerminalStartRequest {
+  readonly argv: readonly string[];
+  readonly cwd?: string;
+  readonly reason: string;
+  readonly ownerId?: string;
+  readonly sessionId?: string;
+  readonly env?: Readonly<Record<string, string>>;
+}
+
+export interface TerminalChunk {
+  readonly stream: 'stdout' | 'stderr';
+  readonly chunk: string;
+  readonly at: number;
 }
 
 export class Container {
@@ -89,6 +146,10 @@ export class Container {
   #abort = new AbortController();
   /** In-flight execs by id, so a single one can be cancelled by name. */
   #running = new Map<string, AbortController>();
+  #terminals = new Map<string, TerminalSession>();
+  #finishedTerminals = new Set<string>();
+  /** Session/runtime variables; never copied from the host environment. */
+  #runtimeEnvironment: Record<string, string> = {};
 
   constructor(
     id: string,
@@ -213,6 +274,13 @@ export class Container {
       })),
     });
 
+    // Loading is deliberately separate from the host process environment. The
+    // values are held only in this Container and are passed to children by
+    // #buildEnv; they are never mounted as a .env file. Mark the container as
+    // running before loading them: a session secret is not injected into a
+    // container that has not completed its Plif startup transition.
+    this.#runtimeEnvironment = {};
+
     if (this.limits.lifetimeMs > 0) {
       this.#lifetimeTimer = setTimeout(() => {
         void this.stop(`lifetime limit of ${this.limits.lifetimeMs}ms reached`);
@@ -227,6 +295,21 @@ export class Container {
       isolation: report.isolation,
       mounts: this.mounts.map((m) => `${m.source} -> ${m.target} (${m.mode})`),
     });
+
+    const sessionBinding = this.#deps.sessionEnvironment;
+    if (sessionBinding) {
+      try {
+        this.#runtimeEnvironment = {
+          ...(await sessionBinding.store.loadForExecution(sessionBinding.scope)),
+        };
+      } catch {
+        // Secure-store failures are fail-closed for values and must not leave
+        // a half-started container behind. The bound store exposes the warning
+        // through its status surface; this container simply starts with no
+        // session variables until a later explicit reload.
+        this.#runtimeEnvironment = {};
+      }
+    }
   }
 
   async stop(reason = 'stopped by request'): Promise<void> {
@@ -243,9 +326,15 @@ export class Container {
       await this.#sandbox.dispose();
       this.#sandbox = null;
     }
+    await Promise.allSettled([...this.#terminals.values()].map((terminal) => terminal.close()));
+    this.#terminals.clear();
+    this.#finishedTerminals.clear();
 
     this.#killedBy = reason;
     this.#exitedAt = new Date().toISOString();
+    // Do not keep session secrets in a stopped container object. A restart can
+    // reload the encrypted session record, while runtime-only values expire.
+    this.#runtimeEnvironment = {};
     this.#transition('exited');
     await this.#deps.audit.append('container.stop', this.id, { reason, usage: this.#usage });
   }
@@ -443,6 +532,14 @@ export class Container {
       this.limits.execTimeoutMs,
     );
 
+    // Capture the values belonging to this child. A later `/env delete` or
+    // session switch must not make output from an already-running process
+    // visible for the few milliseconds before that process exits.
+    const redactionSecrets = environmentSecrets({
+      ...this.#runtimeEnvironment,
+      ...(request.env ?? {}),
+    });
+
     // Two ways to stop this exec: the container going down, or the caller
     // cancelling just this one. Both must work, so they are merged rather than
     // the caller's signal replacing the container's.
@@ -468,7 +565,7 @@ export class Container {
             containerId: this.id,
             execId,
             stream,
-            chunk,
+            chunk: redactEnvironmentValues(chunk, redactionSecrets),
           });
         },
         ...(request.stdin !== undefined ? { stdin: request.stdin } : {}),
@@ -484,8 +581,8 @@ export class Container {
 
     const result: ExecResult = {
       exitCode: spawned.exitCode,
-      stdout: spawned.stdout,
-      stderr: spawned.stderr,
+      stdout: redactEnvironmentValues(spawned.stdout, redactionSecrets),
+      stderr: redactEnvironmentValues(spawned.stderr, redactionSecrets),
       truncated: spawned.truncated,
       durationMs: spawned.durationMs,
       ...(spawned.killedBy ? { killedBy: spawned.killedBy } : {}),
@@ -509,6 +606,189 @@ export class Container {
       });
     }
     return result;
+  }
+
+  async startTerminal(request: TerminalStartRequest): Promise<{ terminalId: string; ownerId: string }> {
+    this.#requireCapability('exec', 'run processes');
+    this.#requireState('running');
+    if (request.argv.length === 0) {
+      throw new PlifError('INVALID_ARGUMENT', 'terminal requires a non-empty argv');
+    }
+    if (!this.#sandbox) {
+      throw new PlifError('SANDBOX_UNAVAILABLE', 'container has no active sandbox jail');
+    }
+    const ownerId = request.ownerId?.trim() || 'primary';
+    const argv0 = request.argv[0] as string;
+    await this.#authorize('exec', argv0, request.argv, request.reason);
+    const cwdVirtual = normalizeVirtualPath(request.cwd ?? this.workdir);
+    const cwdResolved = await this.#jail.resolveRead(cwdVirtual).catch(() => null);
+    const cwdHost = cwdResolved?.host ?? path.join(this.rootfs, ...cwdVirtual.split('/').filter(Boolean));
+    const redactionSecrets = environmentSecrets({
+      ...this.#runtimeEnvironment,
+      ...(request.env ?? {}),
+    });
+    const terminal = new TerminalSession({
+      terminal: await this.#sandbox.openTerminal({
+        argv: request.argv,
+        cwd: cwdHost,
+        virtualCwd: cwdVirtual,
+        env: this.#buildEnv(request.env),
+        maxOutputBytes: this.limits.outputBytes,
+        ownerId,
+        sessionId: request.sessionId,
+        containerId: this.id,
+      }),
+      ownerId,
+      containerId: this.id,
+      redact: (text) => redactEnvironmentValues(text, redactionSecrets),
+    });
+    this.#terminals.set(terminal.id, terminal);
+    this.#deps.bus.emit('exec.start', {
+      containerId: this.id,
+      execId: terminal.id,
+      argv: request.argv,
+      cwd: cwdVirtual,
+    });
+    await this.#deps.audit.append('exec.start', this.id, {
+      execId: terminal.id,
+      argv: request.argv,
+      cwd: cwdVirtual,
+      reason: request.reason,
+      terminal: true,
+      ownerId,
+    });
+    return { terminalId: terminal.id, ownerId };
+  }
+
+  async writeTerminal(id: string, ownerId: string, input: string): Promise<readonly TerminalChunk[]> {
+    const terminal = this.#terminal(id, ownerId);
+    await terminal.write(input);
+    return this.#readTerminalChunks(terminal);
+  }
+
+  async readTerminal(id: string, ownerId: string): Promise<readonly TerminalChunk[]> {
+    return this.#readTerminalChunks(this.#terminal(id, ownerId));
+  }
+
+  async resizeTerminal(id: string, ownerId: string, columns: number, rows: number): Promise<void> {
+    await this.#terminal(id, ownerId).resize(columns, rows);
+  }
+
+  async signalTerminal(id: string, ownerId: string, signal: TerminalSignal): Promise<void> {
+    await this.#terminal(id, ownerId).signal(signal);
+  }
+
+  async waitTerminal(id: string, ownerId: string): Promise<ExecResult> {
+    const terminal = this.#terminal(id, ownerId);
+    const result = await terminal.wait();
+    await this.#finishTerminal(terminal, result);
+    return result;
+  }
+
+  async closeTerminal(id: string, ownerId: string): Promise<ExecResult> {
+    const terminal = this.#terminal(id, ownerId);
+    await terminal.close();
+    const result = await terminal.wait();
+    await this.#finishTerminal(terminal, result);
+    this.#terminals.delete(id);
+    this.#finishedTerminals.delete(id);
+    return result;
+  }
+
+  #terminal(id: string, ownerId: string): TerminalSession {
+    const terminal = this.#terminals.get(id);
+    if (!terminal || terminal.ownerId !== ownerId) {
+      throw new PlifError('POLICY_DENIED', 'terminal "' + id + '" is not owned by this agent');
+    }
+    return terminal;
+  }
+
+  async #readTerminalChunks(terminal: TerminalSession): Promise<readonly TerminalChunk[]> {
+    const chunks = await terminal.readAvailable();
+    for (const item of chunks) {
+      this.#deps.bus.emit('exec.output', {
+        containerId: this.id,
+        execId: terminal.id,
+        stream: item.stream,
+        chunk: item.chunk,
+      });
+    }
+    return chunks;
+  }
+
+  async #finishTerminal(terminal: TerminalSession, result: ExecResult): Promise<void> {
+    if (this.#finishedTerminals.has(terminal.id)) return;
+    this.#finishedTerminals.add(terminal.id);
+    this.#deps.bus.emit('exec.end', { containerId: this.id, execId: terminal.id, result });
+    await this.#deps.audit.append('exec.end', this.id, {
+      execId: terminal.id,
+      exitCode: result.exitCode,
+      durationMs: result.durationMs,
+      killedBy: result.killedBy ?? null,
+      truncated: result.truncated,
+      terminal: true,
+    });
+  }
+
+  /**
+   * Apply variables to the already-running container. This changes only future
+   * execs; existing child processes keep the environment they were spawned
+   * with. The returned view contains names and counts, never values.
+   */
+  applyEnvironment(values: EnvironmentMap): RuntimeEnvironmentStatus {
+    this.#requireState('running');
+    const normalized = normalizeEnvironmentMap(values);
+    this.#runtimeEnvironment = { ...this.#runtimeEnvironment, ...normalized };
+    return this.runtimeEnvironmentStatus();
+  }
+
+  /** Remove variables by name, or by the keys of a map whose values are ignored. */
+  removeEnvironment(selection: EnvironmentNameSelection): RuntimeEnvironmentStatus {
+    this.#requireState('running');
+    for (const name of normalizeEnvironmentNames(selection)) delete this.#runtimeEnvironment[name];
+    return this.runtimeEnvironmentStatus();
+  }
+
+  clearEnvironment(): RuntimeEnvironmentStatus {
+    this.#requireState('running');
+    this.#runtimeEnvironment = {};
+    return this.runtimeEnvironmentStatus();
+  }
+
+  /** Safe view for a TUI; it cannot disclose an environment value. */
+  runtimeEnvironmentStatus(): RuntimeEnvironmentStatus {
+    const names = Object.keys(this.#runtimeEnvironment).sort();
+    return { count: names.length, names };
+  }
+
+  /**
+   * Remove session-environment values from a tool result before it is
+   * persisted, streamed into the TUI, or sent back to a model. This also
+   * protects non-exec tools (for example read_file or an MCP response) if a
+   * command wrote a session credential into a file or response.
+   */
+  redactSensitiveOutput(text: string): string {
+    return redactEnvironmentValues(text, environmentSecrets(this.#runtimeEnvironment));
+  }
+
+  /** Reload the encrypted session environment without restarting the container. */
+  async reloadSessionEnvironment(): Promise<SessionEnvironmentStatus | undefined> {
+    this.#requireState('running');
+    const binding = this.#deps.sessionEnvironment;
+    if (!binding) {
+      this.#runtimeEnvironment = {};
+      return undefined;
+    }
+    this.#runtimeEnvironment = {
+      ...(await binding.store.loadForExecution(binding.scope)),
+    };
+    return binding.store.status(binding.scope);
+  }
+
+  /** Safe persistence/backend status for a TUI, when this container is bound. */
+  sessionEnvironmentStatus(): Promise<SessionEnvironmentStatus | undefined> {
+    const binding = this.#deps.sessionEnvironment;
+    return binding ? binding.store.status(binding.scope) : Promise.resolve(undefined);
   }
 
   /**
@@ -568,7 +848,13 @@ export class Container {
     env['PLIF_CONTAINER'] = this.name;
     env['PLIF_CONTAINER_ID'] = this.id;
 
-    return { ...env, ...this.image.config.env, ...this.spec.env, ...overrides };
+    return {
+      ...env,
+      ...this.image.config.env,
+      ...this.spec.env,
+      ...this.#runtimeEnvironment,
+      ...overrides,
+    };
   }
 
   // -------------------------------------------------------------------------

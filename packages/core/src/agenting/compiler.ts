@@ -5,8 +5,10 @@ import { loadMarkdownInstructions, renderInstruction } from './instruction-loade
 import { mcpModule, skillsModule, toolsModule } from './capabilities.js';
 import type { PromptContext, PromptModule, ResolvedPromptContext } from './types.js';
 import { resolvePromptContext } from './types.js';
+import { securityModule } from '../harness/security-instructions.js';
 
 export const DEFAULT_AGENTING_MODULES: readonly PromptModule[] = [
+  securityModule,
   environmentModule,
   toolsModule,
   skillsModule,

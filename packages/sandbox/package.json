@@ -1,6 +1,6 @@
 {
   "name": "@plif/sandbox",
-  "version": "0.3.9",
+  "version": "0.4.0",
   "description": "plif's OS isolation boundary: the only way it creates a process.",
   "license": "Apache-2.0",
   "author": "Anthophicous",

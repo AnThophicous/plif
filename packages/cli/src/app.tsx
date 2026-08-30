@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
@@ -16,6 +17,7 @@ import {
   buildSystemPrompt,
   catalogSelection,
   checkForUpdate,
+  disableVersion,
   conversationFromTranscript,
   DEFAULT_CONTEXT_TOKENS,
   estimateTokens,
@@ -74,6 +76,9 @@ import {
   supportedEfforts,
   normalizeEffort,
   redactedProviderId,
+  ProjectEnvironmentStore,
+  readUpdatePreferences,
+  runBtw as runEphemeralBtw,
 } from '@plif/core';
 import type {
   Attachment,
@@ -111,8 +116,11 @@ import { Completions, EmojiMenu } from './components/Completions.js';
 import { CodexLoginDialog } from './components/CodexLoginDialog.js';
 import type { CodexLoginStatus } from './components/CodexLoginDialog.js';
 import { Discovery, discoveryHeight } from './components/Discovery.js';
+import { BtwPanel, btwPanelHeight } from './components/BtwPanel.js';
+import type { BtwViewState } from './components/BtwPanel.js';
 import { Queue, queueHeight } from './components/Queue.js';
 import { Question, questionChoiceAtRow, questionHeight } from './components/Question.js';
+import { SecretWarning } from './components/SecretWarning.js';
 import { Footer, FOOTER_HEIGHT } from './components/Footer.js';
 import type { Hint } from './components/Footer.js';
 import { Header, headerHeight } from './components/Header.js';
@@ -150,8 +158,24 @@ import {
   isExactCommandMatch,
   runsWhileWorking,
   tabArgumentCompletion,
+  slashCommandPresentation,
 } from './commands.js';
 import type { Command, CommandContext } from './commands.js';
+import { redactBtwSecrets } from './commands/btw.js';
+import { isDotEnvPath, normalizeEnvName } from './commands/env.js';
+import type { EnvCommandActions } from './commands/env.js';
+import { launchUpdater } from './update-runtime.js';
+import {
+  redactDetectedSecrets,
+  SECRET_FIRST_CONTEXT,
+  SECRET_FIRST_QUESTION,
+  SECRET_FINAL_CONTEXT,
+  SECRET_FINAL_QUESTION,
+  SECRET_REDACT_VALUE,
+  SECRET_REVIEW_VALUE,
+  SECRET_SEND_VALUE,
+  detectDraftSecrets,
+} from './security/secret-detector.js';
 import {
   formatError,
   formatExecOutput,
@@ -191,6 +215,13 @@ import { ComposerHistory } from './composer/history.js';
 import { composerReducer, initialComposerState, submissionFromComposer } from './composer/state.js';
 import type { PastedAttachment } from './composer/state.js';
 import { materializePastedLine } from './composer/paste.js';
+import {
+  applyLocalSuggestion,
+  DEFAULT_LOCAL_ASSISTANCE_SETTINGS,
+  inlineSuggestionSuffix,
+  suggestLocal,
+} from './composer/local-assistance.js';
+import type { LocalAssistanceSettings, LocalSuggestion } from './composer/local-assistance.js';
 import { editorDeleteAction, isControlShortcut } from './editor-keys.js';
 import { attachmentsForPrimaryModel, hasImageAttachments } from './attachments.js';
 import { allTranscriptCells } from './transcript/reducer.js';
@@ -608,6 +639,10 @@ export function App({
   useEffect(() => () => {
     void codexLoginFlow.current?.cancel();
   }, []);
+  useEffect(() => () => {
+    btwAbort.current?.abort();
+    btwAbort.current = null;
+  }, []);
   useEffect(() => {
     applyEffortPalette(effort);
   }, [effort]);
@@ -784,6 +819,7 @@ export function App({
   } | null>(null);
   const loadingSequence = useRef(0);
   const loadingMetricPaintAt = useRef(0);
+  const updatePromptPending = useRef(false);
 
   const beginLoading = useCallback((turnId: string): number => {
     const id = ++loadingSequence.current;
@@ -936,10 +972,35 @@ export function App({
   });
   /** Everything said so far, minus the system prompt, carried across turns. */
   const conversation = useRef<Message[]>([]);
+  /** Snapshot source for BTW while the primary agent is between turns. */
+  const activeConversation = useRef<readonly Message[] | null>(null);
+  /** BTW is a side channel: its lifecycle never enters SessionState. */
+  const [btwView, setBtwView] = useState<BtwViewState | null>(null);
+  const [btwInput, setBtwInput] = useState<{ readonly draft: string; readonly cursor: number } | null>(null);
+  const btwAbort = useRef<AbortController | null>(null);
+  const btwSequence = useRef(0);
   const providerRef = useRef<ModelProvider | null>(provider);
   const modelKeyPrompted = useRef(false);
   /** The empty-install picker opens once per session, not once per render. */
   const modelPickerPrompted = useRef(false);
+  /** Decrypted values are held only for the active process/container. */
+  const sessionEnvironment = useRef<Record<string, string>>({});
+  /** Current transcript owner, used to reject stale async environment work. */
+  const activeEnvironmentSession = useRef<string | null>(null);
+  activeEnvironmentSession.current = transcript.session?.id ?? session?.id ?? null;
+  const loadedEnvironmentSession = useRef<string | null>(null);
+  const environmentQueue = useRef<Promise<void>>(Promise.resolve());
+  const environmentStore = useMemo(() => new ProjectEnvironmentStore({
+    passphrase: async () => (await engine.questions.ask({
+      text: 'Project environment passphrase',
+      secret: true,
+      context: 'This passphrase unlocks the encrypted project environment. It is never stored.',
+    })) ?? undefined,
+  }), [engine]);
+  const environmentScope = useCallback(
+    (_sessionId?: string) => ({ workspace: cwd }),
+    [cwd],
+  );
   const effortRef = useRef<Effort | undefined>(initialEffort);
   const [planMode, setPlanModeState] = useState(false);
   const planModeRef = useRef(false);
@@ -1000,10 +1061,377 @@ export function App({
     void loadConfigSnapshot();
   }, [loadConfigSnapshot]);
 
+  useEffect(() => {
+    void loadGlobalConfig().then(setConfigSnapshot).catch(() => undefined);
+  }, []);
+
+  const localAssistance: LocalAssistanceSettings = {
+    ...DEFAULT_LOCAL_ASSISTANCE_SETTINGS,
+    ...(configSnapshot?.composer ?? {}),
+  };
+
   const push = useCallback(
     (item: ReturnType<typeof entry>) => dispatch({ type: 'append', entry: item }),
     [],
   );
+
+  /**
+   * Keep project-environment persistence and runtime injection on one queue.
+   * The transcript controller has a similar lazy-session queue; this second
+   * seam is what prevents a set/delete racing the session load or container
+   * creation while still keeping secrets outside the transcript.
+   */
+  const enqueueEnvironmentOperation = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
+    const next = environmentQueue.current.catch(() => undefined).then(operation);
+    environmentQueue.current = next.then(() => undefined, () => undefined);
+    return next;
+  }, []);
+
+  const applySessionEnvironment = useCallback((
+    values: Readonly<Record<string, string>>,
+    ownerSessionId?: string | null,
+  ): boolean => {
+    const activeSessionId = activeEnvironmentSession.current;
+    if (ownerSessionId !== undefined && activeSessionId !== null && ownerSessionId !== activeSessionId) {
+      return false;
+    }
+    const next = { ...values };
+    sessionEnvironment.current = next;
+
+    // Runtime-only injection is intentionally available only after the Plif
+    // container is running. Never mutate ContainerSpec: Engine persists that
+    // object and doing so would put decrypted values on disk.
+    const target = current.current;
+    if (target?.state !== 'running') return true;
+    try {
+      const names = target.runtimeEnvironmentStatus().names;
+      if (names.length > 0) target.removeEnvironment(names);
+      if (Object.keys(next).length > 0) target.applyEnvironment(next);
+    } catch {
+      // A container may exit between the state check and the call. The secure
+      // store remains authoritative and the next running container reloads it.
+    }
+    return true;
+  }, []);
+
+  const loadSessionEnvironment = useCallback(async (activeSession: Session | null): Promise<void> => {
+    const sessionId = activeSession?.id ?? null;
+    if (loadedEnvironmentSession.current === sessionId) return;
+    await enqueueEnvironmentOperation(async () => {
+      if (loadedEnvironmentSession.current === sessionId) return;
+      const activeSessionId = activeEnvironmentSession.current;
+      if (activeSessionId !== null && activeSessionId !== sessionId) return;
+      let values: Readonly<Record<string, string>> = {};
+      if (sessionId) {
+        // A broken platform credential store must fail closed: do not retain
+        // the previous session's values and do not block the main turn.
+        await environmentStore.migrateLegacySession(environmentScope(sessionId), sessionId).catch(() => false);
+        values = await environmentStore.loadForExecution(environmentScope(sessionId)).catch(() => ({}));
+      }
+      if (activeEnvironmentSession.current !== null && activeEnvironmentSession.current !== sessionId) return;
+      if (!applySessionEnvironment(values, sessionId)) return;
+      loadedEnvironmentSession.current = sessionId;
+    });
+  }, [applySessionEnvironment, enqueueEnvironmentOperation, environmentScope, environmentStore]);
+
+  const requirePersistentEnvironmentSession = useCallback(async (): Promise<Session> => {
+    const activeSession = await transcript.resolveSession();
+    if (!activeSession) {
+      throw new PlifError('INVALID_ARGUMENT', '/env needs a persistent session', {
+        hint: 'Start a normal conversation first; session-less runs cannot own secrets.',
+      });
+    }
+    return activeSession;
+  }, [transcript]);
+
+  const environmentActions = useMemo<EnvCommandActions>(() => {
+    return {
+      status: async () => {
+        const activeSession = await requirePersistentEnvironmentSession();
+        await loadSessionEnvironment(activeSession);
+        const status = await environmentStore.status(environmentScope(activeSession.id));
+        const running = current.current?.state === 'running';
+        return {
+          sessionId: activeSession.id,
+          storage: status.persistent ? 'encrypted' : 'memory',
+          ...(status.warning ? { warning: status.warning } : {}),
+          variables: status.names.map((name) => ({
+            name,
+            loaded: running && Object.prototype.hasOwnProperty.call(sessionEnvironment.current, name),
+          })),
+        };
+      },
+      set: async (rawName, suppliedValue) => {
+        const activeSession = await requirePersistentEnvironmentSession();
+        const name = normalizeEnvName(rawName);
+        let value = suppliedValue;
+        if (value === undefined) {
+          const answer = await engine.questions.ask({
+            text: `Secret value for ${name}`,
+            secret: true,
+            context: 'This value is masked, protected for the current project, and never shown, logged, or sent to the main transcript. Use /env when a secret is needed; do not ask the agent to repeat it.',
+          });
+          value = answer ?? undefined;
+        }
+        if (!value?.trim()) return { name, saved: false };
+        const secret = value;
+        await loadSessionEnvironment(activeSession);
+        await enqueueEnvironmentOperation(async () => {
+          await environmentStore.set(environmentScope(activeSession.id), { [name]: secret });
+          applySessionEnvironment({ ...sessionEnvironment.current, [name]: secret }, activeSession.id);
+        });
+        return { name, saved: true };
+      },
+      importFile: async (file) => {
+        const activeSession = await requirePersistentEnvironmentSession();
+        if (!isDotEnvPath(file)) {
+          throw new PlifError('INVALID_ARGUMENT', 'import expects a dotenv file', {
+            hint: 'Use a file named .env, .env.local, or *.env.',
+          });
+        }
+        await loadSessionEnvironment(activeSession);
+        return await enqueueEnvironmentOperation(async () => {
+          const imported = await environmentStore.importFile(environmentScope(activeSession.id), file);
+          const values = await environmentStore.loadForExecution(environmentScope(activeSession.id));
+          applySessionEnvironment(values, activeSession.id);
+          return { names: imported.names };
+        });
+      },
+      delete: async (rawName) => {
+        const activeSession = await requirePersistentEnvironmentSession();
+        const name = normalizeEnvName(rawName);
+        await loadSessionEnvironment(activeSession);
+        return await enqueueEnvironmentOperation(async () => {
+          const before = await environmentStore.status(environmentScope(activeSession.id));
+          await environmentStore.remove(environmentScope(activeSession.id), [name]);
+          const values = await environmentStore.loadForExecution(environmentScope(activeSession.id));
+          applySessionEnvironment(values, activeSession.id);
+          return before.names.includes(name);
+        });
+      },
+      clear: async () => {
+        const activeSession = await requirePersistentEnvironmentSession();
+        await loadSessionEnvironment(activeSession);
+        return await enqueueEnvironmentOperation(async () => {
+          const before = await environmentStore.status(environmentScope(activeSession.id));
+          await environmentStore.clear(environmentScope(activeSession.id));
+          applySessionEnvironment({}, activeSession.id);
+          return before.names.length;
+        });
+      },
+    };
+  }, [
+    applySessionEnvironment,
+    engine,
+    enqueueEnvironmentOperation,
+    environmentScope,
+    environmentStore,
+    loadSessionEnvironment,
+    requirePersistentEnvironmentSession,
+  ]);
+
+  const hasPersistentSession = useCallback(async (): Promise<boolean> => {
+    return (await transcript.resolveSession()) !== null;
+  }, [transcript]);
+
+  /** Run BTW through the bounded core side-channel, never through the main loop. */
+  const runBtw = useCallback((question: string): void => {
+    const cleanQuestion = question.trim();
+    if (!cleanQuestion) {
+      setBtwInput({ draft: '', cursor: 0 });
+      return;
+    }
+
+    btwAbort.current?.abort();
+    const controller = new AbortController();
+    btwAbort.current = controller;
+    const id = ++btwSequence.current;
+    const contextSnapshot = structuredClone(
+      activeConversation.current ?? conversation.current,
+    );
+    const displayQuestion = redactBtwSecrets(cleanQuestion);
+    setBtwInput(null);
+    setBtwView({ id, question: displayQuestion, phase: 'working', startedAt: Date.now() });
+
+    void (async () => {
+      try {
+        const activeProvider = providerRef.current;
+        if (!activeProvider) throw new Error('BTW needs a configured model');
+        const result = await runEphemeralBtw({
+          provider: activeProvider,
+          snapshot: { messages: contextSnapshot },
+          question: cleanQuestion,
+          signal: controller.signal,
+          execution: {
+            cwd,
+            workspaceRoots: [cwd],
+          },
+          maxTokens: 800,
+        });
+        if (result.status === 'cancelled') {
+          setBtwView((previous) => previous?.id === id
+            ? { ...previous, phase: 'cancelled', error: 'cancelled' }
+            : previous);
+        } else if (result.status === 'timeout') {
+          setBtwView((previous) => previous?.id === id
+            ? { ...previous, phase: 'error', error: 'BTW timed out; the active turn was not changed.' }
+            : previous);
+        } else if (result.status === 'error') {
+          setBtwView((previous) => previous?.id === id
+            ? { ...previous, phase: 'error', error: 'BTW could not answer; the active turn was not changed.' }
+            : previous);
+        } else {
+          setBtwView((previous) => previous?.id === id
+            ? { ...previous, phase: 'done', answer: result.text.trim() || '(no answer)' }
+            : previous);
+        }
+      } catch (error) {
+        if (controller.signal.aborted) {
+          setBtwView((previous) => previous?.id === id
+            ? { ...previous, phase: 'cancelled', error: 'cancelled' }
+            : previous);
+          return;
+        }
+        const message = error instanceof Error ? error.message : 'BTW request failed';
+        setBtwView((previous) => previous?.id === id
+          ? { ...previous, phase: 'error', error: redactBtwSecrets(message) }
+          : previous);
+      } finally {
+        if (btwAbort.current === controller) btwAbort.current = null;
+      }
+    })();
+  }, [cwd]);
+
+  const cancelBtw = useCallback((): void => {
+    btwAbort.current?.abort();
+    btwAbort.current = null;
+    setBtwInput(null);
+    setBtwView((previous) => previous?.phase === 'working'
+      ? { ...previous, phase: 'cancelled', error: 'cancelled' }
+      : previous);
+  }, []);
+
+  const openBtw = useCallback((): void => {
+    setBtwInput({ draft: '', cursor: 0 });
+  }, []);
+
+  const openEnvironmentPicker = useCallback(async (): Promise<void> => {
+    const status = await environmentActions.status();
+    const storageDetail = status.storage === 'encrypted'
+      ? 'encrypted at rest · not loaded into a container'
+      : 'memory-only · secure persistence unavailable';
+    const keyItems = status.variables.map((variable) => ({
+      value: `key:${variable.name}`,
+      label: variable.name,
+      detail: variable.loaded
+        ? 'active in container memory · value hidden'
+        : storageDetail,
+      state: variable.loaded ? 'on' as const : 'off' as const,
+    }));
+    const open = (): void => { void openEnvironmentPicker(); };
+    const choose = async (value: string | ModelSelection): Promise<void> => {
+      const selected = String(value);
+      if (selected === 'set') {
+        const answer = await engine.questions.ask({
+          text: 'Environment name',
+          context: 'Only the name is shown. The next prompt masks the value and stores it securely.',
+        });
+        const name = answer?.trim();
+        if (!name) return;
+        const result = await environmentActions.set(name);
+        push(entry('notice', result.saved ? `env ${result.name} saved` : `env ${result.name} unchanged`, {
+          tone: result.saved ? 'success' : 'muted',
+          subtitle: result.saved ? 'stored through the session vault · active for future container processes' : 'no value entered',
+        }));
+        open();
+        return;
+      }
+      if (selected === 'import') {
+        const answer = await engine.questions.ask({
+          text: 'Dotenv file path',
+          context: 'The file is parsed privately; values are encrypted and never shown in the TUI or transcript.',
+        });
+        const file = answer?.trim();
+        if (!file) return;
+        const imported = await environmentActions.importFile(file);
+        push(entry('notice', `imported ${imported.names.length} environment key(s)`, {
+          tone: 'success',
+          subtitle: 'stored through the session vault · nothing was copied to the timeline',
+          detail: imported.names.join('\n') || '(no assignments found)',
+          expand: true,
+        }));
+        open();
+        return;
+      }
+      if (selected === 'clear') {
+        const answer = await engine.questions.ask({
+          text: 'Clear all project environment secrets?',
+          options: [
+            { value: 'clear', label: 'Clear all', description: 'Delete stored values for this project.' },
+            { value: 'cancel', label: 'Cancel' },
+          ],
+          context: 'Values are never shown; this only removes the current project secrets.',
+        });
+        if (answer?.trim().toLowerCase() !== 'clear') return;
+        const count = await environmentActions.clear();
+        push(entry('notice', `cleared ${count} environment key(s)`, {
+          tone: count > 0 ? 'success' : 'muted',
+          subtitle: 'secure storage and the active container map are empty',
+        }));
+        open();
+        return;
+      }
+      if (selected.startsWith('key:')) {
+        const name = selected.slice(4);
+        dispatch({
+          type: 'picker.open',
+          picker: {
+            title: `Secret · ${name}`,
+            hint: 'The value is never rendered. Choose an action for this project key.',
+            countLabel: 'actions',
+            items: [
+              { value: 'update', label: 'Update value', detail: 'open a masked secret prompt' },
+              { value: 'delete', label: 'Delete secret', detail: 'remove it from secure storage and future processes' },
+            ],
+            onBack: open,
+            onPick: async (action) => {
+              if (String(action) === 'update') {
+                const result = await environmentActions.set(name);
+                push(entry('notice', result.saved ? `env ${name} saved` : `env ${name} unchanged`, {
+                  tone: result.saved ? 'success' : 'muted',
+                  subtitle: result.saved ? 'stored through the session vault · active for future container processes' : 'no value entered',
+                }));
+              } else if (String(action) === 'delete') {
+                const removed = await environmentActions.delete(name);
+                push(entry('notice', removed ? `env ${name} deleted` : `env ${name} was not saved`, {
+                  tone: removed ? 'success' : 'muted',
+                  subtitle: removed ? 'removed from secure storage and the active container map' : 'nothing changed',
+                }));
+              }
+              open();
+            },
+          },
+        });
+        return;
+      }
+    };
+
+    dispatch({
+      type: 'picker.open',
+      picker: {
+        title: 'Project environment',
+        hint: 'Names and state only · values are encrypted and never rendered · changes apply without restart',
+        countLabel: 'keys',
+        items: [
+          { value: 'set', label: 'Set a secret', detail: 'choose a name, then enter its masked value' },
+          { value: 'import', label: 'Import dotenv', detail: 'parse a .env file privately through the project vault' },
+          { value: 'clear', label: 'Clear all secrets', detail: 'remove every value from this project', state: status.variables.length > 0 ? 'on' : 'off' },
+          ...keyItems,
+        ],
+        onPick: choose,
+      },
+    });
+  }, [engine, environmentActions, push]);
 
   /**
    * Finish the answer being streamed, if there is one.
@@ -1122,6 +1550,14 @@ export function App({
       }),
     );
   }, [contextReplay, replay, push, session]);
+
+  // A resumed session's environment is loaded only after the transcript
+  // pointer is known. The serialized loader also clears the previous session
+  // map first, so a session switch cannot briefly expose another session's
+  // secrets to a newly-created container.
+  useEffect(() => {
+    void loadSessionEnvironment(transcript.session ?? session).catch(() => undefined);
+  }, [loadSessionEnvironment, session, transcript.session]);
 
   useEffect(() => {
     if (!transcript.persistenceWarning) return;
@@ -1636,6 +2072,9 @@ export function App({
             contextUsed: 0,
             contextMax: event.contextMax,
             completionTokens: 0,
+            ...(event.subagentId ? { subagentId: event.subagentId } : {}),
+            ...(event.sessionId ? { sessionId: event.sessionId } : {}),
+            ...(event.forkedFrom ? { forkedFrom: event.forkedFrom } : {}),
           },
         });
       }),
@@ -2030,21 +2469,60 @@ export function App({
    */
   useEffect(() => {
     let active = true;
-    void checkForUpdate({ current: version, cacheFile: engine.paths.updateCheck }).then((update) => {
+    const check = async (): Promise<void> => {
+      if (!active || updatePromptPending.current) return;
+      const update = await checkForUpdate({ current: version, cacheFile: engine.paths.updateCheck });
       if (!active || !update) return;
-      push(
-        entry('notice', `plif ${update.latest} is available`, {
+      const preferences = await readUpdatePreferences(engine.paths.updatePreferences);
+      if (!preferences.enabled || preferences.disabledVersions.includes(update.latest)) return;
+      updatePromptPending.current = true;
+      try {
+        const changelog = update.changelog
+          ? update.changelog.slice(0, 8_000)
+          : 'The published package did not include a readable CHANGELOG.md section.';
+        const choice = await engine.questions.ask({
+          text: `Plif ${update.latest} is available`,
+          context: [
+            `You are running ${update.current}. Updates come from NPM only.`,
+            '',
+            'CHANGELOG.md',
+            changelog,
+          ].join('\n'),
+          options: [
+            { value: 'update', label: 'Update now', description: 'Close safely, install the exact NPM version, verify it, and relaunch.' },
+            { value: 'later', label: 'Later', description: 'Keep this version and ask again on a later check.' },
+            { value: 'ignore', label: "Don't ask again", description: `Silence notifications for ${update.latest} only.` },
+          ],
+        });
+        if (choice === 'ignore') {
+          await disableVersion(engine.paths.updatePreferences, update.latest);
+          return;
+        }
+        if (choice !== 'update') return;
+        if (!launchUpdater(update)) {
+          push(entry('notice', 'updater is unavailable in this installation', {
+            tone: 'warn',
+            subtitle: `Install manually with ${update.command}.`,
+          }));
+          return;
+        }
+        push(entry('notice', `updating Plif to ${update.latest}`, {
           tone: 'accent',
-          subtitle: `you are on ${update.current}`,
-          detail: update.command,
-          expand: true,
-        }),
-      );
-    });
+          subtitle: 'The isolated updater will restart Plif after verification.',
+        }));
+        exit();
+      } finally {
+        updatePromptPending.current = false;
+      }
+    };
+    void check();
+    const timer = setInterval(() => void check(), 6 * 60 * 60 * 1000);
+    timer.unref?.();
     return () => {
       active = false;
+      clearInterval(timer);
     };
-  }, [engine, push, version]);
+  }, [engine, exit, push, version]);
 
   useEffect(() => {
     if (!mcpRegistry) return;
@@ -2076,7 +2554,8 @@ export function App({
     tasks.length > 0 ||
     state.question !== null ||
     state.compaction !== null ||
-    state.subagents.some((view) => view.status === 'running');
+    state.subagents.some((view) => view.status === 'running') ||
+    btwView?.phase === 'working';
 
   useEffect(() => {
     if (!counting) return;
@@ -2383,6 +2862,7 @@ export function App({
     current: current.current,
     setCurrent: (container) => {
       current.current = container;
+      if (container) applySessionEnvironment(sessionEnvironment.current);
       dispatch({
         type: 'container',
         name: container?.name ?? null,
@@ -2709,6 +3189,13 @@ export function App({
     loginCodex,
     mcpNames: mcpStatuses.map((server) => server.name),
     openPicker: (picker) => dispatch({ type: 'picker.open', picker }),
+    openEnv: openEnvironmentPicker,
+    openBtw,
+    env: environmentActions,
+    hasPersistentSession,
+    containerEnvironment: () => sessionEnvironment.current,
+    runBtw,
+    cancelBtw,
     notify: (notice) => push(notice),
     copySession: async () => {
       try {
@@ -2876,8 +3363,72 @@ export function App({
     : [];
   const screenStatus = context.sessionStatus?.();
 
+  const confirmSecretDraft = useCallback(async (text: string): Promise<boolean> => {
+    const detection = detectDraftSecrets(text);
+    if (detection.spans.length === 0) return true;
+
+    const first = await engine.questions.ask({
+      text: SECRET_FIRST_QUESTION,
+      context: SECRET_FIRST_CONTEXT,
+      options: [{
+        value: SECRET_REVIEW_VALUE,
+        label: 'Review warning',
+        description: 'Continue to the final confirmation without sending the draft.',
+      }],
+    });
+    if (first !== SECRET_REVIEW_VALUE) return false;
+
+    const action = await engine.questions.ask({
+      text: SECRET_FINAL_QUESTION,
+      context: SECRET_FINAL_CONTEXT,
+      options: [
+        {
+          value: 'cancel',
+          label: 'Cancel and Edit',
+          description: 'Keep the draft untouched so you can remove the credential.',
+        },
+        {
+          value: SECRET_REDACT_VALUE,
+          label: 'Save Redacted Prompt and Cancel',
+          description: 'Replace detected credentials with a safe marker and copy that version.',
+        },
+        {
+          value: SECRET_SEND_VALUE,
+          label: 'Send Anyway',
+          description: 'Send and persist the original prompt; PLIF cannot unsend or revoke it.',
+        },
+      ],
+    });
+
+    if (action === SECRET_REDACT_VALUE) {
+      const safe = redactDetectedSecrets(text, detection);
+      setInput(safe);
+      setCursor(safe.length);
+      setPasted([]);
+      history.current.record(safe);
+      try {
+        await writeClipboardText(safe);
+        push(entry('notice', 'redacted prompt saved', {
+          tone: 'success',
+          subtitle: 'The safe version was placed in clipboard and command history. The credential was not copied.',
+        }));
+      } catch {
+        push(entry('notice', 'redacted prompt saved locally', {
+          tone: 'success',
+          subtitle: 'Clipboard was unavailable; the safe version remains in the prompt and command history.',
+        }));
+      }
+    }
+    return action === SECRET_SEND_VALUE;
+  }, [engine, push]);
+
   const submit = useCallback(
-    async (line: string, suppliedAttachments?: readonly PastedAttachment[]) => {
+    async (
+      line: string,
+      suppliedAttachments?: readonly PastedAttachment[],
+      clearComposer = false,
+      secretApproved = false,
+    ) => {
       if (credentialPromptPending || projectRootSetupPending) return;
       const visibleLine = line.trim();
       if (!visibleLine) return;
@@ -2885,16 +3436,15 @@ export function App({
         // Slash commands are local actions. They must never carry an image that
         // was left in the composer from a previous prompt.
         if (suppliedAttachments === undefined) setPasted([]);
-        history.current.record(visibleLine);
+        const presentation = slashCommandPresentation(visibleLine);
+        if (presentation.remember) history.current.record(presentation.display);
         await runSlash(visibleLine);
         return;
       }
 
-      // Claim the pasted images for this message and clear the tray, so a
-      // second message does not re-send the first one's screenshot.
       const carried = suppliedAttachments ?? composerRef.current.attachments;
-      if (suppliedAttachments === undefined) setPasted([]);
-      const materialized = materializePastedLine(visibleLine, carried);
+      let materialized = materializePastedLine(visibleLine, carried);
+      if (!secretApproved && !(await confirmSecretDraft(materialized.text))) return;
       const trimmed = materialized.text.trim();
 
       const privateShell = visibleLine.startsWith('!!');
@@ -2923,6 +3473,11 @@ export function App({
           }));
           return;
         }
+      }
+      if (clearComposer) {
+        setInput('');
+        setCursor(0);
+        setPasted([]);
       }
       history.current.record(privateShell ? '!! [private command]' : visibleLine);
       if (agentSubmission) {
@@ -2984,7 +3539,7 @@ export function App({
         dispatch({ type: 'busy', busy: false });
       }
     },
-    [credentialPromptPending, engine, projectRootSetupPending, push, transcript],
+    [confirmSecretDraft, credentialPromptPending, engine, projectRootSetupPending, push, transcript],
   );
 
   /**
@@ -3006,7 +3561,7 @@ export function App({
     queueRef.current = [];
     dispatch({ type: 'queue.clear' });
     void (async () => {
-      for (const message of leftover) await submit(message.text, message.attachments);
+      for (const message of leftover) await submit(message.text, message.attachments, false, true);
     })();
   }, [state.busy, state.queue, submit]);
 
@@ -3110,30 +3665,42 @@ export function App({
     // event. Resolve it in parallel with normal turn setup so native
     // providers can recover their pointer without creating a second source of
     // truth for conversation history.
-    const conversationStatePromise = transcript.resolveSession().then(async (activeSession) => {
+    // Resolve the durable session once and make both environment loading and
+    // container creation depend on that same promise. This is the critical
+    // startup/resume ordering: no container can start with a previous session
+    // or before its encrypted environment has been resolved.
+    const activeSessionPromise = transcript.resolveSession();
+    const conversationStatePromise = activeSessionPromise.then(async (activeSession) => {
       return activeSession?.loadConversationState() ?? null;
     });
-    const containerPromise: Promise<Container> = existingContainer
-      ? Promise.resolve(existingContainer)
-      : (async () => {
-          const image = await engine.ensureBaseImage();
-          return await engine.run({
-            image: image.reference,
-            mounts: [containerMount(cwd), containerTempMount(tempDir)],
-            workdir: containerWorkdir(cwd),
-            // Network is granted at the ceiling and gated per host by policy,
-            // which falls through to "ask". It costs a permission prompt the
-            // first time a search runs, and nothing when auto-approve is on.
-            capabilities: { hostWrite: true, network: true },
-          });
-        })();
+    const environmentPromise = activeSessionPromise.then((activeSession) => loadSessionEnvironment(activeSession));
+    const containerPromise: Promise<Container> = environmentPromise.then(async () => {
+      if (existingContainer) return existingContainer;
+      const image = await engine.ensureBaseImage();
+      const container = await engine.run({
+        image: image.reference,
+        mounts: [containerMount(cwd), containerTempMount(tempDir)],
+        workdir: containerWorkdir(cwd),
+        // Network is granted at the ceiling and gated per host by policy,
+        // which falls through to "ask". It costs a permission prompt the
+        // first time a search runs, and nothing when auto-approve is on.
+        capabilities: { hostWrite: true, network: true },
+      });
+      // The container is running now. Injecting through the runtime-only API
+      // keeps decrypted values out of Engine's persisted ContainerSpec.
+      if (Object.keys(sessionEnvironment.current).length > 0) {
+        container.applyEnvironment(sessionEnvironment.current);
+      }
+      return container;
+    });
 
-    const [container, snapshot, agentInstructions, profileConfig, conversationState] = await Promise.all([
+    const [container, snapshot, agentInstructions, profileConfig, conversationState, activeSession] = await Promise.all([
       containerPromise,
       snapshotPromise,
       instructionsPromise,
       configPromise,
       conversationStatePromise,
+      activeSessionPromise,
     ]);
     await goalControllerRef.current?.ready();
     goalControllerRef.current?.setMaxRounds(plifModeOf(profileConfig).maxGoalRounds);
@@ -3170,7 +3737,7 @@ export function App({
         container,
         bus: engine.bus,
         approvals: engine.approvals,
-        sessionId: transcript.session?.id ?? 'interactive',
+        sessionId: activeSession?.id ?? transcript.session?.id ?? 'interactive',
       });
       setTasks(visibleTasks(taskManager.current.list()));
       const nextLsp = new LspManager({
@@ -3218,6 +3785,7 @@ export function App({
       : "No session goal is set. Do not invent a final objective silently. If the user's end goal is unclear, use ask_user first; when the Galileo skill is available, use it after clarification to help structure the objective.";
     const turnInstructions = [
       agentInstructions,
+      'PROJECT SECRETS: Project environment values may already be injected into container processes, but they are never part of the chat context. If a secret is missing, guide the developer to use `/env set NAME` or `/env import .env`; never ask them to paste a secret into chat, never inspect or print environment values, and never repeat or echo a credential.',
       planOnly
         ? 'PLAN MODE: inspect files and run read-only discovery only. Do not write, edit, delete, move, install, commit, or otherwise mutate the workspace. Return a concrete implementation plan and wait for /plan off before making changes.'
         : undefined,
@@ -3256,6 +3824,9 @@ export function App({
       coordinator: subagents.current,
       ...(turnInstructions ? { agentInstructions: turnInstructions } : {}),
       sessions: engine.sessions,
+      memory: engine.memory,
+      parentSession: activeSession ?? undefined,
+      parentContext: () => activeConversation.current ?? carried,
       continuable: plifModeOf(storedConfig).continuableSubagents !== false,
       skillBootstrap: codexSkillBootstrap,
     };
@@ -3278,6 +3849,10 @@ export function App({
       ...carried,
       { role: 'user', content: text, ...(wireAttachments.length ? { attachments: wireAttachments } : {}) },
     ];
+    // BTW invoked during this turn should see the current user request as well
+    // as the prior transcript. Keep this projection separate from the loop's
+    // mutable message array so the side channel can never alter primary state.
+    activeConversation.current = structuredClone(outgoing);
 
     const loadingOperationId = beginLoading(durableTurnId);
     let loadingResult: 'done' | 'error' | 'cancelled' = 'done';
@@ -3306,6 +3881,8 @@ export function App({
               skills: skillRegistry?.catalogue() ?? skillCatalogue,
               loadedSkills: loadedSkillsForPrompt,
               providerId: providerRef.current.info.providerId,
+              modelId: providerRef.current.info.id,
+              endpointRoute: providerRef.current.info.endpoint,
               mcpServers: mcpRegistry ? mcpRegistry.catalogue() : mcpCatalogue,
               guidance: snapshot.guidance,
               memory: summariseMemory(snapshot),
@@ -3371,6 +3948,7 @@ export function App({
           enableHarnessCycle: effortRef.current === 'plif',
           runScript: !planOnly,
           runScriptMaxSteps: plifModeOf(storedConfig).runScriptMaxSteps,
+          agentId: activeSession?.meta.uuid ?? 'primary',
           goal: goalControllerRef.current ?? undefined,
           sessions: engine.sessions,
           maxIterations: effortRef.current === 'plif' ? 50 : undefined,
@@ -3465,6 +4043,7 @@ export function App({
       // system prompt is rebuilt each turn rather than stored, so a container
       // swap is reflected immediately.
       conversation.current = result.messages.slice(1);
+      activeConversation.current = structuredClone(conversation.current);
       if (result.stop === 'cancelled') loadingResult = 'cancelled';
       else if (result.stop !== 'complete' || result.error) loadingResult = 'error';
       else goalRoundEligible = true;
@@ -3532,6 +4111,7 @@ export function App({
     } catch (error) {
       loadingResult = abort.signal.aborted ? 'cancelled' : 'error';
       if (conversation.current === carried) conversation.current = outgoing;
+      activeConversation.current = structuredClone(conversation.current);
       const recovered = await recoverModelAuth(error);
       if (!recovered) {
         const { title, detail } = formatError(error);
@@ -3566,6 +4146,7 @@ export function App({
       closeAnswer();
       closeThinking();
       transcript.finishTurn(durableTurnId);
+      activeConversation.current = null;
       if (abort.signal.aborted) {
         const goal = goalControllerRef.current?.get();
         if (goal?.status === 'active' && goal.armed) {
@@ -3616,6 +4197,16 @@ export function App({
     }
 
     const argv = tokenize(line);
+    const commandId = randomUUID();
+    if (shareWithAgent) {
+      await transcript.persist({
+        ...eventBase('command.input', commandId),
+        execId: commandId,
+        argv,
+        cwd: container.workdir,
+        interactive: false,
+      });
+    }
     const running = entry('step', line, { status: 'active' });
     pendingRow.current = running.id;
     push(running);
@@ -3641,6 +4232,22 @@ export function App({
         },
       });
       if (shareWithAgent) {
+        const killedBy = result.killedBy === 'timeout' || result.killedBy === 'memory' ||
+          result.killedBy === 'processes' || result.killedBy === 'cancelled'
+          ? result.killedBy
+          : undefined;
+        await transcript.persist({
+          ...eventBase('command.completed', commandId),
+          execId: commandId,
+          exitCode: result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          truncated: result.truncated,
+          durationMs: result.durationMs,
+          ...(killedBy ? { killedBy } : {}),
+        });
+      }
+      if (shareWithAgent) {
         await runAgent(
           `[user-executed-command]\n$ ${line}\n${formatExecOutput(result)}`,
         );
@@ -3660,6 +4267,18 @@ export function App({
           detail: detail ? `${title}\n${detail}` : title,
         },
       });
+      if (shareWithAgent) {
+        const failure = container.redactSensitiveOutput([title, detail].filter(Boolean).join('\n'));
+        await transcript.persist({
+          ...eventBase('command.completed', commandId),
+          execId: commandId,
+          exitCode: 1,
+          stdout: '',
+          stderr: failure,
+          truncated: false,
+          durationMs: 0,
+        });
+      }
     } finally {
       execAbort.current = null;
       stream.current = { rowId: null, text: '', dirty: false };
@@ -3836,15 +4455,30 @@ export function App({
   // `/mcp ` became useful, and made the prompt look like it had eaten input.
   const completionCount = argumentCompletion ? argumentMatches.length : completions.length;
   const showCompletions = completionCount > 0;
+  // Prose prediction is deliberately a single inline ghost. It never adds
+  // rows to the TUI and never competes with slash-command/emoji selectors.
+  const localMatches: readonly LocalSuggestion[] = !showCompletions && !showEmoji && !state.screen && !state.browser && !state.approval && !state.question && !state.picker
+    ? suggestLocal(input, cursor, {
+        settings: localAssistance,
+        history: history.current.recent(),
+        commands: matchCommands('').map((command) => command.name),
+        projectVocabulary: cwd.split(/[\\\/._-]+/g),
+      })
+    : [];
+  const inlineSuggestion = localMatches[0];
+  const inlineGhostText = inlineSuggestionSuffix(input, cursor, inlineSuggestion);
+  const showInlineSuggestion = inlineGhostText.length > 0;
   // An exact command row is informational; there is no alternative for the
   // arrows to choose. Let Up/Down recall history in `/effort` and similar
   // states, while argument menus and ambiguous prefixes still own the keys.
-  const completionOwnsArrows = showCompletions && !(
-    argumentCompletion === null &&
-    completions.length === 1 &&
-    typedCommandName !== null &&
-    isExactCommandMatch(completions[0]!, typedCommandName)
-  );
+  const completionOwnsArrows = showCompletions
+    ? !(
+        argumentCompletion === null &&
+        completions.length === 1 &&
+        typedCommandName !== null &&
+        isExactCommandMatch(completions[0]!, typedCommandName)
+      )
+    : false;
 
   function applyCompletion(command: Command): void {
     const completed = `/${command.name} `;
@@ -3865,6 +4499,14 @@ export function App({
     if (!argumentCompletion) return;
     const value = tabArgumentCompletion(argumentCompletion);
     if (value) applyArgumentCompletion(value);
+  }
+
+  function applyInlineSuggestion(): void {
+    if (!inlineSuggestion) return;
+    const next = applyLocalSuggestion(input, cursor, inlineSuggestion);
+    setInput(next.text);
+    setCursor(next.cursor);
+    setCompletionIndex(0);
   }
 
   // ---- keyboard ----------------------------------------------------------
@@ -3890,6 +4532,17 @@ export function App({
     const text = sanitizePastedText(raw);
     const firstLine = text.split('\n')[0] ?? '';
 
+    if (btwInput) {
+      if (firstLine) {
+        setBtwInput((previous) => previous
+          ? {
+              draft: previous.draft.slice(0, previous.cursor) + firstLine + previous.draft.slice(previous.cursor),
+              cursor: previous.cursor + firstLine.length,
+            }
+          : previous);
+      }
+      return;
+    }
     if (state.browser) {
       if (firstLine) dispatch({ type: 'browser.filter', filter: state.browser.filter + firstLine });
       return;
@@ -4132,6 +4785,14 @@ export function App({
       return;
     }
 
+    // BTW owns only its own draft. It is deliberately checked before the
+    // busy/queue branch so Enter starts a side request rather than queuing or
+    // cancelling the primary turn.
+    if (btwInput) {
+      handleBtwInputKey(char, key, deleteAction);
+      return;
+    }
+
     if (thinkingViewport.open) {
       const metrics = { contentLines: thinkingLines, height: thinkingRows };
       if (isControlShortcut(char, key, 'r') || key.escape) {
@@ -4217,6 +4878,13 @@ export function App({
       const selected = state.subagents[Math.min(state.subagentFocus, state.subagents.length - 1)];
       if (selected && subagents.current.cancel(selected.taskId)) return;
     }
+    // The inline predictor owns Tab before any secondary navigation. This is
+    // the only key that accepts a prose suggestion; Enter always submits.
+    if (key.tab && showInlineSuggestion && !showCompletions && !showEmoji) {
+      applyInlineSuggestion();
+      return;
+    }
+
     // Tab cycles subagent tabs whenever it is not completing a command. While
     // the agent is working there is nothing to complete, which is exactly when
     // there are subagents to look at.
@@ -4339,10 +5007,11 @@ export function App({
         return;
       }
       if ((key.upArrow || key.downArrow) && completionOwnsArrows) {
+        const limit = completionCount;
         setCompletionIndex((value) =>
           key.upArrow
             ? Math.max(0, value - 1)
-            : Math.min(completionCount - 1, value + 1),
+            : Math.min(limit - 1, value + 1),
         );
         return;
       }
@@ -4405,10 +5074,11 @@ export function App({
       if (key.upArrow || key.downArrow) {
         // Arrows drive the menu when it is open, and history when it is not.
         if (completionOwnsArrows) {
+          const limit = completionCount;
           setCompletionIndex((value) =>
             key.upArrow
               ? Math.max(0, value - 1)
-              : Math.min(completionCount - 1, value + 1),
+              : Math.min(limit - 1, value + 1),
           );
           return;
         }
@@ -4482,7 +5152,8 @@ export function App({
       // glyph the moment the second colon lands rather than waiting for Enter.
       const next = expandShortcodes(raw);
       const shrank = raw.length - next.length;
-
+      // Composer assistance is prediction-only. Nothing is rewritten while
+      // the user types; a suggestion is accepted explicitly with Tab.
       setInput(next);
       setEmojiIndex(0);
       setCursor((value) => Math.max(0, value + text.length - shrank));
@@ -4493,12 +5164,13 @@ export function App({
   function runSlashNow(line: string): void {
     const trimmed = line.trim();
     if (!trimmed) return;
+    const presentation = slashCommandPresentation(trimmed);
     setInput('');
     setCursor(0);
     setCompletionIndex(0);
     setPasted([]);
-    history.current.record(trimmed);
-    push(entry('input', trimmed));
+    if (presentation.remember) history.current.record(presentation.display);
+    if (presentation.timeline && presentation.display) push(entry('input', presentation.display));
     void runSlash(trimmed).catch((error: unknown) => {
       const { title, detail } = formatError(error);
       push(entry('step', title, { status: 'failed', tone: 'danger', ...(detail ? { detail } : {}) }));
@@ -4513,37 +5185,50 @@ export function App({
     const commandName = commandPrefix(line);
     const command = commandName === null ? '' : tokenize(line.slice(1))[0] ?? '';
     if (state.busy && runsWhileWorking(command)) {
-      runSlashNow(line);
+      runSlashSafely(line);
       return;
     }
     if (!state.busy && line.trim().startsWith('/')) {
-      runSlashNow(line);
+      runSlashSafely(line);
       return;
     }
     sendLine(line, submission.attachments);
   }
 
+  function runSlashSafely(line: string): void {
+    const name = tokenize(line.trim().slice(1))[0]?.toLowerCase() ?? '';
+    if (name === 'env') {
+      runSlashNow(line);
+      return;
+    }
+    void confirmSecretDraft(line).then((approved) => {
+      if (approved) runSlashNow(line);
+    });
+  }
+
   function sendLine(line: string, attachments = composerRef.current.attachments): void {
     if (!state.busy && line.trim().startsWith('/')) {
-      runSlashNow(line);
+      runSlashSafely(line);
       return;
     }
     if (state.busy) {
       const queued = line.trim();
       if (!queued && attachments.length === 0) return;
-      dispatch({
-        type: 'queue.push',
-        message: { id: `q${Date.now()}`, text: queued, attachments: [...attachments] },
+      const materialized = materializePastedLine(queued, attachments);
+      void confirmSecretDraft(materialized.text).then((approved) => {
+        if (!approved) return;
+        dispatch({
+          type: 'queue.push',
+          message: { id: `q${Date.now()}`, text: queued, attachments: [...attachments] },
+        });
+        setPasted([]);
+        setInput('');
+        setCursor(0);
+        setQueuedIndex(queueRef.current.length);
       });
-      setPasted([]);
-      setInput('');
-      setCursor(0);
-      setQueuedIndex(state.queue.length);
       return;
     }
-    setInput('');
-    setCursor(0);
-    void submit(line, attachments);
+    void submit(line, attachments, true);
   }
 
   async function resumeBrowserSession(id: string): Promise<void> {
@@ -4554,7 +5239,14 @@ export function App({
     try {
       const next = await engine.sessions.resolve(cwd, id);
       if (!next) throw new PlifError('INVALID_ARGUMENT', `session "${id}" was not found`);
-      const [history, contextReplay] = await Promise.all([next.history(), next.replay()]);
+      // Resolve the encrypted environment before moving the transcript
+      // pointer. If loading fails/changes session, the old session remains
+      // visible and no new turn can observe a half-switched environment.
+      const [history, contextReplay] = await Promise.all([
+        next.history(),
+        next.replay(),
+        loadSessionEnvironment(next),
+      ]);
       transcript.switchSession(next, history);
       conversation.current = conversationFromTranscript(contextReplay);
       // Rebuild the ordinary Ink scrollback, not a transcript dialog. The
@@ -4611,6 +5303,10 @@ export function App({
     try {
       const target = await engine.sessions.resolve(cwd, id);
       if (!target) throw new PlifError('INVALID_ARGUMENT', `session "${id}" was not found`);
+      if (loadedEnvironmentSession.current === target.id) {
+        applySessionEnvironment({});
+        loadedEnvironmentSession.current = null;
+      }
       await engine.sessions.remove(target.meta);
       dispatch({ type: 'browser.loading', loading: true });
       await openSessions();
@@ -5031,6 +5727,76 @@ export function App({
     }
   }
 
+  function handleBtwInputKey(
+    char: string,
+    key: Key,
+    deleteAction: 'backward' | 'forward' | null,
+  ): void {
+    const active = btwInput;
+    if (!active) return;
+    if (key.escape || (key.ctrl && char === 'c')) {
+      setBtwInput(null);
+      return;
+    }
+    if (key.return) {
+      if (active.draft.trim()) {
+        runBtw(active.draft);
+      }
+      return;
+    }
+    if (key.leftArrow) {
+      setBtwInput((previous) => previous
+        ? { ...previous, cursor: stepLeft(previous.draft, previous.cursor) }
+        : previous);
+      return;
+    }
+    if (key.rightArrow) {
+      setBtwInput((previous) => previous
+        ? { ...previous, cursor: stepRight(previous.draft, previous.cursor) }
+        : previous);
+      return;
+    }
+    if (key.ctrl && char === 'a') {
+      setBtwInput((previous) => previous ? { ...previous, cursor: 0 } : previous);
+      return;
+    }
+    if (key.ctrl && char === 'e') {
+      setBtwInput((previous) => previous ? { ...previous, cursor: previous.draft.length } : previous);
+      return;
+    }
+    if (deleteAction) {
+      setBtwInput((previous) => {
+        if (!previous) return previous;
+        const position = Math.max(0, Math.min(previous.cursor, previous.draft.length));
+        if (deleteAction === 'backward') {
+          if (position === 0) return previous;
+          const nextCursor = stepLeft(previous.draft, position);
+          return {
+            draft: previous.draft.slice(0, nextCursor) + previous.draft.slice(position),
+            cursor: nextCursor,
+          };
+        }
+        if (position >= previous.draft.length) return previous;
+        const nextCursor = stepRight(previous.draft, position);
+        return {
+          draft: previous.draft.slice(0, position) + previous.draft.slice(nextCursor),
+          cursor: position,
+        };
+      });
+      return;
+    }
+    if (char && !key.ctrl && !key.meta) {
+      const text = sanitizePastedText(char);
+      if (!text) return;
+      setBtwInput((previous) => {
+        if (!previous) return previous;
+        const position = Math.max(0, Math.min(previous.cursor, previous.draft.length));
+        const draft = previous.draft.slice(0, position) + text + previous.draft.slice(position);
+        return { draft, cursor: position + text.length };
+      });
+    }
+  }
+
   /**
    * Answering the agent.
    *
@@ -5066,6 +5832,10 @@ export function App({
       return;
     }
     if (key.escape || (key.ctrl && char === 'c')) {
+      if (question.text === SECRET_FIRST_QUESTION || question.text === SECRET_FINAL_QUESTION) {
+        engine.questions.answer(question.id, 'cancel');
+        return;
+      }
       engine.questions.abandonAll();
       cancelRunning();
       return;
@@ -5258,6 +6028,8 @@ export function App({
     background: tasks.some((task) => task.status === 'running'),
     queued: state.queue.length,
   });
+  const btwWidth = Math.max(1, surface.contentWidth - 2);
+  const btwRows = btwPanelHeight(btwView, btwInput?.draft, btwWidth);
   const hints: Hint[] = state.screen?.kind === 'status'
     ? [{ key: 'Esc', label: 'close' }]
     : state.screen?.kind === 'config'
@@ -5293,6 +6065,12 @@ export function App({
         { key: '↑↓', label: 'choose' },
         { key: 'Enter', label: 'select' },
         { key: 'Esc', label: 'cancel' },
+      ]
+    : btwInput
+    ? [
+        { key: 'type', label: 'side question' },
+        { key: 'Enter', label: 'ask' },
+        { key: 'Esc', label: 'close' },
       ]
     : state.approval
     ? [
@@ -5344,6 +6122,7 @@ export function App({
     state.browser ||
     state.question ||
     state.picker ||
+    btwInput !== null ||
     state.approval ||
     showEmoji ||
     showCompletions,
@@ -5434,6 +6213,11 @@ export function App({
   const compactDialogs = rows < 34;
   const suggestionRows = Math.max(1, Math.min(6, surface.contentHeight - 8));
   const completionHeadingRows = showCompletions && !argumentCompletion ? 2 : 0;
+  const secretWarningStage = state.question?.text === SECRET_FIRST_QUESTION
+    ? 'first'
+    : state.question?.text === SECRET_FINAL_QUESTION
+      ? 'final'
+      : null;
 
   const workingRows = working ? 1 : 0;
   const promptFooterRows = promptStatus ? 1 : 0;
@@ -5455,7 +6239,9 @@ export function App({
         ? 12
         : pickerRows + 8
       : 0) +
+    btwRows +
     (state.approval ? approvalHeight(compactDialogs) : 0) +
+    (secretWarningStage ? 1 : 0) +
     (state.question ? questionHeight(state.question, compactDialogs, state.questionExpanded) : 0) +
     (state.compaction ? COMPACTION_HEIGHT + 1 : 0) +
     discoveryRows +
@@ -5491,7 +6277,7 @@ export function App({
   );
   const animationActive = !state.screen && animationClockActive({
       effort,
-    busy: state.busy,
+    busy: state.busy || btwView?.phase === 'working',
     compacting: state.compaction !== null,
     browserLoading: state.browser?.loading === true,
     runningTask: tasks.some(
@@ -5504,14 +6290,14 @@ export function App({
     // selectors stay completely static; keyboard navigation must be the only
     // thing that changes them.
     ambientFocus: Boolean(stdout.isTTY) && (
-      !state.approval && !state.question && !state.picker && !state.browser && !state.screen && !state.exiting
+      !state.approval && !state.question && !state.picker && !btwInput && !state.browser && !state.screen && !state.exiting
     ),
   });
   // The full travelling wave is reserved for actual work and bounded
   // transitions; an idle frame that waved as hard as a busy one would make
   // "waiting" and "working" the same visual.
   const frameActive = !state.screen && strongFrameActive({
-    busy: state.busy,
+    busy: state.busy || btwView?.phase === 'working',
     compacting: state.compaction !== null,
     browserLoading: state.browser?.loading === true,
     runningTask: tasks.some(
@@ -5712,6 +6498,12 @@ export function App({
 
             {state.question && (
               <Box paddingX={1}>
+                {secretWarningStage && (
+                  <SecretWarning
+                    stage={secretWarningStage}
+                    width={Math.max(1, surface.contentWidth - 2)}
+                  />
+                )}
                 <Question
                   question={state.question}
                   selected={state.questionChoice}
@@ -5732,6 +6524,17 @@ export function App({
             )}
 
             <Discovery calls={state.discovery.calls} open={state.discovery.open} width={surface.contentWidth} />
+
+            {(btwInput !== null || btwView !== null) && (
+              <Box paddingX={1}>
+                <BtwPanel
+                  state={btwView}
+                  {...(btwInput ? { draft: btwInput.draft, cursor: btwInput.cursor } : {})}
+                  width={btwWidth}
+                  now={now}
+                />
+              </Box>
+            )}
 
             <Box flexGrow={1} />
 
@@ -5789,10 +6592,11 @@ export function App({
                 // Focused while busy too: the field takes input the whole time, and
                 // an unfocused-looking box that nonetheless accepts typing is a lie
                 // about where the keystrokes are going.
-                focused={!codexLogin && !state.approval && !state.question && !state.picker}
+                focused={!codexLogin && !state.approval && !state.question && !state.picker && !btwInput}
                 busy={state.busy}
                 busyLabel={state.busyLabel}
                 width={surface.contentWidth}
+                {...(showInlineSuggestion ? { inlineSuggestion: inlineGhostText } : {})}
                 maxRows={promptRows}
                 effort={effort}
                 {...(promptStatus ? { status: promptStatus } : {})}

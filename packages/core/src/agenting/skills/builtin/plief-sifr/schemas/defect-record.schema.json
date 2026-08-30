@@ -1,5 +1,5 @@
 {
-  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "plief.sifr:defect-record:v1",
   "type": "object",
   "required": ["group_id", "symptom", "owner_candidate", "severity_hint"],

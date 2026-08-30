@@ -108,6 +108,34 @@ function numericSetting(
   };
 }
 
+function composerBooleanSetting(
+  id: string,
+  label: string,
+  description: string,
+  key: 'autocomplete',
+  config: ConfigRuntime,
+  actions: ConfigActions,
+  fallback: boolean,
+): ConfigSetting {
+  const enabled = config.config.composer?.[key] ?? fallback;
+  return {
+    id,
+    label,
+    category: 'Interface',
+    description,
+    kind: 'boolean',
+    scope: 'global',
+    value: binaryStateIndicator(enabled ? 'on' : 'off').icon,
+    state: enabled ? 'on' : 'off',
+    inputValue: enabled ? 'true' : 'false',
+    searchableTerms: ['composer', 'local', 'writing', key],
+    apply: async (value) => {
+      if (value !== 'true' && value !== 'false') throw new Error('Enter true or false.');
+      await actions.updateGlobal({ composer: { ...config.config.composer, [key]: value === 'true' } });
+    },
+  };
+}
+
 /**
  * Build the settings catalogue from the actual runtime and persisted config.
  * The renderer only receives this view model; it never guesses a setting's
@@ -135,6 +163,31 @@ export function createConfigSettings(runtime: ConfigRuntime, actions: ConfigActi
       options: runtime.themes.map((item) => option(item.id, item.name, item.description)),
       searchableTerms: ['appearance', 'palette', 'colors', 'colours'],
       apply: actions.setTheme,
+    },
+    composerBooleanSetting(
+      'autocomplete',
+      'Local autocomplete',
+      'Predict the next word from local context, prompt history, commands, and this project.',
+      'autocomplete',
+      runtime,
+      actions,
+      true,
+    ),
+    {
+      id: 'language',
+      label: 'Writing language',
+      category: 'Interface',
+      description: 'Local writing assistance language. English is the default and current supported language.',
+      kind: 'enum',
+      scope: 'global',
+      value: runtime.config.composer?.language ?? 'English',
+      inputValue: runtime.config.composer?.language ?? 'en',
+      options: [option('en', 'English', 'local contextual prediction')],
+      searchableTerms: ['composer', 'local', 'language', 'english'],
+      apply: async (value) => {
+        if (value !== 'en') throw new Error('English is the only bundled writing language.');
+        await actions.updateGlobal({ composer: { ...runtime.config.composer, language: value } });
+      },
     },
     {
       id: 'permissionMode',

@@ -1,5 +1,6 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { changelogFromNpmTarball } from './changelog.js';
 
 const REGISTRY = 'https://registry.npmjs.org';
 const PACKAGE = '@plif/cli';
@@ -12,6 +13,10 @@ export interface UpdateStatus {
   readonly behind: boolean;
   /** The command that installs it, ready to be shown. */
   readonly command: string;
+  readonly packageName: string;
+  readonly tarball?: string;
+  readonly integrity?: string;
+  readonly changelog: string;
 }
 
 export interface UpdateCheckOptions {
@@ -27,6 +32,9 @@ export interface UpdateCheckOptions {
 interface Cache {
   readonly checkedAt: number;
   readonly latest: string;
+  readonly tarball?: string;
+  readonly integrity?: string;
+  readonly changelog?: string;
 }
 
 /**
@@ -57,20 +65,20 @@ export function isNewer(candidate: string, current: string): boolean {
   return a.pre > b.pre;
 }
 
-async function readCache(file: string, ttlMs: number): Promise<string | null> {
+async function readCache(file: string, ttlMs: number): Promise<Cache | null> {
   try {
     const cache = JSON.parse(await readFile(file, 'utf8')) as Cache;
     if (typeof cache.latest !== 'string' || typeof cache.checkedAt !== 'number') return null;
-    return Date.now() - cache.checkedAt < ttlMs ? cache.latest : null;
+    return Date.now() - cache.checkedAt < ttlMs ? cache : null;
   } catch {
     return null;
   }
 }
 
-async function writeCache(file: string, latest: string): Promise<void> {
+async function writeCache(file: string, update: Omit<Cache, 'checkedAt'>): Promise<void> {
   try {
     await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, JSON.stringify({ checkedAt: Date.now(), latest } satisfies Cache), 'utf8');
+    await writeFile(file, JSON.stringify({ checkedAt: Date.now(), ...update } satisfies Cache), 'utf8');
   } catch {
     // A cache that cannot be written costs one request next time.
   }
@@ -94,9 +102,18 @@ export async function checkForUpdate(options: UpdateCheckOptions): Promise<Updat
   const ttlMs = options.ttlMs ?? CACHE_TTL_MS;
   const command = `npm install -g ${PACKAGE}@latest`;
 
-  const decide = (latest: string): UpdateStatus | null =>
-    isNewer(latest, options.current)
-      ? { current: options.current, latest, behind: true, command }
+  const decide = (cache: Cache): UpdateStatus | null =>
+    isNewer(cache.latest, options.current) && cache.changelog
+      ? {
+          current: options.current,
+          latest: cache.latest,
+          behind: true,
+          command,
+          packageName: PACKAGE,
+          ...(cache.tarball ? { tarball: cache.tarball } : {}),
+          ...(cache.integrity ? { integrity: cache.integrity } : {}),
+          changelog: cache.changelog,
+        }
       : null;
 
   const cached = await readCache(options.cacheFile, ttlMs);
@@ -116,11 +133,38 @@ export async function checkForUpdate(options: UpdateCheckOptions): Promise<Updat
     );
     if (!response.ok) return null;
 
-    const body = (await response.json()) as { version?: unknown };
-    if (typeof body.version !== 'string') return null;
-
-    await writeCache(options.cacheFile, body.version);
-    return decide(body.version);
+    const body = (await response.json()) as {
+      version?: unknown;
+      ['dist-tags']?: { latest?: unknown };
+      versions?: Record<string, { dist?: { tarball?: unknown; integrity?: unknown } }>;
+      dist?: { tarball?: unknown; integrity?: unknown };
+    };
+    const latest = typeof body['dist-tags']?.latest === 'string'
+      ? body['dist-tags'].latest
+      : typeof body.version === 'string' ? body.version : null;
+    if (!latest) return null;
+    const release = body.versions?.[latest]?.dist ?? body.dist;
+    let cache: Omit<Cache, 'checkedAt'> = {
+      latest,
+      ...(typeof release?.tarball === 'string' ? { tarball: release.tarball } : {}),
+      ...(typeof release?.integrity === 'string' ? { integrity: release.integrity } : {}),
+    };
+    if (cache.tarball && isNewer(latest, options.current)) {
+      try {
+        const changelogResponse = await request(cache.tarball, {
+          signal: AbortSignal.timeout(options.timeoutMs ?? TIMEOUT_MS),
+          headers: { accept: 'application/octet-stream' },
+        });
+        if (changelogResponse.ok) {
+          const section = changelogFromNpmTarball(new Uint8Array(await changelogResponse.arrayBuffer()), latest);
+          if (section) cache = { ...cache, changelog: section.text };
+        }
+      } catch {
+        return null;
+      }
+    }
+    await writeCache(options.cacheFile, cache);
+    return decide({ checkedAt: Date.now(), ...cache });
   } catch {
     // Offline, blocked, slow, or behind a proxy that hates us. None of that is
     // the developer's problem right now.

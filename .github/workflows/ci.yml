@@ -9,7 +9,7 @@ jobs:
   check:
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-22.04]
+        os: [windows-latest, ubuntu-22.04, macos-latest]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -25,5 +25,84 @@ jobs:
       - run: npm ci
       - if: runner.os == 'Linux'
         run: node --import tsx --test packages/sandbox/test/linux-backend.test.ts
+      - name: Check workspace versions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $paths = @(
+            'package.json',
+            'packages/acp/package.json',
+            'packages/cli/package.json',
+            'packages/core/package.json',
+            'packages/sandbox/package.json'
+          )
+          $manifests = @{}
+          foreach ($path in $paths) {
+            $manifests[$path] = Get-Content -Raw $path | ConvertFrom-Json
+          }
+
+          $expected = [string]$manifests['package.json'].version
+          if ([string]::IsNullOrWhiteSpace($expected)) {
+            throw 'The workspace root has no version.'
+          }
+
+          foreach ($path in $paths) {
+            $actual = [string]$manifests[$path].version
+            if ($actual -ne $expected) {
+              throw "$path has version $actual; expected workspace version $expected."
+            }
+          }
+
+          $dependencyChecks = @(
+            @{ Path = 'packages/acp/package.json'; Dependency = '@plif/core' },
+            @{ Path = 'packages/cli/package.json'; Dependency = '@plif/core' },
+            @{ Path = 'packages/cli/package.json'; Dependency = '@plif/sandbox' },
+            @{ Path = 'packages/core/package.json'; Dependency = '@plif/sandbox' }
+          )
+          foreach ($check in $dependencyChecks) {
+            $property = $manifests[$check.Path].dependencies.PSObject.Properties[$check.Dependency]
+            if ($null -eq $property -or [string]$property.Value -ne $expected) {
+              throw "$($check.Path) must depend on $($check.Dependency)@$expected."
+            }
+          }
+
+          Write-Host "Workspace packages are consistently versioned at $expected."
       - run: npm run typecheck
+      - run: npm run build
       - run: npm test
+      - name: Validate release package contents
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $targets = @(
+            @{ Name = '@plif/sandbox'; Required = @('dist/index.js', 'LICENSE', 'NOTICE') },
+            @{ Name = '@plif/core'; Required = @('dist/index.js', 'dist/index.d.ts', 'schema/config.schema.toml', 'LICENSE', 'NOTICE') },
+            @{ Name = '@plif/acp'; Required = @('dist/index.js', 'README.md', 'SECURITY.md', 'LICENSE', 'NOTICE') },
+            @{ Name = '@plif/cli'; Required = @('dist/main.js', 'README.md', 'CHANGELOG.md', 'LICENSE', 'NOTICE') }
+          )
+
+          foreach ($target in $targets) {
+            $json = (& npm pack --workspace $target.Name --dry-run --json --loglevel=error | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0) {
+              throw "npm pack failed for $($target.Name)."
+            }
+
+            try {
+              $result = $json | ConvertFrom-Json
+            } catch {
+              throw "npm pack returned invalid JSON for $($target.Name): $($_.Exception.Message)"
+            }
+
+            $pack = if ($result -is [array]) { $result[-1] } else { $result }
+            if ($null -eq $pack.files) {
+              throw "npm pack did not report files for $($target.Name)."
+            }
+
+            $files = @($pack.files | ForEach-Object { [string]$_.path })
+            foreach ($required in $target.Required) {
+              if ($files -notcontains $required) {
+                throw "$($target.Name) tarball is missing $required."
+              }
+            }
+            Write-Host "$($target.Name) pack contains all required release files."
+          }

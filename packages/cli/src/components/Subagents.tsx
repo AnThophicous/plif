@@ -18,7 +18,7 @@ const VISIBLE_LINES = 6;
 
 export function subagentsHeight(views: readonly SubagentView[], open: boolean): number {
   if (views.length === 0) return 0;
-  return 1 + (open ? VISIBLE_LINES + 3 : 0);
+  return 1 + (open ? VISIBLE_LINES + 5 : 0);
 }
 
 export function Subagents({
@@ -27,7 +27,7 @@ export function Subagents({
   open,
   width,
 }: SubagentsProps): React.ReactElement | null {
-  const spinner = useSpinnerFrame(80, views.length > 0);
+  const spinner = useSpinnerFrame(80, views.some((view) => view.status === 'running'));
   if (views.length === 0) return null;
 
   const index = Math.min(Math.max(0, focus), views.length - 1);
@@ -38,6 +38,10 @@ export function Subagents({
     <Box flexDirection="column" paddingX={layout.gutter} width="100%">
       {open && (
         <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+          <Text color={color('accent')}>Forked from ID-{truncate(active.forkedFrom ?? 'unknown', Math.max(18, inner - 20))}</Text>
+          {active.sessionId && (
+            <Text color={color('faint')}>History session {truncate(active.sessionId, Math.max(12, inner - 20))}</Text>
+          )}
           <Meter
             value={active.contextUsed}
             max={active.contextMax}

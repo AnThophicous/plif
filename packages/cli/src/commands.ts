@@ -16,6 +16,7 @@ import {
   credentialVariableForProvider,
   discoverProviderModels,
   discoveredModelCost,
+  forgetDiscoveredModels,
   EFFORT_LEVELS,
   findCatalogModel,
   findCatalogProvider,
@@ -39,6 +40,7 @@ import {
   appendTokenSplitSanity,
   unavailableUsage,
   loadTokenSplitConfig,
+  mergeCustomProviderConfig,
   readTokenSplitAudit,
   readTokenSplitMetrics,
   readTokenSplitSanity,
@@ -80,6 +82,11 @@ import {
 } from '@plif/core';
 
 import { formatCapabilities, tokenize } from './format.js';
+import {
+  isDotEnvPath,
+  normalizeEnvName,
+} from './commands/env.js';
+import type { EnvCommandActions, EnvStatus } from './commands/env.js';
 import { effortVisual } from './effort-visuals.js';
 import {
   effortPickerItems,
@@ -150,6 +157,19 @@ export interface CommandContext {
   /** Pull an image off the clipboard and attach it to the line being typed. */
   readonly pasteImage: () => Promise<void>;
   readonly openPicker: (picker: FlatPickerRequest | CatalogPickerRequest) => void;
+  /** Open the session-scoped environment surface without printing values. */
+  readonly openEnv?: () => void | Promise<void>;
+  /** Open the isolated BTW input surface. */
+  readonly openBtw?: () => void | Promise<void>;
+  /** Session environment operations; values are accepted only through this seam. */
+  readonly env?: EnvCommandActions;
+  /** Resolves after pending transcript writes, so /env never races lazy session creation. */
+  readonly hasPersistentSession?: () => Promise<boolean>;
+  /** The mutable runtime map injected after a newly-created container is running. */
+  readonly containerEnvironment?: () => Readonly<Record<string, string>>;
+  /** Start/cancel a read-only, non-transcript BTW request. */
+  readonly runBtw?: (question: string) => void | Promise<void>;
+  readonly cancelBtw?: () => void;
   /** Optional live notice for asynchronous picker actions. */
   readonly notify?: (notice: TimelineEntry) => void;
   readonly copySession?: () => Promise<void>;
@@ -252,6 +272,90 @@ export interface Command {
   /** Optional argument metadata consumed by the generic TAB completer. */
   readonly autocomplete?: CommandAutocomplete;
   readonly run: (argv: readonly string[], context: CommandContext) => Promise<CommandResult>;
+}
+
+export interface SlashCommandPresentation {
+  /** Safe text, if any, that may be shown in the main timeline. */
+  readonly display: string;
+  /** Secret-bearing commands are deliberately absent from composer history. */
+  readonly remember: boolean;
+  /** Side-channel commands do not become rows in the main conversation view. */
+  readonly timeline: boolean;
+}
+
+/**
+ * Keep local command values out of both the timeline and shell history. This
+ * is intentionally independent from command execution: the raw argv is still
+ * passed to `/env set`, but its presentation is decided before any UI write.
+ */
+export function slashCommandPresentation(line: string): SlashCommandPresentation {
+  const trimmed = line.trim();
+  const words = tokenize(trimmed.startsWith('/') ? trimmed.slice(1) : trimmed);
+  const name = words[0]?.toLowerCase() ?? '';
+  if (name === 'btw') return { display: '', remember: false, timeline: false };
+  if (name === 'env' && words[1]?.toLowerCase() === 'set' && words.length > 3) {
+    const variable = words[2] ?? 'NAME';
+    return {
+      display: `/env set ${variable} [secret omitted]`,
+      remember: false,
+      timeline: true,
+    };
+  }
+  return { display: trimmed, remember: true, timeline: true };
+}
+
+export function parseBtwAction(argv: readonly string[]):
+  | { readonly action: 'open' }
+  | { readonly action: 'cancel' }
+  | { readonly action: 'ask'; readonly question: string } {
+  const words = argv.map((word) => word.trim()).filter(Boolean);
+  if (words.length === 0) return { action: 'open' };
+  if (words[0]?.toLowerCase() === 'cancel' && words.length === 1) return { action: 'cancel' };
+  return { action: 'ask', question: words.join(' ') };
+}
+
+function envUnavailableEntry(): CommandResult {
+  return ok(
+    entry('notice', '/env needs a persistent session', {
+      tone: 'muted',
+      subtitle: 'Start a normal conversation first; secrets are never attached to a session-less run.',
+    }),
+  );
+}
+
+async function envGate(context: CommandContext): Promise<CommandResult | null> {
+  if (context.hasPersistentSession && !(await context.hasPersistentSession())) {
+    return envUnavailableEntry();
+  }
+  if (!context.env) {
+    return ok(
+      entry('notice', 'secure environment storage is unavailable', {
+        tone: 'warn',
+        subtitle: 'No plaintext fallback was used; start Plif with its platform credential store enabled.',
+      }),
+    );
+  }
+  return null;
+}
+
+function envStatusDetail(status: EnvStatus): string {
+  const storageLabel = status.storage === 'encrypted' ? 'encrypted at rest' : 'memory only';
+  const storedLabel = status.storage === 'encrypted' ? 'stored securely' : 'held in process memory';
+  const lines = [
+    `storage  ${storageLabel}`,
+    'values   never rendered · never written to the transcript',
+    `loaded   ${status.variables.filter((variable) => variable.loaded).length}/${status.variables.length} active in the container`,
+  ];
+  if (status.warning) lines.push(`warning  ${status.warning}`);
+  if (status.variables.length > 0) {
+    lines.push('', 'keys');
+    lines.push(...status.variables.map((variable) =>
+      `  ${variable.name} · ${variable.loaded ? 'active in container memory' : `${storedLabel}, not loaded`}`,
+    ));
+  } else {
+    lines.push('', 'keys', '  (none saved for this project)');
+  }
+  return lines.join('\n');
 }
 
 export function runsWhileWorking(name: string): boolean {
@@ -936,7 +1040,12 @@ async function providerAccessMap(
 }
 
 function isLocalEndpoint(endpoint: string): boolean {
-  return /^https?:\/\/(?:127\.0\.0\.1|localhost|::1)(?::\d+)?(?:\/|$)/i.test(endpoint);
+  try {
+    const host = new URL(endpoint).hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1' || host === '0.0.0.0';
+  } catch {
+    return false;
+  }
 }
 
 function formatContext(tokens: number): string {
@@ -989,6 +1098,107 @@ function providerPickerItems(
   });
 }
 
+const ADD_CUSTOM_PROVIDER = '__plif_add_custom_provider__';
+
+function safeProviderEndpoint(value: string): string {
+  try {
+    const url = new URL(value);
+    url.username = '';
+    url.password = '';
+    for (const key of [...url.searchParams.keys()]) {
+      if (/(key|secret|token|password|credential|auth)/i.test(key)) url.searchParams.delete(key);
+    }
+    return url.toString();
+  } catch {
+    return 'custom endpoint';
+  }
+}
+
+/** One guided path for a custom OpenAI-compatible gateway and its model list. */
+async function addCustomProvider(context: CommandContext, stored: StoredConfig): Promise<boolean> {
+  const id = (await context.engine.questions.ask({
+    text: 'Provider id',
+    context: 'Use letters, numbers, dots, underscores or hyphens. Reusing an id updates its model list without deleting existing metadata.',
+  }))?.trim();
+  if (!id) return false;
+
+  const baseURL = (await context.engine.questions.ask({
+    text: 'Base URL',
+    context: 'Example: https://gateway.example.com/v1 · local HTTP endpoints can skip the key prompt.',
+  }))?.trim();
+  if (!baseURL) return false;
+
+  const label = (await context.engine.questions.ask({
+    text: 'Display name (optional)',
+    context: 'Press Enter to use the provider id in pickers.',
+  }))?.trim();
+  const modelText = (await context.engine.questions.ask({
+    text: 'Model ids (comma-separated, optional)',
+    context: 'Example: llama-3.1-8b, qwen2.5-coder-32b · leave blank to rely on the provider model endpoint.',
+  }))?.trim();
+  const models = [...new Set((modelText ?? '').split(',').map((model) => model.trim()).filter(Boolean))]
+    .map((model) => ({ id: model }));
+  const local = isLocalEndpoint(baseURL);
+  const apiKey = local
+    ? undefined
+    : (await context.engine.questions.ask({
+        text: 'API key (optional)',
+        secret: true,
+        context: 'The value is masked, never enters the transcript, and is stored only in the encrypted credential broker. Press Esc to leave the provider locked until later.',
+      }))?.trim() || undefined;
+
+  let next: StoredConfig;
+  try {
+    next = mergeCustomProviderConfig(stored, {
+      id,
+      ...(label ? { label } : {}),
+      baseURL,
+      auth: local ? 'none' : 'api-key',
+      needKey: !local,
+      ...(models.length > 0 ? { models } : {}),
+    });
+    await saveGlobalConfig(next);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'invalid provider definition';
+    context.notify?.(entry('notice', 'provider was not saved', {
+      tone: 'danger',
+      subtitle: message,
+    }));
+    return false;
+  }
+
+  let credentialSaved = false;
+  if (apiKey && context.credentials) {
+    try {
+      await context.credentials.remember(credentialVariableForProvider(id, next), apiKey);
+      credentialSaved = true;
+    } catch {
+      context.notify?.(entry('notice', `provider ${label || id} saved without its key`, {
+        tone: 'warn',
+        subtitle: 'The endpoint is configured, but its key could not be persisted securely. Nothing was written in plaintext.',
+      }));
+    }
+  }
+
+  forgetDiscoveredModels(id);
+  const discovered = await discoverProviderModels(id, {
+    stored: next,
+    ...(apiKey ? { apiKey } : {}),
+    refresh: true,
+    waitForNetwork: true,
+  }).catch(() => null);
+  const modelCount = discovered?.live && discovered.ids.length > 0
+    ? `${discovered.ids.length} model${discovered.ids.length === 1 ? '' : 's'} discovered`
+    : models.length > 0
+      ? `${models.length} configured model${models.length === 1 ? '' : 's'}`
+      : 'models will appear after the first successful discovery';
+  context.notify?.(entry('notice', `provider ${label || id} ready`, {
+    tone: 'success',
+    subtitle: `${safeProviderEndpoint(baseURL)} · ${modelCount}${apiKey && credentialSaved ? ' · key saved securely' : ''}`,
+  }));
+  return true;
+}
+
 async function openProviderPicker(
   context: CommandContext,
   stored: StoredConfig,
@@ -1008,14 +1218,32 @@ async function openProviderPicker(
       ...(key ? { apiKey: key } : {}),
     }));
   }));
-  const items = providerPickerItems(sources, activeProvider, access, discovered);
+  const items = [
+    {
+      value: ADD_CUSTOM_PROVIDER,
+      label: 'Add custom provider',
+      detail: 'Endpoint + model list + masked key · no config file editing required',
+      symbol: '+',
+      searchText: 'add custom provider gateway endpoint model',
+    },
+    ...providerPickerItems(sources, activeProvider, access, discovered),
+  ];
   context.openPicker({
     title: 'Select provider',
-    hint: `active: ${activeLabel ?? 'none'} · Enter opens its models`,
+    hint: `active: ${activeLabel ?? 'none'} · Enter opens models · choose Add custom provider for a guided setup`,
     countLabel: 'providers',
     items,
-    selected: Math.max(0, items.findIndex((item) => item.current)),
+    selected: Math.max(0, items.findIndex((item) => item.current) + 1),
     onPick: (value) => {
+      if (String(value) === ADD_CUSTOM_PROVIDER) {
+        void (async () => {
+          if (await addCustomProvider(context, stored)) {
+            const refreshed = (await loadGlobalConfig().catch(() => ({}))) as StoredConfig;
+            await openProviderPicker(context, refreshed, providerSources(refreshed), onBack);
+          }
+        })();
+        return;
+      }
       const selected = sources.find(({ entryProvider }) => entryProvider.id === String(value))?.entryProvider;
       if (!selected) return;
       const sameProvider = selected.id === activeProvider;
@@ -1956,6 +2184,134 @@ export const COMMANDS: readonly Command[] = [
     },
   },
   {
+    name: 'env',
+    concurrent: true,
+    args: '[set NAME [value] | import <file.env> | delete NAME | clear | status]',
+    summary: 'Manage project-scoped secrets without ever showing their values',
+    autocomplete: {
+      getValues: ({ argumentIndex }) => argumentIndex === 0
+        ? ['set', 'import', 'delete', 'clear', 'status']
+        : [],
+      getDetail: (value) => value === 'set'
+        ? 'Ask privately for a value; the project vault injects it into future container processes'
+        : value === 'import'
+          ? 'Import names and values from a dotenv file through the project vault; values never enter the transcript'
+          : value === 'delete'
+            ? 'Remove one project secret'
+            : value === 'clear'
+              ? 'Remove every stored secret from this project'
+              : 'Show names and secure/in-memory state only',
+    },
+    run: async (argv, context) => {
+      const blocked = await envGate(context);
+      if (blocked) return blocked;
+      const env = context.env!;
+      const action = argv[0]?.trim().toLowerCase() ?? '';
+
+      if (!action) {
+        if (context.openEnv) {
+          await context.openEnv();
+          return ok();
+        }
+        const status = await env.status();
+        return ok(entry('notice', 'project environment', {
+          tone: 'accent',
+          subtitle: `${status.variables.length} ${status.storage === 'encrypted' ? 'encrypted' : 'memory-only'} key(s) · values hidden`,
+          detail: envStatusDetail(status),
+          expand: true,
+        }));
+      }
+
+      if (action === 'set') {
+        const name = normalizeEnvName(argv[1] ?? '');
+        const supplied = argv.length > 2 ? argv.slice(2).join(' ') : undefined;
+        const result = await env.set(name, supplied);
+        return ok(entry('notice', result.saved ? `env ${result.name} saved` : `env ${result.name} unchanged`, {
+          tone: result.saved ? 'success' : 'muted',
+          subtitle: result.saved
+            ? 'stored through the project vault · active in the running container on the next process'
+            : 'no value was entered; the secret never entered the timeline or composer history',
+        }));
+      }
+
+      if (action === 'import') {
+        const file = argv[1]?.trim();
+        if (!file) throw new PlifError('INVALID_ARGUMENT', 'usage: /env import <file.env>');
+        if (!isDotEnvPath(file)) {
+          throw new PlifError('INVALID_ARGUMENT', 'import expects a dotenv file', {
+            hint: 'Use a file named .env, .env.local, or *.env.',
+          });
+        }
+        const imported = await env.importFile(file);
+        return ok(entry('notice', `imported ${imported.names.length} environment key(s)`, {
+          tone: 'success',
+          subtitle: 'stored through the project vault · nothing was copied to the timeline',
+          detail: imported.names.length ? imported.names.join('\n') : '(no assignments found)',
+          expand: true,
+        }));
+      }
+
+      if (action === 'delete') {
+        const name = normalizeEnvName(argv[1] ?? '');
+        const removed = await env.delete(name);
+        return ok(entry('notice', removed ? `env ${name} deleted` : `env ${name} was not saved`, {
+          tone: removed ? 'success' : 'muted',
+          subtitle: removed ? 'removed from encrypted storage and the active container map' : 'nothing changed',
+        }));
+      }
+
+      if (action === 'clear') {
+        const count = await env.clear();
+        return ok(entry('notice', `cleared ${count} environment key(s)`, {
+          tone: count > 0 ? 'success' : 'muted',
+          subtitle: 'project vault and the active container map are empty',
+        }));
+      }
+
+      if (action === 'status') {
+        const status = await env.status();
+        return ok(entry('notice', 'project environment', {
+          tone: 'accent',
+          subtitle: `${status.variables.length} ${status.storage === 'encrypted' ? 'encrypted' : 'memory-only'} key(s) · values hidden`,
+          detail: envStatusDetail(status),
+          expand: true,
+        }));
+      }
+
+      throw new PlifError('INVALID_ARGUMENT', 'usage: /env [set NAME [value] | import <file.env> | delete NAME | clear | status]');
+    },
+  },
+
+  {
+    name: 'btw',
+    concurrent: true,
+    args: '[<question> | cancel]',
+    summary: 'Ask an isolated read-only side question without interrupting the main agent',
+    run: async (argv, context) => {
+      const action = parseBtwAction(argv);
+      if (action.action === 'cancel') {
+        if (context.cancelBtw) context.cancelBtw();
+        return ok();
+      }
+      if (action.action === 'open') {
+        if (context.openBtw) {
+          await context.openBtw();
+          return ok();
+        }
+        return ok(entry('notice', 'BTW is ready', {
+          tone: 'accent',
+          subtitle: 'Use /btw <question> for a read-only side answer; it never enters the main transcript.',
+        }));
+      }
+      if (!context.runBtw) {
+        throw new PlifError('INTERNAL', 'the BTW side-channel is unavailable in this host');
+      }
+      await context.runBtw(action.question);
+      return ok();
+    },
+  },
+
+  {
     name: 'sessions',
     concurrent: true,
     summary: 'Browse and resume conversations in this workspace',
@@ -2117,6 +2473,13 @@ export const COMMANDS: readonly Command[] = [
           ? { workdir: containerWorkdir(context.cwd) }
           : {}),
       });
+      // Do this only after Engine.run has transitioned the container to
+      // running. Passing the map in the spec would persist decrypted values in
+      // the container metadata on disk.
+      const environment = context.containerEnvironment?.();
+      if (environment && Object.keys(environment).length > 0) {
+        container.applyEnvironment(environment);
+      }
       context.setCurrent(container);
 
       return ok(
@@ -2305,9 +2668,21 @@ export const COMMANDS: readonly Command[] = [
   {
     name: 'providers',
     aliases: ['provider'],
+    args: '[add]',
     summary: 'Choose a provider, then one of its models',
-    run: async (_argv, context) => {
+    run: async (argv, context) => {
       const stored = (await loadGlobalConfig().catch(() => ({}))) as StoredConfig;
+      const action = argv[0]?.trim().toLowerCase();
+      if (action && action !== 'add') {
+        throw new PlifError('INVALID_ARGUMENT', 'usage: /providers [add]');
+      }
+      if (action === 'add') {
+        if (await addCustomProvider(context, stored)) {
+          const refreshed = (await loadGlobalConfig().catch(() => ({}))) as StoredConfig;
+          await openProviderPicker(context, refreshed, providerSources(refreshed));
+        }
+        return ok();
+      }
       const sources = providerSources(stored);
       await openProviderPicker(context, stored, sources);
       return ok();

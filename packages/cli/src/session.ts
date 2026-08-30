@@ -242,6 +242,9 @@ export interface SubagentView {
   readonly contextUsed: number;
   readonly contextMax: number;
   readonly completionTokens: number;
+  readonly subagentId?: string;
+  readonly sessionId?: string;
+  readonly forkedFrom?: string;
 }
 
 /** Activity lines kept per subagent. The panel cannot show more. */
@@ -1044,15 +1047,12 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       };
 
     case 'subagent.finish':
-      {
-        const subagents = state.subagents.filter((view) => view.taskId !== action.taskId);
-        return {
-          ...state,
-          subagents,
-          subagentFocus: Math.max(0, Math.min(state.subagentFocus, subagents.length - 1)),
-          subagentsOpen: subagents.length > 0 && state.subagentsOpen,
-        };
-      }
+      return {
+        ...state,
+        subagents: state.subagents.map((view) => view.taskId === action.taskId
+          ? { ...view, status: action.status, endedAt: action.at, summary: action.summary, thinkingSince: null }
+          : view),
+      };
 
     case 'subagent.usage':
       return {

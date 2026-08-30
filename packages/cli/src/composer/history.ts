@@ -27,6 +27,10 @@ export class ComposerHistory {
     return this.#entries.length;
   }
 
+  recent(limit = 80): readonly string[] {
+    return this.#entries.slice(-Math.max(0, limit));
+  }
+
   record(text: string): void {
     if (!text.trim()) return;
     if (this.#entries[this.#entries.length - 1] !== text) this.#entries.push(text);

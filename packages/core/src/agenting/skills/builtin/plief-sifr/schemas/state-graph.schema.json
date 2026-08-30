@@ -1,5 +1,5 @@
 {
-  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "plief.sifr:state-graph:v1",
   "title": "InteractionGraph entry",
   "type": "object",

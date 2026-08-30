@@ -266,7 +266,7 @@ describe('live controls', () => {
     assert.deepEqual(state.entries[0]?.edits?.map((edit) => edit.path), ['src/one.ts', 'src/two.ts']);
   });
 
-  it('keeps subagent details collapsed and removes the subagent when it finishes', () => {
+  it('keeps subagent details collapsed and preserves the child when it finishes', () => {
     const running = sessionReducer(initialSession, {
       type: 'subagent.start',
       view: {
@@ -294,7 +294,9 @@ describe('live controls', () => {
       summary: 'done',
     });
     assert.equal(running.subagentsOpen, false);
-    assert.equal(finished.subagents.length, 0);
+    assert.equal(finished.subagents.length, 1);
+    assert.equal(finished.subagents[0]?.status, 'done');
+    assert.equal(finished.subagents[0]?.summary, 'done');
     assert.equal(finished.subagentsOpen, false);
   });
 

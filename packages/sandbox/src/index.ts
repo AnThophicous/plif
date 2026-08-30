@@ -1,7 +1,10 @@
 export * from './backend.js';
+export { PipeTerminal } from './terminal.js';
 export { Win32Backend } from './win32/backend.js';
 export { LinuxBackend } from './linux/backend.js';
 export { PortableBackend } from './portable/backend.js';
+export { loadWindowsCredentialManager } from './win32/ffi.js';
+export type { Win32CredentialBindings } from './win32/ffi.js';
 
 import type { SandboxBackend, SandboxCapabilityReport } from './backend.js';
 import { PortableBackend } from './portable/backend.js';

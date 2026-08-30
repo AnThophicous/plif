@@ -6,7 +6,8 @@ Pipelines are collapsed to the minimum that changes a decision. Standard BUILD:
 
 ```text
 DISCOVER(product-intel) → STRUCTURE(if needed) → VISUALIZE/forensics(if direction open)
-→ SYSTEMIZE(if systemic) → COMPONENT-INTELLIGENCE(optional via Orun)
+→ SYSTEMIZE(if systemic) → MEDIA/SPATIAL(if media materially carries the thesis)
+→ COMPONENT-INTELLIGENCE(optional via Orun)
 → BUILD(impl+interaction+motion+responsive+a11y+perf)
 → VERIFY(render matrix) → REPAIR loop → handoff
 ```
@@ -14,6 +15,8 @@ DISCOVER(product-intel) → STRUCTURE(if needed) → VISUALIZE/forensics(if dire
 RECREATE: forensics extracts grammar → structure-infer (no user interview) → BUILD with transplant discipline.
 
 Escalation: when verification reveals systemic repetition, the owner is upstream (see `modules/verification.md` root-owner table) — escalate mode rather than patching locally (e.g. repeated contrast failures → design-system module, token owner).
+
+For a new/substantially reshaped surface, implement and render one representative vertical slice early: real shell, typography, primary content/action, one risky state and the signature mechanism at one wide and one narrow case. Correct the thesis and integration before multiplying components or effects.
 
 ## Working memory behavior
 

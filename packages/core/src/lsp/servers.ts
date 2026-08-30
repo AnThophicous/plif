@@ -199,12 +199,21 @@ export interface ResolvedServer {
   readonly windowsVerbatimArguments?: boolean;
 }
 
+export interface ResolveServerOptions {
+  /**
+   * Project-local executables are repository-controlled code and therefore
+   * must never run on the host without an explicit trust decision.
+   */
+  readonly allowProjectExecutable?: boolean;
+}
+
 const WINDOWS_SUFFIXES = ['.cmd', '.exe', '.bat', ''];
 
 export async function resolveServer(
   spec: ServerSpec,
   workspace: string,
   tempRoot?: string,
+  options: ResolveServerOptions = {},
 ): Promise<ResolvedServer | null> {
   if (spec.id === 'powershell') return await resolvePowerShell(spec, tempRoot);
 
@@ -228,9 +237,13 @@ export async function resolveServer(
   const local = path.join(workspace, 'node_modules', '.bin', spec.bin);
   const suffixes = process.platform === 'win32' ? WINDOWS_SUFFIXES : [''];
 
-  for (const suffix of suffixes) {
-    if (await exists(local + suffix)) {
-      return spawnableServer(spec, local + suffix, spec.args, 'project');
+  const allowProjectExecutable = options.allowProjectExecutable ??
+    process.env['PLIF_ALLOW_PROJECT_LSP'] === '1';
+  if (allowProjectExecutable) {
+    for (const suffix of suffixes) {
+      if (await exists(local + suffix)) {
+        return spawnableServer(spec, local + suffix, spec.args, 'project');
+      }
     }
   }
 
@@ -320,7 +333,13 @@ async function discoverPowerShellEditorServices(): Promise<string | null> {
 }
 
 async function findOnPath(bin: string): Promise<string | null> {
-  const entries = (process.env['PATH'] ?? '').split(path.delimiter).filter(Boolean);
+  // Relative PATH entries (especially `.`) are controlled by the active
+  // workspace. Ignore them so PATH lookup cannot silently reintroduce the
+  // project-executable path that resolveServer denies by default.
+  const entries = (process.env['PATH'] ?? '')
+    .split(path.delimiter)
+    .map((entry) => entry.trim().replace(/^"|"$/g, ''))
+    .filter((entry) => path.isAbsolute(entry));
   const suffixes =
     process.platform === 'win32'
       ? (process.env['PATHEXT'] ?? '.COM;.EXE;.BAT;.CMD').split(';').map((s) => s.toLowerCase())

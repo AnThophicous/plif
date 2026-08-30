@@ -69,6 +69,7 @@ export interface ToolContext {
    */
   readonly callId?: string;
   readonly memory?: MemoryStore;
+  readonly readOnlyMemory?: boolean;
   readonly workspace?: string;
   /** Shared provider execution policy inherited from the parent PLIF loop. */
   readonly execution?: ModelExecutionContext;
@@ -842,6 +843,152 @@ export const runCommand: Tool = {
   },
 };
 
+function terminalOwner(context: ToolContext): string {
+  return context.agentId ?? 'primary';
+}
+
+function terminalChunksText(chunks: readonly { readonly stream: string; readonly chunk: string }[]): string {
+  if (chunks.length === 0) return 'No terminal output is available yet.';
+  return chunks.map((item) => item.stream + ':\n' + item.chunk).join('\n');
+}
+
+export const terminalStart: Tool = {
+  spec: {
+    name: 'terminal_start',
+    description: 'Start a persistent interactive terminal inside the container. Use terminal_write for stdin and terminal_read for output.',
+    parameters: {
+      type: 'object',
+      properties: {
+        argv: { type: 'array', items: { type: 'string' }, description: 'Command and arguments.' },
+        cwd: { type: 'string', description: 'Optional container working directory.' },
+        reason: { type: 'string', description: 'Why this interactive terminal is needed.' },
+      },
+      required: ['argv', 'reason'],
+      additionalProperties: false,
+    },
+  },
+  async run(input, context) {
+    const argv = input['argv'];
+    if (!Array.isArray(argv) || argv.length === 0 || !argv.every((item) => typeof item === 'string')) {
+      throw new PlifError('INVALID_ARGUMENT', 'terminal_start needs a non-empty argv array');
+    }
+    const result = await context.container.startTerminal({
+      argv: argv as string[],
+      reason: typeof input['reason'] === 'string' ? input['reason'] : 'interactive terminal',
+      ...(typeof input['cwd'] === 'string' ? { cwd: input['cwd'] } : {}),
+      ownerId: terminalOwner(context),
+      sessionId: context.agentId,
+    });
+    return { output: 'terminal_id: ' + result.terminalId + '\nInteractive terminal started.', ok: true };
+  },
+};
+
+export const terminalWrite: Tool = {
+  spec: {
+    name: 'terminal_write',
+    description: 'Write input to an owned persistent terminal. Include newlines when the process expects Enter.',
+    parameters: {
+      type: 'object',
+      properties: {
+        terminal_id: { type: 'string' },
+        input: { type: 'string' },
+      },
+      required: ['terminal_id', 'input'],
+      additionalProperties: false,
+    },
+  },
+  async run(input, context) {
+    const id = requireString(input, 'terminal_id');
+    const value = requireString(input, 'input');
+    const chunks = await context.container.writeTerminal(id, terminalOwner(context), value);
+    return { output: terminalChunksText(chunks), ok: true };
+  },
+};
+
+export const terminalRead: Tool = {
+  spec: {
+    name: 'terminal_read',
+    description: 'Read output currently available from an owned persistent terminal without closing it.',
+    parameters: {
+      type: 'object',
+      properties: { terminal_id: { type: 'string' } },
+      required: ['terminal_id'],
+      additionalProperties: false,
+    },
+  },
+  async run(input, context) {
+    const chunks = await context.container.readTerminal(requireString(input, 'terminal_id'), terminalOwner(context));
+    return { output: terminalChunksText(chunks), ok: true };
+  },
+};
+
+export const terminalResize: Tool = {
+  spec: {
+    name: 'terminal_resize',
+    description: 'Set the column and row size of an owned persistent terminal.',
+    parameters: {
+      type: 'object',
+      properties: {
+        terminal_id: { type: 'string' },
+        columns: { type: 'integer' },
+        rows: { type: 'integer' },
+      },
+      required: ['terminal_id', 'columns', 'rows'],
+      additionalProperties: false,
+    },
+  },
+  async run(input, context) {
+    const columns = input['columns'];
+    const rows = input['rows'];
+    if (typeof columns !== 'number' || typeof rows !== 'number') {
+      throw new PlifError('INVALID_ARGUMENT', 'terminal_resize needs integer columns and rows');
+    }
+    await context.container.resizeTerminal(requireString(input, 'terminal_id'), terminalOwner(context), columns, rows);
+    return { output: 'Terminal resized.', ok: true };
+  },
+};
+
+export const terminalSignal: Tool = {
+  spec: {
+    name: 'terminal_signal',
+    description: 'Send an interrupt or termination signal to an owned persistent terminal.',
+    parameters: {
+      type: 'object',
+      properties: {
+        terminal_id: { type: 'string' },
+        signal: { type: 'string', enum: ['SIGINT', 'SIGTERM', 'SIGKILL'] },
+      },
+      required: ['terminal_id', 'signal'],
+      additionalProperties: false,
+    },
+  },
+  async run(input, context) {
+    const signal = input['signal'];
+    if (signal !== 'SIGINT' && signal !== 'SIGTERM' && signal !== 'SIGKILL') {
+      throw new PlifError('INVALID_ARGUMENT', 'terminal_signal needs SIGINT, SIGTERM, or SIGKILL');
+    }
+    await context.container.signalTerminal(requireString(input, 'terminal_id'), terminalOwner(context), signal);
+    return { output: 'Terminal signal sent.', ok: true };
+  },
+};
+
+export const terminalClose: Tool = {
+  spec: {
+    name: 'terminal_close',
+    description: 'Close an owned persistent terminal and return its final exit status and output.',
+    parameters: {
+      type: 'object',
+      properties: { terminal_id: { type: 'string' } },
+      required: ['terminal_id'],
+      additionalProperties: false,
+    },
+  },
+  async run(input, context) {
+    const result = await context.container.closeTerminal(requireString(input, 'terminal_id'), terminalOwner(context));
+    return formatExecToolResult(result);
+  },
+};
+
 const MAX_SHELL_SCRIPT_BYTES = 32 * 1024;
 
 export const shellCommand: Tool = {
@@ -1332,6 +1479,11 @@ export const remember: Tool = {
           enum: ['fact', 'failure'],
           description: '"fact" for what is true, "failure" for what does not work',
         },
+        scope: {
+          type: 'string',
+          enum: ['workspace', 'global'],
+          description: 'Use workspace by default; choose global only for facts that apply to every project.',
+        },
       },
       required: ['text'],
       additionalProperties: false,
@@ -1341,9 +1493,16 @@ export const remember: Tool = {
     if (!context.memory || !context.workspace) {
       return { output: 'Memory is not available in this run.', ok: false };
     }
+    if (context.readOnlyMemory) {
+      return { output: 'Memory is read-only for subagents. Ask the main agent to record this.', ok: false };
+    }
     const text = requireString(input, 'text');
+    if (/(?:^|[^A-Za-z0-9_])sk_[A-Za-z0-9_-]{16,}/.test(text)) {
+      return { output: 'Credentials cannot be stored in memory. Use /env instead.', ok: false };
+    }
     const kind = input['kind'] === 'failure' ? 'failure' : 'fact';
-    const stored = await context.memory.remember({ workspace: context.workspace, kind, text });
+    const scope = input['scope'] === 'global' ? 'global' : 'workspace';
+    const stored = await context.memory.remember({ workspace: context.workspace, kind, text, scope });
     return {
       output: `Recorded as ${kind}${stored.confirmations > 1 ? ` (confirmed ${stored.confirmations}x)` : ''}.`,
       ok: true,
@@ -1468,6 +1627,14 @@ function eventSearchText(event: ConversationEvent): string {
   switch (event.kind) {
     case 'user.message':
     case 'assistant.message':
+      return event.text;
+    case 'command.input':
+      return event.argv.join(' ');
+    case 'command.completed':
+      return `${event.stdout}\n${event.stderr}`;
+    case 'terminal.output':
+      return event.text;
+    case 'queued.input':
       return event.text;
     case 'tool.completed':
       return event.output.slice(0, 500);
@@ -1851,6 +2018,12 @@ export const DEFAULT_TOOLS: readonly Tool[] = [
   grepFiles,
   applyPatch,
   runCommand,
+  terminalStart,
+  terminalWrite,
+  terminalRead,
+  terminalResize,
+  terminalSignal,
+  terminalClose,
   askUser,
   getConfig,
   updateConfig,

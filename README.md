@@ -1,20 +1,31 @@
 <div align="center">
 
-**Plif 0.3.9 — the stable, adaptive coding agent for your terminal.**
+**Plif 0.4.0 — the adaptive coding agent for your terminal.**
 
-Bring your own model. Configure the provider yourself. Plif 0.3.9 is built for
+Bring your own model. Configure the provider yourself. Plif 0.4.0 is built for
 long coding sessions with durable memory, better adaptation to the user, a
 calmer terminal UI, stronger built-in skills, and a more reliable agent loop.
 
 [![npm](https://img.shields.io/npm/v/%40plif%2Fcli?color=0b7285&label=npm)](https://www.npmjs.com/package/@plif/cli)
 [![license](https://img.shields.io/badge/license-Apache--2.0-0b7285)](LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D20.11-0b7285)](https://nodejs.org)
-[![platform](https://img.shields.io/badge/platform-Windows-0b7285)](#what-the-sandbox-actually-enforces)
+[![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-0b7285)](#supported-platforms-and-sandbox-prerequisites)
 [![ci](https://github.com/AnThophicous/plif/actions/workflows/ci.yml/badge.svg)](https://github.com/AnThophicous/plif/actions/workflows/ci.yml)
 
 </div>
 
 ---
+
+## What's new in 0.4.0
+
+PLIF 0.4.0 adds append-only SQLite chat history, isolated forked subagents with
+follow-up queues, project/global memory, project-scoped `/env`, local writing
+assistance, persistent terminal processes, and an isolated Rust updater. Runtime
+updates use the NPM registry only and show the matching package changelog before
+they are installed. Composer assistance is prediction-only: contextual ghost
+text appears in the input, Tab accepts it, and Enter always sends the original
+draft. See [`CHANGELOG.md`](CHANGELOG.md) for the complete release
+notes.
 
 ## What's new in 0.3.9
 
@@ -102,7 +113,7 @@ the policy with `conversationState = "auto"` or
 `PLIF_CONVERSATION_STATE=native|replay`. See
 [the conversation-state guide](docs/conversation-state.md).
 
-## Why 0.3.9
+## Why 0.4.0
 
 - **Adaptive memory.** Useful facts are ranked and reused without turning the
   conversation into noise.
@@ -119,28 +130,55 @@ the policy with `conversationState = "auto"` or
 
 ## Install
 
-The current stable release is [v0.3.9](https://github.com/AnThophicous/plif/releases/tag/v0.3.9).
-For a reproducible install, pin that version explicitly:
-
-```powershell
-npm install -g @plif/cli@0.3.9
-```
-
-To follow the newest published stable release instead:
+NPM is the primary installation method:
 
 ```powershell
 npm install -g @plif/cli@latest
 ```
 
+For a reproducible install, replace `latest` with an exact published version:
+
+```powershell
+npm install -g @plif/cli@0.4.0
+```
+
+`latest` follows the newest NPM release. The running PLIF can also check NPM for
+new versions, display that version's `CHANGELOG.md`, and let you update through
+the isolated Rust updater. It does not use Git for update discovery.
+
 ```powershell
 irm https://raw.githubusercontent.com/AnThophicous/plif/main/install.ps1 | iex
 ```
 
-That script checks your Node version and runs `npm install -g @plif/cli`. If you
-would rather skip the ceremony, the two are the same thing:
+That one-line PowerShell form downloads and executes the installer from the
+repository's `main` branch. Treat it as code: for an auditable installation,
+download it, inspect it, and execute the local copy with a pinned version:
 
 ```powershell
-npm install -g @plif/cli
+Invoke-WebRequest https://raw.githubusercontent.com/AnThophicous/plif/main/install.ps1 -OutFile .\install-plif.ps1
+Get-Content .\install-plif.ps1
+.\install-plif.ps1 -Version 0.4.0
+```
+
+The installer checks your Node version, installs from NPM, and asks whether the
+runtime update checker should run. Pass `-Version latest` to follow the moving
+release or `-NoUpdatePrompt` for unattended setup. npm and package lifecycle
+scripts still run as part of installation, so keep the normal npm supply-chain
+precautions.
+
+On Linux, the equivalent secondary installer is:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AnThophicous/plif/main/install.sh -o install.sh
+less install.sh
+bash install.sh --version 0.4.0
+```
+
+If you would rather skip the PowerShell wrapper, these commands are equivalent
+when the version is pinned:
+
+```powershell
+npm install -g @plif/cli@0.4.0
 plif
 ```
 
@@ -158,6 +196,22 @@ To remove it: `npm uninstall -g @plif/cli`. Your sessions and credentials live
 in `~/.plif` and are left alone unless you delete them.
 
 ---
+
+## Supported platforms and sandbox prerequisites
+
+Plif runs on Windows, Linux and macOS, but the isolation guarantees are
+platform-specific. Run `plif sandbox` on the target machine to see the backend
+and capabilities that are actually available; a portable fallback is reported
+explicitly when an OS-level backend cannot be used.
+
+| Platform | Backend and prerequisite | What to expect |
+| --- | --- | --- |
+| Windows 10/11 (x64 or arm64) | Win32 Job Objects when the native backend loads; Node.js only | Process-tree, memory, process-count and CPU controls can be enforced. Filesystem-write and network blocking are not currently kernel-enforced. |
+| Linux | `bubblewrap` (`sudo apt-get install bubblewrap` on Debian/Ubuntu); cgroup limits depend on the host | Namespace/process isolation is attempted by the Linux backend. Without a usable `bubblewrap`, Plif falls back to the portable backend and says so. |
+| macOS | Node.js only; the current selection is the portable backend | The CLI and runtime work, but this repository does not currently provide a macOS-specific OS isolation backend. Do not assume Linux or Windows guarantees. |
+
+The CI matrix covers all three platforms. Linux-only sandbox tests run only on
+Linux because `bubblewrap` and cgroups are not available on the other runners.
 
 ## What this is
 
@@ -223,8 +277,11 @@ Press `/` for commands. Nothing is configured yet and that is intentional:
 
 ```
 /model                    pick a provider and model, free ones included
+/providers add            add a custom provider through a guided setup
 /status                   inspect the current session and runtime
 /config                   browse and edit PLIF settings
+/env                      open the session-secret TUI
+/btw                      ask an isolated side question
 /new                      create a container for the agent to work in
 /sandbox                  what your machine enforces, and what it does not
 /mcp                      browse MCP servers, skills and the plugin marketplace
@@ -320,7 +377,7 @@ suggestion.
 
 ## What the sandbox actually enforces
 
-On Windows today:
+On Windows with the Job Object backend:
 
 | Enforced by the kernel | Not enforced |
 |---|---|
@@ -408,6 +465,20 @@ the normal encrypted credential flow. Choose it from `/providers`, paste a key
 when prompted, and PLIF validates the endpoint before saving anything. Models
 are discovered live and kept stale only as a temporary fallback when a refresh
 fails; API keys are never written to the model cache or status output.
+
+### Custom providers without config archaeology
+
+Run `/providers add` for a guided setup. PLIF asks for an id, endpoint, optional
+display name, optional model ids and an optional masked API key. It validates the
+definition, writes only the non-secret provider configuration to
+`~/.plif/config.toml`, stores the key through the encrypted credential broker,
+and warms model discovery immediately. The new models appear in `/model` without
+restarting PLIF. Local endpoints such as Ollama are recognized and do not ask
+for a key.
+
+Provider URLs cannot contain embedded credentials or credential-shaped query
+parameters. This keeps a copied config, picker message or diagnostic from
+silently becoming a secret dump.
 
 `/models` opens with strongest-first ranking. Press uppercase `F` for the
 compact browser menu and choose largest context, fastest, A–Z, provider, tier,
@@ -521,11 +592,13 @@ integrated diff, and runs an evaluator-correction loop before handoff.
 ## Language intelligence and code colour
 
 Plif bundles language servers for TypeScript/JavaScript, JSON/JSONC, HTML, CSS,
-SCSS, and Less. It also discovers project or `PATH` installations for Python,
-TOML, Rust, Go, C/C++, Bash, and PowerShell. File edits request fresh diagnostics
-from the responsible server; diagnostics from an older document version are
-discarded, and changing workspaces shuts the previous manager down before a new
-one starts. Windows `.cmd` and `.bat` server shims are launched through a quoted
+SCSS, and Less. It discovers `PATH` installations for Python, TOML, Rust, Go,
+C/C++, Bash, and PowerShell. Project-local language-server executables are
+repository-controlled code and are ignored by default; opt in only for a
+trusted workspace with `PLIF_ALLOW_PROJECT_LSP=1`. File edits request fresh
+diagnostics from the responsible server; diagnostics from an older document
+version are discarded, and changing workspaces shuts the previous manager down
+before a new one starts. Windows `.cmd` and `.bat` server shims are launched through a quoted
 `cmd.exe` invocation instead of relying on Node's unstable direct shim spawning.
 
 Diffs and code shown while the agent works are syntax-coloured with semantic
@@ -575,6 +648,43 @@ Resolution order is environment, then encrypted store, then asking you. The
 environment wins so `KEY=x plif ...` still overrides a saved value and CI never
 sees a prompt.
 
+## Session environments
+
+`/env` opens a keyboard-first, names-only secret manager bound to the current
+workspace and conversation session. Use `/env set NAME` to enter one value in a
+masked prompt, `/env import .env` to privately parse a dotenv file,
+`/env status` to inspect names and load state, `/env delete NAME` to remove one,
+or `/env clear` to remove them all. A value pasted into `/env` is never printed
+again: it is excluded from the timeline, composer history, transcript, audit
+events, config TOML, container specification and `.env` copies.
+
+On Windows, session environments use the account-bound DPAPI boundary. On Linux,
+PLIF uses `systemd-creds` when available. Records live outside the project and
+are atomically replaced under a hashed workspace/session name and guarded by a
+short per-session lock, so concurrent Plif processes cannot overwrite one
+another's updates; a session can be closed and resumed without exposing its
+variables in a directory listing.
+If no OS-backed store is available, PLIF fails closed to an explicit
+memory-only mode and shows a warning; it never creates a plaintext fallback.
+
+Loading is ordered with session resume and container startup. Values are injected
+only after the PLIF container is running and only into processes started after
+the injection, so setting or updating a key takes effect without restarting
+PLIF or the terminal. Switching sessions clears the previous runtime map before
+loading the next one. The model can guide a user to `/env set NAME` or
+`/env import .env` when a tool needs a secret, but it cannot read the value from
+chat context.
+
+## BTW: an isolated side channel
+
+`/btw` opens a small side panel for an unrelated question while the main agent
+keeps working. `/btw <question>` starts the request and `/btw cancel` stops only
+that request. PLIF takes a bounded snapshot of the conversation, redacts common
+credential-shaped values, and runs a separate text-only request with its own
+timeout and cancellation signal. The side request has no tools, writes, skills,
+or continuation pointer; its answer is not appended to the main transcript and
+cannot mutate the primary agent's plan or state.
+
 ## MCP
 
 Both `mcp` and `mcpServers` are read from `~/.plif/config.toml`. Local servers
@@ -613,28 +723,51 @@ you to run `plif` in a terminal. A CI job must not block on someone clicking.
 
 ---
 
-## Building from source
+## Contributing and building from source
+
+Development requires Node.js `>=20.11` and npm. The repository uses npm
+workspaces and the committed lockfile, so `npm ci` is the first command after a
+fresh clone. On Linux, install `bubblewrap` first if you want to exercise the
+strong Linux sandbox backend.
 
 ```powershell
 git clone https://github.com/AnThophicous/plif
 cd plif
 npm ci
+npm run typecheck
 npm run build
 npm test
-npm run link      # puts your build on PATH as `plif`
 ```
 
-`npm run dev` runs the CLI from source through tsx. `npm run preview` renders
-the interface into stdout with a fake TTY, which is how the terminal layout gets
-reviewed without a terminal.
+Before opening a pull request, run `npm run typecheck`, `npm run build` and
+`npm test`. The CI also runs the Linux sandbox test where applicable, exercises
+the TTY smoke test, and checks the release contents of all four published
+workspace packages: `@plif/sandbox`, `@plif/core`, `@plif/acp` and `@plif/cli`.
+
+Useful local workflows:
+
+- `npm run dev` runs the CLI from source through `tsx`.
+- `npm run preview` renders the interface into stdout with a fake TTY, which is
+  how the terminal layout gets reviewed without a terminal.
+- `npm run link` builds the CLI and creates a global npm link. The `plif`
+  command then points at this checkout's build, so changes require another
+  build and the link is not a standalone installation.
+- `npm run unlink` removes that global CLI link. Use `npm install -g
+  @plif/cli@0.4.0` afterward if you want to return to a published install.
+
+The ACP adapter is built by the root project and can be inspected as a package
+with `npm pack --workspace @plif/acp --dry-run`. It shares the workspace version
+with the CLI, core and sandbox.
 
 ## Status
 
-Version 0.1.0. It is used daily by its author and it is early.
+Version 0.4.0. The workspace release policy keeps the CLI, core, sandbox and
+ACP adapter on the same version. It is used daily by its author and it is still
+early.
 
 What is honestly not done: filesystem write blocking and network blocking are
-not enforced at the OS level (see above), the sandbox is Windows-first because
-that is where the isolation primitives are implemented, and the plugin
+not enforced at the OS level (see above), Linux requires `bubblewrap` for its
+stronger backend, macOS currently uses the portable backend, and the plugin
 marketplace can install MCP servers but not the skills that many catalogue
 entries ship as directories.
 

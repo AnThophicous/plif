@@ -1,5 +1,5 @@
 {
-  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "plief.sifr:component-contract:v1",
   "type": "object",
   "required": ["role", "anatomy", "states"],
@@ -14,5 +14,17 @@
     "source": {"enum": ["native", "transplant", "orun-adapted", "composed", "built"]},
     "source_record_ref": {"type": ["string","null"]},
     "invariant": {"type": ["string","null"]}
-  }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"source": {"const": "transplant"}}, "required": ["source"]},
+      "then": {
+        "required": ["source_record_ref", "invariant"],
+        "properties": {
+          "source_record_ref": {"type": "string", "minLength": 1},
+          "invariant": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  ]
 }

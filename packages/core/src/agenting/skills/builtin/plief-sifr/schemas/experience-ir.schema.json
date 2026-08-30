@@ -1,10 +1,14 @@
 {
-  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "plief.sifr:experience-ir:v1",
   "title": "ExperienceIR",
   "type": "object",
-  "required": ["schema_version", "product_frame", "information_architecture",
-               "accessibility_contract"],
+  "required": [
+    "schema_version",
+    "product_frame",
+    "information_architecture",
+    "accessibility_contract"
+  ],
   "properties": {
     "schema_version": {"const": 1},
     "product_frame": {"type": "object"},
@@ -19,9 +23,14 @@
       "items": {"type": "object", "required": ["component"]}
     },
     "interaction_graph": {"type": "array"},
-    "responsive_contract": {"$ref": "./responsive-contract.schema.json"},
+    "motion": {"$ref": "plief.sifr:motion-contract:v1"},
+    "media_contracts": {
+      "type": "array",
+      "items": {"$ref": "plief.sifr:media-contract:v1"}
+    },
+    "responsive_contract": {"$ref": "plief.sifr:responsive-contract:v1"},
     "accessibility_contract": {"type": "object"},
-    "perf_budget": {"type": "object"},
+    "perf_budget": {"$ref": "plief.sifr:perf-budget:v1"},
     "orun_selections": {"type": "array"},
     "evidence_refs": {"type": "array"},
     "verification_state": {"type": "object"}

@@ -1,6 +1,6 @@
 ﻿{
-  "pack": "plief-sifr/evals v1",
-  "note": "Behavioral cases (E2). Executed only with a host adapter; runner marks RUNTIME_EVAL_NOT_EXECUTED otherwise. CMP-xx mirror the retired component-picker eval semantics; B-xx are new Sifr capabilities.",
+  "pack": "plief-sifr/evals v2",
+  "note": "Behavioral cases (E2). Executed only with a host adapter; runner marks RUNTIME_EVAL_NOT_EXECUTED otherwise. CMP-xx preserve component-selection semantics; B19+ cover art direction, motion and media/spatial contracts.",
   "cases": [
     {
       "id": "SIFR-CMP-E1",
@@ -328,6 +328,124 @@
       ],
       "must_not": [
         "claims rendered evidence"
+      ]
+    },
+    {
+      "id": "SIFR-B19",
+      "critical": true,
+      "prompt": "Cria uma landing premium e não genérica para uma ferramenta de resposta a incidentes; briefing ainda é vago",
+      "must": [
+        "infers CONVINCE with MONITOR/OPERATE evidence",
+        "writes product-causal visual thesis before components",
+        "defines composition, type, material/light, asset world, signature and counter-default",
+        "validates strict DesignDNA"
+      ],
+      "must_not": [
+        "generic centered hero plus rounded feature cards",
+        "premium treated as black plus serif plus whitespace"
+      ]
+    },
+    {
+      "id": "SIFR-B20",
+      "critical": true,
+      "prompt": "Usa Magic UI, Paper Shaders, partículas, smooth cursor e um globo 3D para deixar monstruoso",
+      "must": [
+        "runs product-job and medium gates before library choice",
+        "routes Magic UI through Orun and Paper Shaders through ShaderContract",
+        "selects at most a bounded identity mechanism with fallback and budget",
+        "adapts demo aesthetics into host DNA"
+      ],
+      "must_not": [
+        "library sampler collage",
+        "installs every named effect",
+        "treats libraries as art direction"
+      ]
+    },
+    {
+      "id": "SIFR-B21",
+      "critical": true,
+      "prompt": "Hero com vídeo cinematográfico em autoplay atrás do título",
+      "must": [
+        "creates video media contract with purpose, source, poster, load policy and fallback",
+        "autoplay is muted and reduced-motion becomes a useful static state",
+        "tests contrast across dynamic frames and poster-to-first-frame continuity",
+        "does not lazy-load actual LCP video/poster candidate"
+      ],
+      "must_not": [
+        "autoplay audio",
+        "exclusive meaning only in ambient video"
+      ]
+    },
+    {
+      "id": "SIFR-B22",
+      "critical": true,
+      "prompt": "Coloca o produto em 3D no hero com interação",
+      "must": [
+        "proves viewpoint or manipulation value over cheaper media",
+        "defines camera, silhouette, material/light, controls and responsive framing",
+        "defines non-WebGL fallback, DPR/frame budget, offscreen pause and disposal",
+        "keeps essential controls and semantics in DOM"
+      ],
+      "must_not": [
+        "3D as prestige default",
+        "desktop-only camera crop"
+      ]
+    },
+    {
+      "id": "SIFR-B23",
+      "prompt": "As animações estão entediantes; deixa o site com identidade",
+      "must": [
+        "defines signature sequence, recurring motifs and causal microfeedback",
+        "specifies beats, interruption, settlement and reduced-motion equivalents",
+        "watches continuous choreography and boundary keyframes"
+      ],
+      "must_not": [
+        "same fade-up on every section",
+        "unbounded idle loops",
+        "animation used to hide latency"
+      ],
+      "critical": false
+    },
+    {
+      "id": "SIFR-B24",
+      "prompt": "Quero Liquid Glass em tudo",
+      "must": [
+        "treats glass as a functional top interaction/navigation layer",
+        "defines backdrop conditions, material/light law and opaque fallback",
+        "preserves dense content hierarchy outside glass",
+        "tests reduced transparency and GPU/filter cost"
+      ],
+      "must_not": [
+        "every content card becomes translucent",
+        "calls a static blurred card equivalent to platform-native Liquid Glass"
+      ],
+      "critical": false
+    },
+    {
+      "id": "SIFR-B25",
+      "prompt": "Faz minimalista, mas com muita identidade",
+      "must": [
+        "identity survives effects-off through composition, typography, content and spacing precision",
+        "defines one signature relationship and a counter-default",
+        "uses realistic content volume"
+      ],
+      "must_not": [
+        "under-designed component defaults with extra whitespace",
+        "tiny gray text as refinement"
+      ],
+      "critical": false
+    },
+    {
+      "id": "SIFR-B26",
+      "critical": true,
+      "prompt": "Shader e vídeo parecem bons no screenshot final; aprova",
+      "must": [
+        "rejects still-only proof",
+        "checks brightest/darkest/noisiest frames and continuous transitions",
+        "checks fallback, offscreen pause, runtime health and representative GPU/media budget"
+      ],
+      "must_not": [
+        "approves dynamic media from one flattering frame"
       ]
     }
   ]

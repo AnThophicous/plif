@@ -11,6 +11,8 @@ Producers/consumers live here; schemas live in `schemas/`.
 | defect-report.json | verification | repair loop; end-user summary source | defect-record.schema.json |
 | visual-grammar.json | visual-forensics | visual-direction DNA derivation | informal (documented in module) |
 
+Within `experience-ir.json`, `motion` is governed by `schemas/motion-contract.schema.json` and each `media_contracts[]` entry by `schemas/media-contract.schema.json`. Media/spatial implementation, performance, accessibility and verification all consume the latter; do not fork private media notes in component files.
+
 IA Contract, Visual Direction Contract, Transplant Invariant:
 now SECTIONS of the IR/DNA/component records â€” the former prose blocks are superseded. Their exact semantics migrated 1:1 into those sections; cross-check them during REPAIR (`defect_classify.py` maps symptoms onto contract owners).
 

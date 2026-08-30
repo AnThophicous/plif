@@ -1,29 +1,47 @@
 # Component Intelligence — selection, transplant, switching
 
-## Order of evaluation (strict)
+## Order of evaluation
 
 `PROJECT-NATIVE > ORUN > ADAPT > COMPOSE > BUILD`
 
-Before external anything: inspect existing primitives, unused/adjacent components, team registry, already-installed provider components. External search only when it can materially improve behavior/accessibility/quality/speed/maintainability/distinctiveness. Provider search as ritual is a failure. When external search is warranted, emit `selection-query.json` per Orun QueryContract (`../adapters/orun-selection.template.json`) — include perf budget + dependency constraints + `already_searched_native:true`. Orun ranks; SIFR decides and records SelectionRecord with materiality gate (TRIVIAL = one-liner record; full record required at R2+).
+Inspect existing primitives, unused/adjacent components, team registry and installed providers first. Search externally only when it can materially improve behavior, accessibility, quality, speed, maintainability or the chosen signature. Provider search as ritual is a failure.
+
+When external search is warranted, fill `../adapters/orun-selection-query.template.json` and write `selection-query.json`: include performance/dependency budgets, visual DNA reference and `already_searched_native:true`. Orun ranks; Sifr decides and records `selection-record.json` from `../adapters/orun-selection-record.template.json`. TRIVIAL decisions collapse to a one-line reason; dependency, structural or heavy-media changes require the full record.
 
 ## Slot DNA before ranking
 
-Structural (container/full-bleed, stacking, sticky semantics, regions, density) · Behavioral (routes, auth/session, menus/search, keyboard, scroll, analytics flags, state ownership) · Visual (typography voice, spacing rhythm, surfaces/radius/border, icon family, material/motion character) · Product (job, expertise, frequency, consequence, conversion). Classify every property: preserve | adapt | opportunity | forbidden-regression.
+Structural (regions, stacking, sticky/overflow semantics, density) · behavioral (routes, auth/session, search/menu, keyboard, state/scroll ownership) · visual (type, rhythm, surfaces, icons, material, motion) · product (job, expertise, frequency, consequence, conversion). Mark each property `preserve | adapt | opportunity | forbidden-regression`.
 
-## Hard gates BEFORE aesthetic ranking
+## Hard gates before aesthetic ranking
 
-Stack (framework/runtime/version, SSR/RSC/client boundary, TS, styling assumptions, path aliases) · Dependencies (peers, animation runtime, icons, CSS/keyframes, bundle cost) · Behavior (routes/state/auth/mobile transformations/loading/error) · Accessibility repairability (reject unrepairable core nav/focus/dialog semantics; hover-only essential actions rejected) · Provenance/security (opaque source, unexpected scripts/network, unrelated file mutations → reject/isolate/approval) · Integration risk (framework migration/global CSS corruption/state rewrite/second design system → reject). A visually perfect incompatible candidate loses to ranking rules by definition — gates run first.
+- stack: framework/runtime/version, SSR/RSC/client boundaries, TypeScript, styling assumptions, aliases;
+- dependencies: peers, animation engines, icon/CSS/global side effects, package/source size;
+- behavior: routes, state/auth, loading/error, responsive transformations;
+- accessibility repairability: reject unrepairable navigation/focus/dialog semantics and essential hover-only actions;
+- provenance/security/license: opaque source, unexpected scripts/network or unrelated mutations -> reject/isolate/seek authorization;
+- integration: framework migration, global CSS corruption, state rewrite or second design system -> reject;
+- performance: evaluate the same IR budget used by implementation, including GPU/media costs.
+
+A visually attractive incompatible candidate loses before ranking.
+
+## Named ecosystems are ingredients
+
+- Magic UI and comparable copy/adapt collections offer bounded motion/effect mechanisms. Inspect their Tailwind/shadcn/Motion assumptions, source ownership and global styles. Transplant one useful behavior; remove demo gradients, glows, copy and typography. Do not import a gallery into the product.
+- Paper Shaders and other shader sources route through `media-spatial.md`. Require a ShaderContract, verified current official docs/license/runtime, non-WebGL fallback and measured or defensible GPU budget before selection.
+- Motion/GSAP/Rive/Lottie/Three/R3F are engine choices, not visual directions. Orun owns current vendor facts; the motion/media contracts own why and how they appear.
 
 ## Transplant protocol
 
-Transplant invariant string written INTO the component's IR record (`component.source=transplant:<record-id>`): what signature must survive (e.g. "compact asymmetric nav/CTA tension + instant mobile command-sheet transition"). Replace demo content/routes/CTA/analytics placeholders with real ones; reconnect routing/auth/locale/theme/state ownership/map styling into host tokens/radius/borders/icons/motion; repair accessibility semantics/focus/keyboard BEFORE visual polish; remove runtime cost that pays nothing.
-Shader/WebGL candidates: product value justification, GPU/runtime cost estimate, mobile fallback, text readability, reduced motion, hydration/server-boundary correctness, non-WebGL fallback requirement.
-Interaction-heavy candidates (command palettes, predictive search, mega-menus, drag/drop): state-machine modeling + prototype-first when uncertainty is meaningful; appearance alone cannot validate them.
-Header/nav swaps: full behavior map (home/logo action, nav source, active route, primary CTA, account/auth, locale/theme switchers, mobile navigation model, sticky offsets, scroll behavior, overlay focus, z-index, keyboard path); preserve public header API where practical; adapter for prop-shape differences instead of leaking provider API app-wide; verify desktop/narrow/intermediate/active-route/auth/sticky-offset/keyboard+escape+focus-restore/build.
+Write the invariant into the component IR record (`source:"transplant"`, `source_record_ref:"<record-id>"`, `invariant:"<signature that must survive>"`). Replace demo content/routes/CTA/analytics; reconnect routing, auth, locale, theme, state ownership and host tokens/icons/motion. Repair semantics/focus/keyboard before polish; remove runtime cost that pays nothing. Legacy `transplant:<record-id>` records remain readable but new records use the structured fields.
 
-## Switching & failure
+Heavy effects require purpose, cost, responsive/mobile fallback, readable text, reduced-motion/transparency behavior, hydration correctness and a useful no-effect path. Interaction-heavy candidates require a state graph and prototype-first when uncertainty matters; appearance cannot validate them.
 
-Stable candidate IDs are session CONTRACTS read from artifacts: "H2 without glass" modifies along that dimension preserving identity; "back to H1" switches from stored session info WITHOUT destructive git reset and re-verifies affected surface.
-Failure routing: candidate breaks behavior→identify missing contract/adapt narrowly/reject; dependency storm→cheaper candidate or strip effects; mobile repeatedly fails while desktop fine→structural responsive revisit not more patches; provider outage→one meaningful retry then alternate/native path; bridge offline→downloaded capsule/manual import; preview-without-source→preview is EVIDENCE only, acquire authorized source or implement natively; build fails post-install→classify stack/dep/import/CSS mismatch, revert unsafe partials, change strategy — never blind reinstall loops.
+Header/nav swaps require a full behavior map: home action, nav source/active route, primary CTA, auth/account, locale/theme, mobile model, sticky/scroll offsets, overlay focus, z-index, keyboard/escape/focus restore. Preserve the public API where practical; adapt provider props behind a host-semantic wrapper.
 
-Capsule trust model (`adapters/CAPTURE_BRIDGE.md`): validate schema, separate preview.dom from registry/source snapshot, honor handoff.doNotAutoInstall, hard-gate anyway; browser DOM ≠ framework source.
+## Switching and failure
+
+Stable candidate IDs live in artifacts. “H2 without glass” changes that dimension while preserving its invariant; “back to H1” restores the stored candidate without destructive git operations and re-verifies affected surfaces.
+
+On failure, classify before retry: missing behavior -> adapt narrowly or reject; dependency storm -> cheaper candidate/strip effect; repeated narrow failure -> revisit responsive structure; provider outage -> one meaningful retry then alternate/native; preview without source -> evidence only; post-install build failure -> identify stack/dependency/import/CSS mismatch, remove unsafe partials and change strategy. Never blind-reinstall.
+
+Captured browser DOM is evidence, not framework source. Validate the capsule and honor `adapters/CAPTURE_BRIDGE.md` including `doNotAutoInstall`.

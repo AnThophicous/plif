@@ -22,6 +22,8 @@ import { DEFAULT_CONTEXT_TOKENS, runLoop } from './loop.js';
 import type { SkillBootstrap } from './loop.js';
 import { stableToolSpecs } from './context-budget.js';
 import { buildSystemPrompt } from './prompt.js';
+import { summariseMemory } from './memory.js';
+import type { MemoryStore } from './memory.js';
 import { conversationFromTranscript } from '../session/resume.js';
 import { eventBase } from '../session/events.js';
 import type { Session, SessionStore } from '../session/store.js';
@@ -34,6 +36,12 @@ import {
   readFile,
   runCommand,
   shellCommand,
+  terminalClose,
+  terminalRead,
+  terminalResize,
+  terminalSignal,
+  terminalStart,
+  terminalWrite,
   updatePlan,
   writeFile,
 } from './tools.js';
@@ -70,6 +78,10 @@ export interface SubagentOptions {
   /** Persist children and expose send_message when true and a store exists. */
   readonly continuable?: boolean;
   readonly sessions?: SessionStore;
+  readonly memory?: MemoryStore;
+  readonly parentSession?: Session;
+  readonly parentSessionId?: string;
+  readonly parentContext?: readonly Message[] | (() => readonly Message[]);
 }
 
 export interface SubagentRecord {
@@ -81,19 +93,48 @@ export interface SubagentRecord {
   readonly provider: ModelProvider;
   readonly maxIterations: number;
   readonly effort?: Effort;
+  readonly compatibilityId?: string;
+  readonly forkedFrom?: string;
 }
 
 export class SubagentCoordinator {
   #running = new Map<string, AbortController>();
   #records = new Map<string, SubagentRecord>();
+  #taskRecords = new Map<string, string>();
+  #lanes = new Map<string, Promise<void>>();
 
   register(taskId: string, controller: AbortController, record?: SubagentRecord): void {
     this.#running.set(taskId, controller);
-    if (record) this.#records.set(record.subagentId, record);
+    if (record) {
+      this.#records.set(record.subagentId, record);
+      this.#taskRecords.set(taskId, record.subagentId);
+      this.#runningSubagents.add(record.subagentId);
+    }
   }
 
   finish(taskId: string): void {
     this.#running.delete(taskId);
+    const subagentId = this.#taskRecords.get(taskId);
+    if (subagentId) this.#taskRecords.delete(taskId);
+    if (subagentId) this.#runningSubagents.delete(subagentId);
+  }
+
+  #runningSubagents = new Set<string>();
+
+  isRunning(subagentId: string): boolean {
+    return this.#runningSubagents.has(subagentId);
+  }
+
+  async enqueue<T>(subagentId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.#lanes.get(subagentId) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(operation);
+    const tail = current.then(() => undefined, () => undefined);
+    this.#lanes.set(subagentId, tail);
+    try {
+      return await current;
+    } finally {
+      if (this.#lanes.get(subagentId) === tail) this.#lanes.delete(subagentId);
+    }
   }
 
   cancel(taskId: string): boolean {
@@ -146,6 +187,12 @@ export function subagentTools(
     globFiles,
     grepFiles,
     runCommand,
+    terminalStart,
+    terminalWrite,
+    terminalRead,
+    terminalResize,
+    terminalSignal,
+    terminalClose,
     ...(shellDialect ? [shellCommand] : []),
   ];
   const forbidden = new Set([
@@ -159,6 +206,8 @@ export function subagentTools(
     'cancel_task',
     'send_message',
     'run_script',
+    'remember',
+    'forget_memory',
   ]);
   const names = new Set(tools.map((tool) => tool.spec.name));
   for (const tool of extra) {
@@ -206,6 +255,8 @@ interface SubagentManifest {
   readonly title: string;
   readonly maxIterations: number;
   readonly effort?: Effort;
+  readonly compatibilityId?: string;
+  readonly forkedFrom?: string;
 }
 
 function manifestPath(sessions: SessionStore, sessionId: string): string {
@@ -234,8 +285,77 @@ async function loadManifest(sessions: SessionStore, sessionId: string): Promise<
   }
 }
 
+async function loadManifestByReference(
+  sessions: SessionStore,
+  reference: string,
+): Promise<SubagentManifest | null> {
+  const direct = await loadManifest(sessions, reference);
+  if (direct) return direct;
+  let files: string[];
+  try {
+    files = await fs.readdir(path.join(sessions.root, 'subagents'));
+  } catch {
+    return null;
+  }
+  for (const file of files) {
+    if (!file.endsWith('.json')) continue;
+    try {
+      const value = JSON.parse(await fs.readFile(path.join(sessions.root, 'subagents', file), 'utf8')) as SubagentManifest;
+      if (
+        value &&
+        typeof value.sessionId === 'string' &&
+        typeof value.subagentId === 'string' &&
+        (value.subagentId === reference ||
+          value.subagentId === `subagent:${reference}` ||
+          value.subagentId.startsWith(reference) ||
+          value.compatibilityId === reference ||
+          value.sessionId === reference)
+      ) {
+        return value;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 function continuationId(session: Session): string {
   return `subagent:${session.id}`;
+}
+
+export interface ForkCheckpoint {
+  readonly parentId: string;
+  readonly sourceSequence: number;
+  readonly text: string;
+}
+
+function clipForkText(text: string, limit: number): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  return clean.length <= limit ? clean : `${clean.slice(0, limit - 1)}…`;
+}
+
+export function createForkCheckpoint(
+  parentId: string,
+  parentContext: readonly Message[],
+  task: string,
+): ForkCheckpoint {
+  const source = parentContext.filter((message) => message.role !== 'system');
+  const selected = source.slice(-18);
+  const lines = [`Forked from ID-${parentId}`, '', 'Parent checkpoint:'];
+  for (const message of selected) {
+    const calls = message.toolCalls?.map((call) => call.name).join(', ');
+    const label = calls ? `${message.role} tool calls: ${calls}` : message.role;
+    const content = clipForkText(message.content, 900);
+    if (content) lines.push(`${label}: ${content}`);
+  }
+  lines.push('', 'Child objective:', clipForkText(task, 2_400));
+  lines.push('', 'Use this checkpoint as bounded context. Verify current files and state before acting.');
+  return {
+    parentId,
+    sourceSequence: parentContext.length,
+    text: lines.join('\n').slice(0, 14_000),
+  };
 }
 
 function clipContinuation(text: string): string {
@@ -437,12 +557,33 @@ export function subagentTool(options: SubagentOptions): Tool {
       const childAbort = new AbortController();
       const abortChild = (): void => childAbort.abort();
       context.signal?.addEventListener('abort', abortChild, { once: true });
+      const forkedFrom = options.parentSession?.meta.uuid ?? options.parentSessionId ?? 'unknown';
+      const parentContext = typeof options.parentContext === 'function'
+        ? options.parentContext()
+        : options.parentContext ?? [];
+      const fork = createForkCheckpoint(forkedFrom, parentContext, task);
+      let childMemory = '';
+      if (options.memory && context.workspace) {
+        try {
+          childMemory = summariseMemory(await options.memory.readOnlySnapshot(context.workspace));
+        } catch {
+          childMemory = '';
+        }
+      }
       let childSession: Session | null = null;
       const continuable = options.continuable !== false && options.sessions !== undefined && context.workspace !== undefined;
       if (continuable) {
         try {
-          childSession = await options.sessions!.create(context.workspace!, { container: context.container.name });
+          childSession = await options.sessions!.create(context.workspace!, {
+            container: context.container.name,
+            parentId: forkedFrom,
+            forkCheckpoint: fork.sourceSequence,
+            ...(resolved.provider.info.providerId ? { providerId: resolved.provider.info.providerId } : {}),
+            modelId: resolved.provider.info.id,
+            lifecycle: 'active',
+          });
           await childSession.rename(`sub: ${title}`);
+          await childSession.checkpoint(fork.text, fork.sourceSequence);
           const subagentId = continuationId(childSession);
           await saveManifest(options.sessions!, {
             subagentId,
@@ -452,6 +593,8 @@ export function subagentTool(options: SubagentOptions): Tool {
             title,
             maxIterations: resolved.maxIterations ?? options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
             ...(resolved.effort ? { effort: resolved.effort } : {}),
+            compatibilityId: childSession.id,
+            forkedFrom,
           });
         } catch {
           // Persistence is an enhancement. An unavailable store keeps the
@@ -474,6 +617,8 @@ export function subagentTool(options: SubagentOptions): Tool {
             provider: resolved.provider,
             maxIterations: resolved.maxIterations ?? options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
             ...(resolved.effort ? { effort: resolved.effort } : {}),
+            compatibilityId: childSession.id,
+            forkedFrom,
           }
         : undefined;
       options.coordinator?.register(taskId, childAbort, record);
@@ -483,6 +628,9 @@ export function subagentTool(options: SubagentOptions): Tool {
         title,
         model: resolved.ref,
         contextMax: resolved.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+        ...(subagentId ? { subagentId } : {}),
+        ...(childSession ? { sessionId: childSession.id } : {}),
+        forkedFrom,
         at: startedAt,
       });
 
@@ -507,6 +655,25 @@ export function subagentTool(options: SubagentOptions): Tool {
         });
         inner.on('conversation.event', persistChild);
       }
+      const drainChildInputs = async (): Promise<readonly Message[]> => {
+        if (!childSession) return [];
+        const queued = await childSession.pendingInputs();
+        const messages: Message[] = [];
+        for (const item of queued) {
+          const turnId = randomUUID();
+          const delivered = await childSession.deliverInput(item.id, {
+            ...eventBase('user.message', turnId),
+            text: item.text,
+          });
+          if (!delivered) continue;
+          messages.push({
+            role: 'user',
+            content: item.text,
+            ...(item.attachments?.length ? { attachments: item.attachments as Message['attachments'] } : {}),
+          });
+        }
+        return messages;
+      };
       let calls = 0;
       const relay = (event: PlifEvents['subagent.activity']): void =>
         parent?.emit('subagent.activity', event);
@@ -592,20 +759,24 @@ export function subagentTool(options: SubagentOptions): Tool {
             mode: 'subagent',
             // The worker inherits the parent's PLIF operating mode and skill
             // gate, while its provider wire uses the reduced `resolved.effort`.
-            effort: options.stored.effort,
-            providerId: resolved.provider.info.providerId,
-            contextTokens: resolved.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+             effort: options.stored.effort,
+             providerId: resolved.provider.info.providerId,
+             modelId: resolved.provider.info.id,
+             modelDisplayName: resolved.provider.info.id,
+             endpointRoute: resolved.provider.info.endpoint,
+             contextTokens: resolved.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
             tools: stableToolSpecs(tools.map((tool) => tool.spec)),
             ...(options.skillCatalogue ? { skills: options.skillCatalogue } : {}),
             ...(options.agentInstructions ? { agentInstructions: options.agentInstructions } : {}),
-            ...(resolved.instructions && resolved.agentName
-              ? { profile: { name: resolved.agentName, systemPrompt: resolved.instructions } }
-              : {}),
+             ...(resolved.instructions && resolved.agentName
+               ? { profile: { name: resolved.agentName, systemPrompt: resolved.instructions } }
+               : {}),
+             ...(childMemory ? { memory: childMemory } : {}),
           }),
         },
         {
           role: 'user',
-          content: task,
+           content: fork.text,
           ...(input['includeAttachments'] === true && context.attachments?.length
             ? { attachments: context.attachments }
             : {}),
@@ -631,7 +802,10 @@ export function subagentTool(options: SubagentOptions): Tool {
         ...(context.edits ? { edits: context.edits } : {}),
         ...(options.shellDialect ? { shellDialect: options.shellDialect } : {}),
         ...(options.sessions && !childSession ? { sessions: options.sessions } : {}),
-        agentId: `subagent:${callId ?? title}:${Date.now()}`,
+        ...(options.memory ? { memory: options.memory } : {}),
+        readOnlyMemory: true,
+        drainQueue: drainChildInputs,
+        agentId: subagentId ? `subagent:${subagentId}` : `subagent:${callId ?? title}:${Date.now()}`,
       }).catch((error: unknown) => {
         parent?.emit('subagent.finished', {
           taskId,
@@ -744,9 +918,16 @@ export function sendMessageTool(options: SubagentOptions): Tool {
       let modelRef = live?.modelRef ?? '';
       if (live) {
         session = await options.sessions.resolve(live.workspace, live.sessionId);
-      } else if (subagentId.startsWith('subagent:')) {
-        const sessionId = subagentId.slice('subagent:'.length);
-        const manifest = await loadManifest(options.sessions, sessionId);
+        if (session && options.coordinator?.isRunning(subagentId)) {
+          await session.enqueueInput(message);
+          return {
+            output: `Queued follow-up for ${subagentId}. It will be delivered after the child's current tool results.`,
+            ok: true,
+          };
+        }
+      } else {
+        const reference = subagentId.startsWith('subagent:') ? subagentId.slice('subagent:'.length) : subagentId;
+        const manifest = await loadManifestByReference(options.sessions, reference);
         if (manifest) {
           session = await options.sessions.resolve(manifest.workspace, manifest.sessionId);
           provider = await providerFromManifest(manifest);
@@ -762,16 +943,30 @@ export function sendMessageTool(options: SubagentOptions): Tool {
         };
       }
 
+      let childMemory = '';
+      try {
+        if (options.memory) childMemory = summariseMemory(await options.memory.readOnlySnapshot(workspace));
+      } catch {
+        childMemory = '';
+      }
+      const checkpoint = await session.latestCheckpoint();
       const inner = new EventBus();
       let persistence = Promise.resolve();
       inner.on('conversation.event', (event) => {
         persistence = persistence.then(() => session!.append(event));
       });
+      const pending = await session.pendingInputs();
+      for (const item of pending) {
+        await session.deliverInput(item.id, {
+          ...eventBase('user.message', randomUUID()),
+          text: item.text,
+        });
+      }
       const turnId = randomUUID();
-      persistence = persistence.then(() => session!.append({
+      await session.append({
         ...eventBase('user.message', turnId),
         text: message,
-      }));
+      });
       const transcript = await session.replay();
       const carried = conversationFromTranscript(transcript);
       const messages: Message[] = [
@@ -787,20 +982,24 @@ export function sendMessageTool(options: SubagentOptions): Tool {
             mode: 'subagent',
             effort: options.stored.effort,
             providerId: provider.info.providerId,
+            modelId: provider.info.id,
+            modelDisplayName: provider.info.id,
+            endpointRoute: provider.info.endpoint,
             contextTokens: provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
             tools: stableToolSpecs(tools.map((tool) => tool.spec)),
             ...(options.skillCatalogue ? { skills: options.skillCatalogue } : {}),
             ...(options.agentInstructions ? { agentInstructions: options.agentInstructions } : {}),
+            ...(childMemory ? { memory: childMemory } : {}),
           }),
         },
+        ...(checkpoint?.snapshot ? [{ role: 'user' as const, content: checkpoint.snapshot }] : []),
         ...carried,
-        { role: 'user', content: message },
       ];
       const abort = new AbortController();
       const abortChild = (): void => abort.abort();
       context.signal?.addEventListener('abort', abortChild, { once: true });
       try {
-        const result = await runLoop(messages, {
+        const runTurn = (): Promise<Awaited<ReturnType<typeof runLoop>>> => runLoop(messages, {
           provider,
           container: context.container,
           questions: context.questions,
@@ -812,11 +1011,17 @@ export function sendMessageTool(options: SubagentOptions): Tool {
           contextTokens: provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
           signal: abort.signal,
           workspace,
+          ...(context.execution ? { execution: context.execution } : {}),
           ...(context.lsp ? { lsp: context.lsp } : {}),
           ...(context.edits ? { edits: context.edits } : {}),
           ...(options.shellDialect ? { shellDialect: options.shellDialect } : {}),
-          agentId: `subagent:continue:${subagentId}`,
+          ...(options.memory ? { memory: options.memory } : {}),
+          readOnlyMemory: true,
+          agentId: `subagent:${subagentId}`,
         });
+        const result = await (options.coordinator
+          ? options.coordinator.enqueue(`follow-up:${context.workspace}:${subagentId}`, runTurn)
+          : runTurn());
         await persistence;
         const answer = clipContinuation(result.text.trim());
         return { output: `[${modelRef || provider.info.id}]\n${answer || `stopped: ${result.stop}`}`, ok: result.stop === 'complete' && answer.length > 0 };

@@ -52,6 +52,7 @@ import {
   isConversationState,
   type ConversationState,
 } from '../model/conversation-state.js';
+import { HistoryRepository } from './history-repository.js';
 
 // ---------------------------------------------------------------------------
 // Transcript events
@@ -69,8 +70,10 @@ export type TranscriptEvent = ConversationEvent | LegacyTranscriptEvent;
 
 export interface SessionMeta {
   readonly id: string;
+  readonly uuid?: string;
   /** Absolute workspace path, as typed. Kept for display and for verification. */
   readonly workspace: string;
+  readonly workspaceKey?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   /** First user message, trimmed. What `plif sessions` shows as the label. */
@@ -78,6 +81,11 @@ export interface SessionMeta {
   readonly turns: number;
   /** Container this session was working in, if any. */
   readonly container: string | null;
+  readonly parentId?: string;
+  readonly forkCheckpoint?: number;
+  readonly providerId?: string;
+  readonly modelId?: string;
+  readonly lifecycle?: string;
   /** Set when the session ended cleanly; absent means it was interrupted. */
   readonly closedAt?: string;
 }
@@ -89,6 +97,45 @@ export function workspaceKey(workspace: string): string {
   // workspace and must hash the same. On POSIX they are genuinely different.
   if (process.platform === 'win32') normalized = normalized.toLowerCase();
   return createHash('sha256').update(normalized).digest('hex').slice(0, 12);
+}
+
+/**
+ * One in-process queue for every session file family. It is intentionally
+ * module-scoped rather than owned by SessionStore: two handles opened against
+ * the same root must not be able to race each other either.
+ */
+const SESSION_LOCKS = new Map<string, Promise<void>>();
+
+function sessionLockKey(root: string, workspace: string, id: string): string {
+  let normalized = path.resolve(workspace);
+  if (process.platform === 'win32') normalized = normalized.toLowerCase();
+  return `${path.resolve(root)}\0${normalized}\0${id}`;
+}
+
+function sameWorkspace(left: string, right: string): boolean {
+  let first = path.resolve(left);
+  let second = path.resolve(right);
+  if (process.platform === 'win32') {
+    first = first.toLowerCase();
+    second = second.toLowerCase();
+  }
+  return first === second;
+}
+
+function enqueueSessionOperation<T>(key: string, operation: () => Promise<T>): Promise<T> {
+  const previous = SESSION_LOCKS.get(key) ?? Promise.resolve();
+  const run = previous.then(operation, operation);
+  // The tail never rejects, so a failed operation cannot poison every later
+  // write for this session.
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  SESSION_LOCKS.set(key, tail);
+  void tail.then(() => {
+    if (SESSION_LOCKS.get(key) === tail) SESSION_LOCKS.delete(key);
+  });
+  return run;
 }
 
 /**
@@ -195,13 +242,48 @@ export class Session {
     this.#queue = this.#queue.then(() => this.#store.clearConversationState(this.#meta));
     return this.#queue;
   }
+
+  async checkpoint(snapshot: string, sequence?: number): Promise<void> {
+    await this.#queue;
+    await this.#store.checkpoint(this.#meta, sequence ?? (await this.history()).length, snapshot);
+  }
+
+  async enqueueInput(text: string, attachments: readonly unknown[] = []): Promise<import('./history-repository.js').QueuedHistoryInput> {
+    await this.#queue;
+    return this.#store.enqueueInput(this.#meta, text, attachments);
+  }
+
+  async deliverInput(id: string, event: ConversationEvent): Promise<boolean> {
+    await this.#queue;
+    const next = await this.#store.deliverInput(this.#meta, id, event);
+    if (!next) return false;
+    this.#meta = next;
+    return true;
+  }
+
+  async pendingInputs(): Promise<import('./history-repository.js').QueuedHistoryInput[]> {
+    await this.#queue;
+    return this.#store.pendingInputs(this.#meta);
+  }
+
+  async markInputDelivered(id: string, sequence: number): Promise<void> {
+    await this.#queue;
+    await this.#store.markInputDelivered(this.#meta, id, sequence);
+  }
+
+  async latestCheckpoint(): Promise<import('./history-repository.js').HistoryCheckpoint | null> {
+    await this.#queue;
+    return this.#store.latestCheckpoint(this.#meta);
+  }
 }
 
 export class SessionStore {
   #paths: StorePaths;
+  #history: Promise<HistoryRepository>;
 
   constructor(paths: StorePaths) {
     this.#paths = paths;
+    this.#history = HistoryRepository.open(paths.historyDb);
   }
 
   /** Root of the global store, for auxiliary metadata kept outside sessions. */
@@ -226,30 +308,86 @@ export class SessionStore {
   }
 
   /** Start a new session in this workspace. */
-  async create(workspace: string, options: { container?: string } = {}): Promise<Session> {
+  async create(workspace: string, options: {
+    container?: string;
+    parentId?: string;
+    forkCheckpoint?: number;
+    providerId?: string;
+    modelId?: string;
+    lifecycle?: string;
+  } = {}): Promise<Session> {
     const now = new Date().toISOString();
     const meta: SessionMeta = {
       id: randomUUID().replace(/-/g, '').slice(0, 12),
+      uuid: randomUUID(),
       workspace: path.resolve(workspace),
+      workspaceKey: workspaceKey(workspace),
       createdAt: now,
       updatedAt: now,
       title: '',
       turns: 0,
       container: options.container ?? null,
+      ...(options.parentId ? { parentId: options.parentId } : {}),
+      ...(options.forkCheckpoint !== undefined ? { forkCheckpoint: options.forkCheckpoint } : {}),
+      ...(options.providerId ? { providerId: options.providerId } : {}),
+      ...(options.modelId ? { modelId: options.modelId } : {}),
+      ...(options.lifecycle ? { lifecycle: options.lifecycle } : {}),
     };
     await fs.mkdir(this.#dir(workspace), { recursive: true });
+    const repository = await this.#history;
+    await repository.create(meta);
     await this.#writeMeta(meta);
     return new Session(this, meta);
   }
 
   async #writeMeta(meta: SessionMeta): Promise<void> {
+    return enqueueSessionOperation(
+      sessionLockKey(this.#paths.sessions, meta.workspace, meta.id),
+      () => this.#writeMetaUnlocked(meta),
+    );
+  }
+
+  async #writeMetaUnlocked(meta: SessionMeta): Promise<void> {
     const target = this.#metaFile(meta.workspace, meta.id);
-    const temp = `${target}.tmp`;
-    await fs.writeFile(temp, JSON.stringify(meta, null, 2), 'utf8');
-    await fs.rename(temp, target);
+    const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
+    let committed = false;
+    try {
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(temp, JSON.stringify(meta, null, 2), {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      await fs.rename(temp, target);
+      committed = true;
+    } finally {
+      if (!committed) await fs.rm(temp, { force: true }).catch(() => undefined);
+    }
+  }
+
+  async #readMetaOr(meta: SessionMeta): Promise<SessionMeta> {
+    try {
+      const raw: unknown = JSON.parse(await fs.readFile(this.#metaFile(meta.workspace, meta.id), 'utf8'));
+      if (
+        raw !== null &&
+        typeof raw === 'object' &&
+        (raw as { id?: unknown }).id === meta.id &&
+        typeof (raw as { workspace?: unknown }).workspace === 'string' &&
+        sameWorkspace((raw as { workspace: string }).workspace, meta.workspace)
+      ) {
+        return raw as SessionMeta;
+      }
+    } catch {
+      // A missing or interrupted metadata file is recovered from the caller's
+      // current snapshot. The atomic write below repairs it.
+    }
+    return meta;
   }
 
   async loadConversationState(meta: SessionMeta): Promise<ConversationState | null> {
+    return this.#loadConversationStateUnlocked(meta);
+  }
+
+  async #loadConversationStateUnlocked(meta: SessionMeta): Promise<ConversationState | null> {
     try {
       const raw = JSON.parse(await fs.readFile(this.#conversationStateFile(meta.workspace, meta.id), 'utf8')) as unknown;
       return isConversationState(raw) ? raw : null;
@@ -280,23 +418,41 @@ export class SessionStore {
       updatedAt: state.updatedAt,
       ...(state.lastFallbackReason ? { lastFallbackReason: state.lastFallbackReason } : {}),
     };
-    await fs.mkdir(this.#dir(meta.workspace), { recursive: true });
-    const target = this.#conversationStateFile(meta.workspace, meta.id);
-    const current = await this.loadConversationState(meta);
-    if (current && current.generation > safe.generation) return;
-    const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
-    let committed = false;
-    try {
-      await fs.writeFile(temp, JSON.stringify(safe, null, 2), { encoding: 'utf8', mode: 0o600 });
-      await fs.rename(temp, target);
-      committed = true;
-    } finally {
-      if (!committed) await fs.rm(temp, { force: true }).catch(() => undefined);
-    }
+    return enqueueSessionOperation(
+      sessionLockKey(this.#paths.sessions, meta.workspace, meta.id),
+      async () => {
+        await fs.mkdir(this.#dir(meta.workspace), { recursive: true });
+        const target = this.#conversationStateFile(meta.workspace, meta.id);
+        // The generation check must happen while holding the same session lock
+        // as the replacement. Checking before the lock still allowed an older
+        // writer to replace a newer state after both had read the same file.
+        const current = await this.#loadConversationStateUnlocked(meta);
+        if (current && current.generation > safe.generation) return;
+        const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
+        let committed = false;
+        try {
+          await fs.writeFile(temp, JSON.stringify(safe, null, 2), {
+            encoding: 'utf8',
+            mode: 0o600,
+          });
+          await fs.rename(temp, target);
+          committed = true;
+          await (await this.#history).saveConversationState(meta, safe);
+        } finally {
+          if (!committed) await fs.rm(temp, { force: true }).catch(() => undefined);
+        }
+      },
+    );
   }
 
   async clearConversationState(meta: SessionMeta): Promise<void> {
-    await fs.rm(this.#conversationStateFile(meta.workspace, meta.id), { force: true });
+    return enqueueSessionOperation(
+      sessionLockKey(this.#paths.sessions, meta.workspace, meta.id),
+      async () => {
+        await fs.rm(this.#conversationStateFile(meta.workspace, meta.id), { force: true });
+        await (await this.#history).clearConversationState(meta);
+      },
+    );
   }
 
   /**
@@ -306,60 +462,184 @@ export class SessionStore {
    * metadata so it cannot be dropped on the floor.
    */
   async appendTo(meta: SessionMeta, event: ConversationEvent): Promise<SessionMeta> {
-    await fs.mkdir(this.#dir(meta.workspace), { recursive: true });
-    await fs.appendFile(
-      this.#transcriptFile(meta.workspace, meta.id),
-      JSON.stringify(event) + '\n',
-      'utf8',
+    return enqueueSessionOperation(
+      sessionLockKey(this.#paths.sessions, meta.workspace, meta.id),
+      async () => {
+        await fs.mkdir(this.#dir(meta.workspace), { recursive: true });
+        const next = await (await this.#history).append(meta, event);
+        await fs.appendFile(this.#transcriptFile(meta.workspace, meta.id), JSON.stringify(event) + '\n', 'utf8');
+        await this.#writeMetaUnlocked(next);
+        return next;
+      },
     );
+  }
 
-    const next: SessionMeta = {
-      ...meta,
-      updatedAt: new Date().toISOString(),
-      turns: event.kind === 'user.message' ? meta.turns + 1 : meta.turns,
-      // The first thing the developer said is the best label available, and it
-      // is more useful than any title a model would invent for it.
-      title: meta.title || (event.kind === 'user.message' ? summarise(event.text) : ''),
-    };
-    await this.#writeMeta(next);
-    return next;
+  async checkpoint(meta: SessionMeta, sequence: number, snapshot: string): Promise<void> {
+    await (await this.#history).checkpoint(meta, Math.max(0, Math.floor(sequence)), snapshot);
+  }
+
+  async enqueueInput(meta: SessionMeta, text: string, attachments: readonly unknown[] = []): Promise<import('./history-repository.js').QueuedHistoryInput> {
+    const queued = await (await this.#history).enqueueInput(meta, text, attachments);
+    await fs.mkdir(this.#dir(meta.workspace), { recursive: true });
+    await fs.appendFile(this.#transcriptFile(meta.workspace, meta.id), JSON.stringify(queued.event) + '\n', 'utf8');
+    return queued.input;
+  }
+
+  async deliverInput(meta: SessionMeta, id: string, event: ConversationEvent): Promise<SessionMeta | null> {
+    return enqueueSessionOperation(
+      sessionLockKey(this.#paths.sessions, meta.workspace, meta.id),
+      async () => {
+        const next = await (await this.#history).deliverInput(meta, id, event);
+        if (!next) return null;
+        await fs.mkdir(this.#dir(meta.workspace), { recursive: true });
+        await fs.appendFile(this.#transcriptFile(meta.workspace, meta.id), JSON.stringify(event) + '\n', 'utf8');
+        await this.#writeMetaUnlocked(next);
+        return next;
+      },
+    );
+  }
+
+  async pendingInputs(meta: SessionMeta): Promise<import('./history-repository.js').QueuedHistoryInput[]> {
+    return (await this.#history).pendingInputs(meta);
+  }
+
+  async markInputDelivered(meta: SessionMeta, id: string, sequence: number): Promise<void> {
+    await (await this.#history).markInputDelivered(id, Math.max(0, Math.floor(sequence)));
+  }
+
+  async latestCheckpoint(meta: SessionMeta): Promise<import('./history-repository.js').HistoryCheckpoint | null> {
+    return (await this.#history).latestCheckpoint(meta);
   }
 
   /** Internal: use `Session.close`. */
   async closeMeta(meta: SessionMeta): Promise<SessionMeta> {
-    const next = { ...meta, closedAt: new Date().toISOString() };
-    await this.#writeMeta(next);
-    return next;
+    return enqueueSessionOperation(
+      sessionLockKey(this.#paths.sessions, meta.workspace, meta.id),
+      async () => {
+        const next = await (await this.#history).closeSession(meta);
+        await this.#writeMetaUnlocked(next);
+        return next;
+      },
+    );
   }
 
   /** Internal: metadata-only mutation used by the session browser. */
   async renameMeta(meta: SessionMeta, title: string): Promise<SessionMeta> {
-    const next = { ...meta, title: title.trim().slice(0, 160) };
-    await this.#writeMeta(next);
-    return next;
+    return enqueueSessionOperation(
+      sessionLockKey(this.#paths.sessions, meta.workspace, meta.id),
+      async () => {
+        const next = await (await this.#history).rename(meta, title);
+        await this.#writeMetaUnlocked(next);
+        return next;
+      },
+    );
   }
 
-  /** Every session recorded for this workspace, newest activity first. */
-  async list(workspace: string): Promise<SessionMeta[]> {
-    let files: string[];
+  async #legacyEvents(meta: SessionMeta): Promise<ConversationEvent[]> {
+    const file = this.#transcriptFile(meta.workspace, meta.id);
     try {
-      files = await fs.readdir(this.#dir(workspace));
+      await fs.access(file);
     } catch {
       return [];
     }
 
-    const sessions: SessionMeta[] = [];
+    const stream = createReadStream(file, 'utf8');
+    const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    const events: ConversationEvent[] = [];
+    let pending: { line: string; number: number } | null = null;
+    let lineNumber = 0;
+    let legacyTurn = '';
+    let legacyTurns = 0;
+    const decodeLine = (line: string, number: number, final: boolean): ConversationEvent | null => {
+      let value: unknown;
+      try {
+        value = JSON.parse(line);
+      } catch {
+        return final ? null : {
+          version: 1,
+          eventId: `${meta.id}:malformed:${number}`,
+          turnId: legacyTurn || `${meta.id}:recovery`,
+          at: meta.updatedAt,
+          kind: 'notice.recorded',
+          level: 'warn',
+          text: `Skipped malformed transcript line ${number}.`,
+        };
+      }
+      const canonical = decodeConversationEvent(value);
+      if (canonical) {
+        legacyTurn = canonical.turnId;
+        return canonical;
+      }
+      const legacy = decodeLegacyTranscriptEvent(value);
+      if (!legacy) {
+        return final ? null : {
+          version: 1,
+          eventId: `${meta.id}:malformed:${number}`,
+          turnId: legacyTurn || `${meta.id}:recovery`,
+          at: meta.updatedAt,
+          kind: 'notice.recorded',
+          level: 'warn',
+          text: `Skipped malformed transcript line ${number}.`,
+        };
+      }
+      if (legacy.kind === 'user' || !legacyTurn) {
+        legacyTurns += 1;
+        legacyTurn = `${meta.id}:legacy:${legacyTurns}`;
+      }
+      return adaptLegacyTranscriptEvent(legacy, {
+        turnId: legacyTurn,
+        nextEventId: () => `${meta.id}:legacy-line:${number}`,
+      });
+    };
+    try {
+      for await (const line of lines) {
+        if (!line.trim()) continue;
+        lineNumber += 1;
+        if (pending) {
+          const event = decodeLine(pending.line, pending.number, false);
+          if (event) events.push(event);
+        }
+        pending = { line, number: lineNumber };
+      }
+      if (pending) {
+        const event = decodeLine(pending.line, pending.number, true);
+        if (event) events.push(event);
+      }
+    } finally {
+      lines.close();
+      stream.close();
+    }
+    return dedupeConversationEvents(events);
+  }
+
+  async #syncLegacy(meta: SessionMeta): Promise<void> {
+    const events = await this.#legacyEvents(meta);
+    if (events.length === 0) return;
+    await (await this.#history).importEvents(meta, events);
+  }
+
+  async #syncLegacyWorkspace(workspace: string): Promise<void> {
+    let files: string[];
+    try {
+      files = await fs.readdir(this.#dir(workspace));
+    } catch {
+      return;
+    }
     for (const file of files) {
       if (!file.endsWith('.json') || file.endsWith('.state.json')) continue;
       try {
-        const raw = await fs.readFile(path.join(this.#dir(workspace), file), 'utf8');
-        sessions.push(JSON.parse(raw) as SessionMeta);
+        const raw = JSON.parse(await fs.readFile(path.join(this.#dir(workspace), file), 'utf8')) as SessionMeta;
+        if (raw.workspace && raw.id) await this.#syncLegacy(raw);
       } catch {
-        // A half-written meta file from a crash. Skip it rather than refusing
-        // to list the sessions that are fine.
+        continue;
       }
     }
-    return sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  /** Every session recorded for this workspace, newest activity first. */
+  async list(workspace: string): Promise<SessionMeta[]> {
+    await this.#syncLegacyWorkspace(workspace);
+    return (await this.#history).list(workspace);
   }
 
   /** The session `plif continue` should resume: most recently touched. */
@@ -374,6 +654,9 @@ export class SessionStore {
     const sessions = await this.list(workspace);
     const exact = sessions.find((session) => session.id === ref);
     if (exact) return new Session(this, exact);
+
+    const uuidExact = sessions.find((session) => session.uuid === ref);
+    if (uuidExact) return new Session(this, uuidExact);
 
     const matches = sessions.filter((session) => session.id.startsWith(ref));
     if (matches.length === 1) return new Session(this, matches[0] as SessionMeta);
@@ -394,88 +677,9 @@ export class SessionStore {
    * line was truncated by a crash would defeat the purpose.
    */
   async *read(meta: SessionMeta): AsyncGenerator<ConversationEvent> {
-    const file = this.#transcriptFile(meta.workspace, meta.id);
-    try {
-      await fs.access(file);
-    } catch {
-      return;
-    }
-
-    const stream = createReadStream(file, 'utf8');
-    const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
-    let pending: { line: string; number: number } | null = null;
-    let lineNumber = 0;
-    let legacyTurn = '';
-    let legacyTurns = 0;
-
-    const decodeLine = (
-      line: string,
-      number: number,
-      final: boolean,
-    ): ConversationEvent | null => {
-      let value: unknown;
-      try {
-        value = JSON.parse(line);
-      } catch {
-        return final
-          ? null
-          : {
-              version: 1,
-              eventId: `${meta.id}:malformed:${number}`,
-              turnId: legacyTurn || `${meta.id}:recovery`,
-              at: meta.updatedAt,
-              kind: 'notice.recorded',
-              level: 'warn',
-              text: `Skipped malformed transcript line ${number}.`,
-            };
-      }
-
-      const canonical = decodeConversationEvent(value);
-      if (canonical) {
-        legacyTurn = canonical.turnId;
-        return canonical;
-      }
-
-      const legacy = decodeLegacyTranscriptEvent(value);
-      if (!legacy) {
-        return final
-          ? null
-          : {
-              version: 1,
-              eventId: `${meta.id}:malformed:${number}`,
-              turnId: legacyTurn || `${meta.id}:recovery`,
-              at: meta.updatedAt,
-              kind: 'notice.recorded',
-              level: 'warn',
-              text: `Skipped malformed transcript line ${number}.`,
-            };
-      }
-      if (legacy.kind === 'user' || !legacyTurn) {
-        legacyTurns += 1;
-        legacyTurn = `${meta.id}:legacy:${legacyTurns}`;
-      }
-      return adaptLegacyTranscriptEvent(legacy, {
-        turnId: legacyTurn,
-        nextEventId: () => `${meta.id}:legacy-line:${number}`,
-      });
-    };
-    try {
-      for await (const line of lines) {
-        if (!line.trim()) continue;
-        lineNumber += 1;
-        if (pending) {
-          const event = decodeLine(pending.line, pending.number, false);
-          if (event) yield event;
-        }
-        pending = { line, number: lineNumber };
-      }
-      if (pending) {
-        const event = decodeLine(pending.line, pending.number, true);
-        if (event) yield event;
-      }
-    } finally {
-      lines.close();
-      stream.close();
+    await this.#syncLegacy(meta);
+    for (const event of await (await this.#history).events(meta)) {
+      yield event;
     }
   }
 
@@ -499,14 +703,20 @@ export class SessionStore {
    * conversation; `replay()` remains intentionally smaller for model context.
    */
   async history(meta: SessionMeta): Promise<ConversationEvent[]> {
-    const all: ConversationEvent[] = [];
-    for await (const event of this.read(meta)) all.push(event);
-    return dedupeConversationEvents(all);
+    await this.#syncLegacy(meta);
+    return dedupeConversationEvents(await (await this.#history).events(meta));
   }
 
   async remove(meta: SessionMeta): Promise<void> {
-    await fs.rm(this.#metaFile(meta.workspace, meta.id), { force: true });
-    await fs.rm(this.#transcriptFile(meta.workspace, meta.id), { force: true });
+    return enqueueSessionOperation(
+      sessionLockKey(this.#paths.sessions, meta.workspace, meta.id),
+      async () => {
+        await (await this.#history).remove(meta);
+        await fs.rm(this.#metaFile(meta.workspace, meta.id), { force: true });
+        await fs.rm(this.#transcriptFile(meta.workspace, meta.id), { force: true });
+        await fs.rm(this.#conversationStateFile(meta.workspace, meta.id), { force: true });
+      },
+    );
   }
 
   /** Workspaces that have sessions, for a future `plif sessions --all`. */
@@ -515,10 +725,8 @@ export class SessionStore {
     try {
       keys = await fs.readdir(this.#paths.sessions);
     } catch {
-      return [];
+      return (await this.#history).workspaces();
     }
-
-    const out: { key: string; workspace: string; sessions: number }[] = [];
     for (const key of keys) {
       const dir = path.join(this.#paths.sessions, key);
       let files: string[];
@@ -527,16 +735,16 @@ export class SessionStore {
       } catch {
         continue;
       }
-      if (files.length === 0) continue;
-      try {
-        const raw = await fs.readFile(path.join(dir, files[0] as string), 'utf8');
-        const meta = JSON.parse(raw) as SessionMeta;
-        out.push({ key, workspace: meta.workspace, sessions: files.length });
-      } catch {
-        // unreadable; skip
+      for (const file of files) {
+        try {
+          const meta = JSON.parse(await fs.readFile(path.join(dir, file), 'utf8')) as SessionMeta;
+          if (meta.workspace && meta.id) await this.#syncLegacy(meta);
+        } catch {
+          continue;
+        }
       }
     }
-    return out;
+    return (await this.#history).workspaces();
   }
 }
 

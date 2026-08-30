@@ -16,6 +16,30 @@ export type ConversationEventV1 =
   | (EventBase<'turn.interrupted'> & { readonly reason: string })
   | (EventBase<'turn.failed'> & { readonly reason: string })
   | (EventBase<'user.message'> & { readonly text: string })
+  | (EventBase<'command.input'> & {
+      readonly execId: string;
+      readonly argv: readonly string[];
+      readonly cwd: string;
+      readonly interactive: boolean;
+    })
+  | (EventBase<'command.completed'> & {
+      readonly execId: string;
+      readonly exitCode: number;
+      readonly stdout: string;
+      readonly stderr: string;
+      readonly truncated: boolean;
+      readonly durationMs: number;
+      readonly killedBy?: 'timeout' | 'memory' | 'processes' | 'cancelled';
+    })
+  | (EventBase<'terminal.output'> & {
+      readonly terminalId: string;
+      readonly stream: 'stdout' | 'stderr';
+      readonly text: string;
+    })
+  | (EventBase<'queued.input'> & {
+      readonly inputId: string;
+      readonly text: string;
+    })
   | (EventBase<'assistant.message'> & {
       readonly phase: 'commentary' | 'final';
       readonly text: string;
@@ -137,6 +161,18 @@ function toolCallsOf(value: unknown): readonly ToolCall[] | null {
   return calls;
 }
 
+function stringArrayOf(value: unknown): readonly string[] | null {
+  if (!Array.isArray(value) || value.some((item) => !isString(item))) return null;
+  return value;
+}
+
+function killedByOf(value: unknown): 'timeout' | 'memory' | 'processes' | 'cancelled' | undefined | null {
+  if (value === undefined) return undefined;
+  return value === 'timeout' || value === 'memory' || value === 'processes' || value === 'cancelled'
+    ? value
+    : null;
+}
+
 /** Decode one versioned JSONL value without allowing malformed data to escape. */
 export function decodeConversationEvent(value: unknown): ConversationEvent | null {
   if (!isRecord(value)) return null;
@@ -163,6 +199,53 @@ export function decodeConversationEvent(value: unknown): ConversationEvent | nul
     case 'user.message':
       return isString(value['text'])
         ? { ...base, kind: 'user.message', text: value['text'] }
+        : null;
+    case 'command.input': {
+      const argv = stringArrayOf(value['argv']);
+      return isString(value['execId']) && value['execId'] && argv && isString(value['cwd']) &&
+        typeof value['interactive'] === 'boolean'
+        ? {
+            ...base,
+            kind: 'command.input',
+            execId: value['execId'],
+            argv,
+            cwd: value['cwd'],
+            interactive: value['interactive'],
+          }
+        : null;
+    }
+    case 'command.completed': {
+      const killedBy = killedByOf(value['killedBy']);
+      return isString(value['execId']) && value['execId'] && isFiniteNumber(value['exitCode']) &&
+        isString(value['stdout']) && isString(value['stderr']) && typeof value['truncated'] === 'boolean' &&
+        isFiniteNumber(value['durationMs']) && value['durationMs'] >= 0 && killedBy !== null
+        ? {
+            ...base,
+            kind: 'command.completed',
+            execId: value['execId'],
+            exitCode: value['exitCode'],
+            stdout: value['stdout'],
+            stderr: value['stderr'],
+            truncated: value['truncated'],
+            durationMs: value['durationMs'],
+            ...(killedBy !== undefined ? { killedBy } : {}),
+          }
+        : null;
+    }
+    case 'terminal.output':
+      return isString(value['terminalId']) && value['terminalId'] &&
+        (value['stream'] === 'stdout' || value['stream'] === 'stderr') && isString(value['text'])
+        ? {
+            ...base,
+            kind: 'terminal.output',
+            terminalId: value['terminalId'],
+            stream: value['stream'],
+            text: value['text'],
+          }
+        : null;
+    case 'queued.input':
+      return isString(value['inputId']) && value['inputId'] && isString(value['text'])
+        ? { ...base, kind: 'queued.input', inputId: value['inputId'], text: value['text'] }
         : null;
     case 'assistant.message': {
       const phase = value['phase'];

@@ -43,6 +43,72 @@ describe('canonical conversation events', () => {
     assert.equal(decodeConversationEvent('not-an-object'), null);
   });
 
+  it('decodes command, terminal and queued-input activity as durable events', () => {
+    const command = decodeConversationEvent({
+      version: 1,
+      eventId: 'command-input',
+      turnId: 'turn-1',
+      at,
+      kind: 'command.input',
+      execId: 'exec-1',
+      argv: ['npm', 'test'],
+      cwd: '/workspace',
+      interactive: false,
+    });
+    const completed = decodeConversationEvent({
+      version: 1,
+      eventId: 'command-completed',
+      turnId: 'turn-1',
+      at,
+      kind: 'command.completed',
+      execId: 'exec-1',
+      exitCode: 0,
+      stdout: 'ok',
+      stderr: '',
+      truncated: false,
+      durationMs: 12,
+      killedBy: 'cancelled',
+    });
+    const terminal = decodeConversationEvent({
+      version: 1,
+      eventId: 'terminal-output',
+      turnId: 'turn-1',
+      at,
+      kind: 'terminal.output',
+      terminalId: 'terminal-1',
+      stream: 'stdout',
+      text: 'ready',
+    });
+    const queued = decodeConversationEvent({
+      version: 1,
+      eventId: 'queued-input',
+      turnId: 'turn-1',
+      at,
+      kind: 'queued.input',
+      inputId: 'input-1',
+      text: 'continue',
+    });
+
+    assert.equal(command?.kind, 'command.input');
+    assert.equal(completed?.kind, 'command.completed');
+    assert.equal(terminal?.kind, 'terminal.output');
+    assert.equal(queued?.kind, 'queued.input');
+    assert.equal(decodeConversationEvent({
+      version: 1,
+      eventId: 'bad-command',
+      turnId: 'turn-1',
+      at,
+      kind: 'command.completed',
+      execId: 'exec-1',
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      truncated: false,
+      durationMs: 1,
+      killedBy: 'unknown',
+    }), null);
+  });
+
   it('adapts legacy messages without changing their roles', () => {
     let id = 0;
     const context = { turnId: 'legacy-turn-1', nextEventId: () => `legacy-${++id}` };

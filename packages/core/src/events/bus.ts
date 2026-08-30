@@ -312,6 +312,9 @@ export interface PlifEvents {
     model: string;
     /** Declared context window of the selected child model. */
     contextMax: number;
+    subagentId?: string;
+    sessionId?: string;
+    forkedFrom?: string;
     at: number;
   };
   /**

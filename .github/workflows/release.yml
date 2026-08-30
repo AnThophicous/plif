@@ -1,41 +1,149 @@
 name: release
 
 # npm is what the installer pulls from, so a release is an npm publish first
-# and a GitHub release second. An npm version can never be republished, which
-# is why the tests gate the publish rather than following it.
+# and a GitHub release second. Every publish is built from the exact commit
+# resolved by the release tag.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
     inputs:
-      source_ref:
-        description: 'Branch or commit used for validation and packaging'
+      release_tag:
+        description: 'Existing vX.Y.Z tag to validate and publish'
         required: true
-        default: 'main'
-        type: string
-      release_ref:
-        description: 'Existing tag to publish'
-        required: true
-        default: 'v0.3.9'
         type: string
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+
+concurrency:
+  group: release-${{ inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
-  validate:
-    name: Validate (${{ matrix.os }})
+  resolve:
+    name: Resolve release tag
+    runs-on: ubuntu-22.04
+    outputs:
+      commit: ${{ steps.resolve_tag.outputs.commit }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.release_tag || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Resolve and pin tag commit
+        id: resolve_tag
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:RELEASE_TAG.Trim()
+          if ($tag -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "Release tag '$tag' is not a supported vX.Y.Z tag."
+          }
+          git fetch --force --tags origin
+          $head = (git rev-parse HEAD).Trim()
+          $tagCommit = (git rev-list -n 1 "refs/tags/$tag").Trim()
+          if ([string]::IsNullOrWhiteSpace($tagCommit) -or $head -ne $tagCommit) {
+            throw "Checkout $head does not match commit $tagCommit resolved by tag '$tag'."
+          }
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "commit=$tagCommit"
+          Write-Host "Pinned tag $tag to commit $tagCommit."
+
+  updater:
+    needs: resolve
+    name: Build updater (${{ matrix.platform }}-${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-22.04]
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows
+            arch: x64
+            binary: plif-updater.exe
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            platform: windows
+            arch: arm64
+            binary: plif-updater.exe
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            platform: linux
+            arch: x64
+            binary: plif-updater
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            platform: linux
+            arch: arm64
+            binary: plif-updater
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref || github.ref }}
+          ref: ${{ needs.resolve.outputs.commit }}
+          fetch-depth: 1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install Linux ARM64 linker
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Build updater
+        shell: bash
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --manifest-path updater/Cargo.toml --release --target ${{ matrix.target }}
+      - name: Stage updater
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path artifact -Force | Out-Null
+          Copy-Item "updater/target/${{ matrix.target }}/release/${{ matrix.binary }}" 'artifact/${{ matrix.binary }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plif-updater-${{ matrix.platform }}-${{ matrix.arch }}
+          path: artifact/${{ matrix.binary }}
+          if-no-files-found: error
+
+  validate:
+    needs: resolve
+    name: Validate (${{ matrix.os }})
+    env:
+      EXPECTED_RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.commit }}
+          fetch-depth: 0
+
+      - name: Verify release tag commit before install
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:RELEASE_TAG.Trim()
+          if ($tag -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "Release tag '$tag' is not a supported vX.Y.Z tag."
+          }
+          git fetch --force --tags origin
+          $head = (git rev-parse HEAD).Trim()
+          $tagCommit = (git rev-list -n 1 "refs/tags/$tag").Trim()
+          $expectedCommit = $env:EXPECTED_RELEASE_COMMIT.Trim()
+          if ([string]::IsNullOrWhiteSpace($tagCommit) -or $head -ne $tagCommit -or $head -ne $expectedCommit) {
+            throw "Checkout $head does not match the current tag commit $tagCommit or the resolved commit $expectedCommit."
+          }
+          Write-Host "Validated tag $tag at commit $head before installing dependencies."
 
       - uses: actions/setup-node@v4
         with:
@@ -53,25 +161,134 @@ jobs:
       - name: Test Linux sandbox backend
         if: runner.os == 'Linux'
         run: node --import tsx --test packages/sandbox/test/linux-backend.test.ts
+      - name: Check tag commit and workspace versions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:RELEASE_TAG.Trim()
+          if ($tag -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "Release tag '$tag' is not a supported vX.Y.Z tag."
+          }
+          git fetch --force --tags origin
+          $head = (git rev-parse HEAD).Trim()
+          $tagCommit = (git rev-list -n 1 "refs/tags/$tag").Trim()
+          $expectedCommit = $env:EXPECTED_RELEASE_COMMIT.Trim()
+          if ([string]::IsNullOrWhiteSpace($tagCommit)) {
+            throw "Release tag '$tag' does not exist on origin."
+          }
+          if ($head -ne $tagCommit -or $head -ne $expectedCommit) {
+            throw "Checkout $head does not match the current tag commit $tagCommit or the resolved commit $expectedCommit."
+          }
+
+          $expected = $tag.Substring(1)
+          $paths = @(
+            'package.json',
+            'packages/acp/package.json',
+            'packages/cli/package.json',
+            'packages/core/package.json',
+            'packages/sandbox/package.json'
+          )
+          $manifests = @{}
+          foreach ($path in $paths) {
+            $manifests[$path] = Get-Content -Raw $path | ConvertFrom-Json
+            $actual = [string]$manifests[$path].version
+            if ($actual -ne $expected) {
+              throw "$path has version $actual; expected $expected from tag '$tag'."
+            }
+          }
+
+          $dependencyChecks = @(
+            @{ Path = 'packages/acp/package.json'; Dependency = '@plif/core' },
+            @{ Path = 'packages/cli/package.json'; Dependency = '@plif/core' },
+            @{ Path = 'packages/cli/package.json'; Dependency = '@plif/sandbox' },
+            @{ Path = 'packages/core/package.json'; Dependency = '@plif/sandbox' }
+          )
+          foreach ($check in $dependencyChecks) {
+            $property = $manifests[$check.Path].dependencies.PSObject.Properties[$check.Dependency]
+            if ($null -eq $property -or [string]$property.Value -ne $expected) {
+              throw "$($check.Path) must depend on $($check.Dependency)@$expected."
+            }
+          }
+
+          Write-Host "Tag $tag resolves to the checked-out commit $head."
+          Write-Host "Workspace packages are consistently versioned at $expected."
       - run: npm run typecheck
-      - run: npm test
       - run: npm run build
+      - run: npm test
       - name: Smoke-test the TTY surface
         run: node packages/cli/dev/smoke-tui.mjs
-      - run: npm pack --workspace @plif/cli --dry-run
+      - name: Validate release package contents
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $targets = @(
+            @{ Name = '@plif/sandbox'; Required = @('dist/index.js', 'LICENSE', 'NOTICE') },
+            @{ Name = '@plif/core'; Required = @('dist/index.js', 'dist/index.d.ts', 'schema/config.schema.toml', 'LICENSE', 'NOTICE') },
+            @{ Name = '@plif/acp'; Required = @('dist/index.js', 'README.md', 'SECURITY.md', 'LICENSE', 'NOTICE') },
+            @{ Name = '@plif/cli'; Required = @('dist/main.js', 'README.md', 'CHANGELOG.md', 'LICENSE', 'NOTICE') }
+          )
+
+          foreach ($target in $targets) {
+            $json = (& npm pack --workspace $target.Name --dry-run --json --loglevel=error | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0) {
+              throw "npm pack failed for $($target.Name)."
+            }
+
+            try {
+              $result = $json | ConvertFrom-Json
+            } catch {
+              throw "npm pack returned invalid JSON for $($target.Name): $($_.Exception.Message)"
+            }
+
+            $pack = if ($result -is [array]) { $result[-1] } else { $result }
+            if ($null -eq $pack.files) {
+              throw "npm pack did not report files for $($target.Name)."
+            }
+
+            $files = @($pack.files | ForEach-Object { [string]$_.path })
+            foreach ($required in $target.Required) {
+              if ($files -notcontains $required) {
+                throw "$($target.Name) tarball is missing $required."
+              }
+            }
+            Write-Host "$($target.Name) pack contains all required release files."
+          }
 
   release:
-    needs: validate
-    # Publish only after both supported operating-system validations pass.
-    # The release job remains Windows because npm provenance and the existing
-    # release path are already exercised there; the matrix above proves the
-    # package/build and Linux sandbox path independently before publishing.
+    needs: [resolve, validate, updater]
+    env:
+      EXPECTED_RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+      PLIF_RELEASE: '1'
+    permissions:
+      contents: write
+      id-token: write
+    # Publish only after every supported operating-system validation passes.
+    # The publish job checks out and verifies the same tag again because jobs
+    # have separate workspaces.
     runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref || github.ref }}
+          ref: ${{ needs.resolve.outputs.commit }}
+          fetch-depth: 0
+
+      - name: Verify release tag commit before install
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:RELEASE_TAG.Trim()
+          if ($tag -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "Release tag '$tag' is not a supported vX.Y.Z tag."
+          }
+          git fetch --force --tags origin
+          $head = (git rev-parse HEAD).Trim()
+          $tagCommit = (git rev-list -n 1 "refs/tags/$tag").Trim()
+          $expectedCommit = $env:EXPECTED_RELEASE_COMMIT.Trim()
+          if ([string]::IsNullOrWhiteSpace($tagCommit) -or $head -ne $tagCommit -or $head -ne $expectedCommit) {
+            throw "Checkout $head does not match the current tag commit $tagCommit or the resolved commit $expectedCommit."
+          }
+          Write-Host "Validated tag $tag at commit $head before installing dependencies."
 
       - uses: actions/setup-node@v4
         with:
@@ -82,18 +299,108 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-      - name: Check the tag matches the version
+      - name: Download updater binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: plif-updater-*
+          path: updater-artifacts
+          merge-multiple: false
+
+      - name: Assemble updater assets
         shell: pwsh
-        env:
-          RELEASE_TAG: ${{ inputs.release_ref || github.ref_name }}
         run: |
-          $tag = ($env:RELEASE_TAG -replace '^refs/tags/', '' -replace '^v', '')
-          $version = (Get-Content packages/cli/package.json | ConvertFrom-Json).version
-          if ($tag -ne $version) {
-            throw "tag v$tag does not match packages/cli/package.json version $version"
+          $ErrorActionPreference = 'Stop'
+          $assets = @(
+            @{ Platform = 'windows'; Arch = 'x64'; Binary = 'plif-updater.exe' },
+            @{ Platform = 'windows'; Arch = 'arm64'; Binary = 'plif-updater.exe' },
+            @{ Platform = 'linux'; Arch = 'x64'; Binary = 'plif-updater' },
+            @{ Platform = 'linux'; Arch = 'arm64'; Binary = 'plif-updater' }
+          )
+          foreach ($asset in $assets) {
+            $source = Join-Path "updater-artifacts/plif-updater-$($asset.Platform)-$($asset.Arch)" $asset.Binary
+            $destination = "packages/cli/assets/updater/$($asset.Platform)-$($asset.Arch)"
+            if (-not (Test-Path -LiteralPath $source)) {
+              throw "Missing updater artifact $source"
+            }
+            New-Item -ItemType Directory -Path $destination -Force | Out-Null
+            Copy-Item -LiteralPath $source -Destination (Join-Path $destination $asset.Binary) -Force
           }
 
-      # Dependency order: sandbox, then core which needs it, then the CLI.
+      - name: Re-check tag commit and workspace versions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:RELEASE_TAG.Trim()
+          if ($tag -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "Release tag '$tag' is not a supported vX.Y.Z tag."
+          }
+
+          git fetch --force --tags origin
+          $head = (git rev-parse HEAD).Trim()
+          $tagCommit = (git rev-list -n 1 "refs/tags/$tag").Trim()
+          $expectedCommit = $env:EXPECTED_RELEASE_COMMIT.Trim()
+          if ([string]::IsNullOrWhiteSpace($tagCommit) -or $head -ne $tagCommit -or $head -ne $expectedCommit) {
+            throw "Checkout $head does not match the current tag commit $tagCommit or the resolved commit $expectedCommit."
+          }
+
+          $expected = $tag.Substring(1)
+          $paths = @(
+            'package.json',
+            'packages/acp/package.json',
+            'packages/cli/package.json',
+            'packages/core/package.json',
+            'packages/sandbox/package.json'
+          )
+          $manifests = @{}
+          foreach ($path in $paths) {
+            $manifests[$path] = Get-Content -Raw $path | ConvertFrom-Json
+            if ([string]$manifests[$path].version -ne $expected) {
+              throw "$path is not versioned at $expected."
+            }
+          }
+
+          $dependencyChecks = @(
+            @{ Path = 'packages/acp/package.json'; Dependency = '@plif/core' },
+            @{ Path = 'packages/cli/package.json'; Dependency = '@plif/core' },
+            @{ Path = 'packages/cli/package.json'; Dependency = '@plif/sandbox' },
+            @{ Path = 'packages/core/package.json'; Dependency = '@plif/sandbox' }
+          )
+          foreach ($check in $dependencyChecks) {
+            $property = $manifests[$check.Path].dependencies.PSObject.Properties[$check.Dependency]
+            if ($null -eq $property -or [string]$property.Value -ne $expected) {
+              throw "$($check.Path) must depend on $($check.Dependency)@$expected."
+            }
+          }
+          Write-Host "Publishing commit $head for tag $tag."
+
+      - name: Validate packages before publish
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $targets = @(
+            @{ Name = '@plif/sandbox'; Required = @('dist/index.js', 'LICENSE', 'NOTICE') },
+            @{ Name = '@plif/core'; Required = @('dist/index.js', 'dist/index.d.ts', 'schema/config.schema.toml', 'LICENSE', 'NOTICE') },
+            @{ Name = '@plif/acp'; Required = @('dist/index.js', 'README.md', 'SECURITY.md', 'LICENSE', 'NOTICE') },
+            @{ Name = '@plif/cli'; Required = @('dist/main.js', 'README.md', 'CHANGELOG.md', 'LICENSE', 'NOTICE') }
+          )
+
+          foreach ($target in $targets) {
+            $json = (& npm pack --workspace $target.Name --dry-run --json --loglevel=error | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0) {
+              throw "npm pack failed for $($target.Name)."
+            }
+            $result = $json | ConvertFrom-Json
+            $pack = if ($result -is [array]) { $result[-1] } else { $result }
+            $files = @($pack.files | ForEach-Object { [string]$_.path })
+            foreach ($required in $target.Required) {
+              if ($files -notcontains $required) {
+                throw "$($target.Name) tarball is missing $required."
+              }
+            }
+            Write-Host "$($target.Name) pack is ready to publish."
+          }
+
+      # Dependency order: sandbox, then core, ACP, and finally the CLI.
       - name: Publish to npm
         shell: pwsh
         env:
@@ -103,6 +410,7 @@ jobs:
           $targets = @(
             @{ Workspace = '@plif/sandbox'; Package = '@plif/sandbox'; Manifest = 'packages/sandbox/package.json' },
             @{ Workspace = '@plif/core'; Package = '@plif/core'; Manifest = 'packages/core/package.json' },
+            @{ Workspace = '@plif/acp'; Package = '@plif/acp'; Manifest = 'packages/acp/package.json' },
             @{ Workspace = '@plif/cli'; Package = '@plif/cli'; Manifest = 'packages/cli/package.json' }
           )
 
@@ -124,7 +432,6 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_ref || github.ref_name }}
         run: |
           gh release view $env:RELEASE_TAG *> $null
           if ($LASTEXITCODE -eq 0) {

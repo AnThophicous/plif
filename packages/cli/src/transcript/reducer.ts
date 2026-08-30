@@ -113,6 +113,40 @@ function project(state: TranscriptState, event: ConversationEvent): TranscriptSt
       if (!event.text.trim()) return state;
       return beginCell(state, { ...cellBase(event), kind: 'user', text: event.text });
 
+    case 'command.input':
+      return beginCell(state, {
+        ...cellBase(event),
+        kind: 'user',
+        text: `$ ${event.argv.join(' ')}`,
+      });
+
+    case 'command.completed': {
+      const output = [event.stdout.trim(), event.stderr.trim()].filter(Boolean).join('\n');
+      const status = event.exitCode === 0 && !event.killedBy ? 'completed' : `exited ${event.exitCode}`;
+      return appendFinalized(finalizeActive(state), {
+        ...cellBase(event),
+        kind: 'notice',
+        tone: event.exitCode === 0 && !event.killedBy ? 'muted' : 'danger',
+        text: [`Command ${status}`, output].filter(Boolean).join('\n'),
+      });
+    }
+
+    case 'terminal.output':
+      return appendFinalized(state, {
+        ...cellBase(event),
+        kind: 'notice',
+        tone: 'muted',
+        text: `[terminal ${event.terminalId} ${event.stream}]\n${event.text}`,
+      });
+
+    case 'queued.input':
+      return appendFinalized(state, {
+        ...cellBase(event),
+        kind: 'notice',
+        tone: 'muted',
+        text: `Follow-up queued: ${event.text}`,
+      });
+
     case 'assistant.message': {
       let next = state;
       if (event.reasoning?.trim()) {

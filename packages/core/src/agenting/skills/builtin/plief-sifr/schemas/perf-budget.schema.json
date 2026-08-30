@@ -1,14 +1,20 @@
 {
-  "$schema": "https://json-schema.org/draft/2020/schema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "plief.sifr:perf-budget:v1",
   "type": "object",
   "properties": {
     "initial_js_kb": {"type": "number", "exclusiveMinimum": 0},
+    "third_party_kb": {"type": ["number", "null"], "minimum": 0},
+    "media_initial_kb": {"type": ["number", "null"], "minimum": 0},
     "animation_cap_ms": {"type": "number", "exclusiveMinimum": 0},
-    "image_strategy": {"type": "string"}, "font_budget": {"type": ["string","object"]},
-    "third_party_kb": {"type": ["number","null"]},
+    "gpu_frame_ms": {"type": ["number", "null"], "exclusiveMinimum": 0},
+    "max_dpr": {"type": ["number", "null"], "exclusiveMinimum": 0},
+    "image_strategy": {"type": "string"},
+    "video_strategy": {"type": ["string", "object", "null"]},
+    "font_budget": {"type": ["string", "object"]},
     "hydration_sensitive_elements": {"type": "array"},
-    "lcp_element": {"type": ["string","null"]},
-    "interaction_latency_concerns": {"type": "array"}
+    "lcp_element": {"type": ["string", "null"]},
+    "interaction_latency_concerns": {"type": "array"},
+    "offscreen_pause_required": {"type": "boolean"}
   }
 }

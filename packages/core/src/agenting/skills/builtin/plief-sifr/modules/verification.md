@@ -1,45 +1,55 @@
-# Verification — render → diagnose → repair loop + GENERICITY FIREWALL (canonical)
+# Verification — render, diagnose and repair + genericity firewall
 
-## Loop
+## Closed loop
 
 ```text
-IMPLEMENT → RENDER(representative matrix from engines/matrix_expand.py)
-→ INSPECT(passes A–H) → COMPARE_WITH_CONTRACT(IR sections!)
-→ CLASSIFY_DEFECT({viewport,state,symptom,user_impact,owner_candidate,severity,evidence})
-→ RESOLVE_ROOT_OWNER → RE-RERENDER_AFFECTED_MATRIX(minimal) → PROVE
+IMPLEMENT -> RENDER(representative matrix from matrix_expand.py)
+-> INSPECT(A-I) -> COMPARE WITH IR/DNA CONTRACTS
+-> CLASSIFY {viewport,state,keyframe,symptom,user_impact,owner,severity,evidence}
+-> REPAIR ROOT OWNER -> RE-RENDER AFFECTED MATRIX -> PROVE
 ```
 
-Run the REAL product when capability exists; no fake standalone renders bypassing shell/theme/fonts/routing/data. Evidence matrix = representative combinations, never Cartesian explosion.
+Run the real product when capability exists; do not validate a fake standalone page outside its shell, theme, fonts, routing and data. The matrix is representative, not a Cartesian explosion.
 
-## Inspect passes (perceptual order — hierarchy before 1px)
+## Inspect in perceptual order
 
-A product clarity · B macro composition/balance/anchors/dead space/container behavior · C typography/content measure/wrapping/numeric alignment/fallback shifts · D responsive mechanics (reorder/collapse/overflow ownership/sheet behavior/sticky offsets/safe areas/keyboard overlap/page h-scroll violation/focus order after reflow) · E interaction states (hover/focus-visible/pressed/disabled/loading/validation/system-error/success/overlays/retry/cancel/back) · F accessibility signals (semantics/names/focus visibility+restoration/keyboard reach/targets/contrast/non-color state/reduced motion/zoom/reflow/announcements) · G runtime health (console/hydration/assets/layout shift/jank/network) · H identity vs design-dna.json + provider leakage + signature restraint.
+A. Product clarity: user/job/primary action/evidence and settlement.
+B. Macro composition: silhouette, focal path, anchors, density, dead space, container behavior.
+C. Typography/content: hierarchy, measure, wrapping/localization, numeric alignment, font fallback and content truth.
+D. Responsive: reflow/reorder/overflow owner, sheets/sticky offsets/safe areas/keyboard overlap, page scroll, reading/focus order after transformation.
+E. Interaction/state: hover/focus/pressed/selected/disabled/loading/empty/partial/error/success, overlays, retry/cancel/back and interruption.
+F. Accessibility: semantics/names, focus/restore, keyboard, targets, contrast/non-color state, zoom/reflow, reduced variants and announcements.
+G. Runtime/performance: console/hydration, assets, layout shift, jank, network/media/GPU lifecycle.
+H. Identity: agreement with DesignDNA, signature restraint, asset-world coherence, provider/demo leakage and counter-default.
+I. Dynamic media/motion: poster -> first frame, transition boundaries/settlement, brightest/darkest/noisiest frames, camera/crop, reduced/failure/non-GPU fallbacks and offscreen pause.
 
-Perceptual stress tests: squint / grayscale / silhouette / density (~20% containers removable?) / logo-off / decoration-budget count. Run against the DNA FILE, not vibes — fixes the "forgot the design" regression class by construction.
+Perceptual stress tests: squint · grayscale · silhouette · density (could ~20% of containers disappear?) · logo-off · effects-off · decoration-budget · unrelated-product substitution. Run against artifact files, never memory or vibes.
 
-## Defect record & owner resolution
+For motion/video, watch continuous playback and sample before/at/after boundaries plus rapid interruption/reverse. For shaders/3D, inspect wide/intermediate/narrow, fallback and representative high-load state. Two attractive captures cannot prove continuity, interaction or performance.
 
-Severity: critical(blocks task/corrupts/inaccessible core/runtime failure) > high > medium > low; fix critical/high first ("don't tune shadows while mobile CTA is unreachable").
-Owners fixed enum: PRODUCT STRUCTURE DESIGN_DNA TOKEN COMPONENT STATE RESPONSIVE ACCESSIBILITY PERFORMANCE CONTENT.
-`engines/defect_classify.py` dedupes and proposes owners; grouped symptom (e.g., 12 cards same cause) collapses to ONE record with root owner (TOKEN etc.) — repairing twelve cards individually for one systemic cause is a failure case.
-Root examples: seven controls share wrong focus→primitive/token · hero-specific asymmetry→local composition · recurring mobile modal overflow→interaction/layout architecture · repeated contrast failures→semantic color system (accessibility contract).
+## Defect and owner resolution
 
-Repeat-cycle guard: ≥2 failed patches on same defect group forces a genuinely different strategy/mechanism (script-enforced flag), per anti-thrash policy.
+Severity: critical (blocked/corrupt/inaccessible core/runtime failure) > high > medium > low. Fix critical/high before polish.
 
-## Reference-fidelity mode
+Owners: PRODUCT · STRUCTURE · DESIGN_DNA · TOKEN · COMPONENT · STATE · RESPONSIVE · ACCESSIBILITY · PERFORMANCE · CONTENT. `engines/defect_classify.py` deduplicates and proposes owners. Repeated symptoms with one cause become one systemic record; do not patch twelve cards for one token/DNA defect.
 
-When approved reference exists compare geometry/alignment/proportion/type/spacing/crop/color relationships/hierarchy/interaction/responsive transformation; pixel-diff only stable comparable states; similarity never overrides product semantics, accessibility or host architecture; copy nothing proprietary/accidental.
+Two failed patches on the same defect group force a different strategy/mechanism. If tuning cannot make heavy media satisfy readability, responsiveness or budget, re-open the medium choice rather than degrading the rest of the product.
 
-## Stop conditions
+## Genericity firewall
 
-critical/high resolved · changed states coherent · representative widths pass contract coverage matrix · primary interaction operable · relevant a11y checks pass · runtime clean enough · appropriate technical gates passed (tests/typecheck/build per capabilities) · another pass would yield only low-value polish.
+Do not fabricate a numeric identity score. Make a qualitative proof:
 
-## GENERICITY FIREWALL — canonical section
+- Name at least three formal choices that derive from this product's content, archetype or interaction model.
+- State the single signature relationship and show that it survives logo-off, narrow and reduced-effect variants.
+- State the counter-default and verify the implementation did not drift back to it.
+- Ask whether an unrelated SaaS/product could reuse the page by swapping only logo, accent and copy. If yes, owner is usually PRODUCT, STRUCTURE or DESIGN_DNA — not “add more decoration.”
 
-Diagnose qualitatively (no fake score): silhouette identity · squint identity · logo-off recognition · visual rhythm · composition intentionality · signature element presence · density honesty · default-component dependence (shipped-untouched library defaults read as "the brand").
+Challenge: endless rounded cards/card-in-card; universal pills; giant centered hero copy; gratuitous purple/blue gradients; glass everywhere; arbitrary glow/blob/noise; icon-title-gray-copy feature grids; fake metrics/testimonials; every section centered; uniform radius/elevation; bento without information reason; repeated fade-up reveals; library-demo typography; shader/video/3D spectacle with no product job.
 
-Challenge any resemblance of: endless rounded cards; card-in-card nesting; universal pills; giant centered hero type; gratuitous purple/blue gradients; glass everywhere; arbitrary glow; decorative blobs; icon-title-gray-copy feature grids repeated; tiny uppercase labels everywhere; fake metrics/testimonials; every section centered; identical radius/elevation on everything; motion with no causal purpose; bento fragmentation without information reason.
+For each suspicious move ask what product job it performs (hierarchy, comprehension, affordance, evidence, identity, spatial continuity, emotional trajectory). No strong answer -> remove or replace with a product-specific relationship. Fashionable patterns are not banned; unjustified ones are.
 
-For each suspicious decision ask WHAT PRODUCT JOB it performs (hierarchy? comprehension? affordance? identity? emotional character?). No strong answer → remove or replace with product-specific relationship. Do not replace one cliché with another; do not ban fashionable patterns blindly — justify them or drop them.
+## Reference fidelity and stop conditions
 
-Reference copy protection lives in visual-forensics non-clonables; here it's enforcement during inspection (Pass H).
+With an approved reference, compare geometry, proportion, type, spacing, crop, color relationships, hierarchy, interaction and responsive transformation. Pixel diff only stable comparable states. Similarity never overrides product semantics, accessibility, host architecture or non-clonable identity.
+
+Stop when critical/high defects are resolved; changed states cohere; representative widths/keyframes/fallbacks cover the contract; primary interaction works; relevant accessibility/runtime/technical gates pass; and another pass would yield only low-value polish. Report missing capability checks explicitly.

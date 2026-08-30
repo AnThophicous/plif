@@ -21,6 +21,37 @@ import { globalConfigPath, loadGlobalConfig, saveGlobalConfig } from '../config/
 import type { StorePaths } from '../store/paths.js';
 import type { ModelPricing, ModelProtocol, ModelRankingHints, StreamSemantics } from './provider.js';
 import type { ConversationStateMode } from './conversation-state.js';
+import { mergeCustomProviderAliases } from './provider-definitions.js';
+export {
+  CUSTOM_PROVIDER_AUTHS,
+  CUSTOM_PROVIDER_PROTOCOLS,
+  customProviderDefinitionToStored,
+  mergeCustomProviderAliases,
+  mergeCustomProviderConfig,
+  mergeCustomProviderDefinition,
+  mergeCustomProviderModels,
+  normalizeCustomModelDefinition,
+  normalizeCustomProviderDefinition,
+  normalizeStoredCustomProvider,
+  ProviderDefinitionError,
+  validateCustomModelDefinition,
+  validateCustomProviderDefinition,
+} from './provider-definitions.js';
+export type {
+  CustomModelCapabilities,
+  CustomModelCollectionInput,
+  CustomModelDefinition,
+  CustomModelDefinitionInput,
+  CustomProviderAuth,
+  CustomProviderDefinition,
+  CustomProviderDefinitionInput,
+  CustomProviderProtocol,
+  NormalizedCustomModelDefinition,
+  NormalizedCustomProviderDefinition,
+  ProviderDefinitionValidation,
+  ProviderDefinitionValidationFailure,
+  ProviderDefinitionValidationSuccess,
+} from './provider-definitions.js';
 
 export interface ModelConfig {
   /** Model id as the endpoint knows it, e.g. "gpt-4o-mini", "llama3.1:8b". */
@@ -356,13 +387,22 @@ export interface StoredConfig {
 }
 
 export interface CustomProviderModel {
+  /** New declarative spelling; `name` remains the on-disk compatibility field. */
+  readonly label?: string;
   readonly name?: string;
+  readonly description?: string;
   readonly aliases?: readonly string[];
   readonly contextWindow?: number;
+  readonly contextLength?: number;
   readonly maxInputTokens?: number;
   readonly maxOutputTokens?: number;
   /** Explicit capability declaration; an endpoint model id is not evidence. */
   readonly modalities?: readonly ModelCapability[];
+  readonly capabilities?: {
+    readonly modalities?: readonly ModelCapability[];
+    readonly reasoning?: boolean;
+    readonly tools?: boolean;
+  };
   readonly reasoning?: boolean;
   readonly tools?: boolean;
   /** Price is displayed before a vision subagent is allowed to start. */
@@ -441,12 +481,25 @@ export interface CustomProvider {
   /** Plif custom providers all use the OpenAI-compatible adapter. */
   readonly sdk?: 'openai';
   readonly npm?: string;
+  /** New declarative spelling; `name` remains the on-disk compatibility field. */
+  readonly label?: string;
   readonly name?: string;
+  readonly description?: string;
+  readonly protocol?: ModelProtocol;
+  readonly auth?: 'api-key' | 'none' | 'codex';
+  readonly authMode?: 'codex';
+  readonly defaultModel?: string;
+  readonly needKey?: boolean;
+  readonly NeedKey?: boolean;
   readonly options?: {
     readonly baseURL?: string;
     readonly apiKey?: string;
     readonly needKey?: boolean;
     readonly NeedKey?: boolean;
+    readonly protocol?: ModelProtocol;
+    readonly auth?: 'api-key' | 'none' | 'codex';
+    readonly authMode?: 'codex';
+    readonly defaultModel?: string;
     readonly [key: string]: unknown;
   };
   readonly models?: Readonly<Record<string, CustomProviderModel>>;
@@ -664,17 +717,22 @@ export function resolveConfig(
     (rootFieldsApply ? stored.baseURL : undefined) ??
     PRESETS['openai']!.baseURL;
 
-  const model = ref.model;
+  // A provider may advertise a default model. It is used only when the caller
+  // did not select one; an explicit model ref always wins.
+  const model = ref.model || custom?.defaultModel || custom?.options?.defaultModel || '';
   const providerId = presetName;
-  const authMode = preset?.authMode;
+  const customAuth = custom?.auth ?? custom?.options?.auth ?? custom?.authMode ?? custom?.options?.authMode;
+  const authMode = preset?.authMode ?? (customAuth === 'codex' ? 'codex' : undefined);
   const usesCodexAuth = authMode === 'codex';
   const modelMetadata = custom?.models?.[model];
   const configuredNeedKey = firstBoolean(
     ...(rootFieldsApply ? [stored.NeedKey, stored.needKey] : []),
-    custom?.options?.NeedKey,
-    custom?.options?.needKey,
     modelMetadata?.NeedKey,
     modelMetadata?.needKey,
+    custom?.NeedKey,
+    custom?.needKey,
+    custom?.options?.NeedKey,
+    custom?.options?.needKey,
   );
   const anonymousRemote = !isLocal(baseURL) && keyOptional(baseURL, model, providerId);
   // A stale NeedKey from a paid model must not override the provider's live
@@ -682,8 +740,10 @@ export function resolveConfig(
   // offer. Keep explicit NeedKey behavior for local/custom endpoints.
   const needKey = usesCodexAuth
     ? false
+    : customAuth === 'none'
+      ? false
     : anonymousRemote ? false : configuredNeedKey ?? !keyOptional(baseURL, model, providerId);
-  const protocol = options.protocol ?? modelMetadata?.protocol ?? protocolForModel(providerId, model) ?? providerOffer(providerId)?.protocol;
+  const protocol = options.protocol ?? modelMetadata?.protocol ?? custom?.protocol ?? custom?.options?.protocol ?? protocolForModel(providerId, model) ?? providerOffer(providerId)?.protocol;
 
   // Try the preset's own key variable before the generic one, so switching
   // preset picks up the right credential without renaming anything. Everything
@@ -693,6 +753,8 @@ export function resolveConfig(
   // never issued for.
   const apiKey = usesCodexAuth
     ? ''
+    : customAuth === 'none'
+      ? (isLocal(baseURL) ? 'local' : '')
     : options.apiKey ??
       (preset ? env[preset.keyEnv] : undefined) ??
       (custom && presetName ? env[credentialVariableForProvider(presetName, stored)] : undefined) ??
@@ -961,10 +1023,10 @@ function asCustomProviders(value: unknown): Record<string, CustomProvider> {
 
 /** The canonical custom-provider map; OpenCode's singular alias wins. */
 export function customProvidersOf(stored: StoredConfig): Record<string, CustomProvider> {
-  return {
-    ...asCustomProviders(stored.providers),
-    ...asCustomProviders(stored.provider),
-  };
+  // Keep the singular map as the scalar-value winner for compatibility, but
+  // union nested models/options first. A config that was edited once using
+  // `providers` and later using `provider` must not lose the older models.
+  return mergeCustomProviderAliases(stored.providers, stored.provider);
 }
 
 /**
@@ -1026,7 +1088,7 @@ export function keyOptional(baseURL: string, model: string, providerId?: string)
 /** True for loopback endpoints, which never need a real credential. */
 export function isLocal(baseURL: string): boolean {
   try {
-    const host = new URL(baseURL).hostname;
+    const host = new URL(baseURL).hostname.toLowerCase().replace(/^\[|\]$/g, '');
     return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0';
   } catch {
     return false;

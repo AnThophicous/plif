@@ -126,6 +126,39 @@ export interface SpawnResult {
   readonly killedBy?: 'timeout' | 'memory' | 'processes' | 'cancelled';
 }
 
+export type TerminalSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL';
+
+export interface TerminalOptions {
+  readonly argv: readonly string[];
+  readonly cwd: string;
+  readonly virtualCwd: string;
+  readonly env: Readonly<Record<string, string>>;
+  readonly maxOutputBytes: number;
+  readonly ownerId?: string;
+  readonly sessionId?: string;
+  readonly containerId?: string;
+}
+
+export interface TerminalOutput {
+  readonly stream: 'stdout' | 'stderr';
+  readonly chunk: string;
+  readonly at: number;
+}
+
+export interface SandboxTerminal extends AsyncDisposable {
+  readonly id: string;
+  readonly ownerId?: string;
+  readonly sessionId?: string;
+  readonly containerId?: string;
+  write(input: string): Promise<void>;
+  readAvailable(): Promise<readonly TerminalOutput[]>;
+  read(): AsyncGenerator<TerminalOutput>;
+  resize(columns: number, rows: number): Promise<void>;
+  signal(signal: TerminalSignal): Promise<void>;
+  wait(): Promise<SpawnResult>;
+  close(): Promise<void>;
+}
+
 export interface JailStats {
   readonly peakMemoryBytes: number;
   readonly activeProcesses: number;
@@ -142,6 +175,7 @@ export interface SandboxJail extends AsyncDisposable {
   readonly id: string;
   readonly root: string;
   spawn(options: SpawnOptions): Promise<SpawnResult>;
+  openTerminal(options: TerminalOptions): Promise<SandboxTerminal>;
   stats(): Promise<JailStats>;
   /** Terminate every process in the jail immediately. Idempotent. */
   kill(reason: string): Promise<void>;
