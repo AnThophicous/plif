@@ -312,6 +312,29 @@ export function timelineVisibleHeight(
   );
 }
 
+/** Resolve a live timeline row for mouse hit-testing. */
+export function timelineEntryAtRow(
+  entries: readonly TimelineEntry[],
+  width: number,
+  maxLines: number,
+  row: number,
+  limit?: number,
+): { readonly entry: TimelineEntry; readonly offset: number } | null {
+  if (!Number.isSafeInteger(row) || row < 0 || maxLines <= 0) return null;
+  const inner = width - layout.gutter * 2;
+  const byCount = limit ? entries.slice(-limit) : entries.slice(-layout.maxTimelineRows);
+  const visible = fitToHeight(byCount, inner, maxLines);
+  let cursor = 0;
+  for (const entry of visible) {
+    const height = estimateHeight(entry, inner, Math.max(0, maxLines - cursor));
+    if (row >= cursor && row < cursor + height) {
+      return { entry, offset: row - cursor };
+    }
+    cursor += height;
+  }
+  return null;
+}
+
 /** Wrapped height of one source line at a given width. */
 function wrappedHeight(line: string, width: number): number {
   return Math.max(1, Math.ceil(line.length / Math.max(8, width)));
@@ -661,13 +684,6 @@ function ThinkingIndicator({
           {expand ? `[- Thinked for ${formatDuration(durationMs ?? 0)}]` : `[+ Thinked for ${formatDuration(durationMs ?? 0)}]`}
         </Text>
       )}
-      <Text color={color('ghost')}>
-        {thinking
-          ? ''
-          : expand
-            ? `  ${formatDuration(durationMs ?? 0)}`
-            : `  ${glyph.divider} Ctrl+R history`}
-      </Text>
     </Box>
   );
 }

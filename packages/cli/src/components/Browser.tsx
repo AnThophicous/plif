@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 
 import { categoriesOf, sourceUrl } from '@plif/core';
 import type { CatalogPlugin, McpServerStatus, SessionMeta, Skill } from '@plif/core';

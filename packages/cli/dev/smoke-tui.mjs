@@ -9,7 +9,7 @@ process.env.COLORTERM = 'truecolor';
 process.env.WT_SESSION = 'smoke';
 process.env.FORCE_COLOR = '3';
 
-const { render } = await import('ink');
+const { render } = await import('../dist/ui.js');
 const { Engine, DEFAULT_TOOLS, SkillRegistry, skillTool } = await import('@plif/core');
 const { App } = await import('../dist/app.js');
 const { startInteractiveSurface } = await import('../dist/startup.js');
@@ -81,8 +81,8 @@ async function trial(rows) {
   await new Promise((r) => setTimeout(r, 900));
 
   const all = strip(out.frames.join(''));
-  const inkOutput = strip(out.frames.slice(2).join(''));
-  const inFrame = (inkOutput.match(new RegExp(`Plif ${VERSION_LABEL.replaceAll('.', '\\.')}`, 'g')) || []).length;
+  const frameOutput = strip(out.frames.join(''));
+  const inFrame = (frameOutput.match(new RegExp(`Plif ${VERSION_LABEL.replaceAll('.', '\\.')}`, 'g')) || []).length;
   const routed = /no model configured/.test(all);
   const spawned = /ENOENT/.test(all);
 
@@ -98,6 +98,6 @@ async function trial(rows) {
 }
 
 for (const rows of [40, 20, 12, 8]) await trial(rows);
-console.log('\n--- banner impresso uma vez, fora do Ink ---');
+console.log('\n--- banner impresso uma vez, fora do frame Slate ---');
 process.stdout.write(await trial(24));
 process.exit(0);

@@ -145,6 +145,7 @@ import {
   estimateHeight,
   measureTranscriptCells,
   timelineVisibleHeight,
+  timelineEntryAtRow,
   timelineEntriesFromEvents,
 } from './components/Timeline.js';
 import { ToolExpansion } from './components/ToolExpansion.js';
@@ -1694,7 +1695,7 @@ export function App({
         // adjusted during a long request.
         if (currentLoading && active) activityModel.reasoningEnd(active.id);
         const metrics = turnMetricsRef.current;
-        if (metrics?.turnId === event.turnId && event.durationMs) {
+        if (metrics !== null && metrics.turnId === event.turnId && event.durationMs) {
           metrics.reasoningMs += event.durationMs;
         }
         closeThinking(event.durationMs);
@@ -4662,6 +4663,22 @@ export function App({
     return null;
   }
 
+  function scrollbackRowsForMouse(): number {
+    const entryWidth = Math.max(8, surface.contentWidth - layout.gutter * 2);
+    return headerHeight(headerAvailableWidth) + state.committed.reduce(
+      (total, entry) => total + estimateHeight(entry, entryWidth),
+      0,
+    );
+  }
+
+  function thinkingAtMouse(mouse: { readonly row: number }): string | null {
+    const localRow = mouse.row - scrollbackRowsForMouse() - surface.panelPaddingY - 1;
+    const hit = timelineEntryAtRow(state.entries, surface.contentWidth, timelineBudget, localRow);
+    // ThinkingRow reserves one line above its indicator for the row margin;
+    // only the visible `[ Thinking ]`/`[+ Thinked ...]` line toggles the block.
+    return hit?.entry.kind === 'thinking' && hit.offset === 1 ? hit.entry.id : null;
+  }
+
   function questionChoiceAtMouse(mouse: { readonly row: number }): number | null {
     const question = state.question;
     if (!question) return null;
@@ -4675,7 +4692,7 @@ export function App({
       surface.contentWidth,
       timelineBudget,
     );
-    const questionTop = headerHeight(headerAvailableWidth)
+    const questionTop = scrollbackRowsForMouse()
       + surface.panelPaddingY
       + transcriptRows;
     const localRow = mouse.row - questionTop - 1;
@@ -4694,6 +4711,14 @@ export function App({
         dispatch({ type: 'question.select', selected });
       }
       return;
+    }
+
+    if (mouse.action === 'press') {
+      const thinkingId = thinkingAtMouse(mouse);
+      if (thinkingId !== null) {
+        dispatch({ type: 'toggleThinking', id: thinkingId });
+        return;
+      }
     }
 
     const sequence = nextClickSequence(pastedClick.current, mouse, Date.now());
@@ -6335,7 +6360,15 @@ export function App({
       fastActive={plifActivation}
       plif={effort === 'plif'}
     >
-    <Box flexDirection="column" width={width} height={liveSurfaceHeight}>
+    <Box
+      flexDirection="column"
+      width={width}
+      // Slate paints the header and live panel in one viewport. Ink's
+      // Static output lived outside the dynamic frame, so the old height only
+      // described the panel; reserving both regions keeps the prompt visible
+      // after the renderer swap.
+      height={pastedTextPopup ? liveSurfaceHeight : headerHeight(headerAvailableWidth) + liveSurfaceHeight}
+    >
       {pastedTextPopup ? (
         <PastedTextDialog text={pastedTextPopup.text} width={width} height={surface.canvasHeight} />
       ) : (

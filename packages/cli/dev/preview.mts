@@ -25,7 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 
-import { render } from 'ink';
+import { render } from '../src/ui.js';
 import React from 'react';
 
 import { Engine, ProviderCapabilityCache } from '@plif/core';

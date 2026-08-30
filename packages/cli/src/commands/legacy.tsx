@@ -23,6 +23,7 @@ import path from 'node:path';
 // TypeScript build injects react/jsx-runtime, so this was only exposed by
 // `npm run dev` after the lazy command split moved <App> here.
 import React from 'react';
+import { disableMouseCapture, disableRawMode, enableMouseCapture, enableRawMode } from '@slate-terminal/core';
 
 import {
   CredentialBroker,
@@ -94,13 +95,12 @@ import { formatRelative, plain } from '../print.js';
 import { color, workedSeparator } from '../theme.js';
 import { containerMount, containerTempMount, containerWorkdir } from '../container-paths.js';
 import { activateTheme, loadThemes } from '../themes.js';
-import { detachImmediateInkResize } from '../terminal-resize.js';
 import { disableBracketedPaste, enableBracketedPaste } from '../paste.js';
 import { startInteractiveSurface } from '../startup.js';
-import { createTerminalSurfaceStream } from '../terminal-surface-output.js';
 import { VERSION, VERSION_LABEL } from '../version.js';
 import { createSessionTempWorkspace } from '../temp-workspace.js';
 import { resolveWorkspace } from '../project-root.js';
+import { render } from '../ui.js';
 
 export function buildEngine(flags: GlobalFlags): Engine {
   return new Engine({
@@ -888,11 +888,7 @@ export async function runInteractive(
     return;
   }
 
-  const [{ render }, { App }, slate] = await Promise.all([
-    import('ink'),
-    import('../app.js'),
-    import('@slate-terminal/core'),
-  ]);
+  const { App } = await import('../app.js');
 
   const startupAppearance = await loadGlobalConfig();
   invocation = {
@@ -929,7 +925,6 @@ export async function runInteractive(
   // Ink's erase sequence can briefly expose the terminal's default (usually
   // black) on the reserved row below the live frame. Paint that row with the
   // active panel colour after every frame without changing Ink's line count.
-  const surfaceStdout = createTerminalSurfaceStream(process.stdout, () => color('panel'));
 
   try {
   let session: Session | null = null;
@@ -1009,11 +1004,8 @@ export async function runInteractive(
     ? await Promise.all([session.replay(), session.history()])
     : [[], []] as const;
 
-  const resizeListenersBefore = new Set(
-    process.stdout.listeners('resize') as Array<(...args: unknown[]) => void>,
-  );
-  slate.enableRawMode();
-  slate.enableMouseCapture();
+  enableRawMode();
+  enableMouseCapture();
   enableBracketedPaste();
   const instance = render(
     <App
@@ -1042,9 +1034,8 @@ export async function runInteractive(
       themeCatalogue={themeCatalogue}
     />,
     // Ink's own Ctrl+C handling would exit before containers are reaped.
-    { exitOnCtrlC: false, stdout: surfaceStdout },
+    { exitOnCtrlC: false, stdout: process.stdout },
   );
-  detachImmediateInkResize(process.stdout, resizeListenersBefore);
 
   await instance.waitUntilExit();
   disableBracketedPaste();
@@ -1059,8 +1050,8 @@ export async function runInteractive(
   }
   await done();
   } finally {
-    slate.disableMouseCapture();
-    slate.disableRawMode();
+    disableMouseCapture();
+    disableRawMode();
     await tempWorkspace.cleanup();
   }
 }

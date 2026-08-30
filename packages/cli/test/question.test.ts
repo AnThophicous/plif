@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { render } from 'ink';
+import { render } from '../src/ui.js';
 import React from 'react';
 import { test } from 'node:test';
 

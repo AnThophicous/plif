@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 
 import { color, formatDuration, glyph, truncate } from '../theme.js';
 
@@ -108,8 +108,7 @@ export function BtwPanel({ state, draft, cursor = 0, width, now }: BtwPanelProps
           </Text>
         ))}
       </Box>
-      <Text color={color('ghost')}>/btw <Text color={color('muted')}>new question</Text> · /btw cancel</Text>
+      <Text color={color('ghost')}>/btw <Text color={color('muted')}>new question</Text> · /btw cancel · separate from active turn</Text>
     </Box>
   );
 }
-

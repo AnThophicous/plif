@@ -5,7 +5,7 @@ process.env.COLORTERM = 'truecolor';
 process.env.WT_SESSION = 'md';
 process.env.FORCE_COLOR = '3';
 
-const { render } = await import('ink');
+const { render } = await import('../dist/ui.js');
 const { Markdown } = await import('../dist/components/Markdown.js');
 
 class Out extends EventEmitter {

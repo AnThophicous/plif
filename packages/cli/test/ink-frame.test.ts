@@ -10,7 +10,7 @@ function finalFrame(output: string): string {
   return frame.replace(ANSI, '').replace(/\r/g, '');
 }
 
-describe('Ink frame hierarchy', () => {
+describe('Slate frame hierarchy', () => {
   it('normalizes to the final clear-screen frame', () => {
     assert.equal(finalFrame(`old\u001b[2Jnew`), 'new');
   });
@@ -23,7 +23,7 @@ describe('Ink frame hierarchy', () => {
     assert.match(source, /import \{ Header(?:, headerHeight)? \} from '\.\/components\/Header\.js'/);
     assert.equal(source.match(/^\s*<Header\b/gm)?.length, 1);
     assert.match(source, /const liveSurfaceHeight = pastedTextPopup \? surface\.canvasHeight : surface\.panelHeight/);
-    assert.match(source, /<Box flexDirection="column" width=\{width\} height=\{liveSurfaceHeight\}>/);
+    assert.match(source, /height=\{pastedTextPopup \? liveSurfaceHeight : headerHeight\(headerAvailableWidth\) \+ liveSurfaceHeight\}/);
     assert.match(source, /paddingX=\{surface\.panelPaddingX\}/);
     assert.doesNotMatch(source, /<TerminalSurface\b/);
     assert.match(source, /<Box flexGrow=\{1\} \/>/);

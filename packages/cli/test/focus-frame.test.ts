@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { describe, it } from 'node:test';
 
 import type { McpServerStatus, TaskSnapshot } from '@plif/core';
-import { Box, render, Text } from 'ink';
+import { Box, render, Text } from '../src/ui.js';
 import React from 'react';
 
 import { FocusFrame, focusRule, infinityCells, infinityFrame } from '../src/components/FocusFrame.js';

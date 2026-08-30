@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { describe, it } from 'node:test';
 
-import { Box, render, Static } from 'ink';
+import { Box, render, Static } from '../src/ui.js';
 import React from 'react';
 
 import {

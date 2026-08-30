@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 
 import type { PendingApproval } from '../session.js';
 import { color, glyph, layout, truncate } from '../theme.js';
