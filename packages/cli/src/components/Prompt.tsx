@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 
 import { mix, toneBetween, useBreath } from '../pulse.js';
 import { plifGlyphAt, plifGlyphColor } from '../plif-glyphs.js';

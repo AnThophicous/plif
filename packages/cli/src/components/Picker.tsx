@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 import type { ModelSelection } from '@plif/core';
 
 import { effortSymbol, effortTone, effortVisual } from '../effort-visuals.js';

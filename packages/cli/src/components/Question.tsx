@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 
 import type { PendingQuestion } from '../session.js';
 import { color, formatDuration, glyph, truncate } from '../theme.js';

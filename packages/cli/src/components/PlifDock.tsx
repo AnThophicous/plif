@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 
 import { effortSymbol, effortTagline, effortVisual } from '../effort-visuals.js';
 import { color, layout, shortenPath, truncate } from '../theme.js';

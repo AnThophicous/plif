@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text } from 'ink';
+import { Text } from '../ui.js';
 
 import { clusterLength } from '../text.js';
 import {

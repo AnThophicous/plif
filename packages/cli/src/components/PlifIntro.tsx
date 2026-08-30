@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 
 import { mix, PLIF_SIGNATURE_STOPS, semanticWaveTone } from '../pulse.js';
 import { ANIMATION_INTERVAL_MS, useAnimationFrame } from '../hooks/useAnimationClock.js';

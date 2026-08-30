@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 
 import type { CompactionState } from '../session.js';
 import { color, formatCount, formatDuration, glyph } from '../theme.js';

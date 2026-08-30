@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text } from 'ink';
+import { Text } from '../ui.js';
 
 import { activityGlyphAt, activityKindForLabel, activityVisual, GradientText } from '../activity-visuals.js';
 import { plifGlyphFramesForTerminal } from '../plif-glyphs.js';

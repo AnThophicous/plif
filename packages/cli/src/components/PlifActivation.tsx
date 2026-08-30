@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 
 import { useAnimationFrame } from '../hooks/useAnimationClock.js';
 import { mix, semanticWave, type SemanticWaveStops } from '../pulse.js';

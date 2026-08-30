@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '../ui.js';
 
 import { parseMarkdown, wrapSpans } from '../markdown.js';
 import type { MdBlock, MdSpan } from '../markdown.js';
