@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import React, { createContext, useContext, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useRef } from 'react';
 import createReconciler from 'react-reconciler';
 import { DefaultEventPriority } from 'react-reconciler/constants.js';
 import {
@@ -11,26 +11,112 @@ import {
   type SlateEvent,
 } from '@slate-terminal/react';
 import { createInputSource, enableMouseCapture } from '@slate-terminal/core';
-import { displayWidth } from './text.js';
+import { clusterLength, displayWidth } from './text.js';
 
 /** React host backed by Slate's flex and ANSI renderer. */
 
 type UiProps = Record<string, unknown>;
-type HostText = { kind: 'text'; value: string };
+type HostText = { kind: 'text'; id: string; value: string; revision: number; parent?: HostNode };
 type HostNode = {
   kind: 'node';
-  nodeType: 'container' | 'text';
+  id: string;
+  nodeType: 'container' | 'scroll' | 'text';
   props: UiProps;
   children: Array<HostNode | HostText>;
+  revision: number;
+  parent?: HostNode;
 };
 type HostChild = HostNode | HostText;
+
+let hostNodeSequence = 0;
+
+interface CachedSlateChild {
+  readonly revision: number;
+  readonly context: string;
+  readonly value: SlateChild;
+}
+
+const slateChildCache = new WeakMap<HostNode, CachedSlateChild>();
+
+function shallowRecordEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object' ||
+    Array.isArray(left) || Array.isArray(right)) return false;
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const keys = new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)]);
+  for (const key of keys) if (!Object.is(leftRecord[key], rightRecord[key])) return false;
+  return true;
+}
+
+/** React passes a fresh `style` object on many parent renders. */
+function hostPropsEqual(left: UiProps, right: UiProps): boolean {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  for (const key of keys) {
+    // Children are reconciled through append/remove/text callbacks. Comparing
+    // the React element here would invalidate every host node on each App
+    // render even when its Slate-visible props did not change.
+    if (key === 'children') continue;
+    const previous = left[key];
+    const next = right[key];
+    if (key === 'style' || key === 'textStyle') {
+      if (!shallowRecordEqual(previous, next)) return false;
+    } else if (!Object.is(previous, next)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function bumpRevision(node: HostNode | HostText): void {
+  node.revision += 1;
+  if (node.parent) bumpRevision(node.parent);
+}
+
+function attachChild(parent: HostNode, child: HostChild): void {
+  child.parent = parent;
+}
+
+function detachChild(parent: HostNode, child: HostChild): void {
+  if (child.parent === parent) child.parent = undefined;
+}
+
+function contextKey(
+  parentStyle: Record<string, unknown> | undefined,
+  isRoot: boolean,
+  inheritedVisual: { readonly color?: string; readonly backgroundColor?: string } | undefined,
+): string {
+  return [
+    isRoot ? 'root' : 'child',
+    parentStyle?.flexDirection ?? '',
+    parentStyle?.alignItems ?? '',
+    inheritedVisual?.color ?? '',
+    inheritedVisual?.backgroundColor ?? '',
+  ].join('\u0000');
+}
 
 function slateElement(
   type: string | symbol,
   props: Record<string, unknown>,
   ...children: SlateChild[]
 ): SlateChild {
-  return createSlateElement(type as never, props as never, ...children) as unknown as SlateChild;
+  const suppliedStyle = typeof props.style === 'object' && props.style !== null
+    ? props.style as Record<string, unknown>
+    : {};
+  const style = {
+    alignItems: 'stretch',
+    ...(suppliedStyle.flexDirection === 'column' && suppliedStyle.width === undefined
+      ? { width: '100%' }
+      : {}),
+    ...suppliedStyle,
+  };
+  return createSlateElement(type as never, {
+    ...props,
+    // Generated Slate wrappers do not pass through normalizeStyle. Keep their
+    // cross-axis behavior identical to React host containers or a wrapper can
+    // become a narrow clipping viewport after a conditional row disappears.
+    style,
+  } as never, ...children) as unknown as SlateChild;
 }
 
 interface UiRoot {
@@ -44,6 +130,7 @@ interface UiContextValue {
   readonly stdout: NodeJS.WriteStream;
   readonly input: EventEmitter;
   readonly subscribeInput: (handler: (char: string, key: Key) => void) => () => void;
+  readonly subscribeSlateEvent: (handler: (event: SlateEvent) => void) => () => void;
 }
 
 const context = createContext<UiContextValue | null>(null);
@@ -64,11 +151,18 @@ export interface Key {
   readonly delete: boolean;
   readonly ctrl: boolean;
   readonly shift: boolean;
+  readonly alt: boolean;
+  readonly super: boolean;
   readonly meta: boolean;
 }
 
 export function Box(props: UiProps & { readonly children?: React.ReactNode }): React.ReactElement {
   return React.createElement('slate-container', props);
+}
+
+/** A Slate scrollView with the same JSX surface as Box. */
+export function ScrollView(props: UiProps & { readonly children?: React.ReactNode }): React.ReactElement {
+  return React.createElement('slate-scroll', props);
 }
 
 export function Text(props: UiProps & { readonly children?: React.ReactNode }): React.ReactElement {
@@ -115,9 +209,25 @@ export function useStdout(): { readonly stdout: NodeJS.WriteStream } {
 export function useInput(handler: (char: string, key: Key) => void): void {
   const value = useContext(context);
   if (!value) throw new Error('useInput must be used inside the Slate terminal');
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
   useEffect(() => {
-    return value.subscribeInput(handler);
-  }, [handler, value]);
+    // App renders frequently while a model is streaming. Subscribe once and
+    // read the latest callback through a ref; re-subscribing on every render
+    // creates a small input race and needlessly churns Slate's listener set.
+    return value.subscribeInput((char, key) => handlerRef.current(char, key));
+  }, [value]);
+}
+
+/** Subscribe to Slate's normalized events without converting them to bytes. */
+export function useSlateEvent(handler: (event: SlateEvent) => void): void {
+  const value = useContext(context);
+  if (!value) throw new Error('useSlateEvent must be used inside the Slate terminal');
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
+  useEffect(() => {
+    return value.subscribeSlateEvent((event) => handlerRef.current(event));
+  }, [value]);
 }
 
 function normalizeStyle(props: UiProps): Record<string, unknown> {
@@ -126,6 +236,11 @@ function normalizeStyle(props: UiProps): Record<string, unknown> {
     // a column. Keep the established Plif layout contract unless a component
     // explicitly asks for a column.
     flexDirection: props.flexDirection ?? 'row',
+    // Yoga/Ink stretches children across the cross-axis by default. Slate's
+    // compact flex engine otherwise sizes a column wrapper to its narrowest
+    // child, clipping dynamic timeline rows (and even the last character of
+    // a model id) when a dialog closes.
+    alignItems: props.alignItems ?? 'stretch',
     ...(typeof props.style === 'object' && props.style !== null ? props.style : {}),
   };
   const copy = (from: string, to = from): void => {
@@ -162,7 +277,23 @@ function normalizeStyle(props: UiProps): Record<string, unknown> {
     copy('marginY', 'marginTop');
     copy('marginY', 'marginBottom');
   }
+  // Ink/Yoga gives column children the available cross-axis width by default.
+  // Slate's compact flex engine measures an unconstrained column at its
+  // intrinsic width, turning a wrapper around the timeline into a tiny
+  // overflow clip. Materialize the same contract only for column nodes;
+  // horizontal rows must keep their intrinsic width for inline spans.
+  if (style.flexDirection === 'column' && style.width === undefined) style.width = '100%';
   return style;
+}
+
+function textStyleFor(props: UiProps): Record<string, unknown> | undefined {
+  const direct = typeof props.textStyle === 'object' && props.textStyle !== null
+    ? { ...(props.textStyle as Record<string, unknown>) }
+    : {};
+  for (const name of ['bold', 'dim', 'italic', 'underline', 'strikethrough'] as const) {
+    if (typeof props[name] === 'boolean') direct[name] = props[name];
+  }
+  return Object.keys(direct).length > 0 ? direct : undefined;
 }
 
 function toSlateChild(
@@ -173,8 +304,20 @@ function toSlateChild(
   inheritedVisual?: { readonly color?: string; readonly backgroundColor?: string },
 ): SlateChild {
   if (child.kind === 'text') return child.value;
+  const cacheContext = contextKey(parentStyle, isRoot, inheritedVisual);
+  const cached = slateChildCache.get(child);
+  if (cached?.revision === child.revision && cached.context === cacheContext) return cached.value;
+  const cache = (value: SlateChild): SlateChild => {
+    slateChildCache.set(child, { revision: child.revision, context: cacheContext, value });
+    return value;
+  };
   const props: Record<string, unknown> = {
-    id: `react-${ids.value++}`,
+    // React host nodes survive ordinary updates. Reusing their identity lets
+    // Slate reconcile by node identity instead of by the node's current
+    // position. Positional IDs made a closed picker hand its old clip/layout
+    // to the next timeline row, which was the source of one-character cuts
+    // and stale panes after dynamic updates.
+    id: child.id,
     style: normalizeStyle(child.props),
   };
   const style = props.style as Record<string, unknown>;
@@ -207,12 +350,27 @@ function toSlateChild(
     : inheritedVisual?.backgroundColor;
   if (foreground) props.foreground = foreground;
   if (background) props.background = background;
+  const textStyle = textStyleFor(child.props);
+  if (textStyle) props.textStyle = textStyle;
+  if (typeof child.props.link === 'string') props.link = child.props.link;
+  if (typeof child.props.wrapText === 'boolean') props.wrapText = child.props.wrapText;
+  // Keep Slate 2.1's semantic props on the VNode. In particular, disabled
+  // nodes must be filtered by Slate before hit-testing/focus, rather than
+  // merely looking disabled in the React layer.
+  for (const name of ['className', 'class'] as const) {
+    if (typeof child.props[name] === 'string') props[name] = child.props[name];
+  }
   if (child.props.visible !== undefined) props.visible = child.props.visible;
+  if (child.props.disabled !== undefined) props.disabled = child.props.disabled;
   if (child.props.focusable !== undefined) props.focusable = child.props.focusable;
   const press = child.props.onPress ?? child.props.onClick;
   if (typeof press === 'function') props.onPress = press;
-  if (typeof child.props.onMouse === 'function') props.onMouse = child.props.onMouse;
-  if (typeof child.props.onKey === 'function') props.onKey = child.props.onKey;
+  for (const name of [
+    'onEvent', 'onKey', 'onMouse', 'onHover', 'onPaste', 'onResize', 'onIme',
+    'onFocus', 'onBlur', 'onScroll', 'onChange', 'onSubmit',
+  ] as const) {
+    if (typeof child.props[name] === 'function') props[name] = child.props[name];
+  }
   // Slate's text widget owns one terminal line. React/Ink commonly nests
   // several Text nodes to style spans inline; leaving them as Slate children
   // would make Flex place each span on a separate row. Coalesce the spans so
@@ -222,14 +380,15 @@ function toSlateChild(
     const nested = child.children.some((item) => item.kind === 'node');
     if (!value.includes('\n') && !nested) {
       props.text = value;
-      return slateElement('text', props);
+      return cache(slateElement('text', props));
     }
     if (nested && !value.includes('\n')) {
-      return slateElement('container', {
-        id: `react-${ids.value++}`,
+      return cache(slateElement('container', {
+        id: `${child.id}:inline`,
         style: { ...(props.style as Record<string, unknown>), flexDirection: 'row', height: 1, flexShrink: 0 },
         ...(foreground ? { foreground } : {}),
         ...(background ? { background } : {}),
+        ...(textStyle ? { textStyle } : {}),
       }, ...child.children.flatMap((item) => {
         // Slate reserves one intrinsic cell for an empty text widget. React
         // creates empty siblings around a cursor (the `after` span at the end
@@ -241,33 +400,35 @@ function toSlateChild(
         ) return [];
         return [item.kind === 'text'
           ? slateElement('text', {
-            id: `react-${ids.value++}`,
+            id: item.id,
             text: item.value,
             ...(foreground ? { foreground } : {}),
             ...(background ? { background } : {}),
+            ...(textStyle ? { textStyle } : {}),
           })
           : toSlateChild(item, ids, props.style as Record<string, unknown>, false, {
             color: foreground,
             backgroundColor: background,
           })];
-      }));
+      })));
     }
     // Slate text widgets are single-line by design; a newline character is
     // treated as a zero-width glyph by the ANSI painter. Split it into a
     // column of text widgets so streamed answers, diffs and pasted content
     // keep their actual terminal rows.
     const lines = value.split('\n');
-    return slateElement('container', {
-      id: `react-${ids.value++}`,
+    return cache(slateElement('container', {
+      id: `${child.id}:lines`,
       style: { ...(props.style as Record<string, unknown>), flexDirection: 'column', height: lines.length, flexShrink: 0 },
       ...(foreground ? { foreground } : {}),
       ...(background ? { background } : {}),
-    }, ...lines.map((line) => slateElement('text', {
-      id: `react-${ids.value++}`,
+    }, ...lines.map((line, index) => slateElement('text', {
+      id: `${child.id}:line:${index}`,
       text: line,
       ...(foreground ? { foreground } : {}),
       ...(background ? { background } : {}),
-    })));
+      ...(textStyle ? { textStyle } : {}),
+    }))));
   }
   const children = child.children.map((item) => toSlateChild(item, ids, props.style as Record<string, unknown>));
   if (typeof child.props.borderStyle === 'string') {
@@ -291,20 +452,22 @@ function toSlateChild(
     };
     const top = borderWidth === undefined ? '\u256d\u2500\u256e' : `\u256d${'\u2500'.repeat(borderWidth - 2)}\u256e`;
     const bottom = borderWidth === undefined ? '\u2570\u2500\u256f' : `\u2570${'\u2500'.repeat(borderWidth - 2)}\u256f`;
+    let borderTextIndex = 0;
+    let borderRailIndex = 0;
     const text = (value: string): SlateChild => slateElement('text', {
-      id: `react-${ids.value++}`,
+      id: `${child.id}:border-text:${borderTextIndex++}`,
       text: value,
       ...(foreground ? { foreground } : {}),
     });
     const rail = (): SlateChild => slateElement('container', {
-      id: `react-${ids.value++}`,
+      id: `${child.id}:border-rail:${borderRailIndex++}`,
       style: { flexDirection: 'column', width: 1, height: bodyHeight, flexShrink: 0 },
     }, ...Array.from({ length: bodyHeight }, () => text('\u2502')));
     const middle = slateElement('container', {
-      id: `react-${ids.value++}`,
+      id: `${child.id}:border-middle`,
       style: { flexDirection: 'row', height: bodyHeight, ...(borderWidth === undefined ? {} : { width: borderWidth }) },
     }, rail(), slateElement('container', {
-      id: `react-${ids.value++}`,
+      id: `${child.id}:border-content`,
       style: contentStyle,
     }, ...children), rail());
     const wrapperStyle = {
@@ -317,12 +480,13 @@ function toSlateChild(
       paddingBottom: 0,
       paddingLeft: 0,
     };
-    return slateElement('container', {
-      id: `react-${ids.value++}`,
+    return cache(slateElement('container', {
+      id: `${child.id}:border`,
       style: wrapperStyle,
-    }, text(top), middle, text(bottom));
+    }, text(top), middle, text(bottom)));
+    );
   }
-  return slateElement('container', props, ...children);
+  return cache(slateElement(child.nodeType === 'scroll' ? 'scrollView' : 'container', props, ...children));
 }
 
 function intrinsicHostSize(child: HostNode, axis: 'width' | 'height'): number {
@@ -365,7 +529,8 @@ function treeFor(root: UiRoot): SlateChild {
   return slateElement(slateFragment, {}, ...root.children.map((child) => toSlateChild(child, ids)));
 }
 
-function keyForEvent(event: SlateEvent): Key {
+/** Convert Slate's canonical modifier bits into the legacy key shape. */
+export function keyForEvent(event: SlateEvent): Key {
   const code = (event.code ?? '').toLowerCase();
   const modifiers = event.modifiers ?? 0;
   return {
@@ -382,9 +547,15 @@ function keyForEvent(event: SlateEvent): Key {
     tab: code === 'tab',
     backspace: code === 'backspace',
     delete: code === 'delete' || code === 'del',
-    ctrl: (modifiers & 1) !== 0,
-    shift: (modifiers & 2) !== 0,
-    meta: (modifiers & 4) !== 0,
+    // Slate's canonical modifier bits are SHIFT=1, CONTROL=2, ALT=4 and
+    // SUPER=8. The old adapter had SHIFT and CONTROL reversed, so every
+    // shifted printable key (A, :, ., ;, ç on an ABNT layout, etc.) was
+    // classified as Ctrl input and discarded by the prompt.
+    ctrl: (modifiers & 2) !== 0,
+    shift: (modifiers & 1) !== 0,
+    alt: (modifiers & 4) !== 0,
+    super: (modifiers & 8) !== 0,
+    meta: (modifiers & (4 | 8)) !== 0,
   };
 }
 
@@ -397,8 +568,32 @@ function keyForRaw(char: string): Key {
     kind: 'key',
     code,
     text: char,
-    modifiers: char.length === 1 && char.charCodeAt(0) > 0 && char.charCodeAt(0) < 32 ? 1 : 0,
+    modifiers: char.length === 1 && char.charCodeAt(0) > 0 && char.charCodeAt(0) < 32 ? 2 : 0,
   });
+}
+
+/** Recover printable text when a native terminal reports only a key code. */
+function printableTextForEvent(event: SlateEvent): string {
+  if (event.text) return event.text;
+  const code = event.code ?? '';
+  if (code.length === 1) return code;
+  const modifiers = event.modifiers ?? 0;
+  const shifted = (modifiers & 1) !== 0;
+  if (/^Key[A-Za-z]$/.test(code)) return shifted ? code.slice(3).toUpperCase() : code.slice(3).toLowerCase();
+  const punctuation: Record<string, [string, string]> = {
+    Semicolon: [';', ':'],
+    Comma: [',', '<'],
+    Period: ['.', '>'],
+    Slash: ['/', '?'],
+    Quote: ["'", '"'],
+    Backquote: ['`', '~'],
+    Minus: ['-', '_'],
+    Equal: ['=', '+'],
+    BracketLeft: ['[', '{'],
+    BracketRight: [']', '}'],
+    Backslash: ['\\', '|'],
+  };
+  return punctuation[code]?.[shifted ? 1 : 0] ?? '';
 }
 
 function dispatchRawInput(
@@ -408,7 +603,8 @@ function dispatchRawInput(
 ): void {
   let cursor = 0;
   while (cursor < raw.length) {
-    let char = raw[cursor] ?? '';
+    const length = Math.max(1, clusterLength(raw, cursor));
+    let char = raw.slice(cursor, cursor + length);
     let key = keyForRaw(char);
     if (char === '\u001b' && raw[cursor + 1] === '[') {
       const sequence = raw.slice(cursor, cursor + 3);
@@ -425,18 +621,14 @@ function dispatchRawInput(
         cursor += 1;
       }
     } else {
-      cursor += 1;
+      // A data chunk is UTF-8 decoded before it reaches this fallback. Keep a
+      // full grapheme together so pasted accents and emoji cannot be split into
+      // separate React/Slate text instances.
+      cursor += length;
     }
     input.emit('input', char);
     for (const listener of [...inputListeners]) listener(char, key);
   }
-}
-
-function mouseSequence(event: SlateEvent): string {
-  const button = event.button === 'right' ? 2 : event.button === 'middle' ? 1 : 0;
-  const action = event.action === 'move' || event.action === 'drag' ? 32 : 0;
-  const suffix = event.action === 'release' ? 'm' : 'M';
-  return `\u001b[<${button | action};${Math.max(1, event.x ?? 0) + 1};${Math.max(1, event.y ?? 0) + 1}${suffix}`;
 }
 
 function dispatchSlateEvent(
@@ -445,6 +637,11 @@ function dispatchSlateEvent(
   stdout: NodeJS.WriteStream,
   inputListeners: ReadonlySet<(char: string, key: Key) => void>,
 ): void {
+  // Native Slate mouse events are already normalized and use one-based
+  // terminal coordinates. Re-encoding them as an SGR string would shift the
+  // hit target and send scroll reports as fake left clicks. Mouse consumers
+  // receive the typed event directly through useSlateEvent instead.
+  if (event.kind === 'mouse') return;
   // The native source reports both key press and key release. Ink's useInput
   // contract exposes a key once, so releases must never become a second
   // printable character in the composer.
@@ -456,13 +653,52 @@ function dispatchSlateEvent(
     return;
   }
   let char = '';
-  if (event.kind === 'mouse') char = mouseSequence(event);
-  else if (event.kind === 'paste') char = `\u001b[200~${event.text ?? ''}\u001b[201~`;
-  else if (event.kind === 'key') char = event.text ?? '';
+  if (event.kind === 'paste') char = `\u001b[200~${event.text ?? ''}\u001b[201~`;
+  else if (event.kind === 'key') char = printableTextForEvent(event);
   if (!char && event.kind !== 'key') return;
   input.emit('input', char);
   const key = keyForEvent(event);
   for (const listener of [...inputListeners]) listener(char, key);
+}
+
+/**
+ * Preserve distinct repeated keypresses across Slate's semantic deduplicator.
+ *
+ * The normalizer intentionally drops the same event returned twice by a noisy
+ * source. A real keyboard can, however, legitimately produce `aa` as two
+ * adjacent `press` events. Give those adjacent events alternating press/repeat
+ * phases before the controller normalizes them; the phase is ignored by the
+ * prompt and keeps both characters alive.
+ */
+function createLosslessInputSource(): ReturnType<typeof createInputSource> {
+  const source = createInputSource();
+  let previousSignature: string | null = null;
+  let duplicatePhase: 'press' | 'repeat' = 'press';
+  return {
+    poll(timeoutMs?: number): SlateEvent | null {
+      const event = source.poll(timeoutMs);
+      if (!event) {
+        previousSignature = null;
+        duplicatePhase = 'press';
+        return null;
+      }
+      if (event.kind !== 'key' || event.phase === 'release') {
+        previousSignature = null;
+        duplicatePhase = 'press';
+        return event;
+      }
+      const signature = JSON.stringify([event.code ?? null, event.text ?? null, event.modifiers ?? 0]);
+      if (signature === previousSignature) {
+        duplicatePhase = duplicatePhase === 'press' ? 'repeat' : 'press';
+        previousSignature = signature;
+        return { ...event, phase: duplicatePhase };
+      }
+      previousSignature = signature;
+      duplicatePhase = event.phase === 'repeat' ? 'repeat' : 'press';
+      return event.phase === undefined ? { ...event, phase: 'press' } : event;
+    },
+    close: source.close,
+  };
 }
 
 function normalizeSlateFrame(frame: string): string {
@@ -479,7 +715,60 @@ function normalizeSlateFrame(frame: string): string {
   return lines.slice(0, preludeEnd).join('') + lines.slice(preludeEnd).join('\n');
 }
 
+/**
+ * Do not let a slow terminal output buffer turn streamed frames into a queue.
+ *
+ * `stdout.write()` can return false on Windows Terminal, pipes and redirected
+ * output. Keeping every frame in that case makes the UI show stale frames long
+ * after the model has moved on. A terminal frame is a snapshot, so only the
+ * newest pending snapshot has value; intermediate frames can be discarded.
+ */
+function createCoalescingWriter(stdout: NodeJS.WriteStream): {
+  readonly write: (frame: string) => void;
+  readonly dispose: () => void;
+} {
+  let pending: string | null = null;
+  let waitingDrain = false;
+  let disposed = false;
+
+  const pump = (): void => {
+    if (disposed || waitingDrain || pending === null) return;
+    const frame = pending;
+    pending = null;
+    if (!stdout.write(frame)) {
+      waitingDrain = true;
+      stdout.once('drain', onDrain);
+    }
+  };
+  const onDrain = (): void => {
+    waitingDrain = false;
+    pump();
+  };
+
+  return {
+    write(frame) {
+      if (disposed) return;
+      pending = frame;
+      pump();
+    },
+    dispose() {
+      disposed = true;
+      pending = null;
+      if (waitingDrain) stdout.off('drain', onDrain);
+      waitingDrain = false;
+    },
+  };
+}
+
 const hostConfig = {
+  // React 19's reconciler asks the host for the current update priority even
+  // for a synchronous terminal renderer. Keep this renderer synchronous and
+  // mirror Slate's official React adapter for the rest of the host contract.
+  now: () => Date.now(),
+  getCurrentUpdatePriority: () => 1,
+  setCurrentUpdatePriority: () => undefined,
+  resolveUpdatePriority: () => 1,
+  trackSchedulerEvent: () => undefined,
   getRootHostContext: () => ({ insideText: false }),
   getChildHostContext: (parent: { insideText: boolean }, type: string) => ({ insideText: parent.insideText || type === 'slate-text' }),
   prepareForCommit: () => null,
@@ -488,29 +777,76 @@ const hostConfig = {
   shouldSetTextContent: () => false,
   createInstance: (type: string, props: UiProps) => ({
     kind: 'node',
-    nodeType: type === 'slate-text' ? 'text' : 'container',
+    id: `host-${++hostNodeSequence}`,
+    nodeType: type === 'slate-text' ? 'text' : type === 'slate-scroll' ? 'scroll' : 'container',
     props: { ...props },
     children: [],
+    revision: 0,
   }) as HostNode,
   createTextInstance: (value: string, _root: UiRoot, parent: { insideText: boolean }) => {
     if (!parent.insideText) throw new Error('Text must be rendered inside Text');
-    return { kind: 'text', value } as HostText;
+    return { kind: 'text', id: `host-${++hostNodeSequence}`, value, revision: 0 } as HostText;
   },
-  appendInitialChild: (parent: HostNode, child: HostChild) => parent.children.push(child),
-  appendChild: (parent: HostNode, child: HostChild) => parent.children.push(child),
-  appendChildToContainer: (root: UiRoot, child: HostChild) => root.children.push(child),
-  insertBefore: (parent: HostNode, child: HostChild, before: HostChild) => parent.children.splice(parent.children.indexOf(before), 0, child),
-  insertInContainerBefore: (root: UiRoot, child: HostChild, before: HostChild) => root.children.splice(root.children.indexOf(before), 0, child),
-  removeChild: (parent: HostNode, child: HostChild) => { const index = parent.children.indexOf(child); if (index >= 0) parent.children.splice(index, 1); },
-  removeChildFromContainer: (root: UiRoot, child: HostChild) => { const index = root.children.indexOf(child); if (index >= 0) root.children.splice(index, 1); },
-  prepareUpdate: () => true,
-  commitUpdate: (node: HostNode, _payload: unknown, _type: string, _old: UiProps, next: UiProps) => { node.props = { ...next }; },
-  commitTextUpdate: (node: HostText, _old: string, next: string) => { node.value = next; },
+  appendInitialChild: (parent: HostNode, child: HostChild) => {
+    attachChild(parent, child);
+    parent.children.push(child);
+  },
+  appendChild: (parent: HostNode, child: HostChild) => {
+    const existing = parent.children.indexOf(child);
+    if (existing >= 0) parent.children.splice(existing, 1);
+    attachChild(parent, child);
+    parent.children.push(child);
+    bumpRevision(parent);
+  },
+  appendChildToContainer: (root: UiRoot, child: HostChild) => {
+    const existing = root.children.indexOf(child);
+    if (existing >= 0) root.children.splice(existing, 1);
+    root.children.push(child);
+  },
+  insertBefore: (parent: HostNode, child: HostChild, before: HostChild) => {
+    const existing = parent.children.indexOf(child);
+    if (existing >= 0) parent.children.splice(existing, 1);
+    attachChild(parent, child);
+    const target = parent.children.indexOf(before);
+    if (target < 0) parent.children.push(child);
+    else parent.children.splice(target, 0, child);
+    bumpRevision(parent);
+  },
+  insertInContainerBefore: (root: UiRoot, child: HostChild, before: HostChild) => {
+    const existing = root.children.indexOf(child);
+    if (existing >= 0) root.children.splice(existing, 1);
+    const target = root.children.indexOf(before);
+    if (target < 0) root.children.push(child);
+    else root.children.splice(target, 0, child);
+  },
+  removeChild: (parent: HostNode, child: HostChild) => {
+    const index = parent.children.indexOf(child);
+    if (index < 0) return;
+    parent.children.splice(index, 1);
+    detachChild(parent, child);
+    bumpRevision(parent);
+  },
+  removeChildFromContainer: (root: UiRoot, child: HostChild) => {
+    const index = root.children.indexOf(child);
+    if (index < 0) return;
+    root.children.splice(index, 1);
+    if (child.kind === 'node' || child.kind === 'text') child.parent = undefined;
+  },
+  prepareUpdate: (_node: HostNode, _type: string, oldProps: UiProps, nextProps: UiProps) =>
+    hostPropsEqual(oldProps, nextProps) ? null : true,
+  commitUpdate: (node: HostNode, _type: string, _old: UiProps, next: UiProps) => {
+    node.props = { ...next };
+    bumpRevision(node);
+  },
+  commitTextUpdate: (node: HostText, _old: string, next: string) => {
+    node.value = next;
+    bumpRevision(node);
+  },
   resetTextContent: () => undefined,
-  hideInstance: (node: HostNode) => { node.props = { ...node.props, visible: false }; },
-  unhideInstance: (node: HostNode) => { node.props = { ...node.props, visible: true }; },
-  hideTextInstance: (node: HostText) => { node.value = ''; },
-  unhideTextInstance: (node: HostText, value: string) => { node.value = value; },
+  hideInstance: (node: HostNode) => { node.props = { ...node.props, visible: false }; bumpRevision(node); },
+  unhideInstance: (node: HostNode) => { node.props = { ...node.props, visible: true }; bumpRevision(node); },
+  hideTextInstance: (node: HostText) => { node.value = ''; bumpRevision(node); },
+  unhideTextInstance: (node: HostText, value: string) => { node.value = value; bumpRevision(node); },
   finalizeInitialChildren: () => false,
   getPublicInstance: (node: HostNode) => node,
   isPrimaryRenderer: true,
@@ -523,6 +859,12 @@ const hostConfig = {
   cancelTimeout: clearTimeout,
   noTimeout: -1,
   getCurrentEventPriority: () => DefaultEventPriority,
+  maySuspendCommit: () => false,
+  preloadInstance: () => undefined,
+  startSuspendingCommit: () => undefined,
+  suspendInstance: () => undefined,
+  waitForCommitToBeReady: () => null,
+  preparePortalMount: () => undefined,
   beforeActiveInstanceBlur: () => undefined,
   afterActiveInstanceBlur: () => undefined,
   detachDeletedInstance: () => undefined,
@@ -545,14 +887,33 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
   const stdin = options.stdin ?? process.stdin;
   const input = new EventEmitter();
   const inputListeners = new Set<(char: string, key: Key) => void>();
+  const slateEventListeners = new Set<(event: SlateEvent) => void>();
   const subscribeInput = (handler: (char: string, key: Key) => void): (() => void) => {
     inputListeners.add(handler);
     return () => { inputListeners.delete(handler); };
+  };
+  const subscribeSlateEvent = (handler: (event: SlateEvent) => void): (() => void) => {
+    slateEventListeners.add(handler);
+    return () => { slateEventListeners.delete(handler); };
   };
   let resolveExit!: () => void;
   let paintScheduled = false;
   let skipNextRepaint = false;
   let terminalController: ReturnType<typeof createTerminalController> | null = null;
+  const initialViewport = {
+    width: stdout.columns ?? 80,
+    height: stdout.rows ?? 24,
+  };
+  let viewport = initialViewport;
+  const syncViewport = (): void => {
+    const next = {
+      width: stdout.columns ?? 80,
+      height: stdout.rows ?? 24,
+    };
+    if (next.width === viewport.width && next.height === viewport.height) return;
+    viewport = next;
+    slate.setViewport(next);
+  };
   const exited = new Promise<void>((resolve) => { resolveExit = resolve; });
   const root: UiRoot = { children: [], repaint: () => {
     if (paintScheduled) return;
@@ -566,15 +927,12 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
       // React owns the logical dimensions through useTerminalSize while
       // Slate owns the physical viewport. Keep both in lockstep for resize
       // events delivered by custom streams as well as the native poller.
-      slate.setViewport({
-        width: stdout.columns ?? 80,
-        height: stdout.rows ?? 24,
-      });
-      slate.flush();
+      syncViewport();
+      slate.render();
     });
   } };
   const slate = createSlateApp(() => treeFor(root), {
-    viewport: { width: stdout.columns ?? 80, height: stdout.rows ?? 24 },
+    viewport: initialViewport,
     autoMount: false,
     frameRate: 0,
   });
@@ -588,8 +946,18 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
     stdout,
     input,
     subscribeInput,
+    subscribeSlateEvent,
   };
-  reconciler.updateContainer(React.createElement(context.Provider, { value }, element), container, null, undefined);
+  const mountedElement = React.createElement(context.Provider, { value }, element);
+  // React 19 schedules updateContainer asynchronously. Mount the initial
+  // tree synchronously so Slate's first frame is never an empty viewport;
+  // subsequent state updates can keep using the normal concurrent path.
+  if (typeof reconciler.updateContainerSync === 'function') {
+    reconciler.updateContainerSync(mountedElement, container, null, undefined);
+    reconciler.flushSyncWork?.();
+  } else {
+    reconciler.updateContainer(mountedElement, container, null, undefined);
+  }
   // React's passive-effect queue is normally drained by a browser host. A CLI
   // renderer has no browser scheduler, so flush the first batch here; this
   // starts input listeners and animation clocks before render() returns.
@@ -611,28 +979,37 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
       width: event.width ?? stdout.columns ?? 80,
       height: event.height ?? stdout.rows ?? 24,
     });
+    for (const listener of [...slateEventListeners]) listener(event);
     dispatchSlateEvent(event, input, stdout, inputListeners);
-    return 'consumed';
+    // App-level listeners observe the normalized event, while Slate's own
+    // scrollView/list handlers still need the event for wheel and paging.
+    return 'ignored';
   });
-  slate.setViewport({ width: stdout.columns ?? 80, height: stdout.rows ?? 24 });
-  slate.flush();
-  // updateContainer scheduled one host repaint before the controller existed;
-  // the explicit flush above already mounted that tree. Drop only that stale
-  // callback so the controller produces exactly one initial frame.
-  skipNextRepaint = true;
+  syncViewport();
+  slate.render();
+  // If React committed synchronously, the explicit flush above already
+  // mounted the tree and the queued host repaint is redundant. React 19 may
+  // commit asynchronously, though; in that case the queued repaint is the
+  // first one that can see the mounted React children and must be preserved.
+  skipNextRepaint = root.children.length > 0;
   const nativeTerminal = stdout === process.stdout && stdin === process.stdin;
-  const source = nativeTerminal ? createInputSource() : { poll: () => null };
+  // createTerminalController already applies Slate's canonical input
+  // normalizer. Wrapping the native source here caused a second deduplication
+  // window and made fast repeated/pasted characters disappear.
+  const source = nativeTerminal ? createLosslessInputSource() : { poll: () => null };
+  const output = createCoalescingWriter(stdout);
   terminalController = createTerminalController(
     slate,
     source,
-    { write: (frame) => stdout.write(normalizeSlateFrame(frame)) },
-    { intervalMs: 8, animationFps: 0, render: { hideCursor: true } },
+    { write: (frame) => output.write(normalizeSlateFrame(frame)) },
+    { intervalMs: 16, animationFps: 0, render: { hideCursor: true } },
   );
   terminalController.start();
   return {
     unmount: () => {
       terminalController?.dispose();
       terminalController = null;
+      output.dispose();
       if (stdin !== process.stdin) stdin.off('data', onData);
       slate.unmount();
       reconciler.updateContainer(null, container, null, resolveExit);

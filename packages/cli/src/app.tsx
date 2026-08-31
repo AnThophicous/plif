@@ -3,8 +3,9 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { Box, Static, Text, useApp, useInput, useStdin, useStdout } from './ui.js';
+import { Box, Static, Text, useApp, useInput, useSlateEvent, useStdin, useStdout } from './ui.js';
 import type { Key } from './ui.js';
+import type { SlateEvent } from '@slate-terminal/react';
 
 import {
   adoptProvider,
@@ -141,7 +142,6 @@ import {
 import type { ActivityHudMode } from './components/WorkDock.js';
 import {
   Timeline,
-  TimelineRow,
   estimateHeight,
   measureTranscriptCells,
   timelineVisibleHeight,
@@ -401,6 +401,79 @@ function isSettled(item: { status?: string }): boolean {
   return item.status === undefined || item.status === 'done' || item.status === 'failed';
 }
 
+/** Printable text must win over control handling, including Windows AltGr. */
+function isPrintableInput(
+  char: string,
+  key: { readonly ctrl?: boolean; readonly meta?: boolean; readonly alt?: boolean; readonly super?: boolean },
+): boolean {
+  if (!char || [...char].some((part) => {
+    const code = part.codePointAt(0) ?? 0;
+    return code < 0x20 || code === 0x7f;
+  })) return false;
+  if (key.super) return false;
+  if (!key.ctrl && (!key.meta || key.alt)) return true;
+  // On layouts such as ABNT2, AltGr is reported as Ctrl+Alt. It is a text
+  // modifier, not a shortcut, so ':' and accented letters must remain input.
+  return key.alt === true;
+}
+
+interface FileActivityPreview {
+  readonly path: string;
+  readonly mode: 'creating' | 'editing';
+  readonly code: string;
+  readonly added: number;
+  readonly removed: number;
+}
+
+function lineCount(value: string): number {
+  if (!value) return 0;
+  const normalized = value.replace(/\r\n?/g, '\n');
+  const lines = normalized.split('\n');
+  return lines.length > 1 && lines.at(-1) === '' ? lines.length - 1 : lines.length;
+}
+
+/** Extract the source a file tool is about to write for its live code panel. */
+function fileActivityForTool(name: string, input: unknown): FileActivityPreview | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const record = input as Record<string, unknown>;
+  if (name === 'apply_patch' && Array.isArray(record.edits)) {
+    const edits = record.edits.flatMap((value): FileActivityPreview[] => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+      const edit = value as Record<string, unknown>;
+      if (typeof edit.path !== 'string' || !edit.path.trim() || typeof edit.new_string !== 'string') return [];
+      const code = edit.new_string;
+      return [{
+        path: edit.path,
+        mode: 'editing',
+        code,
+        added: lineCount(code),
+        removed: typeof edit.old_string === 'string' ? lineCount(edit.old_string) : 0,
+      }];
+    });
+    if (edits.length === 0) return null;
+    return {
+      path: edits.length === 1 ? edits[0]!.path : `${edits.length} files`,
+      mode: 'editing',
+      code: edits.map((edit) => `// ${edit.path}\n${edit.code}`).join('\n\n'),
+      added: edits.reduce((total, edit) => total + edit.added, 0),
+      removed: edits.reduce((total, edit) => total + edit.removed, 0),
+    };
+  }
+  if (name !== 'write_file' && name !== 'edit_file') return null;
+  const path = typeof record.path === 'string' && record.path.trim() ? record.path : 'file';
+  const codeKey = name === 'write_file' ? 'content' : 'new_string';
+  const oldKey = name === 'write_file' ? null : 'old_string';
+  const code = typeof record[codeKey] === 'string' ? record[codeKey] : '';
+  const old = oldKey && typeof record[oldKey] === 'string' ? record[oldKey] : '';
+  return {
+    path,
+    mode: name === 'write_file' ? 'creating' : 'editing',
+    code,
+    added: lineCount(code),
+    removed: lineCount(old),
+  };
+}
+
 /** Move inside a multiline draft before giving the arrows to shell history. */
 function verticalCursor(text: string, cursor: number, delta: -1 | 1): number | null {
   if (!text.includes('\n')) return null;
@@ -582,9 +655,9 @@ export function App({
   const cursor = composer.cursor;
   const pasted = composer.attachments;
   const hasTextPasteAttachment = needsPasteClickTracking(pasted);
-  // Mouse reports are enabled only while there is an interaction that can use
-  // them. This keeps wheel scrolling native in ordinary sessions while making
-  // the textual question chooser clickable when it is actually on screen.
+  // Keep basic left-click reports alive for thinking rows and other controls.
+  // A question temporarily upgrades the terminal to motion tracking so its
+  // hover selection works; the effect below always restores the click mode.
   const questionMouseTracking = state.question !== null;
   const mouseTrackingActive = hasTextPasteAttachment || questionMouseTracking;
   const completionIndex = composer.completion?.selected ?? 0;
@@ -1916,6 +1989,7 @@ export function App({
           }
         }
         const described = describeToolCall(event.name, event.input);
+        const fileActivity = fileActivityForTool(event.name, event.input);
         const lane = toolLane(event.name);
         const discoveryKind = event.name === 'read_file' ? 'Read' : event.name === 'list_dir' ? 'List' : null;
         const hiddenSubagent = lane === 'subagent';
@@ -1947,6 +2021,13 @@ export function App({
             ...(described.target !== undefined ? { toolTarget: described.target } : {}),
             ...(described.summary ? { toolSummary: described.summary } : {}),
             ...(described.planItems ? { planItems: described.planItems } : {}),
+            ...(fileActivity ? {
+              fileCode: fileActivity.code,
+              fileMode: fileActivity.mode,
+              filePath: fileActivity.path,
+              fileAdded: fileActivity.added,
+              fileRemoved: fileActivity.removed,
+            } : {}),
           });
           toolRows.current.set(event.id, row.id);
           // Only a lone call can own the exec stream. `run_command` is never
@@ -2006,6 +2087,13 @@ export function App({
               })()
             : described.summary,
           ...(event.diff ? { diff: event.diff } : {}),
+          ...(fileActivity ? {
+            fileCode: fileActivity.code,
+            fileMode: fileActivity.mode,
+            filePath: fileActivity.path,
+            fileAdded: event.diff ? diffStats(parseDiff(event.diff)).added : fileActivity.added,
+            fileRemoved: event.diff ? diffStats(parseDiff(event.diff)).removed : fileActivity.removed,
+          } : {}),
           ...(diagnostics
             ? { detail: diagnostics }
             : !event.diff && event.output?.trim()
@@ -2021,6 +2109,13 @@ export function App({
               ...patch,
               toolCategory: described.category,
               ...(described.target !== undefined ? { toolTarget: described.target } : {}),
+              ...(fileActivity ? {
+                fileCode: fileActivity.code,
+                fileMode: fileActivity.mode,
+                filePath: fileActivity.path,
+                fileAdded: fileActivity.added,
+                fileRemoved: fileActivity.removed,
+              } : {}),
             }),
           );
         }
@@ -2581,13 +2676,10 @@ export function App({
   }, [tasks.length]);
 
   useEffect(() => {
-    // Mouse tracking also captures wheel reports (button 64/65). Keeping it
-    // enabled for the whole session made the parser discard the wheel bytes
-    // before the terminal could scroll. Only paste tokens and live questions
-    // need reports, so ordinary sessions leave the wheel entirely native.
-    if (!stdout.isTTY || !mouseTrackingActive) return;
+    if (!stdout.isTTY) return;
+    const trackingMode = questionMouseTracking ? '\u001B[?1003h' : '\u001B[?1000h';
     stdout.write(
-      `\u001B[?1000l\u001B[?1002l\u001B[?1003l${questionMouseTracking ? '\u001B[?1003h' : '\u001B[?1000h'}\u001B[?1006h`,
+      `\u001B[?1000l\u001B[?1002l\u001B[?1003l${trackingMode}\u001B[?1006h`,
     );
     return () => {
       stdout.write('\u001B[?1000l\u001B[?1002l\u001B[?1003l\u001B[?1006l');
@@ -4664,18 +4756,17 @@ export function App({
   }
 
   function scrollbackRowsForMouse(): number {
-    const entryWidth = Math.max(8, surface.contentWidth - layout.gutter * 2);
-    return headerHeight(headerAvailableWidth) + state.committed.reduce(
-      (total, entry) => total + estimateHeight(entry, entryWidth),
-      0,
-    );
+    // History is now inside Slate's scrollView. It must not be counted as
+    // terminal scrollback a second time, otherwise every click is shifted by
+    // the height of all previous messages.
+    return headerHeight(headerAvailableWidth);
   }
 
   function thinkingAtMouse(mouse: { readonly row: number }): string | null {
     const localRow = mouse.row - scrollbackRowsForMouse() - surface.panelPaddingY - 1;
-    const hit = timelineEntryAtRow(state.entries, surface.contentWidth, timelineBudget, localRow);
-    // ThinkingRow reserves one line above its indicator for the row margin;
-    // only the visible `[ Thinking ]`/`[+ Thinked ...]` line toggles the block.
+    const hit = timelineEntryAtRow(historyEntries, surface.contentWidth, timelineBudget, localRow);
+    // Only the compact header toggles the thought. The body is deliberately
+    // plain text, so clicking a paragraph never unexpectedly collapses it.
     return hit?.entry.kind === 'thinking' && hit.offset === 1 ? hit.entry.id : null;
   }
 
@@ -4688,7 +4779,7 @@ export function App({
     // Timeline and Question share the same row-budget helpers used to render
     // the frame, avoiding a second hand-written layout model for hit-testing.
     const transcriptRows = timelineVisibleHeight(
-      state.entries,
+      historyEntries,
       surface.contentWidth,
       timelineBudget,
     );
@@ -4728,6 +4819,20 @@ export function App({
     const text = pastedTextAtMouse(mouse);
     if (text !== null) setPastedTextPopup({ text });
   }
+
+  // Slate's native source gives zero-based coordinates. Convert them once to
+  // the one-based coordinates used by the existing layout/hit-test helpers.
+  // Keep those events intact instead of
+  // round-tripping them through an SGR string and the legacy input parser.
+  useSlateEvent((event: SlateEvent) => {
+    if (event.kind !== 'mouse') return;
+    handleMouse({
+      button: event.button === 'right' ? 2 : event.button === 'middle' ? 1 : 0,
+      action: event.action ?? 'press',
+      column: Math.max(1, Math.trunc(event.x ?? 0) + 1),
+      row: Math.max(1, Math.trunc(event.y ?? 0) + 1),
+    });
+  });
 
   useInput((char, key) => {
     if (state.exiting) return;
@@ -5157,7 +5262,7 @@ export function App({
       setEmojiIndex(0);
       return;
     }
-    if (char && !key.ctrl && !key.meta) {
+    if (char && (isTerminalPaste(char) || isPrintableInput(char, key))) {
       const pastedText = sanitizePastedText(char);
       if (isTerminalPaste(char) || pastedText.length >= PASTE_ATTACHMENT_MIN_CHARS || pastedText.includes('\n')) {
         void receivePastedContent(pastedText);
@@ -5394,7 +5499,7 @@ export function App({
         dispatch({ type: 'config.edit.value', value: editing.value.slice(0, -1) });
         return;
       }
-      if (char && !key.ctrl && !key.meta && !setting.options) {
+      if (isPrintableInput(char, key) && !setting.options) {
         dispatch({ type: 'config.edit.value', value: editing.value + char });
       }
       return;
@@ -5438,7 +5543,7 @@ export function App({
       dispatch({ type: 'config.filter', filter: screen.state.filter.slice(0, -1) });
       return;
     }
-    if (char && !key.ctrl && !key.meta) {
+    if (isPrintableInput(char, key)) {
       const { text } = splitPaste(char);
       if (text) dispatch({ type: 'config.filter', filter: screen.state.filter + text });
     }
@@ -5487,7 +5592,7 @@ export function App({
         dispatch({ type: 'browser.rename.input', draft: browser.renameDraft.slice(0, -1) });
         return;
       }
-      if (char && !key.ctrl && !key.meta) {
+      if (isPrintableInput(char, key)) {
         const { text } = splitPaste(char);
         if (text) dispatch({ type: 'browser.rename.input', draft: browser.renameDraft + text });
       }
@@ -5579,7 +5684,7 @@ export function App({
       dispatch({ type: 'browser.filter', filter: browser.filter.slice(0, -1) });
       return;
     }
-    if (char && !key.ctrl && !key.meta) {
+    if (isPrintableInput(char, key)) {
       const { text } = splitPaste(char);
       if (text) dispatch({ type: 'browser.filter', filter: browser.filter + text });
     }
@@ -5746,7 +5851,7 @@ export function App({
       dispatch({ type: 'picker.filter', filter: picker.filter.slice(0, -1) });
       return;
     }
-    if (char && !key.ctrl && !key.meta) {
+    if (isPrintableInput(char, key)) {
       const { text } = splitPaste(char);
       if (text) dispatch({ type: 'picker.filter', filter: picker.filter + text });
     }
@@ -5810,7 +5915,7 @@ export function App({
       });
       return;
     }
-    if (char && !key.ctrl && !key.meta) {
+    if (isPrintableInput(char, key)) {
       const text = sanitizePastedText(char);
       if (!text) return;
       setBtwInput((previous) => {
@@ -5887,7 +5992,7 @@ export function App({
       dispatch({ type: 'question.draft', draft: state.questionDraft.slice(0, -1) });
       return;
     }
-    if (char && !key.ctrl && !key.meta) {
+    if (isPrintableInput(char, key)) {
       const { text, submitted } = splitPaste(char);
       const draft = state.questionDraft + text;
       if (submitted && draft.trim()) {
@@ -6293,12 +6398,9 @@ export function App({
   // genuinely no room for history, and showing two orphaned rows at the cost of
   // duplicating the session is the wrong trade.
   const timelineBudget = Math.max(0, surface.contentHeight - chrome);
-  const scrollback = useMemo(
-    (): (TimelineEntry | typeof STATIC_HEADER_ITEM)[] => [
-      STATIC_HEADER_ITEM,
-      ...state.committed,
-    ],
-    [state.committed],
+  const historyEntries = useMemo(
+    (): readonly TimelineEntry[] => [...state.committed, ...state.entries],
+    [state.committed, state.entries],
   );
   const animationActive = !state.screen && animationClockActive({
       effort,
@@ -6389,20 +6491,10 @@ export function App({
             viewport width, so the header row supplies it explicitly; otherwise
             the header's centering box collapses to the card's intrinsic width.
           */}
-          <Static key={state.epoch} items={scrollback}>
-            {(item) => (
-              item.kind === 'header'
-                ? (
-                  <Box key={item.id} width={width} paddingX={layout.gutter} flexShrink={0}>
-                    <Header width={headerAvailableWidth} />
-                  </Box>
-                )
-                : (
-                  <Box key={item.id} paddingX={layout.gutter}>
-                    <TimelineRow entry={item} width={width - layout.gutter * 2} />
-                  </Box>
-                )
-            )}
+          <Static key={state.epoch} items={[]}>
+            <Box width={width} paddingX={layout.gutter} flexShrink={0}>
+              <Header width={headerAvailableWidth} />
+            </Box>
           </Static>
 
           {thinkingViewport.open ? (
@@ -6482,7 +6574,7 @@ export function App({
           <Box flexDirection="column" width={surface.contentWidth} flexGrow={1}>
             <Box flexDirection="column">
               <Timeline
-                entries={state.entries}
+                entries={historyEntries}
                 width={surface.contentWidth}
                 maxLines={timelineBudget}
               />

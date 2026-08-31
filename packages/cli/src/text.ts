@@ -132,6 +132,39 @@ export function displayWidth(value: string): number {
 }
 
 /**
+ * Wrap terminal text without throwing away a byte, a space, or a Unicode
+ * grapheme. Code previews use this instead of truncation: a continuation row
+ * is less pretty than a single line, but it is still the file the model wrote.
+ */
+export function wrapTerminalText(value: string, maxWidth: number): string[] {
+  const width = Math.max(1, Math.floor(maxWidth));
+  const rows: string[] = [];
+  for (const source of value.replace(/\r\n?/g, '\n').split('\n')) {
+    if (source.length === 0) {
+      rows.push('');
+      continue;
+    }
+    let row = '';
+    let cells = 0;
+    for (let at = 0; at < source.length;) {
+      const length = clusterLength(source, at) || 1;
+      const cluster = source.slice(at, at + length);
+      const clusterCells = Math.max(1, displayWidth(cluster));
+      if (row && cells + clusterCells > width) {
+        rows.push(row);
+        row = '';
+        cells = 0;
+      }
+      row += cluster;
+      cells += clusterCells;
+      at += length;
+    }
+    rows.push(row);
+  }
+  return rows.length > 0 ? rows : [''];
+}
+
+/**
  * Characters a terminal draws two cells wide because they are emoji by default.
  *
  * Asked of Unicode rather than listed by hand. The hand-written ranges below

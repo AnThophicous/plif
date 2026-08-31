@@ -45,6 +45,11 @@ export const ToolExpansion = React.memo(function ToolExpansion({
         {...(entry.executions !== undefined ? { executions: entry.executions } : {})}
         {...(entry.toolTarget !== undefined ? { target: entry.toolTarget } : {})}
         {...(entry.toolSummary !== undefined ? { summary: entry.toolSummary } : {})}
+        {...(entry.fileCode !== undefined ? { code: entry.fileCode } : {})}
+        {...(entry.fileMode !== undefined ? { codeMode: entry.fileMode } : {})}
+        {...(entry.filePath !== undefined ? { codePath: entry.filePath } : {})}
+        {...(entry.fileAdded !== undefined ? { codeAdded: entry.fileAdded } : {})}
+        {...(entry.fileRemoved !== undefined ? { codeRemoved: entry.fileRemoved } : {})}
         {...(entry.detail !== undefined ? { output: entry.detail } : {})}
       />
     </Box>

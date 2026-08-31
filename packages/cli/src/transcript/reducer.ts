@@ -3,6 +3,7 @@ import type { ConversationEvent } from '@plif/core';
 
 import type {
   ActivityItem,
+  FileActivity,
   TranscriptAction,
   TranscriptCell,
   TranscriptState,
@@ -43,6 +44,58 @@ function streamCellId(
   epoch: number,
 ): string {
   return `stream:${lane}:${turnId}:${epoch}`;
+}
+
+function fileLineCount(value: string): number {
+  if (!value) return 0;
+  const lines = value.replace(/\r\n?/g, '\n').split('\n');
+  return lines.length > 1 && lines.at(-1) === '' ? lines.length - 1 : lines.length;
+}
+
+function fileActivityForArguments(name: string, rawArguments: string): FileActivity | undefined {
+  let input: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(rawArguments || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    input = parsed as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+  if (name === 'apply_patch' && Array.isArray(input.edits)) {
+    const edits = input.edits.flatMap((value): FileActivity[] => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+      const edit = value as Record<string, unknown>;
+      if (typeof edit.path !== 'string' || !edit.path.trim() || typeof edit.new_string !== 'string') return [];
+      return [{
+        path: edit.path,
+        mode: 'editing',
+        code: edit.new_string,
+        added: fileLineCount(edit.new_string),
+        removed: typeof edit.old_string === 'string' ? fileLineCount(edit.old_string) : 0,
+      }];
+    });
+    if (edits.length === 0) return undefined;
+    return {
+      path: edits.length === 1 ? edits[0]!.path : `${edits.length} files`,
+      mode: 'editing',
+      code: edits.map((edit) => `// ${edit.path}\n${edit.code}`).join('\n\n'),
+      added: edits.reduce((total, edit) => total + edit.added, 0),
+      removed: edits.reduce((total, edit) => total + edit.removed, 0),
+    };
+  }
+  if (name !== 'write_file' && name !== 'edit_file') return undefined;
+  const path = typeof input.path === 'string' && input.path.trim() ? input.path : 'file';
+  const codeKey = name === 'write_file' ? 'content' : 'new_string';
+  const oldKey = name === 'write_file' ? null : 'old_string';
+  const code = typeof input[codeKey] === 'string' ? input[codeKey] : '';
+  const old = oldKey && typeof input[oldKey] === 'string' ? input[oldKey] : '';
+  return {
+    path,
+    mode: name === 'write_file' ? 'creating' : 'editing',
+    code,
+    added: fileLineCount(code),
+    removed: fileLineCount(old),
+  };
 }
 
 function isStreamCell(cell: TranscriptCell, turnId: string, lane?: 'assistant' | 'reasoning'): boolean {
@@ -173,12 +226,18 @@ function project(state: TranscriptState, event: ConversationEvent): TranscriptSt
 
     case 'tool.started': {
       const calls = new Map(state.calls);
-      calls.set(event.call.id, { turnId: event.turnId, name: event.call.name });
+      const file = fileActivityForArguments(event.call.name, event.call.arguments);
+      calls.set(event.call.id, {
+        turnId: event.turnId,
+        name: event.call.name,
+        ...(file ? { file } : {}),
+      });
       const item: ActivityItem = {
         id: event.eventId,
         callId: event.call.id,
         name: event.call.name,
         status: 'running',
+        ...(file ? { file } : {}),
       };
       if (state.active?.kind === 'activity' && state.active.turnId === event.turnId) {
         return {
@@ -213,6 +272,7 @@ function project(state: TranscriptState, event: ConversationEvent): TranscriptSt
             kind: 'error',
             title: name,
             detail: event.output,
+            ...(call?.file ? { file: call.file } : {}),
           });
         }
         return appendFinalized(next, {
@@ -220,6 +280,7 @@ function project(state: TranscriptState, event: ConversationEvent): TranscriptSt
           kind: 'diff',
           title: name,
           diff: event.diff!,
+          ...(call?.file ? { file: call.file } : {}),
         });
       }
 
@@ -230,6 +291,7 @@ function project(state: TranscriptState, event: ConversationEvent): TranscriptSt
         status: 'done',
         output: event.output,
         durationMs: event.durationMs,
+        ...(call?.file ? { file: call.file } : {}),
       };
       if (state.active?.kind === 'activity' && state.active.turnId === event.turnId) {
         const found = state.active.items.some((item) => item.callId === event.callId);

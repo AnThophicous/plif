@@ -48,6 +48,7 @@ import type { PickerGroup } from '../src/components/Picker.js';
 import type { Engine } from '@plif/core';
 import { initialSession, sessionReducer } from '../src/session.js';
 import { editorDeleteAction, isControlShortcut } from '../src/editor-keys.js';
+import { keyForEvent } from '../src/ui.js';
 
 describe('editor delete key normalization', () => {
   it('treats Windows DEL as Backspace even though Ink calls it delete', () => {
@@ -64,6 +65,23 @@ describe('control shortcut normalization', () => {
     assert.equal(isControlShortcut('e', { ctrl: true }, 'e'), true);
     assert.equal(isControlShortcut('\x05', { ctrl: false }, 'e'), true);
     assert.equal(isControlShortcut('e', { ctrl: false }, 'e'), false);
+  });
+});
+
+describe('Slate modifier normalization', () => {
+  it('keeps shifted and AltGr text out of the Ctrl shortcut path', () => {
+    const shifted = keyForEvent({ kind: 'key', code: 'KeyA', text: 'A', modifiers: 1 });
+    assert.equal(shifted.shift, true);
+    assert.equal(shifted.ctrl, false);
+
+    const ctrl = keyForEvent({ kind: 'key', code: 'KeyA', text: '', modifiers: 2 });
+    assert.equal(ctrl.ctrl, true);
+    assert.equal(ctrl.shift, false);
+
+    const altGr = keyForEvent({ kind: 'key', code: 'Semicolon', text: ':', modifiers: 6 });
+    assert.equal(altGr.ctrl, true);
+    assert.equal(altGr.alt, true);
+    assert.equal(altGr.meta, true);
   });
 });
 

@@ -7,6 +7,9 @@ import { highlightShell } from '../shell-highlight.js';
 import { color, glyph, syntaxColor, truncate } from '../theme.js';
 import { displayUrl } from '../format.js';
 import type { PlanDisplayItem, SearchHit, ToolCategory } from '../format.js';
+import { highlight, languageOf } from '../highlight.js';
+import { useAnimationFrame } from '../hooks/useAnimationClock.js';
+import { displayWidth, wrapTerminalText } from '../text.js';
 
 export interface ToolCallProps {
   readonly name: string;
@@ -19,6 +22,12 @@ export interface ToolCallProps {
   readonly planItems?: readonly PlanDisplayItem[];
   readonly searchResults?: readonly SearchHit[];
   readonly executions?: readonly { readonly kind?: 'Read' | 'List'; readonly target?: string; readonly output?: string; readonly ok?: boolean }[];
+  /** Complete source supplied to a file creation/edit tool. */
+  readonly code?: string;
+  readonly codeMode?: 'creating' | 'editing';
+  readonly codePath?: string;
+  readonly codeAdded?: number;
+  readonly codeRemoved?: number;
   readonly expand?: boolean;
   readonly ok: boolean;
   readonly running: boolean;
@@ -26,10 +35,13 @@ export interface ToolCallProps {
   readonly maxOutputLines?: number;
 }
 
-const COLLAPSED_OUTPUT_LINES = 5;
-const COLLAPSED_HEAD_LINES = 3;
-const COLLAPSED_TAIL_LINES = 2;
+const COLLAPSED_OUTPUT_LINES = Number.MAX_SAFE_INTEGER;
 export const COLLAPSED_SEARCH_HITS = 3;
+
+const FILE_ACTIVITY_FRAMES = [
+  '\u2722', '\u2723', '\u2732', '\u2735', '\u2736', '\u2737',
+  '\u2738', '\u2739', '\u273a', '\u273b', '\u273c', '\u273d',
+] as const;
 
 const CATEGORY: Record<ToolCategory, { label: string; marker: keyof typeof glyph; tone: Parameters<typeof color>[0] }> = {
   shell: { label: 'Shell', marker: 'shell', tone: 'accent' },
@@ -46,7 +58,7 @@ const CATEGORY: Record<ToolCategory, { label: string; marker: keyof typeof glyph
   tool: { label: 'Tool', marker: 'tool', tone: 'muted' },
 };
 
-export function ToolCall({ name, category = 'tool', target, summary, output, diff, edits, planItems, searchResults, executions, expand = false, ok, running, width, maxOutputLines }: ToolCallProps): React.ReactElement {
+export function ToolCall({ name, category = 'tool', target, summary, output, diff, edits, planItems, searchResults, executions, code, codeMode = 'editing', codePath, codeAdded = 0, codeRemoved = 0, expand = false, ok, running, width, maxOutputLines }: ToolCallProps): React.ReactElement {
   const spinner = useSpinnerFrame(80, running);
   const identity = CATEGORY[category];
   const targetLines = target ? wrapLine(target, Math.max(18, width - identity.label.length - name.length - 7)) : [];
@@ -54,7 +66,7 @@ export function ToolCall({ name, category = 'tool', target, summary, output, dif
   const limit = maxOutputLines ?? COLLAPSED_OUTPUT_LINES;
   const shown = expand || outputLines.length <= limit
     ? outputLines
-    : [...outputLines.slice(0, COLLAPSED_HEAD_LINES), ...outputLines.slice(-COLLAPSED_TAIL_LINES)];
+    : outputLines;
   const hidden = outputLines.length - shown.length;
   const quiet = name === 'Executed';
 
@@ -87,6 +99,17 @@ export function ToolCall({ name, category = 'tool', target, summary, output, dif
       {summary && !diff && !edits?.length ? (
         <Box><Text color={color('ghost')}>  {summary}</Text></Box>
       ) : null}
+      {code !== undefined ? (
+        <FileActivity
+          code={code}
+          mode={codeMode}
+          path={codePath ?? target ?? 'file'}
+          added={codeAdded}
+          removed={codeRemoved}
+          running={running}
+          width={width}
+        />
+      ) : null}
       {searchResults?.length ? (
         <SearchResults hits={searchResults} expand={expand} width={width} />
       ) : executions?.length ? (
@@ -113,23 +136,102 @@ export function ToolCall({ name, category = 'tool', target, summary, output, dif
       ) : shown.length > 0 ? (
         <Box flexDirection="column">
           <Text color={color('ghost')}>  {glyph.branch}</Text>
-          {shown.map((line, index) => <Text key={index} color={color(ok ? 'muted' : 'warn')}>{'    '}{truncate(line, Math.max(12, width - 4))}</Text>)}
+          {shown.flatMap((line, index) => wrapTerminalText(line, Math.max(1, width - 6)).map((part, partIndex) => (
+            <Text key={`${index}:${partIndex}`} color={color(ok ? 'muted' : 'warn')}>{'    '}{part || ' '}</Text>
+          )))}
           {hidden > 0 ? <Text color={color('ghost')}>{'    '}… {hidden} more {hidden === 1 ? 'line' : 'lines'} hidden {glyph.divider} Ctrl+E</Text> : null}
           {expand && outputLines.length > limit ? <Text color={color('ghost')}>{'    '}{outputLines.length} lines {glyph.divider} Ctrl+E to collapse</Text> : null}
         </Box>
       ) : null}
       {(diff || edits?.length) && outputLines.length > 0 ? (
         <Box flexDirection="column" paddingLeft={2}>
-          {shown.map((line, index) => (
-            <Text key={index} color={color(ok ? 'muted' : 'warn')}>
-              {index === 0 ? `${glyph.hook} ` : '  '}{truncate(line, Math.max(12, width - 6))}
+          {shown.flatMap((line, index) => wrapTerminalText(line, Math.max(1, width - 6)).map((part, partIndex) => (
+            <Text key={`${index}:${partIndex}`} color={color(ok ? 'muted' : 'warn')}>
+              {index === 0 && partIndex === 0 ? `${glyph.hook} ` : '  '}{part || ' '}
             </Text>
-          ))}
+          )))}
           {hidden > 0 ? (
             <Text color={color('ghost')}>… {hidden} more {hidden === 1 ? 'line' : 'lines'} · Ctrl+E</Text>
           ) : null}
         </Box>
       ) : null}
+    </Box>
+  );
+}
+
+function FileActivity({
+  code,
+  mode,
+  path,
+  added,
+  removed,
+  running,
+  width,
+}: {
+  readonly code: string;
+  readonly mode: 'creating' | 'editing';
+  readonly path: string;
+  readonly added: number;
+  readonly removed: number;
+  readonly running: boolean;
+  readonly width: number;
+}): React.ReactElement {
+  const frame = useAnimationFrame(running, 'slow');
+  const lines = code.replace(/\r\n?/g, '\n').split('\n');
+  const visibleCount = running
+    ? Math.min(lines.length, Math.max(1, (frame + 1) * 4))
+    : lines.length;
+  const visible = lines.slice(0, visibleCount);
+  const gutter = String(Math.max(1, lines.length)).length;
+  const codeWidth = Math.max(1, width - gutter - 7);
+  const language = languageOf(path);
+  const activityGlyph = running
+    ? FILE_ACTIVITY_FRAMES[frame % FILE_ACTIVITY_FRAMES.length]
+    : '\u273d';
+  const label = mode === 'creating' ? 'Creating' : 'Editing';
+  const codeRows = visible.reduce(
+    (total, line) => total + wrapTerminalText(line, codeWidth).length,
+    0,
+  );
+  // The custom Slate border adapter receives an explicit content height. It
+  // must include the code margin and language label or the final source line
+  // would sit underneath the bottom border on a tall file.
+  const panelHeight = codeRows + 6 + (language ? 1 : 0);
+
+  return (
+    <Box
+      flexDirection="column"
+      width={Math.max(12, width)}
+      height={panelHeight}
+      marginTop={1}
+      borderStyle="round"
+      borderColor={color(running ? 'accentDim' : 'faint')}
+      paddingX={1}
+    >
+      <Box>
+        <Text color={color(running ? 'accent' : 'success')}>{activityGlyph} </Text>
+        <Text color={color('text')} bold>{label} - {path}</Text>
+        <Text color={color('muted')}> (+{added} | -{removed})</Text>
+      </Box>
+      {language && <Text color={color('ghost')}>  {language}</Text>}
+      <Box flexDirection="column" marginTop={1}>
+        {visible.flatMap((line, lineIndex) => wrapTerminalText(line, codeWidth).map((part, partIndex) => (
+          <Box key={`${lineIndex}:${partIndex}`}>
+            <Text color={color('ghost')}>
+              {partIndex === 0
+                ? `  ${String(lineIndex + 1).padStart(gutter)}  `
+                : ' '.repeat(gutter + 4)}
+            </Text>
+            <Text color={color('muted')}>
+              {highlight(part, language).map((token, tokenIndex) => (
+                <Text key={tokenIndex} color={syntaxColor(token.kind)}>{token.text}</Text>
+              ))}
+              {part.length === 0 ? ' ' : ''}
+              {displayWidth(part) < codeWidth ? ' '.repeat(codeWidth - displayWidth(part)) : ''}
+            </Text>
+          </Box>
+        )))}
+      </Box>
     </Box>
   );
 }
@@ -185,11 +287,11 @@ function ExecutionGroup({ executions, expand, width }: { readonly executions: re
           <Text color={color('muted')}>
             {glyph.branch} {execution.kind ? `${execution.kind} ` : ''}{truncate(execution.target ?? `call ${index + 1}`, Math.max(12, width - 10))}
           </Text>
-          {cleanOutput(execution.output ?? '').map((line, lineIndex) => (
-            <Text key={lineIndex} color={color('ghost')}>
-              {'  '}{glyph.rail} {truncate(line, Math.max(12, width - 6))}
+          {cleanOutput(execution.output ?? '').flatMap((line, lineIndex) => wrapTerminalText(line, Math.max(1, width - 8)).map((part, partIndex) => (
+            <Text key={`${lineIndex}:${partIndex}`} color={color('ghost')}>
+              {'  '}{glyph.rail} {part || ' '}
             </Text>
-          ))}
+          )))}
         </Box>
       ))}
       <Text color={color('ghost')}>Ctrl+E to collapse</Text>

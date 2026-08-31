@@ -3,7 +3,8 @@ import { Box, Text } from '../ui.js';
 
 import { parseMarkdown, wrapSpans } from '../markdown.js';
 import type { MdBlock, MdSpan } from '../markdown.js';
-import { color, glyph, truncate } from '../theme.js';
+import { color, glyph } from '../theme.js';
+import { wrapTerminalText } from '../text.js';
 
 interface MarkdownProps {
   readonly source: string;
@@ -143,8 +144,6 @@ function Inline({ spans, dim }: { spans: readonly MdSpan[]; dim: boolean }): Rea
   );
 }
 
-const MAX_CODE_LINES = 24;
-
 function CodeBlock({
   language,
   lines,
@@ -154,28 +153,22 @@ function CodeBlock({
   lines: readonly string[];
   width: number;
 }): React.ReactElement {
-  const shown = lines.slice(0, MAX_CODE_LINES);
-  const hidden = lines.length - shown.length;
   const gutter = String(lines.length).length;
+  const codeWidth = Math.max(1, width - gutter - 6);
 
   return (
     <Box flexDirection="column" marginY={0}>
       {language && <Text color={color('ghost')}>{'  '}{language}</Text>}
-      {shown.map((line, index) => (
-        <Box key={index}>
+      {lines.flatMap((line, index) => wrapTerminalText(line, codeWidth).map((part, partIndex) => (
+        <Box key={`${index}:${partIndex}`}>
           <Text color={color('ghost')}>
-            {'  '}
-            {String(index + 1).padStart(gutter)}
-            {'  '}
+            {partIndex === 0
+              ? `  ${String(index + 1).padStart(gutter)}  `
+              : ' '.repeat(gutter + 4)}
           </Text>
-          <Text color={color('muted')}>{truncate(line, Math.max(8, width - gutter - 6))}</Text>
+          <Text color={color('muted')}>{part || ' '}</Text>
         </Box>
-      ))}
-      {hidden > 0 && (
-        <Text color={color('ghost')}>
-          {'  '}… {hidden} more lines
-        </Text>
-      )}
+      )))}
     </Box>
   );
 }

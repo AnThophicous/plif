@@ -1,3 +1,5 @@
+import { clusterLength, displayWidth } from './text.js';
+
 export type SpanStyle = 'plain' | 'bold' | 'italic' | 'code' | 'link' | 'strike';
 
 export interface MdSpan {
@@ -173,26 +175,37 @@ export function wrapSpans(
         continue;
       }
 
-      if (used + word.length > width && used > 0) flush();
+      const wordWidth = displayWidth(word);
+      if (used + wordWidth > width && used > 0) flush();
 
-      if (word.length > width) {
+      if (wordWidth > width) {
         let rest = word;
-        while (rest.length > width) {
+        while (displayWidth(rest) > width) {
           if (used > 0) flush();
-          current.push({ text: rest.slice(0, width), style: span.style });
+          let at = 0;
+          let cells = 0;
+          while (at < rest.length) {
+            const length = clusterLength(rest, at) || 1;
+            const cluster = rest.slice(at, at + length);
+            const clusterCells = Math.max(1, displayWidth(cluster));
+            if (cells > 0 && cells + clusterCells > width) break;
+            cells += clusterCells;
+            at += length;
+          }
+          current.push({ text: rest.slice(0, at), style: span.style });
           used = width;
           flush();
-          rest = rest.slice(width);
+          rest = rest.slice(at);
         }
         if (rest) {
           current.push({ text: rest, style: span.style });
-          used += rest.length;
+          used += displayWidth(rest);
         }
         continue;
       }
 
       current.push({ text: word, style: span.style });
-      used += word.length;
+      used += wordWidth;
     }
   }
 

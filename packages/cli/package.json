@@ -43,11 +43,12 @@
   "dependencies": {
     "@plif/core": "0.4.0",
     "@plif/sandbox": "0.4.0",
-    "@slate-terminal/core": "^2.0.0",
-    "@slate-terminal/react": "^2.0.0",
+    "@slate-terminal/core": "^2.2.0",
+    "@slate-terminal/native": "^2.2.0",
+    "@slate-terminal/react": "^2.2.0",
     "chalk": "^5.6.2",
-    "react": "^18.3.1",
-    "react-reconciler": "^0.29.2",
+    "react": "19.0.0",
+    "react-reconciler": "0.31.0",
     "string-width": "^7.2.0"
   }
 }

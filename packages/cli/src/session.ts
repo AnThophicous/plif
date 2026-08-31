@@ -98,6 +98,12 @@ export interface TimelineEntry {
     readonly output?: string;
     readonly ok?: boolean;
   }[];
+  /** Complete source preview for a file creation/edit operation. */
+  readonly fileCode?: string;
+  readonly fileMode?: 'creating' | 'editing';
+  readonly filePath?: string;
+  readonly fileAdded?: number;
+  readonly fileRemoved?: number;
   readonly at: number;
 }
 
@@ -593,20 +599,38 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     }
     case 'toggleLastThinking': {
       const index = [...state.entries].map((item) => item.kind).lastIndexOf('thinking');
-      if (index < 0) return state;
+      if (index >= 0) {
+        return {
+          ...state,
+          entries: state.entries.map((item, itemIndex) =>
+            itemIndex === index ? { ...item, expand: !item.expand } : item,
+          ),
+        };
+      }
+      const committedIndex = [...state.committed].map((item) => item.kind).lastIndexOf('thinking');
+      if (committedIndex < 0) return state;
       return {
         ...state,
-        entries: state.entries.map((item, itemIndex) =>
-          itemIndex === index ? { ...item, expand: !item.expand } : item,
+        committed: state.committed.map((item, itemIndex) =>
+          itemIndex === committedIndex ? { ...item, expand: !item.expand } : item,
         ),
       };
     }
     case 'toggleThinking': {
       const exists = state.entries.some((item) => item.id === action.id && item.kind === 'thinking');
-      if (!exists) return state;
+      if (exists) {
+        return {
+          ...state,
+          entries: state.entries.map((item) =>
+            item.id === action.id ? { ...item, expand: !item.expand } : item,
+          ),
+        };
+      }
+      const committedExists = state.committed.some((item) => item.id === action.id && item.kind === 'thinking');
+      if (!committedExists) return state;
       return {
         ...state,
-        entries: state.entries.map((item) =>
+        committed: state.committed.map((item) =>
           item.id === action.id ? { ...item, expand: !item.expand } : item,
         ),
       };
@@ -1261,7 +1285,8 @@ function hasExpandableToolContent(item: TimelineEntry): boolean {
     item.edits?.length ||
     item.planItems?.length ||
     item.searchResults?.length ||
-    item.executions?.length,
+    item.executions?.length ||
+    item.fileCode !== undefined,
   );
 }
 

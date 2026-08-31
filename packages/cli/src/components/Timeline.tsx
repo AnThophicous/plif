@@ -1,21 +1,20 @@
 import React from 'react';
-import { Box, Text } from '../ui.js';
+import { Box, ScrollView, Text } from '../ui.js';
 
 import { diffHeight } from './Diff.js';
 import { Markdown } from './Markdown.js';
 import { ToolCall, searchResultsHeight } from './ToolCall.js';
 import { BLOOM_MARK, useSpinnerFrame } from './Spinner.js';
-import { activityGlyphAt, activityKindForLabel, activityVisual } from '../activity-visuals.js';
-import { ANIMATION_INTERVAL_MS, useAnimationFrame } from '../hooks/useAnimationClock.js';
+import { useAnimationFrame } from '../hooks/useAnimationClock.js';
 import type { EntryStatus, TimelineEntry } from '../session.js';
 import {
   allTranscriptCells,
   initialTranscriptState,
   transcriptReducer,
 } from '../transcript/reducer.js';
-import type { TranscriptCell } from '../transcript/types.js';
+import type { FileActivity, TranscriptCell } from '../transcript/types.js';
 import { color, formatDuration, formatWorkedDuration, glyph, layout, truncate } from '../theme.js';
-import { clusterLength, displayWidth } from '../text.js';
+import { clusterLength, displayWidth, wrapTerminalText } from '../text.js';
 
 interface TimelineProps {
   readonly entries: readonly TimelineEntry[];
@@ -55,16 +54,22 @@ export const Timeline = React.memo(function Timeline({
   maxLines,
 }: TimelineProps): React.ReactElement {
   const inner = width - layout.gutter * 2;
-  const byCount = limit ? entries.slice(-limit) : entries.slice(-layout.maxTimelineRows);
-  const visible =
-    maxLines === undefined
-      ? byCount
-      : maxLines <= 0
-        ? []
-        : fitToHeight(byCount, inner, maxLines);
+  const byCount = limit
+    ? entries.slice(-limit)
+    : maxLines === undefined
+      ? entries.slice(-layout.maxTimelineRows)
+      : entries;
+  // Let Slate own clipping and scrolling. Slicing settled rows here made
+  // earlier messages appear to disappear as the live frame grew.
+  const visible = maxLines !== undefined && maxLines <= 0 ? [] : byCount;
+  const viewport = maxLines === undefined ? {} : {
+    height: Math.max(1, maxLines),
+    overflow: 'scroll' as const,
+    scrollTop: Number.MAX_SAFE_INTEGER,
+  };
 
   return (
-    <Box flexDirection="column" paddingX={layout.gutter}>
+    <ScrollView flexDirection="column" paddingX={layout.gutter} {...viewport}>
       {visible.map((item) => (
         <TimelineRow
           key={item.id}
@@ -73,7 +78,7 @@ export const Timeline = React.memo(function Timeline({
           {...(maxLines === undefined ? {} : { maxLines })}
         />
       ))}
-    </Box>
+    </ScrollView>
   );
 });
 
@@ -194,7 +199,15 @@ function entryFromTranscriptCell(
         at,
       };
     case 'diff':
-      return { id: cell.id, kind: 'tool', title: cell.title, diff: cell.diff, status: 'done', at };
+      return {
+        id: cell.id,
+        kind: 'tool',
+        title: cell.title,
+        diff: cell.diff,
+        status: 'done',
+        at,
+        ...(cell.file ? fileEntryFields(cell.file) : {}),
+      };
     case 'error':
       return {
         id: cell.id,
@@ -203,6 +216,7 @@ function entryFromTranscriptCell(
         detail: cell.detail,
         status: 'failed',
         at,
+        ...(cell.file ? fileEntryFields(cell.file) : {}),
       };
     case 'approval':
       return {
@@ -304,12 +318,22 @@ export function timelineVisibleHeight(
   limit?: number,
 ): number {
   const inner = width - layout.gutter * 2;
-  const byCount = limit ? entries.slice(-limit) : entries.slice(-layout.maxTimelineRows);
+  const byCount = limit ? entries.slice(-limit) : entries;
   const visible = maxLines <= 0 ? [] : fitToHeight(byCount, inner, maxLines);
   return visible.reduce(
     (total, item) => total + estimateHeight(item, inner, Math.max(0, maxLines - total)),
     0,
   );
+}
+
+function fileEntryFields(file: FileActivity): Pick<TimelineEntry, 'fileCode' | 'fileMode' | 'filePath' | 'fileAdded' | 'fileRemoved'> {
+  return {
+    fileCode: file.code,
+    fileMode: file.mode,
+    filePath: file.path,
+    fileAdded: file.added,
+    fileRemoved: file.removed,
+  };
 }
 
 /** Resolve a live timeline row for mouse hit-testing. */
@@ -322,7 +346,7 @@ export function timelineEntryAtRow(
 ): { readonly entry: TimelineEntry; readonly offset: number } | null {
   if (!Number.isSafeInteger(row) || row < 0 || maxLines <= 0) return null;
   const inner = width - layout.gutter * 2;
-  const byCount = limit ? entries.slice(-limit) : entries.slice(-layout.maxTimelineRows);
+  const byCount = limit ? entries.slice(-limit) : entries;
   const visible = fitToHeight(byCount, inner, maxLines);
   let cursor = 0;
   for (const entry of visible) {
@@ -337,7 +361,7 @@ export function timelineEntryAtRow(
 
 /** Wrapped height of one source line at a given width. */
 function wrappedHeight(line: string, width: number): number {
-  return Math.max(1, Math.ceil(line.length / Math.max(8, width)));
+  return Math.max(1, Math.ceil(displayWidth(line) / Math.max(8, width)));
 }
 
 /**
@@ -362,6 +386,12 @@ export function timelineEntriesFromTranscriptCells(
       const output = item.output?.trim();
       return `${state} ${item.name}${duration}${output ? `\n${output}` : ''}`;
     }).join('\n');
+    const files = cell.items.flatMap((item) => item.file ? [item.file] : []);
+    const fileCode = files.length === 1
+      ? files[0]!.code
+      : files.map((file) => `// ${file.path}\n${file.code}`).join('\n\n');
+    const fileAdded = files.reduce((total, file) => total + file.added, 0);
+    const fileRemoved = files.reduce((total, file) => total + file.removed, 0);
 
     return {
       id: cell.id,
@@ -371,6 +401,13 @@ export function timelineEntriesFromTranscriptCells(
       status: running ? 'active' : 'done',
       toolSummary: `${cell.items.length} ${cell.items.length === 1 ? 'operation' : 'operations'}`,
       at: Date.parse(cell.at) || 0,
+      ...(files.length > 0 ? {
+        fileCode,
+        fileMode: files.every((file) => file.mode === 'creating') ? 'creating' as const : 'editing' as const,
+        filePath: files.length === 1 ? files[0]!.path : `${files.length} files`,
+        fileAdded,
+        fileRemoved,
+      } : {}),
     };
   });
 }
@@ -417,8 +454,8 @@ function wrappedTextHeight(text: string, width: number, ceiling = Number.MAX_SAF
   let start = 0;
   while (true) {
     const end = text.indexOf('\n', start);
-    const length = (end === -1 ? text.length : end) - start;
-    total += Math.max(1, Math.ceil(length / columns));
+    const line = text.slice(start, end === -1 ? text.length : end);
+    total += wrappedHeight(line, columns);
     if (total >= ceiling || end === -1) return total;
     start = end + 1;
   }
@@ -511,23 +548,36 @@ export function wrappedThoughtLines(
       rows.push('');
       continue;
     }
-
-    let row = '';
-    for (const word of flat.split(' ')) {
-      for (let at = 0; at < word.length || at === 0; at += columns) {
-        const piece = word.slice(at, at + columns);
-        if (!row) row = piece;
-        else if (row.length + 1 + piece.length <= columns) row += ` ${piece}`;
-        else {
-          rows.push(row);
-          row = piece;
-        }
-      }
-    }
-    if (row) rows.push(row);
+    rows.push(...wrapThoughtLine(flat, columns));
   }
 
   return rows.slice(-budget);
+}
+
+function wrapThoughtLine(value: string, width: number): string[] {
+  const rows: string[] = [];
+  let row = '';
+  for (const word of value.split(' ')) {
+    if (!word) continue;
+    const wordWidth = displayWidth(word);
+    if (row && displayWidth(row) + 1 + wordWidth <= width) {
+      row += ` ${word}`;
+      continue;
+    }
+    if (row) {
+      rows.push(row);
+      row = '';
+    }
+    if (wordWidth > width) {
+      const pieces = wrapTerminalText(word, width);
+      rows.push(...pieces.slice(0, -1));
+      row = pieces.at(-1) ?? '';
+    } else {
+      row = word;
+    }
+  }
+  if (row) rows.push(row);
+  return rows.length > 0 ? rows : [''];
 }
 
 /**
@@ -646,14 +696,14 @@ export const TimelineRow = React.memo(function TimelineRow({
 
 TimelineRow.displayName = 'TimelineRow';
 
-/**
- * A block of model reasoning.
- *
- * While it is being written it shows its own tail — a few rows of the thought
- * as it forms, in the accent family, because reasoning is where a wrong turn
- * becomes visible before the answer hides it. Once settled, one quiet preview
- * line remains in the chat and the full block stays available through Ctrl+R.
- */
+const THINKING_FRAMES = [
+  '\u28e0', '\u28e1', '\u28e2', '\u28e3', '\u28e4', '\u28e5', '\u28e6', '\u28e7',
+  '\u28e8', '\u28e9', '\u28ea', '\u28eb', '\u28ec', '\u28ed', '\u28ee', '\u28ef',
+  '\u28f0', '\u28f1', '\u28f2', '\u28f3', '\u28f4', '\u28f5', '\u28f6', '\u28f7',
+  '\u28f8', '\u28f9', '\u28fa', '\u28fb', '\u28fc', '\u28fd', '\u28fe', '\u28ff',
+] as const;
+
+/** The model's reasoning: one calm header and a complete, readable body. */
 function ThinkingIndicator({
   thinking,
   label,
@@ -668,20 +718,18 @@ function ThinkingIndicator({
   readonly durationMs?: number;
 }): React.ReactElement {
   void plif;
+  void label;
   const clock = useAnimationFrame(thinking, 'slow');
-  const activityLabel = label.replace(/^plif\s+/i, '') || 'Thinking';
-  const kind = activityKindForLabel(activityLabel);
-  const visual = activityVisual(kind);
-  const pulse = activityGlyphAt(kind, clock * ANIMATION_INTERVAL_MS, thinking);
+  const pulse = THINKING_FRAMES[clock % THINKING_FRAMES.length];
 
   return (
     <Box>
-      <Text color={color(thinking ? 'accent' : 'ghost')}>{thinking ? pulse : glyph.step} </Text>
+      <Text color={color(thinking ? 'accent' : 'ghost')}>{thinking ? pulse : '\u273d'} </Text>
       {thinking ? (
-        <Text color={color('muted')} bold>[ Thinking ]</Text>
+        <Text color={color('muted')} bold>| Thinking</Text>
       ) : (
         <Text color={color('muted')} bold>
-          {expand ? `[- Thinked for ${formatDuration(durationMs ?? 0)}]` : `[+ Thinked for ${formatDuration(durationMs ?? 0)}]`}
+          {`Thinked for: ${durationMs ?? 0} ms`}
         </Text>
       )}
     </Box>
@@ -701,12 +749,11 @@ function ThinkingRow({
   const label = entry.title || 'Thinking';
   const plif = label === 'Plif Thinking';
   const body = entry.detail ?? '';
-  const live = thinking ? thoughtLines(body, width - 4) : [];
-  const clipped =
-    entry.expand && maxLines !== undefined ? tail(body, width - 4, Math.max(3, maxLines - 2)) : body;
-  const preview = !thinking && !entry.expand ? thoughtLines(body, width - 4, 1) : [];
+  // Keep every streamed line in the Slate scroll surface. The previous
+  // three-line tail was a data-loss-looking presentation bug.
+  const live = thinking ? wrappedThoughtLines(body, width - 4) : [];
   const expandedLines = entry.expand && body.trim()
-    ? wrappedThoughtLines(clipped, width - 4, maxLines === undefined ? undefined : Math.max(1, maxLines - 2))
+    ? wrappedThoughtLines(body, width - 4)
     : [];
 
   return (
@@ -720,42 +767,14 @@ function ThinkingRow({
       />
 
       {live.length > 0 && (
-        <Box flexDirection="column" marginTop={1}>
-          {live.map((line, index) => {
-            // The reference grammar: every step hangs off the branch rail,
-            // the last one closes it, and the status column — a champagne
-            // check for what has been thought through, an ellipsis for the
-            // thought still forming — sits at the right edge of the block.
-            const last = index === live.length - 1;
-            const gap = Math.max(1, width - 6 - displayWidth(line));
-            return (
-              <Box key={index}>
-                <Text color={color('ghost')}>{`  ${last ? '  ' : glyph.rail} ${glyph.branch} `}</Text>
-                <Text color={color('faint')}>{line}</Text>
-                {last
-                  ? <Text color={color('muted')}>{' '.repeat(gap)}…</Text>
-                  : <Text color={color('accentBorder')}>{' '.repeat(gap)}✓</Text>}
-              </Box>
-            );
-          })}
-        </Box>
-      )}
-
-      {preview.length > 0 && (
-        <Box marginTop={1}>
-          <Text color={color('ghost')}>{`  ${glyph.branch} `}</Text>
-          <Text color={color('muted')}>{preview[0]}</Text>
+        <Box flexDirection="column" marginTop={1} paddingLeft={2}>
+          {live.map((line, index) => <Text key={index} color={color('faint')}>{line || ' '}</Text>)}
         </Box>
       )}
 
       {entry.expand && body.trim() && (
-        <Box flexDirection="column" marginBottom={1}>
-          {expandedLines.map((line, index) => (
-            <Box key={index}>
-              <Text color={color('ghost')}>{'  ' + glyph.rail + ' '}</Text>
-              <Text color={color('faint')} italic>{line}</Text>
-            </Box>
-          ))}
+        <Box flexDirection="column" marginTop={1} paddingLeft={2} marginBottom={1}>
+          {expandedLines.map((line, index) => <Text key={index} color={color('faint')}>{line || ' '}</Text>)}
         </Box>
       )}
     </Box>
@@ -782,7 +801,9 @@ function CycleSeparator({ entry, width }: { entry: TimelineEntry; width: number 
 }
 
 /** The developer's line is open on the page, matching the reference composition. */
-export const MAX_USER_ROW_LINES = 6;
+// Rows may be paginated by the terminal viewport, but transcript history must
+// retain every wrapped line of the user's message.
+export const MAX_USER_ROW_LINES = Number.MAX_SAFE_INTEGER;
 
 export function userRowLines(
   title: string,
@@ -865,8 +886,7 @@ function AnswerRow({
   // very long paragraphs, so counting `\n` would find four lines where the
   // terminal draws forty and clip nothing at all.
   const streaming = entry.status === 'active';
-  const source =
-    streaming && maxLines !== undefined ? tail(body, width - 2, maxLines) : body;
+  const source = body;
 
   return (
     <Box marginBottom={1} width="100%">
@@ -903,6 +923,11 @@ function ToolRow({ entry, width }: { entry: TimelineEntry; width: number }): Rea
         {...(entry.executions !== undefined ? { executions: entry.executions } : {})}
         {...(entry.toolTarget !== undefined ? { target: entry.toolTarget } : {})}
         {...(entry.toolSummary !== undefined ? { summary: entry.toolSummary } : {})}
+        {...(entry.fileCode !== undefined ? { code: entry.fileCode } : {})}
+        {...(entry.fileMode !== undefined ? { codeMode: entry.fileMode } : {})}
+        {...(entry.filePath !== undefined ? { codePath: entry.filePath } : {})}
+        {...(entry.fileAdded !== undefined ? { codeAdded: entry.fileAdded } : {})}
+        {...(entry.fileRemoved !== undefined ? { codeRemoved: entry.fileRemoved } : {})}
         {...(entry.detail !== undefined ? { output: entry.detail } : {})}
       />
     </Box>
@@ -972,33 +997,18 @@ function Detail({
   live?: boolean;
   expand?: boolean;
 }): React.ReactElement {
+  void live;
+  void expand;
   const lines = text.replace(/\s+$/, '').split('\n');
-
-  // While output is still arriving, show the tail — the newest lines are the
-  // ones the developer is waiting on. Once the command is done, the middle is
-  // elided instead: the first lines say what started, the last say how it
-  // ended, and the middle of a 400-line build log carries the least per line.
-  const head = live ? 0 : 8;
-  const tail = live ? 10 : 4;
-  const elided = !expand && lines.length > head + tail + 1;
-  const shown = elided
-    ? [...lines.slice(0, head), null, ...lines.slice(-tail)]
-    : lines;
 
   return (
     <Box flexDirection="column" marginBottom={1}>
-      {shown.map((line, index) => (
-        <Box key={index}>
+      {lines.flatMap((line, index) => wrapTerminalText(line, Math.max(1, width - 4)).map((part, partIndex) => (
+        <Box key={`${index}:${partIndex}`}>
           <Text color={color('ghost')}>{'  ' + glyph.rail + ' '}</Text>
-          {line === null ? (
-            <Text color={color('ghost')} italic>
-              … {lines.length - head - tail} {live ? 'earlier' : 'more'} lines
-            </Text>
-          ) : (
-            <Text color={color('muted')}>{truncate(line, Math.max(8, width - 4))}</Text>
-          )}
+          <Text color={color('muted')}>{part || ' '}</Text>
         </Box>
-      ))}
+      )))}
     </Box>
   );
 }

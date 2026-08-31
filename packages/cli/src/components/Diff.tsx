@@ -3,8 +3,9 @@ import { Box, Text } from '../ui.js';
 
 import { describeStats, diffStats, hunksOf, parseDiff } from '@plif/core';
 import type { DiffLine } from '@plif/core';
-import { color, diffStyle, glyph, syntaxColor, truncate } from '../theme.js';
+import { color, diffStyle, syntaxColor } from '../theme.js';
 import { highlight, languageOf } from '../highlight.js';
+import { displayWidth, wrapTerminalText } from '../text.js';
 
 interface DiffProps {
   readonly diff: string;
@@ -16,6 +17,8 @@ interface DiffProps {
 }
 
 /** Diff lines shown before the fold. */
+// Kept for layout compatibility; rendering itself always retains the full
+// diff so the historical record is never silently shortened.
 const COLLAPSED_LINES = 14;
 
 /**
@@ -52,8 +55,7 @@ export function Diff({ diff, width, path, expand = false }: DiffProps): React.Re
   if (lines.length === 0) return null;
 
   const language = languageOf(path ?? '');
-  const shown = expand ? lines : lines.slice(0, COLLAPSED_LINES);
-  const hidden = lines.length - shown.length;
+  const shown = lines;
 
   // Wide enough for the largest line number in the diff, so the code column
   // does not shift halfway down a hunk.
@@ -74,14 +76,6 @@ export function Diff({ diff, width, path, expand = false }: DiffProps): React.Re
           language={language}
         />
       ))}
-      {hidden > 0 && (
-        <Box>
-          <Text color={color('ghost')}>{'  ' + glyph.rail + ' '}</Text>
-          <Text color={color('ghost')} italic>
-            … {hidden} more diff {hidden === 1 ? 'line' : 'lines'} — Ctrl+E to expand
-          </Text>
-        </Box>
-      )}
     </Box>
   );
 }
@@ -109,34 +103,35 @@ function DiffRow({
   width: number;
   language: string;
 }): React.ReactElement {
+  const wrapped = wrapTerminalText(line.text, width);
   const background =
     line.op === 'add' ? diffStyle.addBackground : line.op === 'remove' ? diffStyle.removeBackground : undefined;
   const number = line.op === 'remove' ? line.before : line.after;
   const marker = line.op === 'add' ? '+' : line.op === 'remove' ? '-' : ' ';
-  const text = truncate(line.text, width);
-
   return (
-    <Box>
-      <Text color={color('ghost')}>{'  '}</Text>
-      <Text color={color(line.op === 'context' ? 'ghost' : 'faint')}>
-        {String(number ?? '').padStart(gutter)}{' '}
-      </Text>
-      <Text
-        color={color(line.op === 'add' ? diffStyle.addMarker : line.op === 'remove' ? diffStyle.removeMarker : 'ghost')}
-        {...(background ? { backgroundColor: background } : {})}
-      >
-        {marker}{' '}
-      </Text>
-      <Text {...(background ? { backgroundColor: background } : {})}>
-        {highlight(text, language).map((token, index) => (
-          <Text key={index} color={syntaxColor(token.kind)} {...(background ? { backgroundColor: background } : {})}>
-            {token.text}
+    <Box flexDirection="column">
+      {wrapped.map((text, partIndex) => (
+        <Box key={partIndex}>
+          <Text color={color('ghost')}>{'  '}</Text>
+          <Text color={color(line.op === 'context' ? 'ghost' : 'faint')}>
+            {partIndex === 0 ? String(number ?? '').padStart(gutter) : ' '.repeat(gutter)}{' '}
           </Text>
-        ))}
-        {/* Pad to the full width so the tint runs to the edge of the column
-            rather than stopping raggedly at the end of each line. */}
-        {background && text.length < width ? ' '.repeat(width - text.length) : ''}
-      </Text>
+          <Text
+            color={color(line.op === 'add' && partIndex === 0 ? diffStyle.addMarker : line.op === 'remove' && partIndex === 0 ? diffStyle.removeMarker : 'ghost')}
+            {...(background ? { backgroundColor: background } : {})}
+          >
+            {partIndex === 0 ? marker : ' '}{' '}
+          </Text>
+          <Text {...(background ? { backgroundColor: background } : {})}>
+            {highlight(text, language).map((token, index) => (
+              <Text key={index} color={syntaxColor(token.kind)} {...(background ? { backgroundColor: background } : {})}>
+                {token.text}
+              </Text>
+            ))}
+            {background && displayWidth(text) < width ? ' '.repeat(width - displayWidth(text)) : ''}
+          </Text>
+        </Box>
+      ))}
     </Box>
   );
 }

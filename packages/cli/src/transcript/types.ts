@@ -1,3 +1,11 @@
+export interface FileActivity {
+  readonly path: string;
+  readonly mode: 'creating' | 'editing';
+  readonly code: string;
+  readonly added: number;
+  readonly removed: number;
+}
+
 export interface ActivityItem {
   readonly id: string;
   readonly callId: string;
@@ -5,6 +13,7 @@ export interface ActivityItem {
   readonly status: 'running' | 'done';
   readonly output?: string;
   readonly durationMs?: number;
+  readonly file?: FileActivity;
 }
 
 interface CellBase<K extends string> {
@@ -26,8 +35,8 @@ export type TranscriptCell =
       readonly items: readonly ActivityItem[];
       readonly expanded: boolean;
     })
-  | (CellBase<'diff'> & { readonly title: string; readonly diff: string })
-  | (CellBase<'error'> & { readonly title: string; readonly detail: string })
+  | (CellBase<'diff'> & { readonly title: string; readonly diff: string; readonly file?: FileActivity })
+  | (CellBase<'error'> & { readonly title: string; readonly detail: string; readonly file?: FileActivity })
   | (CellBase<'approval'> & {
       readonly requestId: string;
       readonly text: string;
@@ -47,7 +56,7 @@ export interface TranscriptState {
   readonly finalized: readonly TranscriptCell[];
   readonly active: TranscriptCell | null;
   readonly seenEventIds: ReadonlySet<string>;
-  readonly calls: ReadonlyMap<string, { readonly turnId: string; readonly name: string }>;
+  readonly calls: ReadonlyMap<string, { readonly turnId: string; readonly name: string; readonly file?: FileActivity }>;
 }
 
 export type TranscriptAction =
