@@ -8,14 +8,19 @@
  * ## The idea
  *
  * A terminal that a developer sits in for hours has to do two things at once:
- * stay quiet, and stay legible. The cold blue-grey ramp is therefore semantic:
- * borders, important details, highlighted text, default text, and active
- * thinking each have a clear role. Nothing is coloured for decoration. If a
- * line is bright, it earned it.
+ * stay quiet, and stay legible. The ramp is therefore semantic: borders,
+ * important details, highlighted text, default text, and active thinking each
+ * have a clear role. Nothing is coloured for decoration. If a line is bright,
+ * it earned it.
+ *
+ * There are three families and only three: a near-white ink, a spaced neutral
+ * grey hierarchy, and the pink. Everything on screen is one of them or a step
+ * between two — which is what lets a gradient run from grey through white into
+ * pink and still read as one surface.
  *
  * The greys are spaced far enough apart to survive a low-contrast terminal
- * theme, and the pink accent sits at a lightness that holds up on both black
- * and near-black backgrounds, since we do not control the user's background.
+ * theme, and the pink sits at a lightness that holds up on both black and
+ * near-black backgrounds, since we do not control the user's background.
  */
 import { clusterLength, displayWidth } from './text.js';
 
@@ -40,45 +45,70 @@ export const supportsRichGlyphs = richGlyphs;
  * selected, or carrying the PLIF signature.
  */
 const defaultPalette = {
-  /** Dominant reading colour and structural ink. */
-  text: '#CDD6F4',
+  /**
+   * Dominant reading colour and structural ink.
+   *
+   * A near-white carrying the faintest pink-grey bias. It was a blue lavender
+   * (#CDD6F4), which put the most-used colour on the screen in a different
+   * family from the identity: every line of prose pulled cool while the accent
+   * pulled warm, and the two never read as one palette.
+   */
+  text: '#EDEAEC',
   /** The full-bleed shell surface that holds the current Plif frame. */
   panel: '#303030',
   /** Quiet filled surface for the developer's own message row. */
   surface: '#2C2D2E',
+  /*
+    The grey hierarchy.
+
+    Four steps that have to stay tellable apart at a glance, because they are
+    what carries structure once colour is spent on meaning. They used to sit
+    within ten units of each other (#89959E / #7C848A / #6F767C), which is a
+    difference a terminal renders as "slightly different grey" and a reader
+    renders as "one grey" — so a hint, a separator and a piece of metadata all
+    weighed the same. These are spaced, and neutral rather than blue.
+  */
   /** Secondary text: readable, but quieter than the main ink. */
-  muted: '#89959E',
+  muted: '#A9A2A7',
   /** Tertiary: borders, separators, hints. Present but never competing. */
-  faint: '#7C848A',
+  faint: '#857E83',
   /** Quiet metadata and inactive states. */
-  ghost: '#6F767C',
+  ghost: '#655F63',
 
   /** Border and structural identity colour. */
-  brand: '#AAB8CC',
-  /** Thinking and active-work colour. */
+  brand: '#C9BFC5',
+  /** Thinking and active-work colour. The signature pink. */
   accent: '#e8a8c9',
   /** Bright highlight used by the travelling glow. */
-  accentBright: '#f0bcd8',
+  accentBright: '#f4c4dc',
   /** Important details and de-emphasised accents. */
-  accentDim: '#c890ac',
+  accentDim: '#b87e9c',
 
-  /** Canonical pink identity tokens. */
-  accentStrong: '#c890ac',
-  accentPastel: '#f7d4e6',
+  /*
+    The pink ramp, in order: accentDim → accentStrong → accent → accentBright
+    → accentPastel. It is walked as a gradient by the glow and by every
+    activity glyph, so it has to be monotonic. `accentStrong` used to be the
+    exact same value as `accentDim`, which put a dead step in the middle of
+    every gradient in the app — the wave visibly stalled a third of the way
+    through its travel.
+  */
+  accentStrong: '#d693b4',
+  accentPastel: '#fbe0ee',
   accentTint: '#4a3542',
   accentBorder: '#7a5568',
 
   /** Legacy names retained for user themes; values now follow PLIF pink. */
   goldDim: '#7a5568',
   goldBase: '#e8a8c9',
-  gold: '#f0bcd8',
-  goldBright: '#f7d4e6',
-  warmIvory: '#f7d4e6',
+  gold: '#f4c4dc',
+  goldBright: '#fbe0ee',
+  warmIvory: '#fbe0ee',
 
   success: '#8FB3A6',
   warn: '#BDAA82',
   danger: '#C58F99',
-  info: '#A2ADB5',
+  /** Neutral, so a piece of information never reads as a different family. */
+  info: '#B7B0B5',
 } as const;
 
 export type PaletteKey = keyof typeof defaultPalette;
@@ -122,34 +152,40 @@ export const emphasis: Record<EmphasisKey, { tone: PaletteKey; bold: boolean }> 
 
 /**
  * Effort changes the active signal, not the legibility of the whole terminal.
- * The ramp stays inside the Plif blue-grey family; PLIF reaches the primary
- * anchor and, through the stops in `effort-visuals.ts`, the one warm flash the
- * signature is allowed.
+ *
+ * The ramp is one continuous warming: at Low the structural colour is a plain
+ * grey, and each level leans a little further toward the identity pink until
+ * PLIF, which arrives in the family outright. So depth is legible before a
+ * single word is read, and the whole ladder is grey → white → pink rather than
+ * eight arbitrary swatches.
+ *
+ * It used to ramp through blue-greys, which is the one family the accent does
+ * not belong to: raising the effort tinted the frame *away* from the identity.
  */
 export const effortPalette: Readonly<Record<string, Partial<Record<PaletteKey, string>>>> = {
   low: {
-    brand: '#7F8B95', info: '#A2ADB5',
+    brand: '#8A8489', info: '#A39CA1',
   },
   medium: {
-    brand: '#8E9BA6', info: '#A2ADB5',
+    brand: '#969095', info: '#ADA6AB',
   },
   high: {
-    brand: '#9EACBC', info: '#AEB9C8',
+    brand: '#A29BA0', info: '#B7B0B5',
   },
   xhigh: {
-    brand: '#AAB8CC', info: '#B7C3D4',
+    brand: '#AEA6AC', info: '#C1BABF',
   },
   max: {
-    brand: '#AFBBD0', info: '#BAC5D7',
+    brand: '#BAB0B8', info: '#CBC3C8',
   },
   ultra: {
-    brand: '#B5C1D6', info: '#C0CBDF',
+    brand: '#C6BAC3', info: '#D5CBD1',
   },
   ultracode: {
-    brand: '#B8C4D9', info: '#C3CEE1',
+    brand: '#D0C2CC', info: '#DFD3DA',
   },
   plif: {
-    brand: '#C0CBE3', info: '#CDD6F4',
+    brand: '#DCC8D6', info: '#EDEAEC',
   },
 };
 
@@ -302,7 +338,14 @@ const defaultLayout = {
   statusColumn: 12,
   /** Below this terminal width, drop right-aligned metadata rather than wrap. */
   narrowWidth: 72,
-  /** Timeline entries kept on screen; older ones scroll out of the render. */
+  /**
+   * Retained for user themes that set it; no longer trims the transcript.
+   *
+   * It used to cut the timeline to its newest 200 entries, which is why a long
+   * session appeared to lose its earlier messages. The transcript is the record
+   * of the session and is now rendered whole, with Slate scrolling what does
+   * not fit.
+   */
   maxTimelineRows: 200,
 } as const;
 
@@ -418,11 +461,19 @@ export function formatBytes(bytes: number): string {
 }
 
 export function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.round((ms % 60_000) / 1000);
-  return `${minutes}m${seconds.toString().padStart(2, '0')}s`;
+  // Seconds are rounded, so 59.6s has to carry into the minute rather than
+  // print as `0m60s`. Anything past an hour rolls over too: a rate limit that
+  // resets in four hours used to read `239m60s`.
+  const totalSeconds = Math.round(ms / 1000);
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes}m${seconds.toString().padStart(2, '0')}s`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours < 24) return `${hours}h${minutes.toString().padStart(2, '0')}m`;
+  return `${Math.floor(hours / 24)}d${(hours % 24).toString().padStart(2, '0')}h`;
 }
 
 /** Human-friendly duration used by the cycle separators in the timeline. */

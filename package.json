@@ -17,6 +17,7 @@
     "packages/*"
   ],
   "scripts": {
+    "postinstall": "node scripts/patch-slate-text.mjs",
     "build": "tsc --build",
     "clean": "tsc --build --clean",
     "dev": "node --import tsx packages/cli/src/main.tsx",

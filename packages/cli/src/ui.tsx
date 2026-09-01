@@ -85,6 +85,7 @@ function contextKey(
   parentStyle: Record<string, unknown> | undefined,
   isRoot: boolean,
   inheritedVisual: { readonly color?: string; readonly backgroundColor?: string } | undefined,
+  available: number | undefined,
 ): string {
   return [
     isRoot ? 'root' : 'child',
@@ -92,7 +93,35 @@ function contextKey(
     parentStyle?.alignItems ?? '',
     inheritedVisual?.color ?? '',
     inheritedVisual?.backgroundColor ?? '',
+    available ?? '',
   ].join('\u0000');
+}
+
+/**
+ * The cell width a node may occupy, resolved during the walk.
+ *
+ * Borders are painted here as literal rows of box-drawing characters, so the
+ * rule that draws them needs a number. A component asking for a stretched
+ * width used to fall through to the three-cell stub and let its content spill
+ * past the frame - the footer painted as a two-character corner with the model
+ * line wrapping underneath it. Resolving the percentage against the parent's
+ * own resolved width keeps a stretched box's border the width it is drawn at.
+ */
+function resolveWidth(value: unknown, available: number | undefined): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.floor(value);
+  if (typeof value === 'string' && value.endsWith('%') && available !== undefined) {
+    const ratio = Number.parseFloat(value);
+    if (Number.isFinite(ratio)) return Math.max(1, Math.floor((available * ratio) / 100));
+  }
+  return available;
+}
+
+/** What a node leaves to each child once its own edges are taken. */
+function innerWidth(style: Record<string, unknown>, resolved: number | undefined): number | undefined {
+  if (resolved === undefined) return undefined;
+  const edges = Number(style.paddingLeft ?? 0) + Number(style.paddingRight ?? 0)
+    + Number(style.marginLeft ?? 0) + Number(style.marginRight ?? 0);
+  return Math.max(1, resolved - edges);
 }
 
 function slateElement(
@@ -302,9 +331,10 @@ function toSlateChild(
   parentStyle?: Record<string, unknown>,
   isRoot = false,
   inheritedVisual?: { readonly color?: string; readonly backgroundColor?: string },
+  available?: number,
 ): SlateChild {
   if (child.kind === 'text') return child.value;
-  const cacheContext = contextKey(parentStyle, isRoot, inheritedVisual);
+  const cacheContext = contextKey(parentStyle, isRoot, inheritedVisual, available);
   const cached = slateChildCache.get(child);
   if (cached?.revision === child.revision && cached.context === cacheContext) return cached.value;
   const cache = (value: SlateChild): SlateChild => {
@@ -321,6 +351,8 @@ function toSlateChild(
     style: normalizeStyle(child.props),
   };
   const style = props.style as Record<string, unknown>;
+  const resolvedWidth = resolveWidth(style.width, available);
+  const childAvailable = innerWidth(style, resolvedWidth);
   // Slate's compact flex engine calculates intrinsic height from children but
   // intentionally ignores margins and gaps. Ink/Yoga includes those edges in
   // the parent's measured footprint. Materialise that footprint for natural
@@ -335,7 +367,19 @@ function toSlateChild(
       + (typeof child.props.borderStyle === 'string' ? 2 : 0)
       + (isRoot ? Number(style.marginTop ?? 0) + Number(style.marginBottom ?? 0) : 0);
   }
+  // A centred column stretches its children to full width so the *box* lands in
+  // the middle. A Slate text widget draws from its own left edge, though, so
+  // stretching one left-aligns the words inside a card that looks centred -
+  // which is why the startup card's two lines sat against its left rail.
+  // Container children keep the stretch; a text child is wrapped in a row that
+  // centres it instead.
+  const centredText = parentStyle?.flexDirection === 'column' &&
+    parentStyle.alignItems === 'center' &&
+    child.nodeType === 'text' &&
+    child.props.width === undefined &&
+    child.props.flexGrow === undefined;
   if (
+    !centredText &&
     parentStyle?.flexDirection === 'column' &&
     parentStyle.alignItems === 'center' &&
     child.props.width === undefined &&
@@ -380,7 +424,12 @@ function toSlateChild(
     const nested = child.children.some((item) => item.kind === 'node');
     if (!value.includes('\n') && !nested) {
       props.text = value;
-      return cache(slateElement('text', props));
+      const element = slateElement('text', props);
+      if (!centredText) return cache(element);
+      return cache(slateElement('container', {
+        id: child.id + ':centred',
+        style: { flexDirection: 'row', justifyContent: 'center', width: '100%', height: 1, flexShrink: 0 },
+      }, element));
     }
     if (nested && !value.includes('\n')) {
       return cache(slateElement('container', {
@@ -409,7 +458,7 @@ function toSlateChild(
           : toSlateChild(item, ids, props.style as Record<string, unknown>, false, {
             color: foreground,
             backgroundColor: background,
-          })];
+          }, childAvailable)];
       })));
     }
     // Slate text widgets are single-line by design; a newline character is
@@ -430,11 +479,12 @@ function toSlateChild(
       ...(textStyle ? { textStyle } : {}),
     }))));
   }
-  const children = child.children.map((item) => toSlateChild(item, ids, props.style as Record<string, unknown>));
+  const children = child.children.map(
+    (item) => toSlateChild(item, ids, props.style as Record<string, unknown>, false, undefined, childAvailable),
+  );
   if (typeof child.props.borderStyle === 'string') {
     const style = props.style as Record<string, unknown>;
-    const width = typeof style.width === 'number' ? style.width : undefined;
-    const borderWidth = width !== undefined ? Math.max(3, Math.floor(width)) : undefined;
+    const borderWidth = resolvedWidth !== undefined ? Math.max(3, resolvedWidth) : undefined;
     const naturalHeight = child.props.height === undefined;
     const bodyHeight = naturalHeight
       ? Math.max(1, intrinsicHostSize(child, 'height'))
@@ -484,12 +534,34 @@ function toSlateChild(
       id: `${child.id}:border`,
       style: wrapperStyle,
     }, text(top), middle, text(bottom)));
-    );
   }
   return cache(slateElement(child.nodeType === 'scroll' ? 'scrollView' : 'container', props, ...children));
 }
 
+/**
+ * Intrinsic size is a whole-subtree walk, and `toSlateChild` asks for it once
+ * per container — which made a frame cost O(nodes x depth). On a long
+ * transcript that walk outran the 120 ms animation clock, so ticks were
+ * dropped and the shell looked frozen rather than merely slow. The result
+ * depends only on the subtree, and `bumpRevision` already propagates a child's
+ * change to every ancestor, so caching per node revision is exact.
+ */
+const intrinsicSizeCache = new WeakMap<HostNode, { revision: number; width?: number; height?: number }>();
+
 function intrinsicHostSize(child: HostNode, axis: 'width' | 'height'): number {
+  const cached = intrinsicSizeCache.get(child);
+  if (cached?.revision === child.revision) {
+    const hit = cached[axis];
+    if (hit !== undefined) return hit;
+  }
+  const value = measureIntrinsicHostSize(child, axis);
+  const entry = cached?.revision === child.revision ? cached : { revision: child.revision };
+  entry[axis] = value;
+  intrinsicSizeCache.set(child, entry);
+  return value;
+}
+
+function measureIntrinsicHostSize(child: HostNode, axis: 'width' | 'height'): number {
   if (child.nodeType === 'text') {
     const value = flattenHostText(child);
     if (axis === 'height') return Math.max(1, value.split(/\r?\n/).length);
@@ -523,10 +595,16 @@ function flattenHostText(node: HostNode): string {
   return node.children.map((child) => child.kind === 'text' ? child.value : flattenHostText(child)).join('');
 }
 
-function treeFor(root: UiRoot): SlateChild {
+function treeFor(root: UiRoot, available: number): SlateChild {
   const ids = { value: 0 };
-  if (root.children.length === 1) return toSlateChild(root.children[0]!, ids, undefined, true);
-  return slateElement(slateFragment, {}, ...root.children.map((child) => toSlateChild(child, ids)));
+  if (root.children.length === 1) {
+    return toSlateChild(root.children[0]!, ids, undefined, true, undefined, available);
+  }
+  return slateElement(
+    slateFragment,
+    {},
+    ...root.children.map((child) => toSlateChild(child, ids, undefined, false, undefined, available)),
+  );
 }
 
 /** Convert Slate's canonical modifier bits into the legacy key shape. */
@@ -931,7 +1009,7 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
       slate.render();
     });
   } };
-  const slate = createSlateApp(() => treeFor(root), {
+  const slate = createSlateApp(() => treeFor(root, viewport.width), {
     viewport: initialViewport,
     autoMount: false,
     frameRate: 0,

@@ -3,7 +3,8 @@ import { Box, Text } from '../ui.js';
 import type { ModelSelection } from '@plif/core';
 
 import { effortSymbol, effortTone, effortVisual } from '../effort-visuals.js';
-import { binaryStateIndicator, color, glyph, truncate, type BinaryState, type PaletteKey } from '../theme.js';
+import { displayWidth } from '../text.js';
+import { binaryStateIndicator, color, glyph, supportsRichGlyphs, truncate, type BinaryState, type PaletteKey } from '../theme.js';
 
 export interface PickerItem {
   readonly value: string;
@@ -670,7 +671,166 @@ const ModelPickerRow = React.memo(function ModelPickerRow({
 ModelPickerRow.displayName = 'ModelPickerRow';
 
 /** A quiet, vertical effort scale. The selected row is the only emphasis. */
+/**
+ * The effort scale, as a scale.
+ *
+ * Reasoning effort is one ordered dimension — how much thinking to buy — and a
+ * vertical menu of nine rows says nothing about that order. It reads as nine
+ * unrelated options, which is why choosing one felt like guessing. So the cold
+ * levels share a single row, left to right, shallow to deep: the marks grow,
+ * the ramp beneath them fills, and where you are on the ladder is the picture
+ * rather than something to infer from a highlighted line.
+ *
+ * PLIF sits below the ladder, behind a rule. It is not a deeper setting than
+ * Max — it is a different mode, adaptive rather than fixed — and putting it at
+ * the end of the scale would claim an ordering that does not exist.
+ *
+ * Below a narrow terminal the ladder cannot hold eight labelled columns, so it
+ * falls back to the plain list. A cramped scale is worse than an honest menu.
+ */
 export function EffortSelector({
+  hint,
+  items,
+  selected,
+  width,
+}: {
+  readonly hint?: string;
+  readonly items: readonly PickerItem[];
+  readonly selected: number;
+  readonly width: number;
+}): React.ReactElement {
+  const inner = Math.max(24, width - 4);
+  const ladder = items.filter((item) => item.value !== 'plif');
+  const signature = items.find((item) => item.value === 'plif');
+  const current = items.find((item) => item.current);
+  const currentValue = current?.value ?? 'default';
+  const active = items[selected];
+  const columnWidth = ladder.length > 0 ? Math.floor((inner - 2) / ladder.length) : 0;
+  // "ultracode" is the longest label on the ladder; below the width that fits
+  // it plus a cell of air the columns start clipping words, and the row stops
+  // reading as a scale.
+  const wide = columnWidth >= 10;
+
+  if (!wide) {
+    return <EffortList hint={hint} items={items} selected={selected} width={width} />;
+  }
+
+  // Long enough to read a position off, short enough that the descriptor beside
+  // it stays within the eye's reach on a wide terminal.
+  const meterCells = Math.min(44, Math.max(8, inner - 28));
+  const depth = ladder.length > 0 ? (Math.min(selected, ladder.length - 1) + 1) / ladder.length : 0;
+  const filled = Math.round(depth * meterCells);
+  const onSignature = items[selected]?.value === 'plif';
+
+  return (
+    <Box flexDirection="column" width="100%" marginBottom={1} paddingX={1}>
+      <Box>
+        <Text color={color('accent')} bold>Effort</Text>
+        <Text color={color('ghost')}>{'  ·  currently  '}</Text>
+        <Text color={color('accentBright')} bold>
+          {effortMark(currentValue) ? `${effortMark(currentValue)} ` : ''}
+          {referenceEffortLabel(currentValue)}
+        </Text>
+      </Box>
+
+      <Box marginTop={1}>
+        {ladder.map((item, index) => (
+          <Text
+            key={`mark-${item.value}`}
+            color={color(index === selected ? 'accentBright' : item.current ? 'accent' : 'ghost')}
+            bold={index === selected}
+          >
+            {centreCell(effortMark(item.value) || '·', columnWidth)}
+          </Text>
+        ))}
+      </Box>
+      <Box>
+        {ladder.map((item, index) => (
+          <Text
+            key={`label-${item.value}`}
+            color={color(index === selected ? 'accentBright' : index < selected ? 'muted' : 'ghost')}
+            bold={index === selected}
+          >
+            {centreCell(referenceEffortLabel(item.value), columnWidth)}
+          </Text>
+        ))}
+      </Box>
+      <Box>
+        {ladder.map((item, index) => (
+          <Text key={`rule-${item.value}`} color={color('accentBright')}>
+            {index === selected
+              ? centreCell('─'.repeat(Math.max(1, columnWidth - 4)), columnWidth)
+              : ' '.repeat(columnWidth)}
+          </Text>
+        ))}
+      </Box>
+
+      <Box marginTop={1}>
+        <Text color={color(onSignature ? 'ghost' : 'accentBright')}>
+          {(onSignature ? '░' : '█').repeat(filled)}
+        </Text>
+        <Text color={color('ghost')}>{'░'.repeat(Math.max(0, meterCells - filled))}</Text>
+        <Text color={color('muted')}>{`  ${truncate(active?.detail ?? '', 24)}`}</Text>
+      </Box>
+
+      {signature && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color={color('ghost')}>{'─'.repeat(inner)}</Text>
+          <Box>
+            <Text color={color(onSignature ? 'accentBright' : 'accent')} bold>
+              {onSignature ? `${glyph.caret} PLIF` : '  PLIF'}
+            </Text>
+            <Text color={color(onSignature ? 'muted' : 'ghost')}>
+              {`   ${truncate(signatureDetail(signature.detail), Math.max(10, inner - 14))}`}
+            </Text>
+          </Box>
+        </Box>
+      )}
+
+      <Box marginTop={1}>
+        <Text color={color('muted')}>←→ or ↑↓ move  ·  Enter select  ·  Esc close</Text>
+      </Box>
+    </Box>
+  );
+}
+
+/** The signature row is already labelled PLIF; its detail need not repeat it. */
+function signatureDetail(detail: string | undefined): string {
+  const value = (detail ?? 'adaptive reasoning').trim();
+  const stripped = value.replace(/^PLIF\s*(signature mode)?\s*[·\-:]?\s*/i, '').trim();
+  return stripped || 'adaptive reasoning';
+}
+
+/** The mark for a level. PLIF has none: it is a mode name, not a depth. */
+function effortMark(value: string): string {
+  return supportsRichGlyphs ? referenceEffortSymbol(value) : asciiEffortMark(value);
+}
+
+function asciiEffortMark(value: string): string {
+  switch (value) {
+    case 'low': return '.';
+    case 'medium': return 'o';
+    case 'high': return 'O';
+    case 'xhigh': return '@';
+    case 'ultra': return '#';
+    case 'ultracode': return '+';
+    case 'max': return '*';
+    case 'plif': return '';
+    default: return '.';
+  }
+}
+
+/** Centre a value in a fixed cell, so a row of them stays a set of columns. */
+function centreCell(value: string, cells: number): string {
+  const width = Math.max(0, Math.floor(cells));
+  const clipped = truncate(value, width);
+  const slack = Math.max(0, width - displayWidth(clipped));
+  const left = Math.floor(slack / 2);
+  return ' '.repeat(left) + clipped + ' '.repeat(slack - left);
+}
+
+/** The pre-ladder list, kept for terminals too narrow to hold the scale. */
+function EffortList({
   hint,
   items,
   selected,
@@ -684,33 +844,26 @@ export function EffortSelector({
   const inner = Math.max(24, width - 4);
   const current = items.find((item) => item.current);
   const currentValue = current?.value ?? 'default';
-  const currentLabel = currentValue === 'default'
-    ? 'default'
-    : referenceEffortSymbol(currentValue)
-      ? `${referenceEffortSymbol(currentValue)} ${referenceEffortLabel(currentValue)}`
-      : referenceEffortLabel(currentValue);
   return (
     <Box flexDirection="column" width="100%" marginBottom={1} paddingX={1}>
       <Text color={color('accent')} bold>Effort</Text>
       {hint && <Text color={color('ghost')}>{truncate(hint, inner)}</Text>}
       <Text color={color('text')}>
-        current <Text color={color('muted')}>(</Text>
-        <Text color={color('accentBright')} bold>{currentLabel}</Text>
-        <Text color={color('muted')}>)</Text>
+        current <Text color={color('accentBright')} bold>{referenceEffortLabel(currentValue)}</Text>
       </Text>
       <Box marginTop={1} flexDirection="column">
         {items.map((item, index) => {
-          const active = index === selected;
-          const tone = item.value === 'plif' ? (active ? 'accentPastel' : 'accent') : item.tone ?? 'muted';
-          const symbol = referenceEffortSymbol(item.value);
-          const label = `${symbol ? `${symbol} ` : ''}${referenceEffortLabel(item.value)}`;
-          const suffix = item.detail;
+          const isActive = index === selected;
+          const tone = item.value === 'plif' ? (isActive ? 'accentPastel' : 'accent') : item.tone ?? 'muted';
+          const mark = effortMark(item.value);
           return (
             <Box key={item.value} flexDirection="column">
-              <Text color={color(active ? 'accentBright' : tone)} bold={active}>
-                {active ? glyph.caret : ' '} {label}
+              <Text color={color(isActive ? 'accentBright' : tone)} bold={isActive}>
+                {isActive ? glyph.caret : ' '} {mark ? `${mark} ` : ''}{referenceEffortLabel(item.value)}
               </Text>
-              {suffix && <Text color={color('ghost')}>{`    ${truncate(suffix, Math.max(12, inner - 4))}`}</Text>}
+              {item.detail && (
+                <Text color={color('ghost')}>{`    ${truncate(item.detail, Math.max(12, inner - 4))}`}</Text>
+              )}
             </Box>
           );
         })}
@@ -737,7 +890,11 @@ function referenceEffortSymbol(value: string): string {
 }
 
 function referenceEffortLabel(value: string): string {
-  if (value === 'xhigh') return 'xhigh';
   if (value === 'plif') return 'PLIF';
-  return value;
+  if (value === 'default') return 'Default';
+  // The ladder's columns are narrow, so this is the short form of the shared
+  // label: "Extra high" would not fit a column, and xhigh is the only level
+  // whose full name is longer than its cell.
+  if (value === 'xhigh') return 'XHigh';
+  return effortLabel(value);
 }

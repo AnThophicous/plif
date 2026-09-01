@@ -68,6 +68,66 @@ export function stepRight(value: string, cursor: number): number {
   return Math.min(value.length, cursor + clusterLength(value, cursor));
 }
 
+/**
+ * Word-wise cursor movement.
+ *
+ * A word boundary here is the transition between "characters a word is made
+ * of" and everything else, which is what Ctrl+Arrow means in every editor a
+ * developer already uses. Punctuation is not part of a word, so `foo.bar()`
+ * is four stops rather than one — the same behaviour as a browser input.
+ *
+ * Movement is still cluster-safe: the boundary search walks whole characters,
+ * so a word ending in an emoji cannot leave the cursor inside a surrogate pair.
+ */
+function isWordCharacter(value: string): boolean {
+  return /[\p{Letter}\p{Number}_]/u.test(value);
+}
+
+/** Start of the word at or before the cursor. */
+export function wordLeft(value: string, cursor: number): number {
+  let at = Math.max(0, Math.min(cursor, value.length));
+  // Skip whatever separates this position from the previous word.
+  while (at > 0) {
+    const previous = stepLeft(value, at);
+    if (isWordCharacter(clusterAt(value, previous))) break;
+    at = previous;
+  }
+  while (at > 0) {
+    const previous = stepLeft(value, at);
+    if (!isWordCharacter(clusterAt(value, previous))) break;
+    at = previous;
+  }
+  return at;
+}
+
+/** End of the word at or after the cursor. */
+export function wordRight(value: string, cursor: number): number {
+  let at = Math.max(0, Math.min(cursor, value.length));
+  while (at < value.length && !isWordCharacter(clusterAt(value, at))) {
+    at = stepRight(value, at);
+  }
+  while (at < value.length && isWordCharacter(clusterAt(value, at))) {
+    at = stepRight(value, at);
+  }
+  return at;
+}
+
+const NEWLINE = String.fromCharCode(10);
+
+/** Start of the line the cursor is on, for Home. */
+export function lineStart(value: string, cursor: number): number {
+  const at = Math.max(0, Math.min(cursor, value.length));
+  const newline = value.lastIndexOf(NEWLINE, Math.max(0, at - 1));
+  return newline === -1 ? 0 : newline + 1;
+}
+
+/** End of the line the cursor is on, for End. */
+export function lineEnd(value: string, cursor: number): number {
+  const at = Math.max(0, Math.min(cursor, value.length));
+  const newline = value.indexOf(NEWLINE, at);
+  return newline === -1 ? value.length : newline;
+}
+
 /** The index one whole cluster to the left, clamped to zero. */
 export function stepLeft(value: string, cursor: number): number {
   if (cursor <= 0) return 0;

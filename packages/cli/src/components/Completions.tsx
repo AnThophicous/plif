@@ -2,7 +2,11 @@ import React from 'react';
 import { Box, Text } from '../ui.js';
 
 import type { ArgumentCompletion, Command } from '../commands.js';
+import { displayWidth } from '../text.js';
 import { color, glyph, layout, truncate } from '../theme.js';
+
+/** The caret gutter, in cells: the mark plus the space after it. */
+const CARET_WIDTH = 2;
 
 interface CompletionsProps {
   readonly matches: readonly Command[];
@@ -46,9 +50,26 @@ export function Completions({
   const start = Math.max(0, Math.min(selected - rows + 2, sourceLength - rows));
   const visibleCommands = matches.slice(start, start + rows);
   const visibleArguments = argumentRows.slice(start, start + rows);
-  const nameWidth = isArgumentMenu
-    ? Math.max(...argumentRows.map((match) => match.label.length)) + 2
-    : Math.max(...matches.map((command) => command.name.length)) + 2;
+  // Every column is a padded string rather than a flex box. A row whose parts
+  // are allowed to size themselves re-flows the moment one summary is a
+  // character too long: the menu then paints its names at three different
+  // indents and spills the last word onto the next line. Fixed cells cannot.
+  const rowWidth = Math.max(20, Math.floor(width));
+  const nameWidth = Math.min(
+    Math.max(8, Math.floor(rowWidth / 3)),
+    isArgumentMenu
+      ? Math.max(...argumentRows.map((match) => displayWidth(match.label))) + 2
+      : Math.max(...matches.map((command) => displayWidth(`/${command.name}`))) + 2,
+  );
+  const argsWidth = isArgumentMenu ? 0 : Math.min(
+    Math.max(0, Math.floor(rowWidth / 4)),
+    Math.max(0, ...visibleCommands.map((command) => displayWidth(command.args ?? ''))) + 2,
+  );
+  const summaryWidth = Math.max(8, rowWidth - CARET_WIDTH - nameWidth - argsWidth);
+  const cell = (value: string, cells: number): string => {
+    const clipped = truncate(value, cells);
+    return clipped + ' '.repeat(Math.max(0, cells - displayWidth(clipped)));
+  };
 
   return (
     <Box flexDirection="column" paddingX={layout.gutter + 1} marginBottom={0}>
@@ -65,42 +86,38 @@ export function Completions({
           const active = start + index === selected;
           const nameTone = match.tone ?? (active ? 'text' : 'faint');
           return (
-            <Box key={match.value}>
+            <Box key={match.value} width={rowWidth}>
               <Text color={active ? caretTone : color('ghost')}>
-                {active ? glyph.caret : ' '}{' '}
+                {cell(active ? glyph.caret : ' ', CARET_WIDTH)}
               </Text>
-              <Box width={nameWidth}>
-                <Text color={color(nameTone)} bold={active}>
-                  {match.label}
-                </Text>
-              </Box>
-              {match.detail && (
-                <Text color={color(active ? 'muted' : 'ghost')}>
-                  {truncate(match.detail, Math.max(10, width - nameWidth - 6))}
-                </Text>
-              )}
+              <Text color={color(nameTone)} bold={active}>
+                {cell(match.label, nameWidth)}
+              </Text>
+              <Text color={color(active ? 'muted' : 'ghost')}>
+                {cell(match.detail ?? '', summaryWidth)}
+              </Text>
             </Box>
           );
         })
         : visibleCommands.map((command, index) => {
         const active = start + index === selected;
         return (
-          <Box key={command.name}>
+          <Box key={command.name} width={rowWidth}>
             <Text color={active ? caretTone : color('ghost')}>
-              {active ? glyph.caret : ' '}{' '}
+              {cell(active ? glyph.caret : ' ', CARET_WIDTH)}
             </Text>
-            <Box width={nameWidth}>
-              <Text color={color(active ? 'accentBright' : 'muted')} bold={active}>
-                /{command.name}
-              </Text>
-            </Box>
-            {command.args && (
+            <Text color={color(active ? 'accentBright' : 'muted')} bold={active}>
+              {cell(`/${command.name}`, nameWidth)}
+            </Text>
+            {argsWidth > 0 && (
               <Text color={color(active ? 'accentDim' : 'ghost')}>
-                {truncate(command.args, Math.max(6, Math.floor((width - nameWidth) / 3)))}{'  '}
+                {/* One cell of the column is a gap, so a clipped argument
+                    hint never runs straight into the summary text. */}
+                {cell(truncate(command.args ?? '', argsWidth - 1), argsWidth)}
               </Text>
             )}
             <Text color={color(active ? 'muted' : 'ghost')}>
-              {truncate(command.summary, Math.max(10, width - nameWidth - (command.args ? command.args.length + 2 : 0) - 6))}
+              {cell(command.summary, summaryWidth)}
             </Text>
           </Box>
         );

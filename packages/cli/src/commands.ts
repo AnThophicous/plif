@@ -180,6 +180,10 @@ export interface CommandContext {
   /** Full-screen utility views keep their own keyboard lifecycle. */
   readonly openStatus?: () => void;
   readonly openConfig?: () => void;
+  /** The list-shaped screens. Absent in non-interactive runs, which print instead. */
+  readonly openUsage?: () => void;
+  readonly openAgents?: () => void;
+  readonly openSessions?: () => void;
 }
 
 export interface FlatPickerRequest {
@@ -1723,7 +1727,10 @@ async function runAgentAction(action: string, argv: readonly string[], context: 
   const config = await loadGlobalConfig().catch((): GlobalConfig => ({}));
   const agents = { ...(config.agent ?? {}) };
   const normalized = normalizeAgentAction(action);
-  if (normalized === 'menu') return openAgentsMenu(context, config), ok();
+  if (normalized === 'menu') {
+    if (context.openAgents) return context.openAgents(), ok();
+    return openAgentsMenu(context, config), ok();
+  }
   if (!normalized) throw new PlifError('INVALID_ARGUMENT', 'usage: /agents [add|remove|rename|list|auto]');
   if (normalized === 'add') {
     // Keep the old explicit form working for scripts and existing muscle memory.
@@ -2316,7 +2323,11 @@ export const COMMANDS: readonly Command[] = [
     concurrent: true,
     summary: 'Browse and resume conversations in this workspace',
     run: async (_argv, context) => {
-      context.openBrowser('sessions');
+      // Resuming a conversation is not an extension-management task, so it no
+      // longer opens the plugin browser's fourth tab. The browser remains the
+      // place for MCP, skills and the marketplace.
+      if (context.openSessions) context.openSessions();
+      else context.openBrowser('sessions');
       return ok();
     },
   },
@@ -3094,7 +3105,11 @@ export const COMMANDS: readonly Command[] = [
     run: async (argv, context) => {
       const action = argv[0]?.trim().toLowerCase() || 'menu';
       if (action === 'menu') {
-        openUsageMenu(context);
+        // One screen answers both halves of the question — what the provider
+        // allows and what this session spent — instead of a menu whose every
+        // option printed one more line into the transcript.
+        if (context.openUsage) context.openUsage();
+        else openUsageMenu(context);
         return ok();
       }
       if (!['overview', 'limits', 'session'].includes(action)) {
