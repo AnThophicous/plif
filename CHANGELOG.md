@@ -116,6 +116,29 @@ after 0.3.9. It is not a versioned release yet.
 
 ### Added
 
+- **Full-screen `/usage`, `/agents` and `/sessions`.** The three list commands
+  are now screens rather than menus that print a line into the transcript.
+  `/usage` answers both halves of the question on one surface — context window,
+  this session's tokens, requests, turns and tool calls, and the provider's
+  limit windows with consumption meters. `/agents` lists every named subagent
+  with the model it thinks with and what it is for. `/sessions` shows the
+  conversations in this workspace with age and turn count, and resumes the
+  selected one with Enter. All three filter as you type and share one frame.
+- **Shared screen chrome.** `ScreenFrame` gives every full-screen view the same
+  title rail, badge, body and key bar, so status, config, usage, agents and
+  sessions read as one tool instead of five.
+- **The effort scale is drawn as a scale.** `/effort` lays the cold levels out
+  left to right, shallow to deep, with the marks growing and a ramp filling
+  beneath them; PLIF sits below a rule because it is a different mode, not a
+  deeper one. Left and right arrows move along it. Terminals too narrow to hold
+  eight labelled columns keep the previous list.
+- **Word-wise editing in the composer.** Ctrl+Left/Right (and Alt, which is
+  what a Mac terminal sends) move by word, Ctrl+Backspace and Ctrl+Delete
+  remove a word, and Home/End go to the ends of the current line. None of these
+  were bound before; they did nothing.
+- **`dev/screens-check.mts`.** Renders the screens and tool rows directly
+  against fixtures, since `dev/preview.mts` needs a configured provider and a
+  live session before it will show them.
 - **Durable provider conversation state.** PLIF now keeps a scoped,
   non-secret continuation pointer per session, provider, model, endpoint and
   account instead of confusing local message or database IDs with provider
@@ -134,6 +157,45 @@ after 0.3.9. It is not a versioned release yet.
 
 ### Fixed
 
+- **Dropped animation frames and a shell that froze under a long session.**
+  Slate's `segmentGraphemes` built a fresh `Intl.Segmenter` on every call, for
+  every text node, on every layout pass of every frame; a CPU profile of an
+  almost empty screen put it and the `displayWidth` that calls it at roughly
+  40% of process time. With a few hundred transcript rows the frame stopped
+  being ready in time and the 120 ms animation clock lost more than half its
+  ticks, which is what "the animations do not work" was. `scripts/patch-slate-text.mjs`
+  runs from `postinstall` and applies the two behaviour-preserving changes —
+  one shared Segmenter, and a fast path for printable ASCII — plus a memoised
+  `displayWidth`. At 1200 rows: 7 of 25 frames painted before, 25 of 25 after,
+  and mount time 1488 ms to 389 ms. The fix belongs upstream in Slate; the
+  script is a no-op once a release carries it.
+- **The transcript no longer deletes its own history.** The timeline cut itself
+  to the newest 200 entries with no marker, so a long session appeared to lose
+  earlier messages. Every row is now rendered and Slate scrolls what does not
+  fit. Folds that remain are labelled and say how much is hidden.
+- **Bordered boxes with a stretched width painted a three-cell stub.** The
+  border rule accepted only a numeric width, so a component asking for `100%` —
+  the footer, and latently the Codex login dialog — drew `+-+` and let its
+  content spill past the frame and wrap. Width is now resolved against the
+  parent during the tree walk.
+- **Centred columns left-aligned their own text.** A centred column stretched
+  its children to full width, which centres a box but left-aligns the words
+  inside a Slate text widget — the startup card's two lines sat against its
+  left rail. Text children are now wrapped in a row that centres them.
+- **The command menu re-flowed its columns.** Each row sized its own parts, so
+  one summary a character too long changed the indent of the command names and
+  spilled the last word onto the next line. The columns are fixed-width strings
+  the terminal cannot reorganise.
+- **The reasoning header cycled all 256 braille patterns.** One pattern per
+  tick is not a cycle, it is noise: the mark changed silhouette every frame and
+  read as a rendering fault. It uses the shared eight-frame family, and the
+  finished state says how long it thought for instead of `Thinked for: 0 ms`.
+- **`formatDuration` never rolled over past minutes.** A rate limit resetting
+  in four hours read as `239m60s` — both because hours were never carried and
+  because rounding 59.6 seconds produced a literal `60s`.
+- **A dead step in the middle of every gradient.** `accentStrong` held the
+  exact same value as `accentDim`, so the travelling wave visibly stalled a
+  third of the way through its ramp.
 - **Repeated read commands no longer become false errors.** When the model
   repeats an unchanged, read-only tool call such as `run_command` with the same
   arguments, PLIF reuses the successful result instead of emitting the
@@ -144,6 +206,27 @@ after 0.3.9. It is not a versioned release yet.
 
 ### Changed
 
+- **One palette, three families.** The ink moved off a blue lavender
+  (`#CDD6F4`) to a near-white with a faint pink-grey bias, so the most-used
+  colour on screen belongs to the same family as the identity. The four greys
+  were spaced apart — they sat within ten units of each other, which a terminal
+  renders as one grey — and made neutral rather than blue. The effort ramp now
+  warms from grey toward pink as depth increases, instead of tinting the frame
+  away from the accent through blue-greys.
+- **File writes read as a sentence, not a framed card.** A write shows
+  `Write(path)`, then what it did — "Wrote 140 lines to path", or the added and
+  removed counts for an edit — then numbered source lines. Long content folds
+  to its first lines behind a labelled `+N lines … Ctrl+E`. The border around
+  every write is gone; a session with a dozen file operations was a stack of
+  frames carrying no information the indent did not already carry.
+- **`/sessions` left the plugin browser.** Resuming a conversation is not an
+  extension-management task and no longer opens the browser's fourth tab, next
+  to MCP servers and the marketplace catalogue.
+- **Known trade — very long sessions.** Rendering the whole transcript costs
+  frame rate at the extreme: past roughly 2000 rows the paint loop starts
+  dropping ticks again. Not silently deleting the session's history is the
+  right side of that trade; culling rows outside the viewport is the actual
+  fix and is not done yet.
 - **Managed scratch space.** Session files, pasted images, LSP metadata and
   base-image scaffolds now live below `~/.plif/temp` (or the active PLIF store)
   instead of creating loose `plif-*` folders in the operating system Temp
@@ -161,9 +244,14 @@ after 0.3.9. It is not a versioned release yet.
 ### Validation
 
 - Core harness tests: **37 passed, 0 failed**.
-- Full test suite: **1,163 passed, 0 failed, 0 cancelled, 20 skipped**
-  (**1,183 tests discovered**).
+- Full test suite: **1,229 passed, 0 failed, 0 cancelled, 20 skipped**
+  (**1,249 tests discovered**).
 - TypeScript check and production build: passed.
+- Frame budget, measured with a transcript-shaped tree against the 120 ms
+  animation clock: 600 rows **11/25 to 25/25** painted frames, 1200 rows
+  **7/25 to 25/25**, mount **1488 ms to 389 ms**.
+- Grapheme measurement, 8000 calls over typical terminal rows: **107 ms to
+  1.3 ms**.
 - Lint: no lint script is defined in the root package.
 - `git diff --check`: passed.
 

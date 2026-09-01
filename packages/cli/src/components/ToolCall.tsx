@@ -1,6 +1,8 @@
 import React from 'react';
 import { Box, Text } from '../ui.js';
 
+import { describeStats } from '@plif/core';
+
 import { Diff, DiffSummary } from './Diff.js';
 import { useSpinnerFrame } from './Spinner.js';
 import { highlightShell } from '../shell-highlight.js';
@@ -107,6 +109,7 @@ export function ToolCall({ name, category = 'tool', target, summary, output, dif
           added={codeAdded}
           removed={codeRemoved}
           running={running}
+          expand={expand}
           width={width}
         />
       ) : null}
@@ -159,6 +162,24 @@ export function ToolCall({ name, category = 'tool', target, summary, output, dif
   );
 }
 
+/** Source lines shown before the fold on a settled write. */
+const FILE_PREVIEW_LINES = 10;
+
+/**
+ * A file being written, in the shape a reader already knows.
+ *
+ * The header above this already says `Write(path)`, so this says what the call
+ * *did* — "Wrote 140 lines to path", or the added/removed counts for an edit —
+ * and then shows the beginning of the content with real line numbers.
+ *
+ * It is deliberately not a bordered panel any more. A box around every write
+ * turned a session with a dozen file operations into a stack of framed cards,
+ * and the frame carried no information the indent was not already carrying.
+ *
+ * Long content folds to its first lines, and the fold is *labelled*: a reader
+ * must be able to tell "there is more, here is how much" from "that is all of
+ * it". Content is never dropped without saying so.
+ */
 function FileActivity({
   code,
   mode,
@@ -166,6 +187,7 @@ function FileActivity({
   added,
   removed,
   running,
+  expand,
   width,
 }: {
   readonly code: string;
@@ -174,63 +196,62 @@ function FileActivity({
   readonly added: number;
   readonly removed: number;
   readonly running: boolean;
+  readonly expand: boolean;
   readonly width: number;
 }): React.ReactElement {
   const frame = useAnimationFrame(running, 'slow');
-  const lines = code.replace(/\r\n?/g, '\n').split('\n');
+  const lines = code.split(/\r?\n/);
+  // While it is being written the content types itself in; once settled it
+  // folds to a preview, because a settled write is a record rather than an
+  // event to watch.
   const visibleCount = running
     ? Math.min(lines.length, Math.max(1, (frame + 1) * 4))
-    : lines.length;
+    : expand
+      ? lines.length
+      : Math.min(lines.length, FILE_PREVIEW_LINES);
   const visible = lines.slice(0, visibleCount);
+  const folded = lines.length - visible.length;
   const gutter = String(Math.max(1, lines.length)).length;
-  const codeWidth = Math.max(1, width - gutter - 7);
+  const codeWidth = Math.max(1, width - gutter - 6);
   const language = languageOf(path);
-  const activityGlyph = running
-    ? FILE_ACTIVITY_FRAMES[frame % FILE_ACTIVITY_FRAMES.length]
-    : '\u273d';
-  const label = mode === 'creating' ? 'Creating' : 'Editing';
-  const codeRows = visible.reduce(
-    (total, line) => total + wrapTerminalText(line, codeWidth).length,
-    0,
-  );
-  // The custom Slate border adapter receives an explicit content height. It
-  // must include the code margin and language label or the final source line
-  // would sit underneath the bottom border on a tall file.
-  const panelHeight = codeRows + 6 + (language ? 1 : 0);
+
+  const headline = running
+    ? `${mode === 'creating' ? 'Writing' : 'Editing'} ${path}`
+    : mode === 'creating'
+      ? `Wrote ${lines.length} line${lines.length === 1 ? '' : 's'} to ${path}`
+      : added || removed
+        ? `${describeStats({ added, removed })} in ${path}`
+        : `Updated ${path}`;
 
   return (
-    <Box
-      flexDirection="column"
-      width={Math.max(12, width)}
-      height={panelHeight}
-      marginTop={1}
-      borderStyle="round"
-      borderColor={color(running ? 'accentDim' : 'faint')}
-      paddingX={1}
-    >
+    <Box flexDirection="column" width={Math.max(12, width)}>
       <Box>
-        <Text color={color(running ? 'accent' : 'success')}>{activityGlyph} </Text>
-        <Text color={color('text')} bold>{label} - {path}</Text>
-        <Text color={color('muted')}> (+{added} | -{removed})</Text>
+        <Text color={color('ghost')}>{'  '}{glyph.branch}{' '}</Text>
+        <Text color={color(running ? 'accent' : 'muted')}>
+          {truncate(headline, Math.max(12, width - 6))}
+        </Text>
       </Box>
-      {language && <Text color={color('ghost')}>  {language}</Text>}
-      <Box flexDirection="column" marginTop={1}>
+      <Box flexDirection="column">
         {visible.flatMap((line, lineIndex) => wrapTerminalText(line, codeWidth).map((part, partIndex) => (
           <Box key={`${lineIndex}:${partIndex}`}>
             <Text color={color('ghost')}>
               {partIndex === 0
-                ? `  ${String(lineIndex + 1).padStart(gutter)}  `
-                : ' '.repeat(gutter + 4)}
+                ? `${String(lineIndex + 1).padStart(gutter + 4)}  `
+                : ' '.repeat(gutter + 6)}
             </Text>
             <Text color={color('muted')}>
               {highlight(part, language).map((token, tokenIndex) => (
                 <Text key={tokenIndex} color={syntaxColor(token.kind)}>{token.text}</Text>
               ))}
               {part.length === 0 ? ' ' : ''}
-              {displayWidth(part) < codeWidth ? ' '.repeat(codeWidth - displayWidth(part)) : ''}
             </Text>
           </Box>
         )))}
+        {folded > 0 && (
+          <Text color={color('ghost')}>
+            {' '.repeat(gutter + 4)}{glyph.pending} +{folded} line{folded === 1 ? '' : 's'}{running ? '' : `  ${glyph.divider}  Ctrl+E`}
+          </Text>
+        )}
       </Box>
     </Box>
   );

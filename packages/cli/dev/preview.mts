@@ -166,6 +166,11 @@ const SCENARIOS: Record<string, Step[]> = {
   /** A Plif-styled prompt at rest must settle instead of repainting forever. */
   'idle-plif': [{ wait: 900 }],
 
+  /** The three list screens, which replace the panel while they are open. */
+  'usage-screen': [{ wait: 200 }, { type: '/usage' + String.fromCharCode(13) }, { wait: 900 }, { capture: 'usage' }],
+  'agents-screen': [{ wait: 200 }, { type: '/agents' + String.fromCharCode(13) }, { wait: 900 }, { capture: 'agents' }],
+  'sessions-screen': [{ wait: 200 }, { type: '/sessions' + String.fromCharCode(13) }, { wait: 900 }, { capture: 'sessions' }],
+
   /** A live tool row with the Chromatic Reactor working treatment. */
   'working-plif': [
     { wait: 200 },

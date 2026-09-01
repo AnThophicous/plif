@@ -47,6 +47,7 @@ import {
   lspTools,
   EditCoordinator,
   agentsOf,
+  BUILTIN_AGENT_PRESETS,
   diffStats,
   MODEL_CATALOG,
   parseDiff,
@@ -205,13 +206,25 @@ import {
 import { IDLE_PASTE, hasPasteMarker, readPasteChunk } from './paste.js';
 import type { PasteState } from './paste.js';
 import { expandShortcodes, matchEmoji, openShortcode } from './emoji.js';
-import { displayWidth, stepLeft, stepRight } from './text.js';
+import { displayWidth, lineEnd, lineStart, stepLeft, stepRight, wordLeft, wordRight } from './text.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { AnimationClockProvider } from './hooks/useAnimationClock.js';
 import { useTranscriptController } from './hooks/useTranscriptController.js';
 import { withoutReasoning } from './conversation.js';
-import { entry, initialSession, scrollbackCommitEnd, sessionReducer } from './session.js';
-import type { BrowserRow, BrowserState, QueuedMessage, SessionState, TimelineEntry } from './session.js';
+import { entry, initialSession, isListScreen, scrollbackCommitEnd, sessionReducer } from './session.js';
+import type {
+  BrowserRow,
+  BrowserState,
+  ListScreenState,
+  QueuedMessage,
+  SessionScreen,
+  SessionState,
+  TimelineEntry,
+} from './session.js';
+import { AgentsScreen, filterAgents } from './components/AgentsScreen.js';
+import type { AgentRow } from './components/AgentsScreen.js';
+import { SessionsScreen, filterSessions } from './components/SessionsScreen.js';
+import { UsageScreen } from './components/UsageScreen.js';
 import { ComposerHistory } from './composer/history.js';
 import { composerReducer, initialComposerState, submissionFromComposer } from './composer/state.js';
 import type { PastedAttachment } from './composer/state.js';
@@ -606,6 +619,40 @@ async function migrateCredentialsForWrite(
   } catch {
     return undefined;
   }
+}
+
+
+/**
+ * The agents screen's rows, derived from the effective config.
+ *
+ * `agentsOf` already resolves built-in presets against their overrides and
+ * drops the ones explicitly disabled, so the screen shows what would actually
+ * run. Disabled built-ins are listed rather than hidden: an agent you turned
+ * off is still something you own and may want back.
+ */
+function agentRowsFrom(config: GlobalConfig): readonly AgentRow[] {
+  const effective = agentsOf(config);
+  const presetNames = new Set(BUILTIN_AGENT_PRESETS.map((preset) => preset.name));
+  const rows: AgentRow[] = Object.entries(effective).map(([name, agent]) => ({
+    name,
+    model: agent.model?.trim() || 'inherits the main model',
+    description: agent.description ?? '',
+    builtin: presetNames.has(name),
+    enabled: true,
+    runs: 0,
+  }));
+  for (const preset of BUILTIN_AGENT_PRESETS) {
+    if (effective[preset.name]) continue;
+    rows.push({
+      name: preset.name,
+      model: 'inherits the main model',
+      description: preset.description,
+      builtin: true,
+      enabled: false,
+      runs: 0,
+    });
+  }
+  return rows.sort((left, right) => left.name.localeCompare(right.name));
 }
 
 export function App({
@@ -1127,6 +1174,51 @@ export function App({
     dispatch({ type: 'screen.open', screen: 'status' });
     void loadConfigSnapshot();
   }, [loadConfigSnapshot]);
+
+  /**
+   * The three data-bearing screens.
+   *
+   * Each opens immediately and fills in when its data arrives, rather than
+   * blocking on a provider round trip before anything is drawn. A screen that
+   * appears half a second after the keystroke reads as a hang.
+   */
+  const loadUsageScreen = useCallback(async (): Promise<void> => {
+    const model = providerRef.current ?? provider;
+    if (!model) {
+      dispatch({ type: 'screen.usage.data', usage: null, problem: 'No model is configured yet.' });
+      return;
+    }
+    try {
+      const info = model.getUsage ? await model.getUsage() : null;
+      dispatch({ type: 'screen.usage.data', usage: info });
+    } catch (error) {
+      const { title } = formatError(error);
+      dispatch({ type: 'screen.usage.data', usage: null, problem: title });
+    }
+  }, [provider]);
+
+  const openUsageScreen = useCallback((): void => {
+    dispatch({ type: 'screen.open', screen: 'usage' });
+    void loadUsageScreen();
+  }, [loadUsageScreen]);
+
+  const openAgentsScreen = useCallback((): void => {
+    dispatch({ type: 'screen.open', screen: 'agents' });
+    void loadGlobalConfig()
+      .then((config) => dispatch({ type: 'screen.agents.data', agents: agentRowsFrom(config) }))
+      .catch(() => dispatch({ type: 'screen.agents.data', agents: [] }));
+  }, []);
+
+  const openSessionsScreen = useCallback((): void => {
+    dispatch({ type: 'screen.open', screen: 'sessions' });
+    void engine.sessions.list(cwd)
+      .then((list) => dispatch({ type: 'screen.sessions.data', sessions: list }))
+      .catch((error: unknown) => dispatch({
+        type: 'screen.sessions.data',
+        sessions: [],
+        problem: formatError(error).title,
+      }));
+  }, [engine, cwd]);
 
   const openConfigScreen = useCallback((): void => {
     setConfigSnapshot(null);
@@ -3350,6 +3442,9 @@ export function App({
     themes: themeCatalogue.themes,
     openStatus: openStatusScreen,
     openConfig: openConfigScreen,
+    openUsage: openUsageScreen,
+    openAgents: openAgentsScreen,
+    openSessions: openSessionsScreen,
     switchTheme: async (id) => {
       const theme = themeCatalogue.themes.find((entry) => entry.id === id);
       if (!theme) throw new Error(`unknown theme ${id}`);
@@ -5228,13 +5323,26 @@ export function App({
     }
 
     // Arrows move by whole character, not by code unit. One press should cross
-    // an emoji, not land inside it.
+    // an emoji, not land inside it. Held with Ctrl (or Alt, which is what a
+    // Mac terminal sends) they move by word, and Home/End go to the ends of
+    // the current line — the bindings every other text field on the machine
+    // already has, and which the composer simply did not answer to.
+    if (key.home) {
+      setCursor((value) => lineStart(input, value));
+      return;
+    }
+    if (key.end) {
+      setCursor((value) => lineEnd(input, value));
+      return;
+    }
     if (key.leftArrow) {
-      setCursor((value) => stepLeft(input, value));
+      const byWord = key.ctrl || key.alt;
+      setCursor((value) => byWord ? wordLeft(input, value) : stepLeft(input, value));
       return;
     }
     if (key.rightArrow) {
-      setCursor((value) => stepRight(input, value));
+      const byWord = key.ctrl || key.alt;
+      setCursor((value) => byWord ? wordRight(input, value) : stepRight(input, value));
       return;
     }
     if (key.escape) {
@@ -5249,7 +5357,7 @@ export function App({
       // Read and mutate the reducer state as one operation. Computing the
       // deletion from render-local input/cursor values makes repeated
       // Backspace events reuse the previous render and stall after one key.
-      composerDispatch({ type: 'delete.backward' });
+      composerDispatch({ type: 'delete.backward', word: key.ctrl === true || key.alt === true });
       setCompletionIndex(0);
       setEmojiIndex(0);
       return;
@@ -5257,7 +5365,7 @@ export function App({
     if (deleteAction === 'forward') {
       const current = composerRef.current;
       if (current.cursor >= current.draft.length && current.selection === null) return;
-      composerDispatch({ type: 'delete.forward' });
+      composerDispatch({ type: 'delete.forward', word: key.ctrl === true || key.alt === true });
       setCompletionIndex(0);
       setEmojiIndex(0);
       return;
@@ -5466,11 +5574,69 @@ export function App({
     }
   }
 
+  /**
+   * Keys for the list-shaped screens.
+   *
+   * Usage, agents and sessions are driven identically — move, filter, act,
+   * close — so the differences live in one switch at the bottom rather than in
+   * three parallel handlers that would drift apart.
+   */
+  function handleListScreenKey(
+    screen: Extract<SessionScreen, { state: ListScreenState }>,
+    char: string,
+    key: Key,
+  ): void {
+    const count = listScreenCount(screen);
+    if (key.escape || (key.ctrl && char === 'c')) {
+      if (screen.state.filter) dispatch({ type: 'screen.list.filter', filter: '' });
+      else dispatch({ type: 'screen.close' });
+      return;
+    }
+    if (key.upArrow || key.downArrow) {
+      dispatch({ type: 'screen.list.move', delta: key.upArrow ? -1 : 1, count });
+      return;
+    }
+    if (key.backspace || key.delete) {
+      dispatch({ type: 'screen.list.filter', filter: screen.state.filter.slice(0, -1) });
+      return;
+    }
+    if (screen.kind === 'usage') {
+      // Usage has no list to filter, so a bare key is a command rather than
+      // the first character of a search.
+      if (char === 'r' || char === 'R') void loadUsageScreen();
+      return;
+    }
+    if (key.return) {
+      if (screen.kind === 'sessions') {
+        const chosen = filterSessions(screen.sessions, screen.state.filter)[screen.state.selected];
+        if (chosen) {
+          dispatch({ type: 'screen.close' });
+          void resumeBrowserSession(chosen.id);
+        }
+      }
+      return;
+    }
+    if (isPrintableInput(char, key)) {
+      dispatch({ type: 'screen.list.filter', filter: screen.state.filter + char });
+    }
+  }
+
+  /** How many rows the current filter leaves on a list screen. */
+  function listScreenCount(screen: Extract<SessionScreen, { state: ListScreenState }>): number {
+    if (screen.kind === 'agents') return filterAgents(screen.agents, screen.state.filter).length;
+    if (screen.kind === 'sessions') return filterSessions(screen.sessions, screen.state.filter).length;
+    return 0;
+  }
+
   function handleConfigKey(char: string, key: Key): void {
     const screen = state.screen;
     if (!screen) return;
     if (screen.kind === 'status') {
       if (key.escape || (key.ctrl && char === 'c')) dispatch({ type: 'screen.close' });
+      return;
+    }
+    if (isListScreen(screen)) {
+      handleListScreenKey(screen, char, key);
       return;
     }
 
@@ -5785,6 +5951,8 @@ export function App({
       escape?: boolean;
       upArrow?: boolean;
       downArrow?: boolean;
+      leftArrow?: boolean;
+      rightArrow?: boolean;
       backspace?: boolean;
       delete?: boolean;
       tab?: boolean;
@@ -5811,11 +5979,16 @@ export function App({
       picker.onFilter();
       return;
     }
-    if (key.upArrow) {
+    // The effort picker draws its levels as a horizontal ladder, so the
+    // horizontal arrows have to move along it. They are accepted for every
+    // flat picker rather than only that one: on a list, left and right have
+    // nothing else to do, and a key that silently does nothing is a small
+    // lie about the surface.
+    if (key.upArrow || (key.leftArrow && !picker.groups)) {
       dispatch({ type: picker.groups ? 'picker.moveVisible' : 'picker.move', delta: -1 });
       return;
     }
-    if (key.downArrow) {
+    if (key.downArrow || (key.rightArrow && !picker.groups)) {
       dispatch({ type: picker.groups ? 'picker.moveVisible' : 'picker.move', delta: 1 });
       return;
     }
@@ -6539,6 +6712,37 @@ export function App({
               feedback={state.screen.state.feedback}
               loading={configLoading}
               problem={configProblem}
+              width={width}
+              rows={rows}
+            />
+          ) : state.screen.kind === 'usage' ? (
+            <UsageScreen
+              info={state.screen.usage}
+              session={usage.current}
+              contextUsed={state.contextUsed}
+              contextMax={state.contextMax}
+              elapsedMs={Math.max(0, now - sessionStartedAt.current)}
+              {...(effort ? { effort } : {})}
+              loading={state.screen.state.loading}
+              problem={state.screen.state.problem}
+              width={width}
+              rows={rows}
+            />
+          ) : state.screen.kind === 'agents' ? (
+            <AgentsScreen
+              agents={state.screen.agents}
+              selected={state.screen.state.selected}
+              filter={state.screen.state.filter}
+              width={width}
+              rows={rows}
+            />
+          ) : state.screen.kind === 'sessions' ? (
+            <SessionsScreen
+              sessions={state.screen.sessions}
+              selected={state.screen.state.selected}
+              filter={state.screen.state.filter}
+              workspace={cwd}
+              loading={state.screen.state.loading}
               width={width}
               rows={rows}
             />

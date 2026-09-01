@@ -4,8 +4,8 @@ import { Box, ScrollView, Text } from '../ui.js';
 import { diffHeight } from './Diff.js';
 import { Markdown } from './Markdown.js';
 import { ToolCall, searchResultsHeight } from './ToolCall.js';
-import { BLOOM_MARK, useSpinnerFrame } from './Spinner.js';
-import { useAnimationFrame } from '../hooks/useAnimationClock.js';
+import { BLOOM_MARK, spinnerFrameAt, useSpinnerFrame } from './Spinner.js';
+import { ANIMATION_INTERVAL_MS, useAnimationFrame } from '../hooks/useAnimationClock.js';
 import type { EntryStatus, TimelineEntry } from '../session.js';
 import {
   allTranscriptCells,
@@ -54,11 +54,12 @@ export const Timeline = React.memo(function Timeline({
   maxLines,
 }: TimelineProps): React.ReactElement {
   const inner = width - layout.gutter * 2;
-  const byCount = limit
-    ? entries.slice(-limit)
-    : maxLines === undefined
-      ? entries.slice(-layout.maxTimelineRows)
-      : entries;
+  // `limit` is a caller asking for a specific window (a preview, a dialog).
+  // Everything else keeps every row it was given: the transcript is the record
+  // of the session, and quietly dropping the oldest entries once the count
+  // passed a threshold is how earlier messages appeared to be deleted. Slate
+  // scrolls what does not fit; nothing here decides it never happened.
+  const byCount = limit ? entries.slice(-limit) : entries;
   // Let Slate own clipping and scrolling. Slicing settled rows here made
   // earlier messages appear to disappear as the live frame grew.
   const visible = maxLines !== undefined && maxLines <= 0 ? [] : byCount;
@@ -696,13 +697,6 @@ export const TimelineRow = React.memo(function TimelineRow({
 
 TimelineRow.displayName = 'TimelineRow';
 
-const THINKING_FRAMES = [
-  '\u28e0', '\u28e1', '\u28e2', '\u28e3', '\u28e4', '\u28e5', '\u28e6', '\u28e7',
-  '\u28e8', '\u28e9', '\u28ea', '\u28eb', '\u28ec', '\u28ed', '\u28ee', '\u28ef',
-  '\u28f0', '\u28f1', '\u28f2', '\u28f3', '\u28f4', '\u28f5', '\u28f6', '\u28f7',
-  '\u28f8', '\u28f9', '\u28fa', '\u28fb', '\u28fc', '\u28fd', '\u28fe', '\u28ff',
-] as const;
-
 /** The model's reasoning: one calm header and a complete, readable body. */
 function ThinkingIndicator({
   thinking,
@@ -718,18 +712,22 @@ function ThinkingIndicator({
   readonly durationMs?: number;
 }): React.ReactElement {
   void plif;
-  void label;
+  void expand;
   const clock = useAnimationFrame(thinking, 'slow');
-  const pulse = THINKING_FRAMES[clock % THINKING_FRAMES.length];
+  // The reasoning header used to walk the whole 256-glyph braille block, one
+  // pattern per tick. That is not a cycle, it is noise: the mark changed
+  // silhouette on every frame and read as a rendering fault rather than as
+  // work in progress. The shared eight-frame family moves inside the cell.
+  const pulse = spinnerFrameAt(clock * ANIMATION_INTERVAL_MS);
 
   return (
     <Box>
       <Text color={color(thinking ? 'accent' : 'ghost')}>{thinking ? pulse : '\u273d'} </Text>
       {thinking ? (
-        <Text color={color('muted')} bold>| Thinking</Text>
+        <Text color={color('muted')} bold>{label}</Text>
       ) : (
         <Text color={color('muted')} bold>
-          {`Thinked for: ${durationMs ?? 0} ms`}
+          {durationMs === undefined ? label : `${label} for ${formatDuration(durationMs)}`}
         </Text>
       )}
     </Box>

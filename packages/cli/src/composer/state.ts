@@ -1,4 +1,4 @@
-import { snap, stepLeft, stepRight } from '../text.js';
+import { snap, stepLeft, stepRight, wordLeft, wordRight } from '../text.js';
 
 export interface PastedText {
   readonly kind: 'text';
@@ -56,8 +56,8 @@ export type ComposerAction =
   | { readonly type: 'move.end' }
   | { readonly type: 'cursor.set'; readonly cursor: number }
   | { readonly type: 'select.all' }
-  | { readonly type: 'delete.backward' }
-  | { readonly type: 'delete.forward' }
+  | { readonly type: 'delete.backward'; readonly word?: boolean }
+  | { readonly type: 'delete.forward'; readonly word?: boolean }
   | { readonly type: 'draft.set'; readonly text: string; readonly cursor?: number }
   | { readonly type: 'reset.draft' }
   | { readonly type: 'attachment.add'; readonly attachment: PastedAttachment }
@@ -165,7 +165,11 @@ export function composerReducer(state: ComposerState, action: ComposerAction): C
           historySearch: null,
         };
       }
-      const from = stepLeft(state.draft, state.cursor);
+      // Ctrl+Backspace removes the word, which is what every other text field
+      // on the machine does and what a long mistyped path needs.
+      const from = action.word
+        ? wordLeft(state.draft, state.cursor)
+        : stepLeft(state.draft, state.cursor);
       if (from === state.cursor) return state;
       return {
         ...state,
@@ -191,7 +195,9 @@ export function composerReducer(state: ComposerState, action: ComposerAction): C
           historySearch: null,
         };
       }
-      const to = stepRight(state.draft, state.cursor);
+      const to = action.word
+        ? wordRight(state.draft, state.cursor)
+        : stepRight(state.draft, state.cursor);
       if (to === state.cursor) return state;
       return {
         ...state,

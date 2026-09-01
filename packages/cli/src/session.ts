@@ -8,10 +8,11 @@
  */
 
 import { DEFAULT_CONTEXT_TOKENS, diffStats, parseDiff } from '@plif/core';
-import type { Catalog, Decision, Effort, PolicyAction, SessionMeta } from '@plif/core';
+import type { Catalog, Decision, Effort, PolicyAction, SessionMeta, UsageInfo } from '@plif/core';
 import type { ModelSelection } from '@plif/core';
 import { filterItems, filterPickerGroups, flattenPickerGroups, pickerRows, preservePickerSelection } from './components/Picker.js';
 import type { PickerGroup, PickerItem } from './components/Picker.js';
+import type { AgentRow } from './components/AgentsScreen.js';
 import type { PastedAttachment } from './composer/state.js';
 export type { PastedAttachment, PastedImage, PastedText } from './composer/state.js';
 
@@ -204,9 +205,72 @@ export interface ConfigScreenState {
   readonly feedback: string | null;
 }
 
+/**
+ * The state every list-shaped screen needs, and nothing more.
+ *
+ * Usage, agents and sessions differ in what they list, not in how they are
+ * driven: a filter, a cursor, and data that arrives after the screen opens.
+ * One shared shape means one set of reducer cases and one set of key handlers
+ * rather than three near-identical copies of each.
+ */
+export interface ListScreenState {
+  readonly filter: string;
+  readonly selected: number;
+  readonly loading: boolean;
+  readonly problem: string | null;
+}
+
+export const emptyListScreen: ListScreenState = {
+  filter: '',
+  selected: 0,
+  loading: true,
+  problem: null,
+};
+
+export type ScreenKind = 'status' | 'config' | 'usage' | 'agents' | 'sessions';
+
 export type SessionScreen =
   | { readonly kind: 'status' }
-  | { readonly kind: 'config'; readonly state: ConfigScreenState };
+  | { readonly kind: 'config'; readonly state: ConfigScreenState }
+  | {
+      readonly kind: 'usage';
+      readonly state: ListScreenState;
+      readonly usage: UsageInfo | null;
+    }
+  | {
+      readonly kind: 'agents';
+      readonly state: ListScreenState;
+      readonly agents: readonly AgentRow[];
+    }
+  | {
+      readonly kind: 'sessions';
+      readonly state: ListScreenState;
+      readonly sessions: readonly SessionMeta[];
+    };
+
+/** Whether a screen is one of the list-shaped ones the shared cases drive. */
+export function isListScreen(
+  screen: SessionScreen,
+): screen is Extract<SessionScreen, { state: ListScreenState }> {
+  return screen.kind === 'usage' || screen.kind === 'agents' || screen.kind === 'sessions';
+}
+
+/** The initial shape of each screen. Data-bearing screens open empty and load. */
+function openScreen(kind: ScreenKind): SessionScreen {
+  switch (kind) {
+    case 'status': return { kind: 'status' };
+    case 'usage': return { kind: 'usage', state: emptyListScreen, usage: null };
+    case 'agents': return { kind: 'agents', state: emptyListScreen, agents: [] };
+    case 'sessions': return { kind: 'sessions', state: emptyListScreen, sessions: [] };
+    default:
+      return {
+        kind: 'config',
+        state: { filter: '', selected: 0, editing: null, feedback: null },
+      };
+  }
+}
+
+export type ScreenKindMarker = ScreenKind;
 
 /** A compaction pass in flight. */
 export interface CompactionState {
@@ -417,8 +481,13 @@ export type SessionAction =
   | { type: 'browser.rename.start'; id: string; draft: string }
   | { type: 'browser.rename.input'; draft: string }
   | { type: 'browser.rename.cancel' }
-  | { type: 'screen.open'; screen: 'status' | 'config' }
+  | { type: 'screen.open'; screen: ScreenKind }
   | { type: 'screen.close' }
+  | { type: 'screen.list.filter'; filter: string }
+  | { type: 'screen.list.move'; delta: number; count: number }
+  | { type: 'screen.usage.data'; usage: UsageInfo | null; problem?: string }
+  | { type: 'screen.agents.data'; agents: readonly AgentRow[] }
+  | { type: 'screen.sessions.data'; sessions: readonly SessionMeta[]; problem?: string }
   | { type: 'config.filter'; filter: string }
   | { type: 'config.move'; delta: number; count: number }
   | { type: 'config.edit.start'; id: string; value: string }
@@ -931,14 +1000,79 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case 'screen.open':
       return {
         ...state,
-        screen: action.screen === 'status'
-          ? { kind: 'status' }
-          : {
-              kind: 'config',
-              state: { filter: '', selected: 0, editing: null, feedback: null },
-            },
+        screen: openScreen(action.screen),
         browser: null,
         picker: null,
+      };
+
+    case 'screen.list.filter': {
+      const screen = state.screen;
+      if (!screen || !isListScreen(screen)) return state;
+      return {
+        ...state,
+        screen: {
+          ...screen,
+          state: { ...screen.state, filter: action.filter, selected: 0 },
+        },
+      };
+    }
+
+    case 'screen.list.move': {
+      const screen = state.screen;
+      if (!screen || !isListScreen(screen) || action.count <= 0) return state;
+      return {
+        ...state,
+        screen: {
+          ...screen,
+          state: {
+            ...screen.state,
+            selected: Math.max(0, Math.min(action.count - 1, screen.state.selected + action.delta)),
+          },
+        },
+      };
+    }
+
+    case 'screen.usage.data':
+      if (state.screen?.kind !== 'usage') return state;
+      return {
+        ...state,
+        screen: {
+          kind: 'usage',
+          usage: action.usage,
+          state: { ...state.screen.state, loading: false, problem: action.problem ?? null },
+        },
+      };
+
+    case 'screen.agents.data':
+      if (state.screen?.kind !== 'agents') return state;
+      return {
+        ...state,
+        screen: {
+          kind: 'agents',
+          agents: action.agents,
+          state: {
+            ...state.screen.state,
+            loading: false,
+            problem: null,
+            selected: Math.min(state.screen.state.selected, Math.max(0, action.agents.length - 1)),
+          },
+        },
+      };
+
+    case 'screen.sessions.data':
+      if (state.screen?.kind !== 'sessions') return state;
+      return {
+        ...state,
+        screen: {
+          kind: 'sessions',
+          sessions: action.sessions,
+          state: {
+            ...state.screen.state,
+            loading: false,
+            problem: action.problem ?? null,
+            selected: Math.min(state.screen.state.selected, Math.max(0, action.sessions.length - 1)),
+          },
+        },
       };
 
     case 'screen.close':
