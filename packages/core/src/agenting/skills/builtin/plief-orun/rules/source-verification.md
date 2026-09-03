@@ -7,6 +7,12 @@
 Commands, imports, package names, slugs, props, hooks, plugins, versions, licensing,
 premium status and compatibility require evidence before use when stale/unknown.
 
+Capability records also carry `last_verified` and `volatility`. HIGH-volatility
+records (browser support, package API, runtime behavior, licensing and current
+registries) must return `VERIFY_REQUIRED` before an install, import or API claim.
+An unknown value is preserved as unknown; it is never inferred from a nearby
+package or an old example.
+
 ## Evidence record
 Store:
 - URL
@@ -15,6 +21,7 @@ Store:
 - claim
 - status
 - optional version/context
+- volatility and last_verified date
 
 ## Divergence
 When two official sources disagree:

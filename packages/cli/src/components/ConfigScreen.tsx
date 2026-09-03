@@ -4,8 +4,12 @@ import { Box, Text } from '../ui.js';
 import type { ConfigSetting } from '../configuration.js';
 import type { ConfigEditState } from '../session.js';
 import { binaryStateIndicator, color, glyph, layout, truncate } from '../theme.js';
+import { ScreenTabs, type ScreenTab } from './ScreenFrame.js';
 
 export interface ConfigScreenProps {
+  /** The screen bar and the tab this screen is. */
+  readonly tabs?: readonly ScreenTab[];
+  readonly activeTab?: string;
   readonly settings: readonly ConfigSetting[];
   readonly filter: string;
   readonly selected: number;
@@ -53,6 +57,8 @@ export function configViewport(
 }
 
 export function ConfigScreen({
+  tabs,
+  activeTab,
   settings,
   filter,
   selected,
@@ -72,10 +78,19 @@ export function ConfigScreen({
 
   return (
     <Box flexDirection="column" width={width} height={Math.max(1, rows - 1)} paddingX={layout.gutter}>
-      <Box width={contentWidth} justifyContent="space-between">
-        <Text color={color('text')} bold>config</Text>
-        <Text color={color('ghost')}>{settings.length} settings · Esc close</Text>
-      </Box>
+      {tabs && activeTab ? (
+        <ScreenTabs
+          tabs={tabs}
+          active={activeTab}
+          badge={`${settings.length} settings`}
+          width={contentWidth}
+        />
+      ) : (
+        <Box width={contentWidth} justifyContent="space-between">
+          <Text color={color('text')} bold>config</Text>
+          <Text color={color('ghost')}>{settings.length} settings · Esc close</Text>
+        </Box>
+      )}
       <Text color={color('faint')}>{'─'.repeat(Math.max(1, contentWidth))}</Text>
       <Box width={contentWidth} marginTop={1}>
         <Text color={color('accent')}>{glyph.search} </Text>

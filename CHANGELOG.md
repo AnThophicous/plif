@@ -8,6 +8,40 @@ This release is under development. The following improvements define the
 0.4.0 scope and are being implemented together as one cohesive runtime,
 installation and session experience.
 
+### Added
+
+- **Code Mode (`toolMode = "code"`).** An opt-in tool presentation in which the
+  model receives one tool on the wire, `run_code`, plus a generated TypeScript
+  declaration of the whole tool catalogue in the system prompt, and calls tools
+  from inside programs it writes. Three savings follow: the schemas move out of
+  the per-request payload into the cacheable prompt prefix, only what a program
+  logs and returns enters the conversation, and dependent calls collapse from
+  one round trip each into one request and one result. `/code-mode` switches it,
+  `PLIF_TOOLS_MODE` overrides for a session, and `/token-split stats code-mode`
+  reports what the collapse kept off the wire.
+- **Process-isolated `run_code` runtime.** Programs run in their own OS process,
+  started by the container and confined by the active sandbox backend — the same
+  jail every `run_command` goes through. Tool calls made inside a program are
+  dispatched back through the host's existing policy engine, path jail and audit
+  log, so approvals and denials behave exactly as they do natively. The earlier
+  fail-closed refusal is retained for any caller with no container to run in.
+  The runtime treats the program as a hostile peer: inbound frames are rebuilt
+  from own properties, call ids are answered at most once, and non-lossless JSON
+  is refused rather than coerced.
+- **Independent wall and compute budgets for programs.** `timeoutMs` bounds the
+  whole run including time spent in tools; `computeMs` bounds measured busy time
+  inside the runtime process, so a program waiting on a slow tool is not killed
+  for a hot loop it is not running. Failures come back as a result naming the
+  cause — `exception`, `timeout`, `abort`, `process-exit`, `invalid-output`,
+  `output-limit`, `call-limit` — with everything logged before the stop.
+- **Ordered concurrency inside a program.** Tool calls a program issues follow
+  the same contract the native loop applies to a batch: `parallelSafe` calls
+  overlap up to a cap, anything else takes the lane alone, and records commit in
+  submission order so the audit log reads in the order the program wrote.
+- **`code.dispatch` runtime event.** Each tool call made inside a program is
+  emitted for the timeline and the audit log without entering the model's
+  context, and updates the program's own row rather than opening one per call.
+
 ### Planned
 
 - **NPM-first installation and updates.** `npm install -g @plif/cli@latest`
@@ -156,6 +190,42 @@ after 0.3.9. It is not a versioned release yet.
   [`docs/conversation-state.md`](docs/conversation-state.md).
 
 ### Fixed
+
+- **The prompt vanished the moment a session was opened from `/sessions`.**
+  Resuming replaces the transcript with a shorter one, and the timeline's
+  follow state kept the scroll high-water mark of the transcript that had just
+  been closed. Against a mark it could never reach, the fresh session reported
+  itself as scrolled away from a tail it had never had, which raised the
+  "new below" pill. That pill is a sibling of the scroll viewport inside the
+  same column, so it added a row on top of the `maxLines` the layout had
+  budgeted for history — and in a panel clamped to the window height, one row
+  over the budget is paid for by the last child, which is the prompt. The input
+  line was not hidden or unfocused: it had been pushed past the bottom edge of
+  the frame. The mark is now dropped whenever the transcript shrinks or empties,
+  so a resumed session and a cleared one both open anchored to their own newest
+  row, and the pill's row is taken out of the viewport's height instead of out
+  of the prompt's.
+- **The transcript could not be scrolled, and every attempt cost a full frame.**
+  The viewport asserted `scrollTop: Number.MAX_SAFE_INTEGER` on every render.
+  Slate clamps to that offset, so a wheel tick moved the view and the render it
+  triggered immediately put it back — the position was recomputed, repainted and
+  discarded, once per tick, which is why the scrollbar felt both stuck and slow.
+  Pinning is a claim about the tail, so it is now made only while the view is at
+  the tail; once the reader moves up, the offset is theirs, and `useTailFollow`
+  re-pins the moment they return to the newest row. The guarantee the
+  unconditional pin was protecting — never stranding a viewport on empty space
+  above a loaded transcript — is kept by the high-water reset above rather than
+  by overruling the reader.
+- **Five test files had never run.** The runner's globs matched `*.test.ts` and
+  nothing else, so every `.test.tsx` in `packages/cli/test` — the render tests
+  for the timeline, the animation clock, the BTW panel and the timeline window —
+  was collected by no run and asserted nothing. The globs now include `.test.tsx`
+  and are quoted, so the pattern reaches Node's test runner intact on shells
+  that do not expand it. Bringing them back exposed assertions that had drifted
+  from the UI they describe: the timeline render test still expected
+  `Thinked for: 321 ms` and an `Editing - path (+8 | -2)` summary, neither of
+  which the component has emitted for some time. They now assert the labels the
+  component actually renders, and the suite runs 1.343 tests with none failing.
 
 - **Dropped animation frames and a shell that froze under a long session.**
   Slate's `segmentGraphemes` built a fresh `Intl.Segmenter` on every call, for

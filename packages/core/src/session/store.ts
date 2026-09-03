@@ -53,6 +53,7 @@ import {
   type ConversationState,
 } from '../model/conversation-state.js';
 import { HistoryRepository } from './history-repository.js';
+import type { SessionUsageRow, UsageDelta } from './history-repository.js';
 
 // ---------------------------------------------------------------------------
 // Transcript events
@@ -198,6 +199,16 @@ export class Session {
     });
     if (!adapted) throw new PlifError('INVALID_ARGUMENT', 'session event could not be adapted');
     return adapted;
+  }
+
+  /**
+   * Add a turn's tokens to this session's totals.
+   *
+   * Deliberately fire-and-forget from the caller's point of view: usage is a
+   * statistic, and failing to write one must never be able to fail a turn.
+   */
+  async recordUsage(modelId: string, delta: UsageDelta): Promise<void> {
+    await this.#store.recordUsage(this.meta, modelId, delta);
   }
 
   /** Flush pending appends, then mark the conversation finished. */
@@ -637,6 +648,16 @@ export class SessionStore {
   }
 
   /** Every session recorded for this workspace, newest activity first. */
+  /** Accumulate a turn's tokens against one session and model. */
+  async recordUsage(meta: SessionMeta, modelId: string, delta: UsageDelta): Promise<void> {
+    await (await this.#history).recordUsage(meta, modelId, delta);
+  }
+
+  /** Every session in the store with its usage, for the stats screen. */
+  async usageRows(): Promise<SessionUsageRow[]> {
+    return await (await this.#history).usageRows();
+  }
+
   async list(workspace: string): Promise<SessionMeta[]> {
     await this.#syncLegacyWorkspace(workspace);
     return (await this.#history).list(workspace);

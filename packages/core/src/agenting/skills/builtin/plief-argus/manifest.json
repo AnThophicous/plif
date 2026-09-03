@@ -1,8 +1,8 @@
 {
   "name": "Pli'ef Argus",
   "slug": "plief-argus",
-  "version": "1.0.0",
-  "description": "Security Intelligence & Verification System: SecurityIR model, traversable attack paths with control leverage, SecDiff for change review, Proof-of-Fix findings lifecycle, evidence-aware posture bands and machine-checkable release gates.",
+  "version": "3.0.0",
+  "description": "Security Intelligence & Verification System: SecurityIR model, traversable attack paths with control leverage, SecDiff for change review, Proof-of-Fix findings lifecycle, evidence-aware posture bands and machine-checkable release gates, fused with the defensive control checklists, severity matrix and reporting discipline of the retired plief-float.",
   "entry": "SKILL.md",
   "artifacts": {
     "produced": [
@@ -17,9 +17,14 @@
       "_kernel/risk/autonomy.md"
     ]
   },
-  "schemas": ["schemas/security-ir.schema.json", "schemas/finding.schema.json"],
+  "schemas": [
+    "assets/security-ir.schema.json",
+    "assets/finding.schema.json"
+  ],
   "engines_selftest": [
-    "tools/argus_ir_lint.py", "tools/argus_attackpath.py",
-    "tools/argus_sec_diff.py", "tools/argus_findings.py"
+    "scripts/argus_ir_lint.py",
+    "scripts/argus_attackpath.py",
+    "scripts/argus_sec_diff.py",
+    "scripts/argus_findings.py"
   ]
 }

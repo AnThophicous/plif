@@ -230,6 +230,15 @@ const glyphPairs = {
   active: ['…', '...'],
   /** Queued, not started. */
   pending: ['○', 'o'],
+  /**
+   * Live and healthy.
+   *
+   * Paired with `pending` and `failed` so a three-state indicator - the MCP
+   * screen's server column - is still readable with colour off, which is how
+   * it will be read in a pipe, a screenshot, or by anyone who cannot separate
+   * the green from the amber.
+   */
+  live: ['●', '*'],
   /** Finished cleanly. */
   done: ['✓', 'v'],
   /** Failed. */
@@ -332,7 +341,15 @@ export function binaryStateIndicator(state: BinaryState): {
 const defaultLayout = {
   gutter: 1,
   boxPadX: 1,
-  surfacePadX: 4,
+  /**
+   * Left and right inset of the whole live surface.
+   *
+   * This was 4, which put every transcript row five columns in once the
+   * timeline's own gutter was added, and made the content read as floating in
+   * the middle of the terminal instead of belonging to its left edge. One
+   * column keeps the text off the very border without the drift.
+   */
+  surfacePadX: 1,
   surfacePadY: 1,
   /** Width of the status column that `[done]`-style tags right-align into. */
   statusColumn: 12,

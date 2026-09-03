@@ -1,13 +1,17 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 
 /**
- * Terminal animation is deliberately sampled, not rendered at 60 FPS. One
- * provider owns two cadence-specific clocks: a slow one for spinners and a
- * faster one for visual pulse consumers. This keeps each effect smooth without
- * giving every widget its own interval.
+ * Terminal animation is sampled on two shared cadences, not one per widget.
+ *
+ * The slow clock is for spinners, where a step every 120 ms is the effect. The
+ * fast clock drives continuous motion - gradient sweeps, the breathing prompt -
+ * and runs at the same 60 Hz the renderer paints at, so a sweep advances once
+ * per frame instead of once every other frame.
  */
 export const ANIMATION_INTERVAL_MS = 120;
-export const FAST_ANIMATION_INTERVAL_MS = 33;
+// 60 Hz. This was 33 ms — an exactly 30 FPS pulse, which is what a smooth
+// gradient sweep reads as when the terminal beside it is drawing at 60.
+export const FAST_ANIMATION_INTERVAL_MS = 16;
 
 export type AnimationRate = 'slow' | 'fast';
 

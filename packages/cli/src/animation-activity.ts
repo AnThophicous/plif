@@ -10,17 +10,17 @@ export interface AnimationActivity {
   readonly effortTransitioning?: boolean;
   /** Active timeline rows can be driven by preview or an event-only surface. */
   readonly runningTimeline?: boolean;
-  /**
-   * A menu or the focused idle prompt wants subtle motion.
-   *
-   * Kept separate from the strong-frame inputs: it advances the shared clock
-   * so breathing carets and selections can tick, without promoting the prompt
-   * frame to its full travelling wave.
-   */
-  readonly ambientFocus?: boolean;
 }
 
-/** Whether the shared Ink animation clock should advance. */
+/**
+ * Whether the shared animation clock should advance.
+ *
+ * Only real work animates. An idle prompt used to keep the clock running for a
+ * breathing caret, and every tick of that clock re-laid-out and repainted the
+ * whole frame — so a session that was doing nothing still spent its CPU
+ * redrawing itself eight times a second. Nothing is happening, so nothing
+ * moves.
+ */
 export function animationClockActive(activity: AnimationActivity): boolean {
   return (
     activity.busy ||
@@ -30,8 +30,7 @@ export function animationClockActive(activity: AnimationActivity): boolean {
     activity.runningSubagent ||
     activity.runningDiscovery ||
     activity.effortTransitioning === true ||
-    activity.runningTimeline === true ||
-    activity.ambientFocus === true
+    activity.runningTimeline === true
   );
 }
 

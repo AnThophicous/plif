@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text } from '../ui.js';
 
-import { activityColorAt, activityGlyphAt, activityKindForLabel, activityVisual, GradientText } from '../activity-visuals.js';
+import { ActivityLabel, activityGlyphAt, activityKindForLabel, activityVisual } from '../activity-visuals.js';
 import { useAnimationFrame } from '../hooks/useAnimationClock.js';
 import {
   elapsedSince,
@@ -89,13 +89,19 @@ const ActivityLoadingLabel = React.memo(function ActivityLoadingLabel({
   const kind = activityKindForLabel(candidate);
   const visual = activityVisual(kind);
   const glyphText = activityGlyphAt(kind, elapsed, active);
-  const glyphColor = activityColorAt(kind, elapsed);
   const label = displayWidth(`${glyphText} ${candidate}…`) <= Math.max(12, width) ? candidate : 'Working';
   return (
     <Text>
-      <Text color={glyphColor} bold>{glyphText}</Text>
-      <Text> </Text>
-      <GradientText value={label} from={visual.gradient[0]} to={visual.gradient[1]} bold />
+      <ActivityLabel
+        glyph={glyphText}
+        value={label}
+        from={visual.gradient[0]}
+        to={visual.gradient[1]}
+        // The glyph alternates between two frames, which a reader can miss
+        // entirely on a long pause. The travelling highlight is the part that
+        // keeps saying "still working" without adding a second element.
+        {...(active ? { shimmerMs: elapsed } : {})}
+      />
       <Text color={color('muted')}>…</Text>
     </Text>
   );

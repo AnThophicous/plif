@@ -1,12 +1,22 @@
 ---
-name: "pli'ef-orun"
-display_name: "Pli'ef Orun"
-description: "Frontend, UI, motion and 3D intelligence system: discovers, verifies, selects, adapts, implements and audits components, animation systems and immersive experiences with evidence-first source routing."
+name: plief-orun
+description: Intelligence system for frontend capabilities — components, registries, libraries, motion, media, 2D/3D, WebGL/WebGPU, shaders, source verification and evidence-first integration. Use quando o usuário pedir para descobrir, comparar, selecionar ou integrar shadcn, Aceternity, Magic UI, GSAP, Three.js, Rive, Motion, registries, 3D, animação, ou capabilities frontend verificáveis.
+license: MIT
+metadata:
+  plief-short-description: Capabilities frontend com evidência
+  plief-version: "1.1.0"
+  plief-author: pli'ef
 ---
 
-# Pli'ef Orun
+# pli'ef orun
+
+## Missão
 
 Pli'ef Orun is not a component dump. It is a decision system for frontend engineering.
+
+## Quando usar
+
+Use para descobrir, comparar, selecionar e integrar recursos frontend verificáveis. Não use para redesign visual sem componente de capability (indique `plief-sifr`) nem para auditoria de segurança (indique `plief-float`).
 
 Its operating model is:
 
@@ -33,6 +43,16 @@ If a decision would depend on `LOW` confidence, verify before executing.
 For every request:
 
 `INTENT → PROJECT STATE → CAPABILITIES → CONCEPT RESOLUTION → RETRIEVAL → CANDIDATES → SCORING → RISK/CONFIDENCE → VERIFY IF NEEDED → USE/ADAPT/COMPOSE/BUILD → IMPLEMENT → TEST → VERIFY`
+
+Capability resolution is graph-first, not library-first:
+
+`NEED → CAPABILITY → CANDIDATES → EVIDENCE → FIT → USE | ADAPT | COMPOSE | BUILD`
+
+Read `knowledge/retrieval.md` and query `scripts/query_capabilities.py` before
+loading a source profile. The local capability records include limitations,
+runtime/SSR/accessibility/performance implications and provenance. They are
+selective evidence, not permission to install. `ORUN QUALIFIES; SIFR SELECTS
+FOR EXPERIENCE FIT` when the decision changes product language or hierarchy.
 
 Do not run every stage ceremonially. Use a fast path for local, reversible, well-evidenced work and a deep path when freshness, uncertainty, blast radius or irreversibility rises.
 
@@ -67,6 +87,7 @@ Then load only the modules needed.
 - Tests/visual/a11y/perf gates: `core/judge.md`
 - Runtime capability model: `adapters/capabilities.md`
 - Source-specific facts: `sources/<source>.md`
+- Capability domains, graph and normalized records: query `knowledge/capability-domains.json`, `knowledge/capability-graph.json` and `knowledge/capabilities.json` selectively via `scripts/query_capabilities.py`
 - Source verification policy: `rules/source-verification.md`
 - Animation choice: `rules/animation-routing.md`
 - Project changes: `rules/project-inspection.md`, `rules/implementation.md`
@@ -142,6 +163,8 @@ In particular:
 
 Other flagships (Sifr component-intelligence, etc.) consume Orun as a service via the QueryContract/SelectionRecord interfaces defined in `rules/integration-contract.md` (schemas in `schemas/selection-*.schema.json`, validator `scripts/validate_query_contract.py`). Hard gates run BEFORE ranking; budgets are hard constraints; Orun recommends — the consuming skill decides and records the SelectionRecord. Component provider discovery knowledge is consolidated HERE; transplant mechanics live with consumers.
 
+## Critérios de pronto
+
 ## Stop conditions
 
 Finish when:
@@ -152,3 +175,7 @@ Finish when:
 - remaining improvements have low marginal value.
 
 Never call “plausible” verified.
+
+## Verificação e entrega
+
+Siga `core/judge.md`. Declare o que foi verificado, o que ficou `UNVERIFIED` e o risco residual. Não afirme execução de ferramenta que não rodou.

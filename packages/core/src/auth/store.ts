@@ -11,6 +11,7 @@ import type {
 } from '@modelcontextprotocol/sdk/shared/auth.js';
 
 import { PlifError } from '../errors.js';
+import { nativeWindowsDpapi } from './dpapi.js';
 
 export type OAuthCredentialScope = 'all' | 'client' | 'tokens' | 'verifier' | 'discovery';
 
@@ -130,6 +131,17 @@ function runCredentialCommand(
 export async function runWindowsDpapi(mode: 'protect' | 'unprotect', input: string): Promise<string> {
   if (process.platform !== 'win32') {
     throw new PlifError('INTERNAL', 'Windows DPAPI is unavailable on this platform');
+  }
+  // The in-process binding is ~480x faster than spawning PowerShell and writes
+  // the identical record; the helper below stays as the fallback for hosts
+  // where the FFI binding will not load.
+  try {
+    const native = await nativeWindowsDpapi(mode, input);
+    if (native !== null) return native;
+  } catch (error) {
+    // A record this binding cannot handle is worth one PowerShell attempt
+    // before the caller is told the store is unreadable.
+    if (mode === 'protect') throw error;
   }
   return runCredentialCommand(
     'powershell.exe',

@@ -169,10 +169,30 @@ def check_eval_cases(root, cfg, errs):
                 errs.append(f"eval case unparseable {fn}: {exc}")
                 continue
             recs = data.get("cases", data if isinstance(data, list) else [])
+            # Not every eval pack is a prompt/assertion pack. Routing packs assert
+            # which skill owns a request, and expansion packs assert query terms;
+            # forcing them into must/must_not would misstate what they check, so
+            # the pack declares its `kind` and the required fields follow from it.
+            kind = data.get("kind", "behavior") if isinstance(data, dict) else "behavior"
+            by_kind = cfg.get("eval_case_required_by_kind") or {}
+            required = by_kind.get(kind)
+            if required is None:
+                if kind != "behavior" and by_kind:
+                    errs.append(f"eval case {fn}: unknown pack kind '{kind}'")
+                required = cfg["eval_case_required"]
+            one_of = (cfg.get("eval_case_one_of_by_kind") or {}).get(kind) or []
             for c in recs if isinstance(recs, list) else []:
-                for f in cfg["eval_case_required"]:
+                for f in required:
                     if f not in c:
                         errs.append(f"eval case {fn}/{c.get('id','?')}: missing field '{f}'")
+                # A routing pack holds two legitimate case shapes: one asserts
+                # which skill owns the request, the rest assert behaviour. Each
+                # case must satisfy at least one whole shape, not a mix.
+                if one_of and not any(all(f in c for f in shape) for shape in one_of):
+                    shapes = " | ".join("+".join(s) for s in one_of)
+                    errs.append(
+                        f"eval case {fn}/{c.get('id','?')}: satisfies no required "
+                        f"field set ({shapes})")
     return n
 
 

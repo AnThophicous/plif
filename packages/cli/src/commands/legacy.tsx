@@ -75,6 +75,7 @@ import {
   profilesOf,
   readAgentInstructions,
   removePendingLegacyGlobalConfigs,
+  toolModeOf,
   visionTools,
   ProviderCapabilityCache,
 } from '@plif/core';
@@ -669,6 +670,7 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
 
   try {
     const tokenSplitConfig = await loadTokenSplitConfig();
+    const toolMode = toolModeOf(await loadGlobalConfig());
     const result = await runLoop(
       [
         {
@@ -682,6 +684,7 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
             isolation: engine.sandboxReport.isolation,
             contextTokens: provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
             tools: stableToolSpecs(agentTools.map((tool) => tool.spec)),
+            toolMode,
             skills: skills.catalogue(),
             loadedSkills: codexSkillBootstrap.map((skill) => skill.name),
             providerId: provider.info.providerId,
@@ -745,6 +748,8 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
           sessionId: session.id,
         },
         enableHarnessCycle: promptConfig.effort === 'plif',
+        toolMode,
+        isolation: engine.sandboxReport.isolation,
         tools: agentTools,
         tasks,
         lsp,
@@ -910,10 +915,13 @@ export async function runInteractive(
 
   const startedAt = Date.now();
   const engine = buildEngine(invocation.flags);
+  // The theme catalogue is pure disk reading and shares nothing with the
+  // engine's bootstrap, so the two run together rather than end to end.
+  const themeLoad = loadThemes();
   const report = await engine.start();
   const [appearance, themeCatalogue] = await Promise.all([
     Promise.resolve(startupAppearance),
-    loadThemes(),
+    themeLoad,
   ]);
   await configureGlobalApprovals(engine, appearance);
   for (const problem of themeCatalogue.problems) process.stderr.write(`plif theme: ${problem}\n`);
@@ -972,6 +980,9 @@ export async function runInteractive(
   const capabilityCache = new ProviderCapabilityCache({
     file: path.join(engine.paths.root, 'model-capabilities.json'),
   });
+  // The value comes back through the broker's promise and is written to the
+  // encrypted store. It is never put on the bus, so no subscriber — timeline,
+  // transcript, audit log — is in a position to leak it.
   // One broker is shared by startup resolution, model adoption, and MCP. A
   // typed model key therefore has one encrypted home and survives restart.
   const credentials = new CredentialBroker({
@@ -983,27 +994,38 @@ export async function runInteractive(
         ...(request.hint ? { context: request.hint } : {}),
       }),
   });
-  try {
-    provider = await buildProvider(engine, invocation.flags, capabilityCache, credentials);
-  } catch (error) {
-    providerProblem = PlifError.is(error)
-      ? [error.message, error.hint].filter(Boolean).join('\n')
-      : String(error);
-  }
-
-  const skills = await SkillRegistry.load({
+  // Resolving the model, loading the skill catalogue and replaying the session
+  // touch three different parts of the store and none of them reads the
+  // others' output. Awaiting them one at a time simply added their latencies
+  // together on the path to the first frame.
+  const providerLoad = buildProvider(engine, invocation.flags, capabilityCache, credentials)
+    .then(
+      (resolved) => ({ provider: resolved, problem: null as string | null }),
+      (error: unknown) => ({
+        provider: null,
+        problem: PlifError.is(error)
+          ? [error.message, error.hint].filter(Boolean).join('\n')
+          : String(error),
+      }),
+    );
+  const skillLoad = SkillRegistry.load({
     workspace: invocation.flags.workspace,
     root: engine.paths.root,
   });
+  const historyLoad = session
+    ? Promise.all([session.replay(), session.history()])
+    : Promise.resolve([[], []] as const);
+
+  const [providerResult, skills, [replay, history]] = await Promise.all([
+    providerLoad,
+    skillLoad,
+    historyLoad,
+  ]);
+  provider = providerResult.provider;
+  providerProblem = providerResult.problem;
+
   const mcp = new McpRegistry(engine.bus, { interactive: true });
   const tools = [...DEFAULT_TOOLS, skillTool(skills), createSkillTool(skills)];
-  // The value comes back through the broker's promise and is written to the
-  // encrypted store. It is never put on the bus, so no subscriber — timeline,
-  // transcript, audit log — is in a position to leak it.
-  const [replay, history] = session
-    ? await Promise.all([session.replay(), session.history()])
-    : [[], []] as const;
-
   enableRawMode();
   enableMouseCapture();
   enableBracketedPaste();

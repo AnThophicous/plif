@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from '../ui.js';
 
-import { activityGlyphAt, activityKindForLabel, activityVisual, GradientText } from '../activity-visuals.js';
+import { ActivityLabel, activityGlyphAt, activityKindForLabel, activityVisual } from '../activity-visuals.js';
 import { ANIMATION_INTERVAL_MS, useAnimationFrame } from '../hooks/useAnimationClock.js';
 import { color, formatCount, formatDuration, glyph, truncate } from '../theme.js';
 
@@ -75,8 +75,14 @@ export function Thinking({
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={color('accent')}>{pulse} </Text>
-        <GradientText value={verb} from={visual.gradient[0]} to={visual.gradient[1]} bold />
+        <ActivityLabel
+          glyph={pulse}
+          value={verb}
+          from={visual.gradient[0]}
+          to={visual.gradient[1]}
+          bold={false}
+          shimmerMs={clock * ANIMATION_INTERVAL_MS}
+        />
         <Text color={color('accent')}>…</Text>
         <Text color={color('ghost')}> ({parts.join(' · ')})</Text>
       </Box>

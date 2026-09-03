@@ -2,7 +2,19 @@
   "name": "Pli'ef Orun",
   "slug": "plief-orun",
   "version": "1.1.0-integration",
-  "description": "Resource & knowledge intelligence: discovers, verifies, ranks and recommends component libraries, primitives, animation engines, 3D/motion tooling and design resources via the QueryContract integration surface.",
+  "description": "Capability intelligence: discovers, verifies, ranks and qualifies component libraries, registries, motion/media engines, 2D/3D/WebGL/WebGPU/shader tooling and frontend runtime resources via capability-first retrieval and the QueryContract integration surface.",
+  "architecture": [
+    "Brain",
+    "Memory",
+    "Eyes",
+    "Hands",
+    "Judge"
+  ],
+  "runtime_strategy": "PLIF first-class; capability-driven portable core",
+  "source_count": 111,
+  "seed_item_count": 170,
+  "concept_count": 195,
+  "authority": "OFFICIAL SOURCE > LOCAL INDEX > MODEL MEMORY",
   "entry": "SKILL.md",
   "artifacts": {
     "produced": [
@@ -19,13 +31,27 @@
     "schemas/concept.schema.json",
     "schemas/relationship.schema.json",
     "schemas/selection-query.schema.json",
-    "schemas/selection-record.schema.json"
+    "schemas/selection-record.schema.json",
+    "schemas/capability-record.schema.json"
   ],
   "engines_selftest": [
-    "scripts/validate_query_contract.py"
+    "scripts/validate_query_contract.py",
+    "scripts/query_capabilities.py"
   ],
+  "knowledge": {
+    "domains": "knowledge/capability-domains.json",
+    "graph": "knowledge/capability-graph.json",
+    "records": "knowledge/capabilities.json",
+    "records_expansion": "knowledge/capabilities-expansion.json",
+    "graph_expansion": "knowledge/capability-graph-expansion.json",
+    "source_registry": "knowledge/capabilities-expansion.json#source_registry",
+    "retrieval_contract": "knowledge/retrieval.md",
+    "query": "scripts/query_capabilities.py"
+  },
+  "eval_cases": ["evals/cases/orun-cases.json", "evals/cases/orun-hardening-cases.json", "../pli'ef sifr/evals/cases/boundary-cases.json", "evals/cases/expansion-cases.json"],
   "notes": [
     "Integration contract: rules/integration-contract.md resolves historical component-discovery overlap.",
-    "Catalog validators: validate_catalog / build_indexes / detect_duplicates / check_freshness retained."
+    "Catalog validators: validate_catalog / build_indexes / detect_duplicates / check_freshness retained.",
+    "Expansion builder: scripts/build_capability_expansion.py regenerates curated and catalog-derived shards deterministically."
   ]
 }

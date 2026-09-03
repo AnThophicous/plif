@@ -80,13 +80,24 @@ export function ToolCall({ name, category = 'tool', target, summary, output, dif
     reader scanning twenty of these does not need the taxonomy — they need the
     verb and what it was done to, which is exactly what a function call already
     reads as. Failure keeps its mark, because that is the one status worth
-    interrupting the scan for; success is carried by the bullet's colour.
+    interrupting the scan for.
+
+    The bullet itself now also carries *what kind* of call this was — a shell
+    dollar sign, an edit's plus/minus, a search's magnifier — using the marker
+    already defined per category below. It used to always draw the same
+    generic arrow regardless of category, which made a screen full of tool
+    calls readable only by their name text; the shape now gives the same
+    information a glance ahead of reading it. A run in progress still shows
+    the spinner over anything else, and a failure still turns the bullet red
+    regardless of category, so status is never in doubt either.
   */
+  const bulletTone = running ? 'accent' : ok ? identity.tone : 'danger';
+  const bulletGlyph = running ? spinner : glyph[identity.marker];
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={color(running ? 'accent' : ok ? 'accentDim' : 'danger')}>
-          {running ? spinner : glyph.tool}{' '}
+        <Text color={color(bulletTone)}>
+          {bulletGlyph}{' '}
         </Text>
         <Text color={color(quiet ? 'muted' : 'text')} bold={!quiet}>{name}</Text>
         {targetLines[0] ? (
@@ -101,7 +112,17 @@ export function ToolCall({ name, category = 'tool', target, summary, output, dif
       {summary && !diff && !edits?.length ? (
         <Box><Text color={color('ghost')}>  {summary}</Text></Box>
       ) : null}
-      {code !== undefined ? (
+      {/*
+        A structured diff already shows what changed, with real line numbers
+        and colour on both sides of the edit. Rendering the raw new content
+        underneath it as well - FileActivity's own numbered preview, in a
+        different style with no +/- markers - said the same thing twice in two
+        incompatible-looking ways, which is what made a single completed edit
+        read as duplicated or corrupted content. FileActivity only remains the
+        thing shown when there is nothing more informative yet: while the tool
+        is still running, and for the few tools that never produce a diff.
+      */}
+      {code !== undefined && !diff && !edits?.length ? (
         <FileActivity
           code={code}
           mode={codeMode}

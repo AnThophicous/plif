@@ -114,6 +114,8 @@ describe('subagent credential routing', () => {
         '- anti-ai-slop: Clean, human-readable output without generated-sounding prose',
         '- plief-galileu: Socratic decision review',
         '- plief-argus: Principal security engineering',
+        '- plief-sifr: Frontend intelligence',
+        '- plief-orun: Component selection with evidence',
       ].join('\n'),
       extraTools: [skill],
       maxIterations: 2,

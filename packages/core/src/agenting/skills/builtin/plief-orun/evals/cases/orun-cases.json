@@ -105,5 +105,6 @@
       "must_not": [],
       "critical": false
     }
-  ]
+  ],
+  "kind": "behavior"
 }

@@ -90,13 +90,22 @@ describe('modular system prompt', () => {
       '- anti-ai-slop: Clean, human-readable output without generated-sounding prose',
       '- plief-galileu: Socratic decision review',
       '- plief-argus: Principal security engineering',
+      '- plief-sifr: Frontend intelligence',
+      '- plief-orun: Component selection with evidence',
     ].join('\n');
     const prompt = buildSystemPrompt({
       ...base,
       effort: 'plif',
       skills,
       tools: [{ name: 'skill', description: 'Load a skill.', parameters: {} }],
-      loadedSkills: ['anti-ai-slop', 'plief-galileu', 'plief-argus'],
+      // Every mandatory PLIF skill is carried, which is the case this covers.
+      loadedSkills: [
+        'anti-ai-slop',
+        'plief-galileu',
+        'plief-argus',
+        'plief-sifr',
+        'plief-orun',
+      ],
     });
 
     assert.match(prompt, /already loaded successfully in this session/i);
@@ -431,5 +440,41 @@ describe('project instructions', () => {
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('Code Mode sections', () => {
+  const tools = [
+    {
+      name: 'read_file',
+      description: 'Read a file.',
+      parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+    },
+  ];
+
+  it('adds neither section in native mode', () => {
+    const prompt = buildSystemPrompt({ ...base, tools });
+    assert.doesNotMatch(prompt, /Writing code for run_code/);
+    assert.doesNotMatch(prompt, /declare const tools/);
+  });
+
+  it('states the rule before the catalogue, and the SDK after the guidance', () => {
+    const prompt = buildSystemPrompt({ ...base, tools, toolMode: 'code' });
+    assert.match(prompt, /only tool you can call directly/);
+    assert.match(prompt, /declare const tools/);
+    assert.ok(
+      prompt.indexOf('only tool you can call directly') < prompt.indexOf('# Available Plif tools'),
+      'the collapse rule must be read before the tool names',
+    );
+    assert.ok(
+      prompt.indexOf('# Available Plif tools') < prompt.indexOf('declare const tools'),
+      'the SDK belongs after the guidance that says when to reach for a tool',
+    );
+  });
+
+  it('renders the same bytes for the same tool set', () => {
+    const first = buildSystemPrompt({ ...base, tools, toolMode: 'code' });
+    const second = buildSystemPrompt({ ...base, tools: [...tools], toolMode: 'code' });
+    assert.equal(first, second);
   });
 });

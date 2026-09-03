@@ -1,7 +1,7 @@
 # img2threejs
 
-**Type:** agent skill, procedural image-to-Three.js pipeline  
-**Verification:** `VERIFIED_CURRENT` / `HIGH`  
+**Type:** agent skill, procedural image-to-Three.js pipeline\
+**Verification:** `VERIFIED_CURRENT` / `HIGH`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile

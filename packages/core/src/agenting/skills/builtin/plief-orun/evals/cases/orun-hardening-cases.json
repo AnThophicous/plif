@@ -1,0 +1,145 @@
+{
+  "pack": "plief-orun/astronomical-hardening",
+  "cases": [
+    {
+      "id": "O-01",
+      "critical": true,
+      "prompt": "Need an accessible dialog for a React product.",
+      "must": [
+        "resolve capability before library",
+        "return multiple candidates with evidence",
+        "include focus/SSR/accessibility gates"
+      ],
+      "must_not": [
+        "recommend by popularity only",
+        "invent API"
+      ]
+    },
+    {
+      "id": "O-02",
+      "critical": true,
+      "prompt": "Need a sortable table with 100k rows.",
+      "must": [
+        "separate table state from rendering",
+        "consider virtualization as a composition",
+        "surface browser-find/accessibility tradeoff"
+      ],
+      "must_not": [
+        "promise performance without measurement",
+        "hide all rows from semantics"
+      ]
+    },
+    {
+      "id": "O-03",
+      "critical": true,
+      "prompt": "Need interactive 3D for a product explanation.",
+      "must": [
+        "challenge whether 3D is required",
+        "return engine/camera/fallback/runtime constraints",
+        "flag volatile graphics facts for verification"
+      ],
+      "must_not": [
+        "treat Three.js as a component library",
+        "use a photo as 3D proof"
+      ]
+    },
+    {
+      "id": "O-04",
+      "critical": true,
+      "prompt": "Need a shader background behind readable copy.",
+      "must": [
+        "require ShaderContract",
+        "return fallback, DPR/frame/contrast gates",
+        "flag current Paper Shaders API/license as verify-required"
+      ],
+      "must_not": [
+        "ship demo shader by name",
+        "put critical text only in shader"
+      ]
+    },
+    {
+      "id": "O-05",
+      "critical": true,
+      "prompt": "Need authored state-machine animation.",
+      "must": [
+        "route to Rive capability",
+        "verify asset/runtime provenance",
+        "require semantic and reduced-motion path"
+      ],
+      "must_not": [
+        "claim Rive package/version from memory",
+        "treat canvas as accessible UI"
+      ]
+    },
+    {
+      "id": "O-06",
+      "critical": true,
+      "prompt": "Need adaptive video with captions.",
+      "must": [
+        "classify content-bearing media",
+        "include poster, captions, failure and offscreen policy",
+        "verify current playback/runtime path"
+      ],
+      "must_not": [
+        "autoplay audio",
+        "ambient video as exclusive meaning"
+      ]
+    },
+    {
+      "id": "O-07",
+      "critical": true,
+      "prompt": "Need a library component from a registry.",
+      "must": [
+        "inspect source/provenance/license/global CSS/deps",
+        "rank only after hard gates",
+        "return ADAPT/COMPOSE/BUILD if USE is unsafe"
+      ],
+      "must_not": [
+        "install opaque source",
+        "treat registry demo as product DNA"
+      ]
+    },
+    {
+      "id": "O-08",
+      "critical": true,
+      "prompt": "Need to know if a stored WebGPU fact is safe to use.",
+      "must": [
+        "check volatility and freshness",
+        "return VERIFY_REQUIRED when stale/high-volatility",
+        "preserve unknowns"
+      ],
+      "must_not": [
+        "invent browser compatibility",
+        "silently downgrade constraints"
+      ]
+    },
+    {
+      "id": "O-09",
+      "critical": true,
+      "prompt": "Need no external library; existing project primitive already fits.",
+      "must": [
+        "PROJECT-NATIVE is first",
+        "allow direct BUILD/ADAPT without ceremony",
+        "do not query external sources as ritual"
+      ],
+      "must_not": [
+        "shop libraries before repository inspection"
+      ]
+    },
+    {
+      "id": "O-10",
+      "critical": true,
+      "prompt": "Need a recommendation for a product with tight bundle and accessibility budgets.",
+      "must": [
+        "filter hard constraints before aesthetic ranking",
+        "show limitations, bundle and accessibility implications",
+        "record SelectionRecord for chosen external item"
+      ],
+      "must_not": [
+        "rank a beautiful incompatible candidate first",
+        "hide unresolved risk"
+      ]
+    }
+  ],
+  "kind": "behavior"
+}

@@ -54,3 +54,24 @@ Discover long-tail items JIT, verify them, use them, and only persist them when:
 - identity is stable;
 - evidence is official;
 - schema validation passes.
+# Memory — layered knowledge without context flooding
+
+Orun stores knowledge in layers:
+
+1. `catalogs/` and `indexes/` preserve the existing source/item/concept cache;
+2. `knowledge/capability-domains.json` maps user needs to capability classes;
+3. `knowledge/capability-graph.json` stores candidate, alternative, composition,
+   requirement and verification relationships;
+4. `knowledge/capabilities.json` stores normalized evidence-bearing records.
+
+Load layer 2 first, retrieve a small graph neighborhood, then read only the
+records needed for the decision. Do not preload all source profiles. The local
+index is cache evidence; official current sources remain authoritative for
+volatile APIs, compatibility, package names, licensing and browser behavior.
+
+## Record hygiene
+
+Every normalized capability keeps useful negatives: limitations, avoid-when,
+known conflicts, SSR constraints, accessibility and performance characteristics.
+Unknown is valid. A record with only a name, adjectives or a copied demo is not
+eligible for ranking.

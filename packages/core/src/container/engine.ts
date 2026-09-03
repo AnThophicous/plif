@@ -98,9 +98,11 @@ export class Engine {
   async start(): Promise<SandboxCapabilityReport> {
     if (this.#started && this.#report) return this.#report;
 
-    for (const dir of this.paths.bootstrapDirs()) {
-      await fs.mkdir(dir, { recursive: true });
-    }
+    // Independent directories, so they are created together rather than in a
+    // serial chain of round trips to the filesystem.
+    await Promise.all(
+      this.paths.bootstrapDirs().map((dir) => fs.mkdir(dir, { recursive: true })),
+    );
     await this.audit.open();
 
     if (this.#options.backend) {

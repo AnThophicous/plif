@@ -206,6 +206,11 @@ export function subagentTools(
     'cancel_task',
     'send_message',
     'run_script',
+    // Both batching tools are closures over the *parent* turn's registry,
+    // abort signal and container. Inherited into a child loop they would
+    // dispatch a subagent's calls into the parent's turn, which is neither
+    // cancellable with the child nor visible on the child's own timeline.
+    'run_code',
     'remember',
     'forget_memory',
   ]);

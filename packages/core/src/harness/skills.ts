@@ -257,11 +257,56 @@ export class SkillRegistry {
 /** Skills that every provider and every effort must load before proceeding. */
 export const MANDATORY_GLOBAL_SKILLS = ['anti-ai-slop', 'plief-galileu'] as const;
 
-/** Additional skills required by the PLIF effort. */
+/**
+ * Additional skills required by the PLIF effort.
+ *
+ * PLIF is the deliberate, everything-on mode: the whole pli'ef family loads
+ * before the work starts, so quality, security, frontend and component
+ * selection are all governed rather than remembered. This is not free — five
+ * bodies is a materially larger first turn than two — and that cost is the
+ * point of it being a separate effort rather than the default.
+ */
 export const MANDATORY_PLIF_SKILLS = [
   ...MANDATORY_GLOBAL_SKILLS,
   'plief-argus',
+  'plief-sifr',
+  'plief-orun',
 ] as const;
+
+/**
+ * Skills that any effort must load once the request touches their domain.
+ *
+ * Distinct from the mandatory gate: these do not load on every turn, they load
+ * as soon as the work is of that kind. Frontend is the case that kept being
+ * missed — a request to build a page is frontend work whether or not the word
+ * appears in it.
+ */
+export const DOMAIN_SKILL_ROUTES: readonly {
+  readonly skills: readonly string[];
+  readonly when: string;
+}[] = [
+  {
+    skills: ['plief-sifr'],
+    when:
+      'the work touches any user interface: a page, screen, component, layout, '
+      + 'dashboard, landing page, form, table, modal, navigation, design system, '
+      + 'theme, styling, responsiveness, accessibility, animation or visual polish '
+      + '— in any framework, and including plain HTML and CSS',
+  },
+  {
+    skills: ['plief-orun'],
+    when:
+      'a component, library, package, animation or 3D capability has to be chosen '
+      + 'or integrated, and the choice needs evidence rather than a guess',
+  },
+  {
+    skills: ['plief-argus'],
+    when:
+      'the work touches authentication, authorization, secrets, dependencies with '
+      + 'known advisories, uploads, deserialization, or anything the user frames as '
+      + 'a security review, threat model or hardening pass',
+  },
+];
 
 export function mandatorySkillsForEffort(effort?: string): readonly string[] {
   return effort === 'plif' ? MANDATORY_PLIF_SKILLS : MANDATORY_GLOBAL_SKILLS;

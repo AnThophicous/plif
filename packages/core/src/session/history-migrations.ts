@@ -70,4 +70,27 @@ export const HISTORY_MIGRATIONS: readonly SqliteMigration[] = [
       );
     `,
   },
+  {
+    // Cumulative token usage, kept beside the session rather than inside it.
+    //
+    // A separate table because usage is per model as well as per session: a
+    // session that switched models halfway is two rows, which is what lets the
+    // stats screen show a per-model split instead of one blended figure. It is
+    // also purely additive, so a store written by an older build stays
+    // readable and simply reports nothing for the sessions that predate it.
+    version: 2,
+    sql: `
+      CREATE TABLE IF NOT EXISTS session_usage (
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        model_id TEXT NOT NULL DEFAULT '',
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (session_id, model_id)
+      );
+      CREATE INDEX IF NOT EXISTS session_usage_session ON session_usage(session_id);
+    `,
+  },
 ];

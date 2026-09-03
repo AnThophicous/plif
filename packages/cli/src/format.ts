@@ -355,6 +355,7 @@ export function toolLane(name: string): ToolLane {
 
 const TOOL_LABELS: Readonly<Record<string, string>> = {
   run_command: 'Ran',
+  run_code: 'Program',
   read_file: 'Read',
   write_file: 'Edited',
   // "Update", not "Edit". The row shows a diff, and a diff is a statement about
@@ -381,7 +382,7 @@ const TOOL_LABELS: Readonly<Record<string, string>> = {
 
 export function toolCategory(name: string): ToolCategory {
   if (name.startsWith('mcp__')) return 'external';
-  if (name === 'run_command' || name === 'start_task') return 'shell';
+  if (name === 'run_command' || name === 'start_task' || name === 'run_code') return 'shell';
   if (name === 'read_file' || name === 'diagnostics') return 'read';
   if (name === 'list_dir' || name === 'glob') return 'list';
   if (name === 'grep' || name === 'web_search' || name === 'research' || name === 'find_definition' || name === 'find_references' || name === 'outline') return 'search';
@@ -432,6 +433,11 @@ export function describeToolCall(name: string, input: unknown): DescribedTool {
 
   if (name === 'run_command' && Array.isArray(record['argv'])) {
     return { label, category, target: (record['argv'] as string[]).join(' ') };
+  }
+  // The program is the argument, and it is far too long to be a row header.
+  // The model was made to write a title for exactly this position.
+  if (name === 'run_code' && typeof record['description'] === 'string') {
+    return { label, category, target: record['description'] };
   }
   if (name === 'curl' && typeof record['url'] === 'string') {
     const method = typeof record['method'] === 'string' ? record['method'].toUpperCase() : 'GET';

@@ -3,12 +3,15 @@ import { Box, Text } from '../ui.js';
 
 import type { UsageInfo, UsageWindow } from '@plif/core';
 
-import { cell, Meter, rightCell, ScreenFrame, SectionLabel } from './ScreenFrame.js';
+import { cell, Meter, rightCell, ScreenFrame, SectionLabel, type ScreenTab } from './ScreenFrame.js';
 import { effortDisplay } from '../effort-visuals.js';
 import type { SessionUsage } from '../status.js';
 import { color, formatCount, formatDuration, truncate } from '../theme.js';
 
 export interface UsageScreenProps {
+  /** The screen bar and the tab this screen is. */
+  readonly tabs?: readonly ScreenTab[];
+  readonly activeTab?: string;
   readonly info: UsageInfo | null;
   readonly session: SessionUsage;
   readonly contextUsed: number;
@@ -88,6 +91,8 @@ export function usageTone(percent: number | null): Parameters<typeof color>[0] {
  * ceiling gets "not published", not a bar at an imagined maximum.
  */
 export function UsageScreen({
+  tabs,
+  activeTab,
   info,
   session,
   contextUsed,
@@ -111,6 +116,8 @@ export function UsageScreen({
 
   return (
     <ScreenFrame
+      {...(tabs ? { tabs } : {})}
+      {...(activeTab ? { activeTab } : {})}
       title="Usage"
       badge={badge}
       {...(effort ? { subtitle: `effort ${effortDisplay(effort)} · session running ${formatDuration(elapsedMs)}` } : {})}

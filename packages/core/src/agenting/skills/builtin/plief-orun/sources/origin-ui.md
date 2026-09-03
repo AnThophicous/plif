@@ -1,7 +1,7 @@
 # Origin UI
 
-**Type:** legacy copy-paste component collection, historical shadcn-style collection  
-**Verification:** `DEPRECATED` / `HIGH`  
+**Type:** legacy copy-paste component collection, historical shadcn-style collection\
+**Verification:** `DEPRECATED` / `HIGH`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Text } from '../ui.js';
 
-import { activityGlyphAt, activityKindForLabel, activityVisual, GradientText } from '../activity-visuals.js';
+import { ActivityLabel, activityColorAt, activityGlyphAt, activityKindForLabel, activityVisual } from '../activity-visuals.js';
 import { plifGlyphFramesForTerminal } from '../plif-glyphs.js';
 import { color, formatCount, formatDuration, formatWorkedDuration, glyph, supportsRichGlyphs } from '../theme.js';
 import { ANIMATION_INTERVAL_MS, useAnimationFrame, usePlifAnimation } from '../hooks/useAnimationClock.js';
@@ -152,9 +152,13 @@ export const Working = React.memo(function Working({ seed, since, tokens, estima
 
   return (
     <Text>
-      <Text color={color('accent')} bold>{activityGlyphAt(kind, frame * ANIMATION_INTERVAL_MS, true)}</Text>
-      <Text> </Text>
-      <GradientText value={label} from={visual.gradient[0]} to={visual.gradient[1]} bold />
+      <ActivityLabel
+        glyph={activityGlyphAt(kind, frame * ANIMATION_INTERVAL_MS, true)}
+        value={label}
+        from={visual.gradient[0]}
+        to={visual.gradient[1]}
+        shimmerMs={frame * ANIMATION_INTERVAL_MS}
+      />
       <Text color={color('muted')}>…</Text>
       {facts.length > 0 && <Text color={color('ghost')}> ({facts.join(` ${glyph.divider} `)})</Text>}
     </Text>
@@ -168,12 +172,27 @@ export const Spinner = React.memo(function Spinner({ label, since, tone = 'accen
   const activityLabel = label ?? 'Working';
   const kind = activityKindForLabel(activityLabel);
   const visual = activityVisual(kind);
+  const glyphColor = plif
+    ? activityColorAt(kind, activityFrame * ANIMATION_INTERVAL_MS)
+    : color(tone);
 
   return (
     <Text>
-      <Text color={color(tone)} bold>{plif ? activityGlyphAt(kind, activityFrame * ANIMATION_INTERVAL_MS, true) : frame}</Text>
-      <Text> </Text>
-      <GradientText value={activityLabel} from={visual.gradient[0]} to={visual.gradient[1]} bold />
+      {plif ? (
+        <ActivityLabel
+          glyph={activityGlyphAt(kind, activityFrame * ANIMATION_INTERVAL_MS, true)}
+          value={activityLabel}
+          from={visual.gradient[0]}
+          to={visual.gradient[1]}
+          shimmerMs={activityFrame * ANIMATION_INTERVAL_MS}
+        />
+      ) : (
+        <>
+          <Text color={glyphColor} bold>{frame}</Text>
+          <Text> </Text>
+          <ActivityLabel glyph="" value={activityLabel} from={visual.gradient[0]} to={visual.gradient[1]} />
+        </>
+      )}
       {!plif && since !== undefined && elapsed >= 1000 && (
         <Text color={color('ghost')}> {formatDuration(elapsed)}</Text>
       )}

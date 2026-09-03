@@ -321,49 +321,14 @@ export function Picker({
     return <EffortSelector hint={hint} items={items ?? []} selected={selected} width={width} />;
   }
 
-  return (
-    <Box flexDirection="column" width="100%" marginBottom={1}>
-      <Box flexDirection="column" width={inner}>
-        <Box justifyContent="space-between">
-          <Text color={color('accent')} bold>
-            {title}
-          </Text>
-          <Text color={color('ghost')}>
-            {countLabel
-              ? `${count} ${countLabel}`
-              : `${count} ${grouped ? 'providers' : count === 1 ? 'match' : 'matches'}`}
-          </Text>
-        </Box>
-
-        {hint?.split('\n').map((line, index) => (
-          <Text key={`${line}-${index}`} color={color('ghost')}>{truncate(line, inner)}</Text>
-        ))}
-
-        <Box marginTop={1}>
-          <Text color={color('muted')}>{glyph.prompt} </Text>
-          {filter ? (
-            <Text color={color('text')}>{filter}</Text>
-          ) : (
-            <Text color={color('ghost')}>{modelFirst ? 'Search models' : 'type to filter'}</Text>
-          )}
-        </Box>
-
-        <Box marginTop={1} flexDirection={splitDetails ? 'row' : 'column'} width="100%">
-          <Box flexDirection="column" width={listWidth}>
-          {start > 0 && (
-            <Text color={color('ghost')}>
-              {'  '}
-              {glyph.pending} {start} above
-            </Text>
-          )}
-
-          {visible.length === 0 && (
-            <Text color={color('faint')}>
-              {'  '}nothing matches — custom providers live in ~/.plif/config.toml
-            </Text>
-          )}
-
-          {visible.map((item, index) => {
+  /**
+   * One row's content. Split out from the list so every row can share a
+   * single labelled wrapper: Slate hit-tests mouse reports against the laid
+   * out tree and reports the element it landed on, so the label is all the
+   * app needs to turn a click into a selection. No second, hand-written
+   * layout model, and no per-row event closure to invalidate the frame.
+   */
+  const renderRow = (item: PickerRow | PickerItem, index: number): React.ReactNode => {
             const active = start + index === selected;
             if (grouped) {
               const row = item as PickerRow;
@@ -556,7 +521,60 @@ export function Picker({
                 )}
               </Box>
             );
-          })}
+  };
+
+  return (
+    <Box flexDirection="column" width="100%" marginBottom={1}>
+      <Box flexDirection="column" width={inner}>
+        <Box justifyContent="space-between">
+          <Text color={color('accent')} bold>
+            {title}
+          </Text>
+          <Text color={color('ghost')}>
+            {countLabel
+              ? `${count} ${countLabel}`
+              : `${count} ${grouped ? 'providers' : count === 1 ? 'match' : 'matches'}`}
+          </Text>
+        </Box>
+
+        {hint?.split('\n').map((line, index) => (
+          <Text key={`${line}-${index}`} color={color('ghost')}>{truncate(line, inner)}</Text>
+        ))}
+
+        <Box marginTop={1}>
+          <Text color={color('muted')}>{glyph.prompt} </Text>
+          {filter ? (
+            <Text color={color('text')}>{filter}</Text>
+          ) : (
+            <Text color={color('ghost')}>{modelFirst ? 'Search models' : 'type to filter'}</Text>
+          )}
+        </Box>
+
+        <Box marginTop={1} flexDirection={splitDetails ? 'row' : 'column'} width="100%">
+          <Box flexDirection="column" width={listWidth}>
+          {start > 0 && (
+            <Text color={color('ghost')}>
+              {'  '}
+              {glyph.pending} {start} above
+            </Text>
+          )}
+
+          {visible.length === 0 && (
+            <Text color={color('faint')}>
+              {'  '}nothing matches — custom providers live in ~/.plif/config.toml
+            </Text>
+          )}
+
+          {visible.map((item, index) => (
+            <Box
+              key={grouped ? (item as PickerRow).id : (item as PickerItem).value}
+              width="100%"
+              flexDirection="column"
+              hitTarget={`picker:row:${start + index}`}
+            >
+              {renderRow(item, index)}
+            </Box>
+          ))}
 
           {start + rows < rowCount && (
             <Text color={color('ghost')}>

@@ -40,6 +40,10 @@ const slateSharedSegmenter = Intl.Segmenter
     : null;
 const slateWidthCache = new Map();
 const SLATE_WIDTH_CACHE_LIMIT = 20000;
+const slateSegmentCache = new Map();
+const SLATE_SEGMENT_CACHE_LIMIT = 20000;
+const slateWrapCache = new Map();
+const SLATE_WRAP_CACHE_LIMIT = 8000;
 `;
 
 const WIDTH_BODY = (name) => `${name} displayWidth(value) {
@@ -58,6 +62,18 @@ const WIDTH_ORIGINAL = (name) => `${name} displayWidth(value) {
     return segmentGraphemes(value).reduce((width, grapheme) => width + graphemeWidth(grapheme), 0);
 }`;
 
+/**
+ * ASCII-only text is one cell per code unit, so the whole grapheme machinery --
+ * segmentation, then three Unicode property regexes per character -- can be
+ * skipped. Nearly all terminal text takes this path.
+ */
+const ASCII_WIDTH_GUARD = `    if (value.length === 1) {
+        const ascii = value.charCodeAt(0);
+        if (ascii >= 0x20 && ascii <= 0x7e)
+            return 1;
+    }
+    const code = value.codePointAt(0) ?? 0;`;
+
 /** Each target names the exact original text it replaces, so a changed upstream is left alone. */
 const targets = [
   {
@@ -71,14 +87,72 @@ const targets = [
     return fallbackGraphemes(value);
 }`,
         to: `${PREAMBLE}export function segmentGraphemes(value) {
-    if (SLATE_ASCII_ONLY.test(value))
-        return value.split("");
-    if (slateSharedSegmenter)
-        return [...slateSharedSegmenter.segment(value)].map(item => item.segment);
-    return fallbackGraphemes(value);
+    const cached = slateSegmentCache.get(value);
+    if (cached !== undefined)
+        return cached;
+    const segments = SLATE_ASCII_ONLY.test(value)
+        ? value.split("")
+        : slateSharedSegmenter
+            ? [...slateSharedSegmenter.segment(value)].map(item => item.segment)
+            : fallbackGraphemes(value);
+    if (slateSegmentCache.size < SLATE_SEGMENT_CACHE_LIMIT)
+        slateSegmentCache.set(value, segments);
+    return segments;
 }`,
       },
       { from: WIDTH_ORIGINAL('export function'), to: WIDTH_BODY('export function') },
+      {
+        from: 'export function splitLines(value) {',
+        to: String.raw`export function splitLines(value) {
+    if (value.indexOf("\n") === -1 && value.indexOf("\r") === -1)
+        return [value];`,
+      },
+      {
+        from: `export function graphemeWidth(value) {
+    const code = value.codePointAt(0) ?? 0;`,
+        to: `export function graphemeWidth(value) {
+${ASCII_WIDTH_GUARD}`,
+      },
+      {
+        from: `export function wrapText(value, maxWidth) {
+    const width = Math.max(1, Math.floor(maxWidth));
+    return splitLines(value).flatMap(line => wrapLine(line, width));
+}`,
+        to: `export function wrapText(value, maxWidth) {
+    const width = Math.max(1, Math.floor(maxWidth));
+    // The width is delimited by the first colon, so the key is unambiguous.
+    const key = width + ":" + value;
+    const cached = slateWrapCache.get(key);
+    if (cached !== undefined)
+        return cached;
+    const lines = splitLines(value).flatMap(line => wrapLine(line, width));
+    if (slateWrapCache.size < SLATE_WRAP_CACHE_LIMIT)
+        slateWrapCache.set(key, lines);
+    return lines;
+}`,
+      },
+      {
+        from: `function wrapLine(value, maxWidth) {
+    if (value.length === 0)
+        return [""];
+    if (!Number.isFinite(maxWidth))
+        return [value];
+    const result = [];`,
+        to: `function wrapLine(value, maxWidth) {
+    if (value.length === 0)
+        return [""];
+    if (!Number.isFinite(maxWidth))
+        return [value];
+    if (SLATE_ASCII_ONLY.test(value)) {
+        if (value.length <= maxWidth)
+            return [value];
+        const chunks = [];
+        for (let at = 0; at < value.length; at += maxWidth)
+            chunks.push(value.slice(at, at + maxWidth));
+        return chunks;
+    }
+    const result = [];`,
+      },
     ],
   },
   {
@@ -90,14 +164,26 @@ const targets = [
     return Segmenter ? [...new Segmenter(undefined, { granularity: "grapheme" }).segment(value)].map(item => item.segment) : [...value];
 }`,
         to: `${PREAMBLE}function segmentGraphemes(value) {
-    if (SLATE_ASCII_ONLY.test(value))
-        return value.split("");
-    return slateSharedSegmenter
-        ? [...slateSharedSegmenter.segment(value)].map(item => item.segment)
-        : [...value];
+    const cached = slateSegmentCache.get(value);
+    if (cached !== undefined)
+        return cached;
+    const segments = SLATE_ASCII_ONLY.test(value)
+        ? value.split("")
+        : slateSharedSegmenter
+            ? [...slateSharedSegmenter.segment(value)].map(item => item.segment)
+            : [...value];
+    if (slateSegmentCache.size < SLATE_SEGMENT_CACHE_LIMIT)
+        slateSegmentCache.set(value, segments);
+    return segments;
 }`,
       },
       { from: WIDTH_ORIGINAL('function'), to: WIDTH_BODY('function') },
+      {
+        from: `function graphemeWidth(value) {
+    const code = value.codePointAt(0) ?? 0;`,
+        to: `function graphemeWidth(value) {
+${ASCII_WIDTH_GUARD}`,
+      },
     ],
   },
 ];
@@ -113,7 +199,7 @@ for (const target of targets) {
     continue;
   }
   const raw = readFileSync(file, 'utf8');
-  if (raw.includes('SLATE_ASCII_ONLY')) {
+  if (raw.includes('SLATE_WRAP_CACHE_LIMIT')) {
     already += 1;
     continue;
   }

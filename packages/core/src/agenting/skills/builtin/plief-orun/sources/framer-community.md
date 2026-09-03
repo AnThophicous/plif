@@ -1,7 +1,7 @@
 # Framer Community / Marketplace
 
-**Type:** marketplace, template source, component source, design/interaction reference  
-**Verification:** `VERIFIED_CURRENT` / `HIGH`  
+**Type:** marketplace, template source, component source, design/interaction reference\
+**Verification:** `VERIFIED_CURRENT` / `HIGH`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile

@@ -30,6 +30,13 @@ Example:
 
 Then query implementations attached to those concepts.
 
+For implementation knowledge, resolve the capability domain and graph before
+looking at a library name. Use `scripts/query_capabilities.py` with the intent,
+framework and hard requirements. Return a compact candidate set with evidence,
+limitations and a verification plan; load full records only for the finalists.
+Orun qualifies technical fit. If the choice changes product hierarchy, visual
+language or interaction meaning, hand the experience-fit decision to Sifr.
+
 ## Candidate scoring
 
 Use 0–5 per dimension:
@@ -48,6 +55,10 @@ Use 0–5 per dimension:
 
 Normalize only when comparison is useful. Do not manufacture precision from missing evidence.
 Unknown critical dimensions lower confidence; they are not silently scored as neutral.
+
+Hard gates run before this score. A candidate that fails the host runtime, SSR
+boundary, license/provenance, accessibility or performance budget is rejected or
+flagged regardless of its visual score.
 
 ## Risk Engine
 

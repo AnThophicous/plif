@@ -20,6 +20,10 @@ The authoritative order is always:
 
 `OFFICIAL SOURCE > LOCAL INDEX > MODEL MEMORY`
 
+The runtime capability index is split into a compact baseline, a curated
+expansion and a catalog-derived discovery shard. The latter is deliberately
+`LOW` confidence until its source, license and behavior are re-verified.
+
 Run:
 
 ```bash
@@ -28,6 +32,8 @@ python3 scripts/build_indexes.py
 python3 scripts/detect_duplicates.py
 python3 scripts/check_freshness.py
 python3 tests/smoke_test.py
+python3 scripts/build_capability_expansion.py
+python3 tests/capability_knowledge_test.py
 ```
 
 Network checks are explicit:

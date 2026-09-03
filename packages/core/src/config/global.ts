@@ -108,7 +108,28 @@ export interface GlobalConfig {
   readonly NeedKey?: boolean;
   readonly temperature?: number;
   readonly maxTokens?: number;
+  /**
+   * Token ceiling for one agent run, before the watchdog stops it.
+   *
+   * The stop exists so a looping agent cannot burn a budget unattended, and
+   * the default is deliberately conservative. It is configurable because the
+   * error raised on reaching the ceiling tells the operator to raise the run
+   * budget — advice that needs somewhere to be acted on. Omitted means the
+   * built-in default.
+   */
+  readonly maxRunTokens?: number;
   readonly timeoutMs?: number;
+  /**
+   * How the tool surface is presented to the model.
+   *
+   * `native` sends every tool schema on every request. `code` sends one —
+   * `run_code` — and moves the catalogue into the cacheable system prefix,
+   * where the model reaches tools by writing programs; that is a large token
+   * saving on a wide tool surface and it needs a container able to spawn a
+   * process. `both` ships both presentations and lets the model choose, which
+   * costs the most and is mainly useful while comparing them.
+   */
+  readonly toolMode?: 'native' | 'code' | 'both';
   readonly effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | 'ultracode' | 'plif';
   /** Opt-in Codex fast service tier; ignored by all other providers. */
   readonly codexFast?: boolean;
@@ -425,6 +446,20 @@ export async function setAutoApprove(
 
 export function isAutoApproveEnabled(config: GlobalConfig): boolean {
   return permissionMode(config) === 'auto-approve';
+}
+
+/**
+ * Which tool presentation this session runs.
+ *
+ * The environment wins over the file because switching presentation is how you
+ * measure one against the other, and a comparison you have to edit a config
+ * file between runs to make is a comparison nobody makes. An unrecognised value
+ * falls back to `native` rather than failing: the wrong presentation is a cost,
+ * a refusal to start is an outage.
+ */
+export function toolModeOf(config: GlobalConfig): 'native' | 'code' | 'both' {
+  const raw = (process.env['PLIF_TOOLS_MODE'] ?? config.toolMode ?? '').trim().toLowerCase();
+  return raw === 'code' || raw === 'both' || raw === 'native' ? raw : 'native';
 }
 
 export function permissionMode(config: GlobalConfig): PermissionMode {

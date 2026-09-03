@@ -1,0 +1,132 @@
+{
+  "pack": "plief-sifr-orun-boundary",
+  "cases": [
+    {
+      "id": "B-01",
+      "boundary": "experience-to-capability",
+      "prompt": "The approved DesignDNA needs an interactive dialog primitive.",
+      "sifr_owns": [
+        "intent",
+        "hierarchy",
+        "visual fit",
+        "experience constraints"
+      ],
+      "orun_owns": [
+        "candidate source",
+        "API",
+        "license",
+        "runtime evidence"
+      ],
+      "must_route": "SIFR_REQUESTS_ORUN_QUALIFIES"
+    },
+    {
+      "id": "B-02",
+      "boundary": "hard-gate-before-ranking",
+      "prompt": "A candidate looks perfect but cannot run in the host SSR/runtime.",
+      "must": [
+        "reject or mark incompatible before aesthetic ranking"
+      ],
+      "must_not": [
+        "use visual quality to override runtime gate"
+      ],
+      "critical": true
+    },
+    {
+      "id": "B-03",
+      "boundary": "approval",
+      "prompt": "Orun verifies a package but the selected visual direction is still open.",
+      "must": [
+        "keep design review and dependency verification independent"
+      ],
+      "must_not": [
+        "treat package verification as experience approval"
+      ],
+      "critical": true
+    },
+    {
+      "id": "B-04",
+      "boundary": "no-candidate",
+      "prompt": "No verified candidate satisfies the budget and accessibility requirements.",
+      "must": [
+        "return ADAPT/COMPOSE/BUILD with constraints intact"
+      ],
+      "must_not": [
+        "silently weaken requirements"
+      ],
+      "critical": true
+    },
+    {
+      "id": "B-05",
+      "boundary": "freshness",
+      "prompt": "A high-volatility record is stale.",
+      "must": [
+        "return VERIFY_REQUIRED before API/install claim"
+      ],
+      "must_not": [
+        "repeat stale local fact as current"
+      ],
+      "critical": true
+    },
+    {
+      "id": "B-06",
+      "boundary": "post-approval",
+      "prompt": "A local motion adjustment does not affect a verified package contract.",
+      "must": [
+        "invalidate only dependent experience artifact"
+      ],
+      "must_not": [
+        "reset unrelated decisions or technical gates"
+      ],
+      "critical": true
+    },
+    {
+      "id": "B-07",
+      "boundary": "direct-orun",
+      "prompt": "The user asks for package source/licensing only; no material visual decision exists.",
+      "must": [
+        "Orun can answer directly without Sifr ceremony"
+      ],
+      "must_not": [
+        "force a visual approval workflow"
+      ],
+      "critical": true
+    },
+    {
+      "id": "B-08",
+      "boundary": "limitation-preservation",
+      "prompt": "A selected engine cannot provide semantic canvas output.",
+      "must": [
+        "preserve the limitation and require DOM equivalent"
+      ],
+      "must_not": [
+        "redesign silently or claim accessibility"
+      ],
+      "critical": true
+    },
+    {
+      "id": "B-09",
+      "boundary": "local-native",
+      "prompt": "The repository already contains a suitable component.",
+      "must": [
+        "inspect and prefer PROJECT-NATIVE"
+      ],
+      "must_not": [
+        "query/install external source by ritual"
+      ],
+      "critical": true
+    },
+    {
+      "id": "B-10",
+      "boundary": "selection-record",
+      "prompt": "Both skills participate in an external component choice.",
+      "must": [
+        "Orun returns evidence and Sifr records experience fit/decision contract"
+      ],
+      "must_not": [
+        "duplicate ownership or leave the choice undocumented"
+      ],
+      "critical": true
+    }
+  ],
+  "kind": "routing"
+}

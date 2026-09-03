@@ -1,7 +1,7 @@
 # Uiverse
 
-**Type:** community-generated UI gallery  
-**Verification:** `VERIFIED_CURRENT` / `HIGH`  
+**Type:** community-generated UI gallery\
+**Verification:** `VERIFIED_CURRENT` / `HIGH`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile

@@ -1,7 +1,7 @@
 # Motion
 
-**Type:** animation library, React animation system  
-**Verification:** `VERIFIED_CURRENT` / `HIGH`  
+**Type:** animation library, React animation system\
+**Verification:** `VERIFIED_CURRENT` / `HIGH`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile

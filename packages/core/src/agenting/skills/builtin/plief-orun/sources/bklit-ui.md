@@ -1,7 +1,7 @@
 # Bklit UI
 
-**Type:** shadcn registry, data visualization component library, studio product  
-**Verification:** `VERIFIED_CURRENT` / `HIGH`  
+**Type:** shadcn registry, data visualization component library, studio product\
+**Verification:** `VERIFIED_CURRENT` / `HIGH`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile

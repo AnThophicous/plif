@@ -1,0 +1,110 @@
+{
+  "version": "1.0.0",
+  "purpose": "Regression cases for the expanded design-language corpus.",
+  "cases": [
+    {
+      "id": "S-EXP-01",
+      "query": "Art Nouveau versus Art Deco",
+      "expected_any": [
+        "art-nouveau",
+        "art-deco"
+      ]
+    },
+    {
+      "id": "S-EXP-02",
+      "query": "Swiss grid versus Bauhaus",
+      "expected_any": [
+        "swiss-typographic",
+        "bauhaus"
+      ]
+    },
+    {
+      "id": "S-EXP-03",
+      "query": "Minimalism versus Neo-minimalism",
+      "expected_any": [
+        "neo-minimalism",
+        "quiet-ui",
+        "editorial-minimalism"
+      ]
+    },
+    {
+      "id": "S-EXP-04",
+      "query": "Brutalism versus Neo-brutalism",
+      "expected_any": [
+        "brutalism-neo-brutalism",
+        "web-brutalism"
+      ]
+    },
+    {
+      "id": "S-EXP-05",
+      "query": "Glassmorphism versus Liquid Glass",
+      "expected_any": [
+        "glassmorphism-liquid-glass",
+        "liquid-glass-functional",
+        "frosted-surface"
+      ]
+    },
+    {
+      "id": "S-EXP-06",
+      "query": "Y2K versus Frutiger Aero",
+      "expected_any": [
+        "maximalism-retro-futurism",
+        "frutiger-aero",
+        "cyber-y2k"
+      ]
+    },
+    {
+      "id": "S-EXP-07",
+      "query": "Vaporwave versus Synthwave",
+      "expected_any": [
+        "vaporwave",
+        "synthwave"
+      ]
+    },
+    {
+      "id": "S-EXP-08",
+      "query": "Editorial Minimalism versus Luxury Editorial",
+      "expected_any": [
+        "editorial-minimalism",
+        "cinematic-luxury-editorial"
+      ]
+    },
+    {
+      "id": "S-EXP-09",
+      "query": "Cyberpunk versus Solarpunk",
+      "expected_any": [
+        "cyber-techno",
+        "biopunk",
+        "techno-language"
+      ]
+    },
+    {
+      "id": "S-EXP-10",
+      "query": "Bento grid versus generic card grid",
+      "expected_any": [
+        "bento-grid",
+        "modular-grid",
+        "modular-ui"
+      ]
+    },
+    {
+      "id": "S-EXP-11",
+      "query": "Maximalism versus clutter",
+      "expected_any": [
+        "maximalism-retro-futurism",
+        "controlled-chaos",
+        "pop-maximalism"
+      ]
+    },
+    {
+      "id": "S-EXP-12",
+      "query": "Spatial versus decorative 3D",
+      "expected_any": [
+        "spatial-immersive",
+        "spatial-web",
+        "product-3d"
+      ]
+    }
+  ],
+  "kind": "expansion"
+}

@@ -43,12 +43,12 @@ test('token split normalization restores missing technique safety defaults', () 
   assert.equal(config.techniques.budgets.on, true);
   assert.equal(config.techniques.compaction.on, true);
   assert.equal(config.techniques.caveman.on, false);
-  assert.equal(tokenSplitDefinitions().length, 14);
+  assert.equal(tokenSplitDefinitions().length, 15);
 });
 
 test('token split sanity reports safe projection checks and explicit non-wired techniques', () => {
   const results = runTokenSplitSanity();
-  assert.equal(results.length, 14);
+  assert.equal(results.length, 15);
   assert.equal(results.find((result) => result.technique === 'tool-clear')?.status, 'pass');
   assert.equal(results.find((result) => result.technique === 'terse')?.status, 'not-wired');
   assert.equal(results.some((result) => result.status === 'fail'), false);

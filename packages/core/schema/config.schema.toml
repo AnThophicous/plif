@@ -50,6 +50,11 @@ deprecatedBy = "permissionMode"
 type = "string"
 values = ["low", "medium", "high", "xhigh", "max", "ultra", "ultracode", "plif"]
 
+[fields.toolMode]
+type = "string"
+values = ["native", "code", "both"]
+description = "How tools reach the model. native sends every schema each request; code sends only run_code and moves the catalogue into the cacheable system prefix, where the model calls tools from inside a sandboxed program; both ships each and lets the model choose. Overridden by PLIF_TOOLS_MODE."
+
 [fields.codexFast]
 type = "boolean"
 description = "Use Codex's higher-speed service tier; applies only to the Codex provider."

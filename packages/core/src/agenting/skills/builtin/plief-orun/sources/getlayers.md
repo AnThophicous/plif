@@ -1,7 +1,7 @@
 # GetLayers
 
-**Type:** AI design layer library, prompt library, source-file library, 3D scene source, MCP/skill ecosystem  
-**Verification:** `VERIFIED_CURRENT` / `HIGH`  
+**Type:** AI design layer library, prompt library, source-file library, 3D scene source, MCP/skill ecosystem\
+**Verification:** `VERIFIED_CURRENT` / `HIGH`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile

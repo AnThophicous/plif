@@ -1,7 +1,7 @@
 # Three.js
 
-**Type:** 3D engine  
-**Verification:** `VERIFIED_CURRENT` / `HIGH`  
+**Type:** 3D engine\
+**Verification:** `VERIFIED_CURRENT` / `HIGH`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile

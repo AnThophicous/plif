@@ -25,8 +25,16 @@ interface FooterProps {
   readonly showHints?: boolean;
 }
 
-/** A compact contextual status surface shown only when it earns attention. */
-export const FOOTER_HEIGHT = 3;
+/**
+ * A compact contextual status surface shown only when it earns attention.
+ *
+ * One line of text - no rule, no bordered box. Plif's visual direction calls
+ * for light chrome, and the rule was the last piece of pure decoration here:
+ * the prompt frame directly above it already separates the footer from the
+ * transcript, so the line only repeated an edge that was already drawn - and
+ * it cost a terminal row that the transcript now keeps.
+ */
+export const FOOTER_HEIGHT = 1;
 
 /**
  * Provider/model/effort/context are intentionally given one home. The labels
@@ -48,7 +56,8 @@ export const Footer = React.memo(function Footer({
   void hints;
   void status;
   void showHints;
-  const innerWidth = Math.max(8, width - 4);
+  // No border or padding to account for any more; the whole width is usable.
+  const innerWidth = Math.max(8, width);
   const percent = contextPercent(contextUsed, contextMax);
   const meter = contextMeter(percent, 14);
   const providerLabel = provider ? providerDisplayName(provider) : 'not configured';
@@ -67,14 +76,7 @@ export const Footer = React.memo(function Footer({
         : `${truncate(modelLabel, Math.max(10, innerWidth - (showCodexFast ? 27 : 17)))}  ${glyph.divider}  ${effortLabel}${showCodexFast ? `  ${glyph.divider}  ${fastLabel}` : ''}  ${percent}%`;
 
   return (
-    <Box
-      width="100%"
-      height={FOOTER_HEIGHT}
-      borderStyle="round"
-      borderColor={color('faint')}
-      paddingX={1}
-      flexShrink={0}
-    >
+    <Box width="100%" height={FOOTER_HEIGHT} flexDirection="column" flexShrink={0}>
       {displayWidth(plain) > innerWidth ? (
         <Text color={color('muted')} wrap="truncate">{truncate(plain, innerWidth)}</Text>
       ) : (

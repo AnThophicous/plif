@@ -1,0 +1,385 @@
+/*
+ * pli'ef sifr — tokens de design
+ *
+ * Ponto de partida para projetos SEM design system. Para adaptar ao produto,
+ * ajuste três coisas: o matiz do acento (--plief-accent-hue), o matiz dos
+ * neutros (--plief-neutral-hue) e a personalidade de raio (--radius-control /
+ * --radius-card). Todo o resto deriva das escalas em
+ * references/sistema-de-design.md.
+ *
+ * Cores em OKLCH (luminosidade perceptualmente uniforme → contraste
+ * previsível) e temas via light-dark(): cada token declara o valor claro e o
+ * escuro uma única vez. O tema escuro é uma escala própria, não uma inversão.
+ *
+ * Alternância de tema:
+ *   <html>                      → segue prefers-color-scheme
+ *   <html data-theme="light">   → força claro
+ *   <html data-theme="dark">    → força escuro
+ *
+ * Componentes devem usar APENAS os tokens semânticos (seção 3), nunca os
+ * passos brutos das escalas (seção 2).
+ *
+ * Suporte: navegadores modernos (OKLCH 2023+, light-dark() 2024+).
+ */
+
+@layer tokens {
+  :root { color-scheme: light dark; }
+  :root[data-theme="light"] { color-scheme: light; }
+  :root[data-theme="dark"]  { color-scheme: dark; }
+
+  :root {
+    /* ------------------------------------------------------------------
+     * 1. Parâmetros de identidade — mude aqui
+     * ---------------------------------------------------------------- */
+    --plief-accent-hue: 250;        /* 250 azul · 165 verde-petróleo · 25 coral · 300 violeta */
+    --plief-neutral-hue: 250;       /* normalmente igual ao acento ou levemente frio */
+    --plief-neutral-chroma: 0.008;  /* 0 = cinza puro (evitar) · 0.005–0.015 = tinta sutil */
+
+    /* ------------------------------------------------------------------
+     * 2. Escalas brutas (não usar direto em componentes)
+     *    12 passos, estilo Radix. Claro | Escuro.
+     * ---------------------------------------------------------------- */
+    --nh: var(--plief-neutral-hue);
+    --nc: var(--plief-neutral-chroma);
+    --ah: var(--plief-accent-hue);
+
+    --neutral-1:  light-dark(oklch(0.995 calc(var(--nc) * .25) var(--nh)), oklch(0.135 var(--nc) var(--nh)));
+    --neutral-2:  light-dark(oklch(0.982 calc(var(--nc) * .5) var(--nh)),  oklch(0.165 var(--nc) var(--nh)));
+    --neutral-3:  light-dark(oklch(0.955 var(--nc) var(--nh)),             oklch(0.205 var(--nc) var(--nh)));
+    --neutral-4:  light-dark(oklch(0.930 var(--nc) var(--nh)),             oklch(0.235 var(--nc) var(--nh)));
+    --neutral-5:  light-dark(oklch(0.905 var(--nc) var(--nh)),             oklch(0.265 var(--nc) var(--nh)));
+    --neutral-6:  light-dark(oklch(0.875 var(--nc) var(--nh)),             oklch(0.300 var(--nc) var(--nh)));
+    --neutral-7:  light-dark(oklch(0.830 var(--nc) var(--nh)),             oklch(0.350 var(--nc) var(--nh)));
+    --neutral-8:  light-dark(oklch(0.640 var(--nc) var(--nh)),             oklch(0.480 var(--nc) var(--nh))); /* ≥ 3:1 sobre bg */
+    --neutral-9:  light-dark(oklch(0.600 var(--nc) var(--nh)),             oklch(0.560 var(--nc) var(--nh)));
+    --neutral-10: light-dark(oklch(0.550 var(--nc) var(--nh)),             oklch(0.620 var(--nc) var(--nh)));
+    --neutral-11: light-dark(oklch(0.470 calc(var(--nc) * 1.5) var(--nh)), oklch(0.740 var(--nc) var(--nh)));
+    --neutral-12: light-dark(oklch(0.200 calc(var(--nc) * 2) var(--nh)),   oklch(0.960 calc(var(--nc) * .5) var(--nh)));
+
+    --accent-1:  light-dark(oklch(0.990 0.010 var(--ah)), oklch(0.160 0.020 var(--ah)));
+    --accent-2:  light-dark(oklch(0.975 0.020 var(--ah)), oklch(0.190 0.030 var(--ah)));
+    --accent-3:  light-dark(oklch(0.945 0.045 var(--ah)), oklch(0.240 0.060 var(--ah)));
+    --accent-4:  light-dark(oklch(0.910 0.075 var(--ah)), oklch(0.280 0.085 var(--ah)));
+    --accent-5:  light-dark(oklch(0.870 0.100 var(--ah)), oklch(0.320 0.105 var(--ah)));
+    --accent-6:  light-dark(oklch(0.820 0.120 var(--ah)), oklch(0.370 0.125 var(--ah)));
+    --accent-7:  light-dark(oklch(0.750 0.140 var(--ah)), oklch(0.440 0.145 var(--ah)));
+    --accent-8:  light-dark(oklch(0.620 0.160 var(--ah)), oklch(0.540 0.160 var(--ah))); /* foco: ≥ 3:1 sobre bg */
+    --accent-9:  light-dark(oklch(0.500 0.160 var(--ah)), oklch(0.620 0.170 var(--ah))); /* sólido */
+    --accent-10: light-dark(oklch(0.450 0.160 var(--ah)), oklch(0.680 0.160 var(--ah)));
+    --accent-11: light-dark(oklch(0.420 0.150 var(--ah)), oklch(0.780 0.120 var(--ah))); /* texto */
+    --accent-12: light-dark(oklch(0.250 0.080 var(--ah)), oklch(0.920 0.050 var(--ah)));
+
+    --success-solid:   light-dark(oklch(0.560 0.150 150), oklch(0.640 0.150 150));
+    --success-hover:   light-dark(oklch(0.500 0.150 150), oklch(0.700 0.150 150));
+    --success-text:    light-dark(oklch(0.420 0.130 150), oklch(0.780 0.130 150));
+    --success-surface: light-dark(oklch(0.960 0.040 150), oklch(0.220 0.040 150));
+    --success-border:  light-dark(oklch(0.850 0.090 150), oklch(0.360 0.080 150));
+
+    --warning-solid:   light-dark(oklch(0.720 0.160 70),  oklch(0.760 0.160 75));
+    --warning-hover:   light-dark(oklch(0.660 0.160 70),  oklch(0.810 0.150 75));
+    --warning-text:    light-dark(oklch(0.450 0.120 65),  oklch(0.830 0.140 80));
+    --warning-surface: light-dark(oklch(0.970 0.050 80),  oklch(0.230 0.045 75));
+    --warning-border:  light-dark(oklch(0.870 0.110 75),  oklch(0.400 0.090 75));
+
+    --danger-solid:    light-dark(oklch(0.560 0.210 25),  oklch(0.620 0.200 25));
+    --danger-hover:    light-dark(oklch(0.500 0.210 25),  oklch(0.680 0.190 25));
+    --danger-text:     light-dark(oklch(0.450 0.190 25),  oklch(0.780 0.150 25));
+    --danger-surface:  light-dark(oklch(0.965 0.030 20),  oklch(0.230 0.045 20));
+    --danger-border:   light-dark(oklch(0.860 0.090 20),  oklch(0.400 0.100 20));
+
+    --info-solid:      light-dark(oklch(0.560 0.150 235), oklch(0.640 0.150 235));
+    --info-hover:      light-dark(oklch(0.500 0.150 235), oklch(0.700 0.140 235));
+    --info-text:       light-dark(oklch(0.440 0.130 235), oklch(0.780 0.120 235));
+    --info-surface:    light-dark(oklch(0.960 0.035 235), oklch(0.220 0.040 235));
+    --info-border:     light-dark(oklch(0.850 0.080 235), oklch(0.370 0.080 235));
+
+    /* ------------------------------------------------------------------
+     * 3. Tokens semânticos — use ESTES nos componentes
+     * ---------------------------------------------------------------- */
+    --color-bg:              var(--neutral-1);
+    --color-bg-subtle:       var(--neutral-2);
+    --color-surface:         light-dark(var(--neutral-1), var(--neutral-2));
+    --color-surface-raised:  light-dark(var(--neutral-1), var(--neutral-3));
+    --color-surface-overlay: light-dark(var(--neutral-1), var(--neutral-3));
+    --color-surface-sunken:  light-dark(var(--neutral-3), var(--neutral-1));
+    --color-surface-hover:   light-dark(var(--neutral-3), var(--neutral-4));
+    --color-surface-active:  light-dark(var(--neutral-4), var(--neutral-5));
+    --color-border:          light-dark(var(--neutral-6), oklch(1 0 0 / .10)); /* divisores e cards: decorativo */
+    --color-border-strong:   light-dark(var(--neutral-8), oklch(1 0 0 / .22)); /* ≥ 3:1: hover, ênfase */
+    --color-border-input:    var(--color-border-strong);                      /* controles precisam de 3:1 (WCAG 1.4.11) */
+    --color-border-input-hover: light-dark(var(--neutral-9), oklch(1 0 0 / .32));
+    --color-border-subtle:   light-dark(var(--neutral-4), oklch(1 0 0 / .06));
+    --color-text:            var(--neutral-12);
+    --color-text-muted:      var(--neutral-11);
+    --color-text-subtle:     var(--neutral-9);
+    --color-text-disabled:   var(--neutral-8);
+    --color-text-on-accent:  light-dark(white, oklch(0.13 0.02 var(--ah)));
+    --color-accent:          var(--accent-9);
+    --color-accent-hover:    var(--accent-10);
+    --color-accent-active:   var(--accent-11);
+    --color-accent-subtle:   var(--accent-3);
+    --color-accent-subtle-hover: var(--accent-4);
+    --color-accent-text:     var(--accent-11);
+    --color-accent-border:   var(--accent-7);
+    --color-focus-ring:      var(--accent-8);
+    --color-backdrop:        light-dark(oklch(0.15 0.02 var(--nh) / .5), oklch(0.05 0.01 var(--nh) / .7));
+    --color-skeleton:        var(--neutral-4);
+    --color-skeleton-shine:  light-dark(var(--neutral-2), var(--neutral-6));
+
+    /* ------------------------------------------------------------------
+     * 4. Tipografia
+     * ---------------------------------------------------------------- */
+    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+    --font-display: var(--font-sans); /* troque por uma display se a marca pedir */
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+
+    --text-xs:   0.75rem;    /* 12 */
+    --text-sm:   0.875rem;   /* 14 */
+    --text-base: 1rem;       /* 16 */
+    --text-lg:   1.125rem;   /* 18 */
+    --text-xl:   1.25rem;    /* 20 */
+    --text-2xl:  1.5rem;     /* 24 */
+    --text-3xl:  1.875rem;   /* 30 */
+    --text-4xl:  2.25rem;    /* 36 */
+    --text-5xl:  3rem;       /* 48 */
+    --text-6xl:  3.75rem;    /* 60 */
+    --text-7xl:  4.5rem;     /* 72 */
+
+    --text-fluid-h1:   clamp(2.25rem, 1.5rem + 3vw, 4.5rem);
+    --text-fluid-h2:   clamp(1.75rem, 1.25rem + 2vw, 3rem);
+    --text-fluid-lead: clamp(1.0625rem, 1rem + 0.35vw, 1.25rem);
+
+    --leading-none:  1;
+    --leading-tight: 1.15;
+    --leading-snug:  1.3;
+    --leading-ui:    1.4;
+    --leading-body:  1.55;
+    --leading-loose: 1.7;
+
+    --tracking-display: -0.03em;
+    --tracking-heading: -0.015em;
+    --tracking-normal:  0;
+    --tracking-caps:    0.06em;
+
+    --weight-regular:  400;
+    --weight-medium:   500;
+    --weight-semibold: 600;
+    --weight-bold:     700;
+
+    --measure: 65ch;
+
+    /* ------------------------------------------------------------------
+     * 5. Espaçamento (base 4 px)
+     * ---------------------------------------------------------------- */
+    --space-0-5: 0.125rem;  /* 2 */
+    --space-1:   0.25rem;   /* 4 */
+    --space-2:   0.5rem;    /* 8 */
+    --space-3:   0.75rem;   /* 12 */
+    --space-4:   1rem;      /* 16 */
+    --space-5:   1.25rem;   /* 20 */
+    --space-6:   1.5rem;    /* 24 */
+    --space-8:   2rem;      /* 32 */
+    --space-10:  2.5rem;    /* 40 */
+    --space-12:  3rem;      /* 48 */
+    --space-16:  4rem;      /* 64 */
+    --space-20:  5rem;      /* 80 */
+    --space-24:  6rem;      /* 96 */
+    --space-32:  8rem;      /* 128 */
+
+    --space-section:     clamp(var(--space-16), 6vw + 1rem, var(--space-24));
+    --space-page-inline: clamp(var(--space-4), 4vw, var(--space-12));
+
+    /* ------------------------------------------------------------------
+     * 6. Raio — escolha uma personalidade e mantenha
+     * ---------------------------------------------------------------- */
+    --radius-xs:   0.125rem; /* 2 */
+    --radius-sm:   0.25rem;  /* 4 */
+    --radius-md:   0.5rem;   /* 8 */
+    --radius-lg:   0.75rem;  /* 12 */
+    --radius-xl:   1rem;     /* 16 */
+    --radius-2xl:  1.5rem;   /* 24 */
+    --radius-full: 9999px;
+
+    --radius-control: var(--radius-md);  /* botões, inputs, badges */
+    --radius-card:    var(--radius-lg);
+    --radius-dialog:  var(--radius-xl);
+
+    /* ------------------------------------------------------------------
+     * 7. Elevação — sombras em camadas com tinta; no escuro quase somem
+     *    e a elevação vem de --color-surface-raised + highlight interno
+     * ---------------------------------------------------------------- */
+    --shadow-color: light-dark(oklch(0.20 0.02 var(--nh)), oklch(0.05 0.01 var(--nh)));
+    --shadow-xs: 0 1px 2px 0 oklch(from var(--shadow-color) l c h / .05);
+    --shadow-sm: 0 1px 3px 0 oklch(from var(--shadow-color) l c h / .08),
+                 0 1px 2px -1px oklch(from var(--shadow-color) l c h / .06);
+    --shadow-md: 0 4px 6px -1px oklch(from var(--shadow-color) l c h / .08),
+                 0 2px 4px -2px oklch(from var(--shadow-color) l c h / .06);
+    --shadow-lg: 0 10px 15px -3px oklch(from var(--shadow-color) l c h / .10),
+                 0 4px 6px -4px oklch(from var(--shadow-color) l c h / .06);
+    --shadow-xl: 0 20px 25px -5px oklch(from var(--shadow-color) l c h / .12),
+                 0 8px 10px -6px oklch(from var(--shadow-color) l c h / .06);
+    --shadow-inner-highlight: light-dark(0 0 #0000, inset 0 1px 0 oklch(1 0 0 / .05));
+
+    /* ------------------------------------------------------------------
+     * 8. Movimento
+     * ---------------------------------------------------------------- */
+    --duration-instant: 0ms;
+    --duration-fast:    120ms;
+    --duration-base:    200ms;
+    --duration-slow:    300ms;
+    --duration-slower:  500ms;
+
+    --ease-out:      cubic-bezier(0, 0, 0.2, 1);
+    --ease-in:       cubic-bezier(0.4, 0, 1, 1);
+    --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* ------------------------------------------------------------------
+     * 9. Controles
+     * ---------------------------------------------------------------- */
+    --control-height-sm: 2rem;     /* 32 */
+    --control-height-md: 2.5rem;   /* 40 */
+    --control-height-lg: 2.75rem;  /* 44 */
+    --control-padding-inline-sm: var(--space-3);
+    --control-padding-inline-md: var(--space-4);
+    --control-padding-inline-lg: var(--space-5);
+    --focus-ring-width:  2px;
+    --focus-ring-offset: 2px;
+    --border-width: 1px;
+    --icon-sm: 1rem;      /* 16 */
+    --icon-md: 1.25rem;   /* 20 */
+    --icon-lg: 1.5rem;    /* 24 */
+
+    /* ------------------------------------------------------------------
+     * 10. Layout
+     * ---------------------------------------------------------------- */
+    --container-prose:   var(--measure);
+    --container-narrow:  40rem;   /* 640 */
+    --container-content: 75rem;   /* 1200 */
+    --container-wide:    90rem;   /* 1440 */
+    --sidebar-width:     16.5rem; /* 264 */
+    --panel-width:       24rem;   /* 384 */
+    --header-height:     3.5rem;  /* 56 */
+
+    /* ------------------------------------------------------------------
+     * 11. Z-index
+     * ---------------------------------------------------------------- */
+    --z-base:     0;
+    --z-raised:   10;
+    --z-sticky:   100;
+    --z-dropdown: 1000;
+    --z-overlay:  1100;
+    --z-modal:    1200;
+    --z-toast:    1300;
+    --z-tooltip:  1400;
+  }
+
+  /* ------------------------------------------------------------------
+   * Preferências do usuário
+   * ---------------------------------------------------------------- */
+  @media (prefers-reduced-motion: reduce) {
+    :root {
+      --duration-fast:   0.01ms;
+      --duration-base:   0.01ms;
+      --duration-slow:   0.01ms;
+      --duration-slower: 0.01ms;
+    }
+  }
+
+  @media (prefers-contrast: more) {
+    :root {
+      --color-border:     var(--color-border-strong);
+      --color-text-muted: var(--color-text);
+      --focus-ring-width: 3px;
+    }
+  }
+}
+
+/* ======================================================================
+ * Base mínima — aplica os tokens ao documento.
+ * Remova se o projeto já tiver um reset/base próprio.
+ * ==================================================================== */
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html {
+    font-family: var(--font-sans);
+    line-height: var(--leading-body);
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    background: var(--color-bg);
+    color: var(--color-text);
+    accent-color: var(--color-accent);
+  }
+
+  body { margin: 0; min-block-size: 100dvh; }
+
+  h1, h2, h3, h4, h5, h6 {
+    margin: 0;
+    font-weight: var(--weight-semibold);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-heading);
+    text-wrap: balance;
+  }
+  h1 { font-size: var(--text-4xl); }
+  h2 { font-size: var(--text-3xl); }
+  h3 { font-size: var(--text-2xl); }
+  h4 { font-size: var(--text-xl);   line-height: var(--leading-snug); }
+  h5 { font-size: var(--text-lg);   line-height: var(--leading-snug); }
+  h6 { font-size: var(--text-base); line-height: var(--leading-snug); }
+
+  p { margin: 0; text-wrap: pretty; }
+  p + p { margin-block-start: 1em; }
+
+  a {
+    color: var(--color-accent-text);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.15em;
+    transition: color var(--duration-fast) var(--ease-standard);
+  }
+  a:hover { color: var(--color-accent-active); }
+
+  img, picture, video, canvas, svg { display: block; max-inline-size: 100%; }
+  img, video { block-size: auto; }
+
+  button, input, select, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
+  button { cursor: pointer; }
+  :disabled { cursor: not-allowed; }
+
+  code, kbd, samp, pre { font-family: var(--font-mono); font-size: 0.9em; }
+
+  table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+
+  :focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
+    border-radius: var(--radius-sm);
+  }
+  :focus:not(:focus-visible) { outline: none; }
+
+  ::selection { background: var(--color-accent-subtle); color: var(--color-text); }
+
+  .visually-hidden {
+    position: absolute !important;
+    inline-size: 1px; block-size: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden; clip-path: inset(50%);
+    white-space: nowrap; border: 0;
+  }
+
+  .skip-link {
+    position: absolute;
+    inset-inline-start: var(--space-4);
+    inset-block-start: calc(-1 * var(--control-height-lg) - var(--space-4));
+    z-index: var(--z-tooltip);
+    padding: var(--space-3) var(--space-4);
+    background: var(--color-surface-overlay);
+    color: var(--color-text);
+    border-radius: var(--radius-control);
+    box-shadow: var(--shadow-lg);
+    transition: inset-block-start var(--duration-fast) var(--ease-out);
+  }
+  .skip-link:focus-visible { inset-block-start: var(--space-4); }
+}

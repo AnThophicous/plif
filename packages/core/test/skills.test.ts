@@ -26,10 +26,15 @@ const context = {} as ToolContext;
 describe('mandatory skill policy', () => {
   it('requires anti-AI-slop and Pli\'ef Galileu for every effort, with Argus added to Plif', () => {
     assert.deepEqual(mandatorySkillsForEffort('low'), ['anti-ai-slop', 'plief-galileu']);
+    // PLIF is the everything-on mode: the whole pli'ef family loads up front, so
+    // quality, security, frontend and component choice are all governed rather
+    // than remembered.
     assert.deepEqual(mandatorySkillsForEffort('plif'), [
       'anti-ai-slop',
       'plief-galileu',
       'plief-argus',
+      'plief-sifr',
+      'plief-orun',
     ]);
   });
 });
@@ -201,12 +206,18 @@ describe('SkillRegistry', () => {
     const registry = await SkillRegistry.load({ workspace, root });
     const skill = registry.get('plief-argus');
     assert.ok(skill);
-    assert.match(skill.instructions, /Default mode/);
-    assert.match(skill.instructions, /Authorization boundary/);
-    assert.match(skill.instructions, /attack-path/i);
+    // Argus 3.0 folded the defensive checklists of the retired plief-float into
+    // the traversable model and is written in Portuguese. The assertions track
+    // the same contract sections under their current headings.
+    assert.match(skill.instructions, /Modo padrão/);
+    assert.match(skill.instructions, /Limite obrigatório de autorização/);
+    assert.match(skill.instructions, /attack-path|caminhos-de-ataque/i);
     assert.match(skill.instructions, /release/i);
+    // The checklist-to-graph bridge is what the merge contributed; without it
+    // this is the old Argus package, not the fused one.
+    assert.match(skill.instructions, /ponte-checklist-ir/);
 
-    const reference = path.join(path.dirname(skill.file), 'schemas', 'security-ir.schema.json');
+    const reference = path.join(path.dirname(skill.file), 'assets', 'security-ir.schema.json');
     const referenceText = await fs.readFile(reference, 'utf8');
     assert.match(referenceText, /security-ir/);
     assert.match(referenceText, /nodes/);

@@ -8,7 +8,7 @@
  */
 
 import { DEFAULT_CONTEXT_TOKENS, diffStats, parseDiff } from '@plif/core';
-import type { Catalog, Decision, Effort, PolicyAction, SessionMeta, UsageInfo } from '@plif/core';
+import type { Catalog, Decision, Effort, PolicyAction, SessionMeta, SessionStats, UsageInfo } from '@plif/core';
 import type { ModelSelection } from '@plif/core';
 import { filterItems, filterPickerGroups, flattenPickerGroups, pickerRows, preservePickerSelection } from './components/Picker.js';
 import type { PickerGroup, PickerItem } from './components/Picker.js';
@@ -227,7 +227,48 @@ export const emptyListScreen: ListScreenState = {
   problem: null,
 };
 
-export type ScreenKind = 'status' | 'config' | 'usage' | 'agents' | 'sessions';
+export type ScreenKind = 'status' | 'config' | 'usage' | 'stats' | 'mcp' | 'agents' | 'sessions';
+
+/**
+ * The screen bar, in the order it is drawn and cycled.
+ *
+ * One list, so the bar a screen shows and the order Tab walks cannot drift
+ * apart. Agents and sessions stay off the bar deliberately: they are pickers
+ * that act on something and close, not places to sit and read.
+ */
+export const SCREEN_TABS: readonly { readonly id: ScreenKind; readonly label: string }[] = [
+  { id: 'status', label: 'Status' },
+  { id: 'config', label: 'Config' },
+  { id: 'usage', label: 'Usage' },
+  { id: 'stats', label: 'Stats' },
+  { id: 'mcp', label: 'MCP' },
+];
+
+/** The screen `delta` steps away on the bar, or null when the screen is off it. */
+export function tabbedScreen(kind: ScreenKind, delta: number): ScreenKind | null {
+  const index = SCREEN_TABS.findIndex((tab) => tab.id === kind);
+  if (index < 0) return null;
+  const size = SCREEN_TABS.length;
+  return SCREEN_TABS[(index + delta + size * 2) % size]!.id;
+}
+
+/** Which range of days the stats screen is summarising. */
+export type StatsRange = 'all' | '7d' | '30d';
+export type StatsTab = 'overview' | 'models';
+
+export interface StatsScreenState {
+  readonly range: StatsRange;
+  readonly tab: StatsTab;
+  readonly loading: boolean;
+  readonly problem: string | null;
+}
+
+export const emptyStatsScreen: StatsScreenState = {
+  range: 'all',
+  tab: 'overview',
+  loading: true,
+  problem: null,
+};
 
 export type SessionScreen =
   | { readonly kind: 'status' }
@@ -246,13 +287,25 @@ export type SessionScreen =
       readonly kind: 'sessions';
       readonly state: ListScreenState;
       readonly sessions: readonly SessionMeta[];
+    }
+  | {
+      readonly kind: 'stats';
+      readonly state: StatsScreenState;
+      readonly stats: SessionStats | null;
+    }
+  | {
+      // The rows come from the live `mcp.status` events the app already keeps,
+      // so the screen carries only the selection and filter.
+      readonly kind: 'mcp';
+      readonly state: ListScreenState;
     };
 
 /** Whether a screen is one of the list-shaped ones the shared cases drive. */
 export function isListScreen(
   screen: SessionScreen,
 ): screen is Extract<SessionScreen, { state: ListScreenState }> {
-  return screen.kind === 'usage' || screen.kind === 'agents' || screen.kind === 'sessions';
+  return screen.kind === 'usage' || screen.kind === 'agents' || screen.kind === 'sessions'
+    || screen.kind === 'mcp';
 }
 
 /** The initial shape of each screen. Data-bearing screens open empty and load. */
@@ -262,6 +315,8 @@ function openScreen(kind: ScreenKind): SessionScreen {
     case 'usage': return { kind: 'usage', state: emptyListScreen, usage: null };
     case 'agents': return { kind: 'agents', state: emptyListScreen, agents: [] };
     case 'sessions': return { kind: 'sessions', state: emptyListScreen, sessions: [] };
+    case 'stats': return { kind: 'stats', state: emptyStatsScreen, stats: null };
+    case 'mcp': return { kind: 'mcp', state: emptyListScreen };
     default:
       return {
         kind: 'config',
@@ -482,6 +537,11 @@ export type SessionAction =
   | { type: 'browser.rename.input'; draft: string }
   | { type: 'browser.rename.cancel' }
   | { type: 'screen.open'; screen: ScreenKind }
+  | { type: 'screen.tab'; delta: number }
+  | { type: 'stats.loaded'; stats: SessionStats }
+  | { type: 'stats.range'; range: StatsRange }
+  | { type: 'stats.tab'; tab: StatsTab }
+  | { type: 'stats.problem'; problem: string | null }
   | { type: 'screen.close' }
   | { type: 'screen.list.filter'; filter: string }
   | { type: 'screen.list.move'; delta: number; count: number }
@@ -539,6 +599,7 @@ export type SessionAction =
     }
   | { type: 'picker.filter'; filter: string }
   | { type: 'picker.move'; delta: number }
+  | { type: 'picker.select'; index: number }
   | { type: 'picker.moveVisible'; delta: number }
   | { type: 'picker.toggle'; id: string }
   | { type: 'picker.close' }
@@ -1005,6 +1066,53 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         picker: null,
       };
 
+    case 'screen.tab': {
+      // Only the screens on the bar are reachable this way. Agents and
+      // sessions are pickers reached by their command, and cycling into one
+      // from Tab would drop the reader somewhere they cannot get back from.
+      const next = state.screen ? tabbedScreen(state.screen.kind, action.delta) : null;
+      if (!next || next === state.screen?.kind) return state;
+      return { ...state, screen: openScreen(next) };
+    }
+
+    case 'stats.loaded':
+      if (state.screen?.kind !== 'stats') return state;
+      return {
+        ...state,
+        screen: {
+          ...state.screen,
+          stats: action.stats,
+          state: { ...state.screen.state, loading: false, problem: null },
+        },
+      };
+
+    case 'stats.problem':
+      if (state.screen?.kind !== 'stats') return state;
+      return {
+        ...state,
+        screen: {
+          ...state.screen,
+          state: { ...state.screen.state, loading: false, problem: action.problem },
+        },
+      };
+
+    case 'stats.range':
+      if (state.screen?.kind !== 'stats') return state;
+      return {
+        ...state,
+        screen: {
+          ...state.screen,
+          state: { ...state.screen.state, range: action.range, loading: true },
+        },
+      };
+
+    case 'stats.tab':
+      if (state.screen?.kind !== 'stats') return state;
+      return {
+        ...state,
+        screen: { ...state.screen, state: { ...state.screen.state, tab: action.tab } },
+      };
+
     case 'screen.list.filter': {
       const screen = state.screen;
       if (!screen || !isListScreen(screen)) return state;
@@ -1352,6 +1460,19 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       const matches = filterItems(state.picker.items ?? [], state.picker.filter);
       if (matches.length === 0) return state;
       const next = Math.max(0, Math.min(matches.length - 1, state.picker.selected + action.delta));
+      return { ...state, picker: { ...state.picker, selected: next } };
+    }
+
+    case 'picker.select': {
+      if (!state.picker) return state;
+      // A click names a row outright, so the index is clamped against whichever
+      // list is on screen rather than nudged from the current position.
+      const matches = state.picker.groups
+        ? pickerRows(state.picker.groups, state.picker.expanded ?? [], state.picker.filter)
+        : filterItems(state.picker.items ?? [], state.picker.filter);
+      if (matches.length === 0) return state;
+      const next = Math.max(0, Math.min(matches.length - 1, action.index));
+      if (next === state.picker.selected) return state;
       return { ...state, picker: { ...state.picker, selected: next } };
     }
 

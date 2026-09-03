@@ -5,10 +5,14 @@ import type { GlobalConfig } from '@plif/core';
 
 import { effortDisplay } from '../effort-visuals.js';
 import { color, formatCount, glyph, layout, shortenPath, truncate } from '../theme.js';
+import { ScreenTabs, type ScreenTab } from './ScreenFrame.js';
 import { contextPercent } from '../status.js';
 import type { StatusInput } from '../status.js';
 
 export interface StatusScreenProps {
+  /** The screen bar and the tab this screen is. */
+  readonly tabs?: readonly ScreenTab[];
+  readonly activeTab?: string;
   readonly snapshot: StatusInput;
   readonly version: string;
   readonly config: GlobalConfig | null;
@@ -108,6 +112,8 @@ export function statusSections(
 }
 
 export function StatusScreen({
+  tabs,
+  activeTab,
   snapshot,
   version,
   config,
@@ -140,10 +146,14 @@ export function StatusScreen({
 
   return (
     <Box flexDirection="column" width={width} height={Math.max(1, rows - 1)} paddingX={layout.gutter}>
-      <Box width={contentWidth} justifyContent="space-between">
-        <Text color={color('text')} bold>status</Text>
-        <Text color={color('ghost')}>Esc close</Text>
-      </Box>
+      {tabs && activeTab ? (
+        <ScreenTabs tabs={tabs} active={activeTab} badge="Esc close" width={contentWidth} />
+      ) : (
+        <Box width={contentWidth} justifyContent="space-between">
+          <Text color={color('text')} bold>status</Text>
+          <Text color={color('ghost')}>Esc close</Text>
+        </Box>
+      )}
       <Text color={color('faint')}>{'─'.repeat(Math.max(1, contentWidth))}</Text>
       {sections.map((section) => (
         <Box key={section.title} flexDirection="column" marginTop={compact ? 0 : 1}>

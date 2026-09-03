@@ -1,7 +1,7 @@
 # Awwwards
 
-**Type:** design inspiration source, awards/gallery  
-**Verification:** `VERIFIED_BUT_VERSION_UNKNOWN` / `HIGH`  
+**Type:** design inspiration source, awards/gallery\
+**Verification:** `VERIFIED_BUT_VERSION_UNKNOWN` / `HIGH`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile

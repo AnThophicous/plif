@@ -62,9 +62,11 @@ test('timeline keeps settled thoughts and complete file code in the Slate viewpo
   app.unmount();
   const output = stdout.output.replace(ANSI, '').replace(/\r/g, '');
 
-  assert.match(output, /Thinked for: 321 ms/);
+  // These label assertions had drifted from the UI and went unnoticed because
+  // the runner's glob only matched `.test.ts`, so no `.test.tsx` file ran.
+  assert.match(output, /Thought for 321ms/);
   assert.match(output, /first paragraph/);
   assert.match(output, /second paragraph/);
   assert.match(output, /FULL_CODE_7/);
-  assert.match(output, /Editing - src\/example\.ts \(\+8 \| -2\)/);
+  assert.match(output, /Added 8 lines, removed 2 lines in src\/example\.ts/);
 });

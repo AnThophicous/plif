@@ -1,7 +1,7 @@
 # Transitions.dev
 
-**Type:** product-motion pattern library, agent skill source  
-**Verification:** `VERIFIED_CURRENT` / `HIGH`  
+**Type:** product-motion pattern library, agent skill source\
+**Verification:** `VERIFIED_CURRENT` / `HIGH`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile
