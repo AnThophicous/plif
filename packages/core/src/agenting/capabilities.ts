@@ -1,5 +1,5 @@
 import { definePromptModule } from './types.js';
-import { mandatorySkillsForEffort } from '../harness/skills.js';
+import { DOMAIN_SKILL_ROUTES, mandatorySkillsForEffort } from '../harness/skills.js';
 
 export const mcpModule = definePromptModule({
   id: '80-mcp',
@@ -62,6 +62,17 @@ export const skillsModule = definePromptModule({
       'load or does not fit after inspection, discard it and continue with the default',
       'workflow. The default skill policy governs precedence, resources, and user',
       'updates. The mandatory skill gate below overrides this optional degradation policy.',
+      '',
+      '## Domain routing (not optional)',
+      'These are not suggestions to weigh. When the condition holds, load the skill',
+      'before the covered work begins, whether or not the user named it and whether or',
+      'not you think you already know the answer:',
+      ...DOMAIN_SKILL_ROUTES.map(
+        (route) => `- Load ${route.skills.map((name) => `\`${name}\``).join(' and ')} when ${route.when}.`,
+      ),
+      'Judge by what the work is, not by the words the user used. "Make me a landing',
+      'page", "fix this button", "the spacing looks off" and "build the dashboard" are',
+      'all frontend work.',
     ];
 
     const loaded = new Set(context.loadedSkills ?? []);
@@ -95,9 +106,37 @@ export const skillsModule = definePromptModule({
       );
     }
 
+    // Galileu is a standing discipline, not a one-off ceremony at the start of
+    // a session. Loading it once and then drifting is the failure this block
+    // exists to prevent: the decision record has to outlive the turn that
+    // created it, and later turns have to be measured against it.
+    lines.push(
+      '',
+      '## Galileu persistence',
+      'The decision record is durable state, not a formality. Keep it alive:',
+      '- Before acting on a request that sets or changes direction, write the objective,',
+      '  the assumptions it rests on, and what would falsify each one.',
+      '- On every later turn, re-read that record before deciding. If new evidence',
+      '  contradicts a recorded assumption, reopen the affected decision explicitly and',
+      '  say what changed — do not quietly proceed on the old one.',
+      '- Never invent a final objective when the user has not set one. Ask, then record',
+      '  the answer.',
+      '- Check the environment before asking: a question whose answer is in the',
+      '  repository is a question that should not be asked.',
+      '- When a decision is reversed, keep the original entry and add the reversal with',
+      '  its cause. The history is the point; overwriting it destroys the audit.',
+    );
+
     if (context.effort === 'plif') {
       lines.push(
-        'Once loaded, follow the mandatory procedures for this turn. The review checkpoint is internal orchestration: perform checks with tools, do not print gate narration or repeated audit receipts, and finish with a concise result. Do not persist a Galileu decision record automatically.',
+        'Once loaded, follow the mandatory procedures for this turn. The review checkpoint is internal orchestration: perform checks with tools, do not print gate narration or repeated audit receipts, and finish with a concise result.',
+        '',
+        '### Quality gate (PLIF)',
+        'Nothing is reported as done until each of these is true, and each is checked',
+        'with a tool rather than asserted: the change builds and typechecks; the tests',
+        'that cover it run and pass; the diff introduces no secret, no broad lint',
+        'suppression and no destructive default; every claim of verification names the',
+        'command that produced it. A step that could not run is reported as not run.',
       );
     }
 

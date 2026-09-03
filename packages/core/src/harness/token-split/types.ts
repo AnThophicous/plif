@@ -2,6 +2,7 @@ import type { Message } from '../../model/provider.js';
 
 export const TOKEN_SPLIT_TECHNIQUE_IDS = [
   'budgets',
+  'code-mode',
   'lazy',
   'skills-disclosure',
   'state-notes',

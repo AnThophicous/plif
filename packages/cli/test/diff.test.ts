@@ -13,6 +13,7 @@ import { describe, it } from 'node:test';
 import { diffLines, formatDiff } from '@plif/core';
 
 import { diffHeight } from '../src/components/Diff.js';
+import { wrapTerminalText } from '../src/text.js';
 import { highlight, languageOf } from '../src/highlight.js';
 import { entry } from '../src/session.js';
 import { estimateHeight } from '../src/components/Timeline.js';
@@ -107,18 +108,36 @@ describe('diff row height', () => {
     // lines the edit touched, and an under-reserved frame is the full-repaint
     // bug this budget exists to prevent.
     const row = entry('tool', 'Update', { status: 'done', diff, detail: 'edited a.ts' });
-    assert.ok(estimateHeight(row, 80) >= diffHeight(diff, false));
+    // `estimateHeight` gives a plain diff's `<Diff>` a `width - 4` margin.
+    assert.ok(estimateHeight(row, 80) >= diffHeight(diff, 80 - 4));
   });
 
-  it('grows when the row is expanded', () => {
-    const long = formatDiff(
-      'a.ts',
-      diffLines(
-        Array.from({ length: 60 }, (_, index) => `line ${index}`).join('\n'),
-        Array.from({ length: 60 }, (_, index) => `changed ${index}`).join('\n'),
-      ),
-    );
-    assert.ok(diffHeight(long, true) > diffHeight(long, false));
+  it('matches the rows `Diff` actually paints, including wrapped ones', () => {
+    // `Diff` folds nothing — it renders every line — so this has to report the
+    // exact physical row count that produces: one row per wrapped segment, not
+    // one per logical diff line. Undercounting this is what let old, wrapped
+    // text survive under a shorter new frame: the terminal erases by row
+    // count, and an estimate that ignores wrapping erases too few rows.
+    const before = 'short';
+    const after = 'This one line is written deliberately long so that it must wrap across '
+      + 'several physical terminal rows once the code column narrows enough to force it, '
+      + 'the same way a full sentence in a generated file would.';
+    const long = formatDiff('a.ts', diffLines(before, after));
+    const width = 40;
+    // The same gutter and code column `Diff` computes for a single-digit line count.
+    const codeWidth = Math.max(12, width - 3 - 6);
+    const expected = Math.max(1, wrapTerminalText(before, codeWidth).length)
+      + Math.max(1, wrapTerminalText(after, codeWidth).length);
+    assert.equal(diffHeight(long, width), expected);
+    // A narrower width wraps the long line into more rows, never fewer.
+    assert.ok(diffHeight(long, 20) > diffHeight(long, 200));
+  });
+
+  it('matches an empty diff string against what Diff actually renders', () => {
+    // An empty string splits into one empty line, not zero, so parseDiff
+    // reports a single empty context row rather than none - Diff() paints
+    // one row here, not zero. The estimate has to agree with that.
+    assert.equal(diffHeight('', 80), 1);
   });
 
   it('reserves room for automatic language-server feedback under an edit', () => {

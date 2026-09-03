@@ -1,7 +1,7 @@
 # Aceternity UI
 
-**Type:** animated component library, blocks/templates source, shadcn-compatible source  
-**Verification:** `VERIFIED_CURRENT` / `HIGH`  
+**Type:** animated component library, blocks/templates source, shadcn-compatible source\
+**Verification:** `VERIFIED_CURRENT` / `HIGH`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile

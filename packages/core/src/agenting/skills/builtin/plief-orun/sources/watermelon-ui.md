@@ -1,7 +1,7 @@
 # Watermelon UI
 
-**Type:** shadcn registry, component/block/dashboard catalog  
-**Verification:** `VERIFIED_CURRENT` / `HIGH`  
+**Type:** shadcn registry, component/block/dashboard catalog\
+**Verification:** `VERIFIED_CURRENT` / `HIGH`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile

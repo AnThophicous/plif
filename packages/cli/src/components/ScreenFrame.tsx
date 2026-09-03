@@ -4,8 +4,26 @@ import { Box, Text } from '../ui.js';
 import { displayWidth } from '../text.js';
 import { color, layout, truncate } from '../theme.js';
 
+/** One entry in the screen bar. `id` is the screen kind the tab opens. */
+export interface ScreenTab {
+  readonly id: string;
+  readonly label: string;
+}
+
 export interface ScreenFrameProps {
-  /** The screen's name. Shown upper-case; it is the only thing on the left. */
+  /**
+   * Every screen, and which one is showing.
+   *
+   * The screens used to be reached only by their own slash command and drew
+   * their own heading, so nothing on screen said the other four existed. The
+   * bar is the navigation: it names the whole set and marks where you are.
+   */
+  readonly tabs?: readonly ScreenTab[];
+  readonly activeTab?: string;
+  /** A second row for screens that are themselves divided, e.g. stats. */
+  readonly subTabs?: readonly ScreenTab[];
+  readonly activeSubTab?: string;
+  /** The screen's name. Used when a screen stands outside the bar. */
   readonly title: string;
   /** Right-aligned context for the title row: a count, a provider, a state. */
   readonly badge?: string;
@@ -32,6 +50,10 @@ export interface ScreenFrameProps {
  * cell it draws is a cell the renderer measures on every frame.
  */
 export function ScreenFrame({
+  tabs,
+  activeTab,
+  subTabs,
+  activeSubTab,
   title,
   badge,
   subtitle,
@@ -52,13 +74,43 @@ export function ScreenFrame({
 
   return (
     <Box flexDirection="column" width={width} height={height} paddingX={layout.gutter}>
-      <Box width={contentWidth}>
-        <Text color={color('accentBright')} bold>{heading}</Text>
-        <Text color={color('ghost')}>{` ${'─'.repeat(railWidth)} `}</Text>
-        {badge !== undefined && (
-          <Text color={color('muted')}>{truncate(badge, Math.max(4, contentWidth / 2))}</Text>
-        )}
-      </Box>
+      {tabs && tabs.length > 0 ? (
+        <Box width={contentWidth} justifyContent="space-between">
+          <Box>
+            {tabs.map((tab, index) => (
+              <TabLabel
+                key={tab.id}
+                label={tab.label}
+                active={tab.id === activeTab}
+                first={index === 0}
+              />
+            ))}
+          </Box>
+          {badge !== undefined && (
+            <Text color={color('muted')}>{truncate(badge, Math.max(4, contentWidth / 2))}</Text>
+          )}
+        </Box>
+      ) : (
+        <Box width={contentWidth}>
+          <Text color={color('accentBright')} bold>{heading}</Text>
+          <Text color={color('ghost')}>{` ${'─'.repeat(railWidth)} `}</Text>
+          {badge !== undefined && (
+            <Text color={color('muted')}>{truncate(badge, Math.max(4, contentWidth / 2))}</Text>
+          )}
+        </Box>
+      )}
+      {subTabs && subTabs.length > 0 && (
+        <Box width={contentWidth} marginTop={1} marginLeft={2}>
+          {subTabs.map((tab, index) => (
+            <TabLabel
+              key={tab.id}
+              label={tab.label}
+              active={tab.id === activeSubTab}
+              first={index === 0}
+            />
+          ))}
+        </Box>
+      )}
       {subtitle !== undefined && (
         <Text color={color('faint')}>{truncate(subtitle, contentWidth)}</Text>
       )}
@@ -70,6 +122,69 @@ export function ScreenFrame({
       <Box flexGrow={1} />
       <Text color={color('ghost')}>{truncate(keys.join('  ·  '), contentWidth)}</Text>
     </Box>
+  );
+}
+
+/**
+ * The screen bar on its own.
+ *
+ * Exported because two screens draw their own chrome rather than going through
+ * `ScreenFrame`, and the bar has to be the same object in all of them or it
+ * stops reading as one navigation.
+ */
+export function ScreenTabs({
+  tabs,
+  active,
+  badge,
+  width,
+}: {
+  readonly tabs: readonly ScreenTab[];
+  readonly active: string;
+  readonly badge?: string;
+  readonly width: number;
+}): React.ReactElement {
+  return (
+    <Box width={width} justifyContent="space-between">
+      <Box>
+        {tabs.map((tab, index) => (
+          <TabLabel key={tab.id} label={tab.label} active={tab.id === active} first={index === 0} />
+        ))}
+      </Box>
+      {badge !== undefined && (
+        <Text color={color('muted')}>{truncate(badge, Math.max(4, width / 2))}</Text>
+      )}
+    </Box>
+  );
+}
+
+/**
+ * One tab.
+ *
+ * The selected tab is filled rather than merely coloured. A bar of same-weight
+ * words with one of them tinted is genuinely hard to scan at a glance in a
+ * terminal, and the reference this follows fills the active one for exactly
+ * that reason; the fill also survives a theme whose accent is low-contrast.
+ */
+function TabLabel({
+  label,
+  active,
+  first,
+}: {
+  readonly label: string;
+  readonly active: boolean;
+  readonly first: boolean;
+}): React.ReactElement {
+  return (
+    <Text>
+      {!first && <Text color={color('ghost')}>{'  '}</Text>}
+      {active ? (
+        <Text color={color('panel')} backgroundColor={color('accentBright')} bold>
+          {` ${label} `}
+        </Text>
+      ) : (
+        <Text color={color('muted')}>{` ${label} `}</Text>
+      )}
+    </Text>
   );
 }
 

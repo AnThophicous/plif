@@ -37,6 +37,28 @@ interface StateRow extends Record<string, SqliteValue> {
   generation: number;
 }
 
+/** Tokens a turn consumed, as the provider reported them. */
+export interface UsageDelta {
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly cacheReadTokens?: number;
+  readonly cacheWriteTokens?: number;
+}
+
+/** One session, with whatever token usage was recorded against it. */
+export interface SessionUsageRow {
+  readonly sessionId: string;
+  readonly workspace: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly turns: number;
+  readonly modelId: string;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+}
+
 export interface HistoryCheckpoint {
   readonly sessionId: string;
   readonly sequence: number;
@@ -325,6 +347,82 @@ export class HistoryRepository {
       output.push(event);
     }
     return output;
+  }
+
+  /**
+   * Add a turn's tokens to this session's running totals.
+   *
+   * Accumulated rather than replaced: a turn reports what it used, and the
+   * session is the sum of its turns. Keyed by model as well, so switching
+   * models mid-session keeps the two apart instead of blending them.
+   */
+  async recordUsage(meta: SessionMeta, modelId: string, delta: UsageDelta): Promise<void> {
+    const input = Math.max(0, Math.trunc(delta.inputTokens ?? 0));
+    const output = Math.max(0, Math.trunc(delta.outputTokens ?? 0));
+    const cacheRead = Math.max(0, Math.trunc(delta.cacheReadTokens ?? 0));
+    const cacheWrite = Math.max(0, Math.trunc(delta.cacheWriteTokens ?? 0));
+    if (input + output + cacheRead + cacheWrite === 0) return;
+    const id = sessionId(meta);
+    await this.#database.transaction((database) => {
+      database.run(
+        `INSERT INTO session_usage
+           (session_id, model_id, input_tokens, output_tokens,
+            cache_read_tokens, cache_write_tokens, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(session_id, model_id) DO UPDATE SET
+           input_tokens = input_tokens + excluded.input_tokens,
+           output_tokens = output_tokens + excluded.output_tokens,
+           cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
+           cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
+           updated_at = excluded.updated_at`,
+        [id, modelId, input, output, cacheRead, cacheWrite, new Date().toISOString()],
+      );
+    });
+  }
+
+  /**
+   * Every session in the store, with its usage, across all workspaces.
+   *
+   * A left join, so sessions recorded before usage was tracked still count
+   * towards days, streaks and session length - they simply contribute no
+   * tokens rather than disappearing from the history.
+   */
+  async usageRows(): Promise<SessionUsageRow[]> {
+    interface Row extends Record<string, SqliteValue> {
+      id: string;
+      workspace: string;
+      created_at: string;
+      updated_at: string;
+      turns: number;
+      session_model: string | null;
+      usage_model: string | null;
+      input_tokens: number | null;
+      output_tokens: number | null;
+      cache_read_tokens: number | null;
+      cache_write_tokens: number | null;
+    }
+    const rows = await this.#database.read((database) => database.all<Row>(
+      `SELECT s.id, s.workspace, s.created_at, s.updated_at, s.turns,
+              s.model_id AS session_model,
+              u.model_id AS usage_model,
+              u.input_tokens, u.output_tokens,
+              u.cache_read_tokens, u.cache_write_tokens
+       FROM sessions s
+       LEFT JOIN session_usage u ON u.session_id = s.id
+       ORDER BY s.created_at ASC`,
+    ));
+    return rows.map((row) => ({
+      sessionId: row.id,
+      workspace: row.workspace,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      turns: numberValue(row.turns),
+      modelId: row.usage_model || row.session_model || '',
+      inputTokens: numberValue(row.input_tokens ?? 0),
+      outputTokens: numberValue(row.output_tokens ?? 0),
+      cacheReadTokens: numberValue(row.cache_read_tokens ?? 0),
+      cacheWriteTokens: numberValue(row.cache_write_tokens ?? 0),
+    }));
   }
 
   async rename(meta: SessionMeta, title: string): Promise<SessionMeta> {

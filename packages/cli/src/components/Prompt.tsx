@@ -243,7 +243,9 @@ export const Prompt = React.memo(function Prompt({
       breathing={breathing && focused}
       {...(footer ? { footer } : {})}
     >
-      <Box flexDirection="column" width="100%" paddingX={layout.gutter}>
+      {/* FocusFrame owns the horizontal inset; applying it here as well clips
+          the final content column and leaves a visible gap in the frame. */}
+      <Box flexDirection="column" width="100%">
         {content}
       </Box>
     </FocusFrame>

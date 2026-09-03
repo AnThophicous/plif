@@ -1,7 +1,7 @@
 # GSAP
 
-**Type:** animation engine, plugin ecosystem  
-**Verification:** `VERIFIED_CURRENT` / `HIGH`  
+**Type:** animation engine, plugin ecosystem\
+**Verification:** `VERIFIED_CURRENT` / `HIGH`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile

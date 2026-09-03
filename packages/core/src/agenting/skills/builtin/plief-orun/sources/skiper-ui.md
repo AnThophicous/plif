@@ -1,7 +1,7 @@
 # Skiper UI
 
-**Type:** shadcn registry, motion-heavy component collection, premium/free mixed source  
-**Verification:** `VERIFIED_CURRENT` / `HIGH`  
+**Type:** shadcn registry, motion-heavy component collection, premium/free mixed source\
+**Verification:** `VERIFIED_CURRENT` / `HIGH`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile

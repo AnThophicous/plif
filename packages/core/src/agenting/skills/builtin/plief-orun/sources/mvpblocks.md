@@ -1,7 +1,7 @@
 # MVPBlocks
 
-**Type:** component collection, blocks library, CLI/registry  
-**Verification:** `VERIFIED_CURRENT` / `HIGH`  
+**Type:** component collection, blocks library, CLI/registry\
+**Verification:** `VERIFIED_CURRENT` / `HIGH`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile

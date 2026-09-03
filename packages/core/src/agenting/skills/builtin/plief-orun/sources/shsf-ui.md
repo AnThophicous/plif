@@ -1,7 +1,7 @@
 # SHSF UI
 
-**Type:** motion-first UI component source  
-**Verification:** `UNVERIFIED` / `MEDIUM`  
+**Type:** motion-first UI component source\
+**Verification:** `UNVERIFIED` / `MEDIUM`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile

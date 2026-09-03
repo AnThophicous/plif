@@ -1,3 +1,4 @@
+import { codeModeNoticeModule, codeModeSdkModule } from './code-mode.js';
 import { historicalContextModule, profileModule, projectContextModule } from './context.js';
 import { compactionSystemPrompt } from './compaction.js';
 import { environmentModule } from './environment.js';
@@ -10,7 +11,9 @@ import { securityModule } from '../harness/security-instructions.js';
 export const DEFAULT_AGENTING_MODULES: readonly PromptModule[] = [
   securityModule,
   environmentModule,
+  codeModeNoticeModule,
   toolsModule,
+  codeModeSdkModule,
   skillsModule,
   mcpModule,
   projectContextModule,

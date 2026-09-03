@@ -1,7 +1,7 @@
 # Originkit
 
-**Type:** animated component library, CLI/MCP-capable source  
-**Verification:** `VERIFIED_BUT_VERSION_UNKNOWN` / `HIGH`  
+**Type:** animated component library, CLI/MCP-capable source\
+**Verification:** `VERIFIED_BUT_VERSION_UNKNOWN` / `HIGH`\
 **Last verified:** 2026-08-26
 
 ## Canonical profile

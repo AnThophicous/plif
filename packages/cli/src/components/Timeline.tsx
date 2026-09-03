@@ -15,6 +15,7 @@ import {
 import type { FileActivity, TranscriptCell } from '../transcript/types.js';
 import { color, formatDuration, formatWorkedDuration, glyph, layout, truncate } from '../theme.js';
 import { clusterLength, displayWidth, wrapTerminalText } from '../text.js';
+import { toneBetween } from '../pulse.js';
 
 interface TimelineProps {
   readonly entries: readonly TimelineEntry[];
@@ -60,28 +61,282 @@ export const Timeline = React.memo(function Timeline({
   // passed a threshold is how earlier messages appeared to be deleted. Slate
   // scrolls what does not fit; nothing here decides it never happened.
   const byCount = limit ? entries.slice(-limit) : entries;
-  // Let Slate own clipping and scrolling. Slicing settled rows here made
-  // earlier messages appear to disappear as the live frame grew.
-  const visible = maxLines !== undefined && maxLines <= 0 ? [] : byCount;
-  const viewport = maxLines === undefined ? {} : {
-    height: Math.max(1, maxLines),
-    overflow: 'scroll' as const,
-    scrollTop: Number.MAX_SAFE_INTEGER,
-  };
+  // Only the rows that can actually be on screen are handed to Slate.
+  //
+  // Slate lays out and reconciles every node it is given, whether or not the
+  // scroll viewport can show it, so passing the whole transcript made the cost
+  // of *every* frame proportional to the size of the session: a 1.9 MB session
+  // measured 4.5 s for the first frame and ~2 s of CPU per keystroke. Nothing
+  // is dropped — the rows outside the window are represented by two spacers of
+  // exactly their height, so the scrollbar, the scroll offset and the pinned
+  // tail all behave as if the full transcript were mounted.
+  const slice = useTimelineWindow(byCount, inner, maxLines);
+  const visible = slice.rows;
+  // The tail is pinned while the reader is at it, and released while they are
+  // not.
+  //
+  // The danger an unconditional pin was protecting against is the offset and
+  // the content disagreeing — a viewport sitting on empty space with the
+  // transcript loaded above it and no way back. That is guarded here instead:
+  // the high-water mark resets whenever the transcript shrinks or empties, so a
+  // cleared or freshly resumed session re-anchors on its own, and the reader
+  // keeps the position they chose in every other case.
+  const follow = useTailFollow(visible.length, slice.onScroll);
+  // Shown only when this view has genuinely been scrolled away from its newest
+  // row and there is something to be away from. An empty session has nothing
+  // below it, and a marker pointing at nothing is a control that lies.
+  const showJump = !follow.pinned && visible.length > 0;
+  const viewport = maxLines === undefined ? {} : timelineViewport(maxLines, follow.pinned, showJump, follow.onScroll);
 
   return (
-    <ScrollView flexDirection="column" paddingX={layout.gutter} {...viewport}>
-      {visible.map((item) => (
-        <TimelineRow
-          key={item.id}
-          entry={item}
-          width={inner}
-          {...(maxLines === undefined ? {} : { maxLines })}
-        />
-      ))}
-    </ScrollView>
+    <Box flexDirection="column">
+      <ScrollView flexDirection="column" paddingX={layout.gutter} {...viewport}>
+        {!process.env.NOSP && slice.above > 0 && <Box height={slice.above} flexShrink={0} />}
+        {visible.map((item) => (
+          <TimelineRow
+            key={item.id}
+            entry={item}
+            width={inner}
+            {...(maxLines === undefined ? {} : { maxLines })}
+          />
+        ))}
+        {!process.env.NOSP && slice.below > 0 && <Box height={slice.below} flexShrink={0} />}
+      </ScrollView>
+      {showJump && (
+        <Box width="100%" justifyContent="center">
+          <NewBelowPill added={follow.addedWhileAway} />
+        </Box>
+      )}
+    </Box>
   );
 });
+
+/**
+ * Per-entry rendered height, cached on the entry itself.
+ *
+ * Timeline entries are immutable: a row that changes is a new object, so a
+ * WeakMap keyed by the entry is a cache that can never go stale and never
+ * needs eviction. Without it, windowing would re-measure the whole transcript
+ * — including every stored diff — on every frame, which is the cost the window
+ * exists to avoid.
+ */
+const heightCache = new WeakMap<TimelineEntry, Map<number, number>>();
+
+function cachedHeight(entry: TimelineEntry, width: number): number {
+  let byWidth = heightCache.get(entry);
+  if (!byWidth) {
+    byWidth = new Map();
+    heightCache.set(entry, byWidth);
+  }
+  const known = byWidth.get(width);
+  if (known !== undefined) return known;
+  const height = estimateHeight(entry, width);
+  byWidth.set(width, height);
+  return height;
+}
+
+/**
+ * Scroll viewport props for the transcript body.
+ *
+ * Two things the previous version got wrong, both of which the reader felt:
+ *
+ * The pinned offset was asserted on every frame. Slate clamps to it, so a wheel
+ * tick moved the view and the very next render put it back — the transcript
+ * could not be scrolled at all, and every tick still paid for a full frame.
+ * Pinning is a statement about the tail, so it is only sent while the view is
+ * actually at the tail; once the reader moves away the offset is theirs, and
+ * `useTailFollow` re-pins as soon as they come back down.
+ *
+ * The jump pill sits below this viewport inside the same column, so it is a row
+ * of the timeline's own budget. Taking it out of the body height is what keeps
+ * the block inside `maxLines`: one row over, and the height-clamped panel that
+ * holds the transcript pushes the prompt off the bottom of the window.
+ */
+export function timelineViewport(
+  maxLines: number,
+  pinned: boolean,
+  showJump: boolean,
+  onScroll: (x: number, y: number) => void,
+): {
+  readonly height: number;
+  readonly overflow: 'scroll';
+  readonly scrollTop?: number;
+  readonly onScroll: (x: number, y: number) => void;
+} {
+  return {
+    height: Math.max(1, maxLines - (showJump ? 1 : 0)),
+    overflow: 'scroll' as const,
+    ...(pinned ? { scrollTop: Number.MAX_SAFE_INTEGER } : {}),
+    onScroll,
+  };
+}
+
+/** Rows above and below the viewport, kept as height so scrolling is unaffected. */
+interface TimelineWindow {
+  readonly rows: readonly TimelineEntry[];
+  readonly above: number;
+  readonly below: number;
+  readonly onScroll: (y: number) => void;
+}
+
+/**
+ * The slice of the transcript that can be on screen, plus the height of what
+ * is not.
+ *
+ * Overscan is a full viewport in each direction, so an ordinary wheel scroll
+ * lands on rows that are already mounted and the window is recomputed behind
+ * it rather than in front of it.
+ */
+function useTimelineWindow(
+  entries: readonly TimelineEntry[],
+  width: number,
+  maxLines: number | undefined,
+): TimelineWindow {
+  const [scrollTop, setScrollTop] = React.useState<number | null>(null);
+  const total = React.useRef(0);
+
+  const onScroll = React.useCallback((y: number) => {
+    setScrollTop((previous) => (previous === y ? previous : y));
+  }, []);
+
+  return React.useMemo((): TimelineWindow => {
+    if (maxLines === undefined) {
+      return { rows: entries, above: 0, below: 0, onScroll };
+    }
+    if (maxLines <= 0 || entries.length === 0) {
+      return { rows: [], above: 0, below: 0, onScroll };
+    }
+
+    const heights = entries.map((entry) => cachedHeight(entry, width));
+    const contentHeight = heights.reduce((sum, height) => sum + height, 0);
+    total.current = contentHeight;
+
+    const overscan = Math.max(maxLines, 20);
+    // A null offset — and any offset at or past the live tail — means the view
+    // is pinned to the newest row, which is where Slate's clamped scrollTop
+    // puts it.
+    const pinned = scrollTop === null || scrollTop >= contentHeight - maxLines - 1;
+    const top = pinned
+      ? contentHeight - maxLines - overscan
+      : scrollTop - overscan;
+    const bottom = pinned ? contentHeight : scrollTop + maxLines + overscan;
+
+    let start = 0;
+    let above = 0;
+    let cursor = 0;
+    while (start < entries.length && cursor + heights[start]! <= top) {
+      cursor += heights[start]!;
+      above = cursor;
+      start += 1;
+    }
+    let end = start;
+    while (end < entries.length && cursor < bottom) {
+      cursor += heights[end]!;
+      end += 1;
+    }
+    const below = contentHeight - cursor;
+
+    return {
+      rows: entries.slice(start, end),
+      above: Math.max(0, above),
+      below: Math.max(0, below),
+      onScroll,
+    };
+  }, [entries, maxLines, onScroll, scrollTop, width]);
+}
+
+/**
+ * Whether the timeline is sitting at its newest row, and how much arrived
+ * while it was not.
+ *
+ * Slate reports a scroll offset but not the content height, so "at the end" is
+ * derived from the furthest offset this view has ever reached. That is enough
+ * for the only decision here, and it degrades safely: a terminal that never
+ * emits a scroll event simply stays pinned, which is exactly today's
+ * behaviour.
+ */
+export function useTailFollow(
+  rowCount: number,
+  observe: (y: number) => void,
+): {
+  readonly pinned: boolean;
+  readonly addedWhileAway: number;
+  readonly onScroll: (x: number, y: number) => void;
+} {
+  const [pinned, setPinned] = React.useState(true);
+  const furthest = React.useRef(0);
+  const rowsWhenLeft = React.useRef(rowCount);
+
+  const onScroll = React.useCallback((_x: number, y: number) => {
+    observe(y);
+    // Until this view has scrolled past its first row there is no "away" to be
+    // in. Without this, a single scroll event at offset zero on an empty
+    // transcript unpinned the view and showed a jump control with nothing to
+    // jump to.
+    if (furthest.current === 0 && y === 0) return;
+    furthest.current = Math.max(furthest.current, y);
+    // One line of slack: a view a single row from the end is, to a reader,
+    // still at the end, and treating it otherwise makes the pill flicker.
+    const atEnd = y >= furthest.current - 1;
+    setPinned((was) => {
+      if (was && !atEnd) rowsWhenLeft.current = rowCount;
+      return atEnd;
+    });
+  }, [observe, rowCount]);
+
+  React.useEffect(() => {
+    if (pinned) rowsWhenLeft.current = rowCount;
+  }, [pinned, rowCount]);
+
+  // A cleared or emptied transcript has no tail to be behind. Re-anchor rather
+  // than leaving the view stuck in a state the reader never chose.
+  React.useEffect(() => {
+    if (rowCount === 0) {
+      furthest.current = 0;
+      rowsWhenLeft.current = 0;
+      setPinned(true);
+    }
+  }, [rowCount]);
+
+  // Fewer rows than last frame means this is not the same transcript any more:
+  // /clear ran, or a session was resumed from the picker. The high-water mark
+  // belongs to the transcript that produced it, so carrying it across made a
+  // freshly opened session report itself as scrolled away from a tail it never
+  // had — which showed the jump pill, and cost the prompt its row.
+  const previousRowCount = React.useRef(rowCount);
+  React.useEffect(() => {
+    if (rowCount < previousRowCount.current) {
+      furthest.current = 0;
+      rowsWhenLeft.current = rowCount;
+      setPinned(true);
+    }
+    previousRowCount.current = rowCount;
+  }, [rowCount]);
+
+
+  return {
+    pinned,
+    addedWhileAway: Math.max(0, rowCount - rowsWhenLeft.current),
+    onScroll,
+  };
+}
+
+/**
+ * The marker that says the conversation moved on without the reader.
+ *
+ * It names no key on purpose. The main transcript is scrolled by the terminal,
+ * not by Plif, so there is no keystroke here to advertise; scrolling back to
+ * the newest row re-anchors the view on its own. A control that names a key
+ * nothing listens for is worse than no control.
+ */
+export function NewBelowPill({ added }: { readonly added: number }): React.ReactElement {
+  const label = added > 0
+    ? `${added} new below ↓`
+    : 'newer messages below ↓';
+  return (
+    <Text color={color('accent')} inverse>{` ${label} `}</Text>
+  );
+}
 
 Timeline.displayName = 'Timeline';
 
@@ -242,7 +497,7 @@ function entryFromTranscriptCell(
   }
 }
 
-export function measureTranscriptCell(cell: TranscriptCell, width: number): number {
+export function measureTranscriptCell(cell: TranscriptCell, width: number, expanded = false): number {
   const inner = Math.max(8, width - layout.gutter * 2);
   const wrap = (text: string, columns = inner): number =>
     text.split('\n').reduce((total, line) => total + wrappedHeight(line, columns), 0);
@@ -256,7 +511,9 @@ export function measureTranscriptCell(cell: TranscriptCell, width: number): numb
     case 'activity':
       return 2 + cell.items.length;
     case 'diff':
-      return diffHeight(cell.diff, false) + 2;
+      // Mirrors the ToolCall/Diff pairing for a plain (non-edits) diff entry:
+      // a `-4` margin around the diff itself, plus the header and spacing rows.
+      return diffHeight(cell.diff, Math.max(12, inner - 4), expanded) + 2;
     case 'error':
       return wrap(cell.detail, Math.max(8, inner - 4)) + 2;
     case 'approval':
@@ -267,8 +524,12 @@ export function measureTranscriptCell(cell: TranscriptCell, width: number): numb
   }
 }
 
-export function measureTranscriptCells(cells: readonly TranscriptCell[], width: number): number {
-  return cells.reduce((total, cell) => total + measureTranscriptCell(cell, width), 0);
+export function measureTranscriptCells(
+  cells: readonly TranscriptCell[],
+  width: number,
+  expanded = false,
+): number {
+  return cells.reduce((total, cell) => total + measureTranscriptCell(cell, width, expanded), 0);
 }
 
 /**
@@ -655,13 +916,15 @@ export function estimateHeight(
       return 1 + shown + (shown < entry.planItems.length ? 1 : 0) + 1;
     }
     if (entry.edits?.length) {
-      return 1 + entry.edits.reduce((total, edit) => total + 1 + diffHeight(edit.diff, entry.expand ?? false), 0)
+      // Matches the `width - 6` ToolCall gives each edit's <Diff>.
+      return 1 + entry.edits.reduce((total, edit) => total + 1 + diffHeight(edit.diff, width - 6, entry.expand ?? false), 0)
         + editNoteHeight + 1;
     }
     // The diff replaces the ordinary edit summary. Automatic language-server
     // feedback is retained beneath it, so that small note is measured too.
     if (entry.diff) {
-      return 1 + (entry.toolSummary ? 1 : 0) + diffHeight(entry.diff, entry.expand ?? false)
+      // Matches the `width - 4` ToolCall gives a plain diff's <Diff>.
+      return 1 + (entry.toolSummary ? 1 : 0) + diffHeight(entry.diff, width - 4, entry.expand ?? false)
         + editNoteHeight + 1;
     }
     const shown = entry.expand
@@ -704,21 +967,28 @@ function ThinkingIndicator({
   plif,
   expand,
   durationMs,
+  hasContent,
 }: {
   readonly thinking: boolean;
   readonly label: string;
   readonly plif: boolean;
   readonly expand?: boolean;
   readonly durationMs?: number;
+  /** Whether this thought has a body worth recovering once it settles. */
+  readonly hasContent?: boolean;
 }): React.ReactElement {
   void plif;
-  void expand;
   const clock = useAnimationFrame(thinking, 'slow');
   // The reasoning header used to walk the whole 256-glyph braille block, one
   // pattern per tick. That is not a cycle, it is noise: the mark changed
   // silhouette on every frame and read as a rendering fault rather than as
   // work in progress. The shared eight-frame family moves inside the cell.
   const pulse = spinnerFrameAt(clock * ANIMATION_INTERVAL_MS);
+  // A settled thought folds its body away by default. Plif never drops it \u2014
+  // Ctrl+R and a click both bring it back \u2014 but nothing used to say so.
+  // "Thought for 9s" and nothing else read as the reasoning having vanished,
+  // because the only ways back to it were never named anywhere on screen.
+  const recoverable = !thinking && hasContent === true;
 
   return (
     <Box>
@@ -730,8 +1000,32 @@ function ThinkingIndicator({
           {durationMs === undefined ? label : `${label} for ${formatDuration(durationMs)}`}
         </Text>
       )}
+      {recoverable && (
+        <Text color={color('ghost')}>
+          {'  '}{glyph.divider}{'  '}{expand ? 'click to collapse' : 'click or Ctrl+R to review'}
+        </Text>
+      )}
     </Box>
   );
+}
+
+/**
+ * The colour of one line of reasoning, by its place in the block.
+ *
+ * A wall of a single grey is hard to enter and gives no sense of direction.
+ * The ramp runs dim at the top to brighter at the newest line, so while a
+ * thought streams the eye is pulled to where the writing is actually
+ * happening, and a settled block still reads top-to-bottom instead of as one
+ * undifferentiated slab.
+ *
+ * `total <= 1` returns the bright end: a single line is the newest line.
+ */
+export function thoughtLineTone(index: number, total: number): string {
+  if (total <= 1) return toneBetween('ghost', 'muted', 1);
+  const ratio = Math.min(1, Math.max(0, index / (total - 1)));
+  // Eased so the top of a long thought does not vanish into the background:
+  // the ramp spends most of its range in the readable half.
+  return toneBetween('ghost', 'muted', 0.35 + ratio * 0.65);
 }
 
 function ThinkingRow({
@@ -762,17 +1056,22 @@ function ThinkingRow({
         plif={plif}
         {...(entry.expand === undefined ? {} : { expand: entry.expand })}
         durationMs={entry.durationMs}
+        hasContent={body.trim().length > 0}
       />
 
       {live.length > 0 && (
         <Box flexDirection="column" marginTop={1} paddingLeft={2}>
-          {live.map((line, index) => <Text key={index} color={color('faint')}>{line || ' '}</Text>)}
+          {live.map((line, index) => (
+            <Text key={index} color={thoughtLineTone(index, live.length)}>{line || ' '}</Text>
+          ))}
         </Box>
       )}
 
       {entry.expand && body.trim() && (
         <Box flexDirection="column" marginTop={1} paddingLeft={2} marginBottom={1}>
-          {expandedLines.map((line, index) => <Text key={index} color={color('faint')}>{line || ' '}</Text>)}
+          {expandedLines.map((line, index) => (
+            <Text key={index} color={thoughtLineTone(index, expandedLines.length)}>{line || ' '}</Text>
+          ))}
         </Box>
       )}
     </Box>

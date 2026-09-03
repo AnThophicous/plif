@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pli'ef Sifr Design Concept",
+  "type": "object",
+  "required": [
+    "id", "canonical_name", "aliases", "category", "era_origin",
+    "historical_context", "core_principles", "visual_grammar", "typography",
+    "color_behavior", "spacing", "geometry", "layout", "grid", "composition",
+    "hierarchy", "density", "surfaces", "depth", "borders", "imagery",
+    "iconography", "motion_character", "interaction_character", "responsive_behavior",
+    "accessibility_considerations", "content_fit", "product_fit", "good_use_cases",
+    "bad_use_cases", "compatible_concepts", "tension_with", "common_cliches",
+    "failure_modes", "anti_patterns", "implementation_implications", "reference_texts",
+    "visual_references", "evidence", "confidence", "last_verified"
+  ],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+    "canonical_name": {"type": "string", "minLength": 3},
+    "aliases": {"type": "array", "items": {"type": "string"}},
+    "category": {"type": "string"},
+    "era_origin": {"type": "string"},
+    "historical_context": {"type": "string", "minLength": 40},
+    "core_principles": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "visual_grammar": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "typography": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "color_behavior": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "spacing": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "geometry": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "layout": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "grid": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "composition": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "hierarchy": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "density": {"type": "string"},
+    "surfaces": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "depth": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "borders": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "imagery": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "iconography": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "motion_character": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "interaction_character": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "responsive_behavior": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "accessibility_considerations": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "content_fit": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "product_fit": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "good_use_cases": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "bad_use_cases": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "compatible_concepts": {"type": "array", "items": {"type": "string"}},
+    "tension_with": {"type": "array", "items": {"type": "string"}},
+    "common_cliches": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "failure_modes": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "anti_patterns": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "implementation_implications": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "reference_texts": {"type": "array", "items": {"$ref": "#/$defs/reference"}},
+    "visual_references": {"type": "array", "items": {"$ref": "#/$defs/reference"}},
+    "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidence"}},
+    "confidence": {"enum": ["HIGH", "MEDIUM", "LOW", "UNVERIFIED"]},
+    "last_verified": {"type": "string", "format": "date"}
+  },
+  "$defs": {
+    "reference": {
+      "type": "object",
+      "required": ["title", "url", "source_type", "demonstrates"],
+      "properties": {
+        "title": {"type": "string"},
+        "url": {"type": "string", "format": "uri"},
+        "source_type": {"enum": ["PRIMARY_TEXT", "MUSEUM_ARCHIVE", "MUSEUM_CATALOGUE", "MUSEUM_COLLECTION", "DIGITAL_ARCHIVE", "OFFICIAL_GUIDE", "OFFICIAL_DESIGN_SYSTEM", "VISUAL_ARCHIVE", "REFERENCE_GALLERY", "SPECIALIST_GALLERY"]},
+        "demonstrates": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["claim", "state", "source", "checked_at"],
+      "properties": {
+        "claim": {"type": "string"},
+        "state": {"enum": ["VERIFIED", "INFERRED", "HYPOTHESIS", "UNVERIFIED"]},
+        "source": {"type": "string"},
+        "checked_at": {"type": "string", "format": "date"}
+      }
+    }
+  }
+}

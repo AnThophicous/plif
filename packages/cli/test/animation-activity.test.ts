@@ -37,10 +37,9 @@ describe('application animation activity', () => {
     assert.equal(animationClockActive({ ...IDLE_PLIF, effortTransitioning: true }), true);
   });
 
-  it('advances the clock for ambient focus without promoting the strong frame', () => {
-    const ambient = { ...IDLE_PLIF, ambientFocus: true };
-    assert.equal(animationClockActive(ambient), true, 'breathing carets need the clock');
-    assert.equal(strongFrameActive(ambient), false, 'an idle prompt must not carry the travelling wave');
+  it('stays completely still while nothing is happening', () => {
+    assert.equal(animationClockActive(IDLE_PLIF), false, 'an idle session must not tick');
+    assert.equal(strongFrameActive(IDLE_PLIF), false);
     assert.equal(strongFrameActive({ ...IDLE_PLIF, busy: true }), true);
     assert.equal(strongFrameActive({ ...IDLE_PLIF, browserLoading: true }), false, 'browser loading breathes, it does not wave');
   });

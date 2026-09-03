@@ -24,8 +24,11 @@ assistance, persistent terminal processes, and an isolated Rust updater. Runtime
 updates use the NPM registry only and show the matching package changelog before
 they are installed. Composer assistance is prediction-only: contextual ghost
 text appears in the input, Tab accepts it, and Enter always sends the original
-draft. See [`CHANGELOG.md`](CHANGELOG.md) for the complete release
-notes.
+draft. It also adds **Code Mode**: an opt-in tool presentation where the model
+writes programs against a generated SDK instead of receiving every tool schema
+on every request, which moves the catalogue into the cacheable prompt prefix and
+keeps intermediate tool output out of the context. See
+[`CHANGELOG.md`](CHANGELOG.md) for the complete release notes.
 
 ## What's new in 0.3.9
 
@@ -307,6 +310,10 @@ folder with the transcript back in the model's context.
 | `plif help [topic]` | |
 | `plif version` | |
 
+Inside a session, `/code-mode` chooses how tools reach the model — every schema
+on the wire, or one `run_code` program with the catalogue in the cached prompt
+prefix. See [Code Mode](#code-mode-one-tool-on-the-wire).
+
 Flags: `--root <dir>` (default `~/.plif`), `--workspace <dir>` / `-C <dir>`,
 `--strict`, `--json`.
 
@@ -546,6 +553,104 @@ transcript. When the task finishes, fails, times out, or is cancelled, one
 structured tool result returns to the existing agent loop so it can continue
 with the original goal. Ctrl+C and session shutdown cancel the wait and clean
 its listeners/timers.
+
+## Code Mode: one tool on the wire
+
+By default every tool ships its JSON Schema to the model on every request. With
+thirty tools that is a payload you pay for once per turn, forever, whether the
+turn uses one tool or none.
+
+Code Mode changes the presentation. The model gets exactly one tool on the
+wire — `run_code` — plus a generated TypeScript declaration of the whole
+catalogue in the system prompt, and it reaches tools by writing programs:
+
+```ts
+const [config, lock] = await Promise.all([
+  tools.read_file({ path: "package.json" }),
+  tools.read_file({ path: "package-lock.json" }),
+]);
+const hits = await tools.grep({ pattern: "\"version\"", path: "packages" });
+console.log(hits.output.split("\n").length, "matches");
+return { declared: JSON.parse(config.output).version };
+```
+
+Three things change, and each of them is a saving:
+
+- **The catalogue leaves the wire.** Tool schemas move into the system prefix,
+  which providers cache. They are rendered in lexicographic order with stable
+  key ordering specifically so the bytes do not change between turns — a prefix
+  that varies is a prefix that never gets a cache hit.
+- **The intermediate results leave the context.** Only what the program
+  `console.log`s and what it `return`s enters the conversation. Read ten files,
+  return the three lines that mattered — the other ten reads are recorded in
+  the timeline and the audit log, and cost no tokens.
+- **The round trips collapse.** Ten dependent calls are one request and one
+  result instead of ten of each. Independent calls inside a program run
+  concurrently under the same rules the native loop already applies:
+  `parallelSafe` tools overlap, anything else takes the lane alone, and the
+  order the program wrote is the order the audit log records.
+
+### Where the program actually runs
+
+In its own OS process, started by the container, confined by whatever the
+sandbox backend can enforce on this machine — the same jail every
+`run_command` goes through. This is not a detail. Code Mode was held back in
+earlier versions precisely because there was nowhere safe to put model-written
+code: `node:vm` is a language boundary, not a security one, and a worker thread
+runs with the host process's privileges. Neither is a boundary.
+
+A `run_code` program has exactly as much privilege as a shell command the model
+could already have issued, and rather less: every tool call it makes comes back
+out to the host and through the same dispatcher, policy engine, path jail and
+audit log the native presentation uses. Approvals still prompt. Denials still
+deny.
+
+The program itself is treated as a hostile peer. Every frame it sends is rebuilt
+from own properties before it is read, a forged `__proto__` lands as an ordinary
+key, each call id is answered at most once, and anything that would not survive
+a JSON round trip is refused rather than coerced.
+
+### Budgets, and why there are two clocks
+
+| Budget | Default | What it catches |
+| --- | --- | --- |
+| `timeoutMs` | 120s | Total wall clock, including time inside tools |
+| `computeMs` | 60s | Measured busy time inside the runtime process |
+| `outputBytes` | 32 KiB | Logs plus returned value |
+| `maxCalls` | 64 | Tool calls per program |
+| `maxConcurrency` | 8 | Overlapping calls |
+
+Wall clock alone cannot tell a program waiting on a slow grep from a program
+spinning in a loop. Killing the first for the sins of the second would make
+every legitimate long tool call a hazard, so busy time is measured separately:
+a program may wait as long as its wall budget allows and is still stopped the
+moment it starts burning the machine.
+
+A program that fails comes back as a *result*, never as a raised error, with the
+cause named — `exception`, `timeout`, `abort`, `process-exit`, `invalid-output`,
+`output-limit`, `call-limit` — and everything it logged before it stopped. The
+model fixes the program on the next turn instead of re-deriving what happened.
+
+### Turning it on
+
+```
+/code-mode code     # one schema on the wire, catalogue in the cached prefix
+/code-mode both     # both presentations; the model chooses
+/code-mode native   # the default
+```
+
+`/code-mode` with no argument opens the picker. The choice is saved as
+`toolMode` in `~/.plif/config.toml`, and `PLIF_TOOLS_MODE=code` overrides it for
+one session — which is how you compare the two without editing a file between
+runs. `/token-split stats code-mode` reports what the collapse kept off the
+wire, turn by turn.
+
+Plan mode always runs native: exploring is where the model most needs the
+schemas in front of it, and there are no mutations worth batching.
+
+`run_script` — the strictly sequential batch tool — stays available in `native`
+and `both`, and is withdrawn in `code`, where a program says the same thing
+better and a second schema would cost tokens to say it twice.
 
 ## Research and Plif effort
 

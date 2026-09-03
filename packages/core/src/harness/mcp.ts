@@ -1,7 +1,34 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
+// The MCP SDK is ~230ms of module loading — the single most expensive import
+// in the engine — and a session with no MCP server configured never needs it.
+// It is therefore pulled in when a server actually connects, and the classes
+// below are used as types only.
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
+import { isSdkError } from '../model/sdk-errors.js';
+
+/** Loads the MCP client SDK once, on the first connection attempt. */
+async function loadMcpSdk(): Promise<{
+  Client: typeof import('@modelcontextprotocol/sdk/client/index.js').Client;
+  StdioClientTransport: typeof import('@modelcontextprotocol/sdk/client/stdio.js').StdioClientTransport;
+  StreamableHTTPClientTransport: typeof import('@modelcontextprotocol/sdk/client/streamableHttp.js').StreamableHTTPClientTransport;
+}> {
+  const [client, stdio, http] = await Promise.all([
+    import('@modelcontextprotocol/sdk/client/index.js'),
+    import('@modelcontextprotocol/sdk/client/stdio.js'),
+    import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
+  ]);
+  return {
+    Client: client.Client,
+    StdioClientTransport: stdio.StdioClientTransport,
+    StreamableHTTPClientTransport: http.StreamableHTTPClientTransport,
+  };
+}
+
+/** The SDK's OAuth challenge, matched without importing its auth module. */
+function isUnauthorizedError(error: unknown): boolean {
+  return isSdkError(error, 'UnauthorizedError');
+}
 
 import {
   McpOAuthCoordinator,
@@ -46,13 +73,31 @@ export interface McpRegistryOptions {
 
 export type McpServerConfig = StdioServerConfig | HttpServerConfig;
 
+/** One tool call this server served, newest first. */
+export interface McpToolCall {
+  readonly tool: string;
+  readonly at: string;
+  readonly ok: boolean;
+}
+
 export interface McpServerStatus {
   readonly name: string;
   readonly transport: 'stdio' | 'http';
   readonly connected: boolean;
   readonly toolCount: number;
   readonly detail: string;
+  /** The endpoint for an HTTP server; the command for a stdio one. */
+  readonly endpoint: string;
+  /** When the current connection was established. */
+  readonly startedAt?: string;
+  /** When this server last answered anything. */
+  readonly lastActivityAt?: string;
+  /** The most recent calls, newest first. Bounded; this is a display aid. */
+  readonly recentCalls: readonly McpToolCall[];
 }
+
+/** How many recent calls a server remembers for the MCP screen. */
+const RECENT_CALL_LIMIT = 8;
 
 /**
  * Connect deadlines, split by transport because they are different problems.
@@ -190,6 +235,9 @@ class McpServer {
   #provider: McpOAuthProvider | undefined;
   #httpTransport: StreamableHTTPClientTransport | undefined;
   #bus: EventBus | undefined;
+  #startedAt: string | undefined;
+  #lastActivityAt: string | undefined;
+  #recentCalls: McpToolCall[] = [];
 
   constructor(name: string, config: McpServerConfig, bus?: EventBus, oauth?: McpOAuthCoordinator) {
     this.name = name;
@@ -244,13 +292,32 @@ class McpServer {
       connected: this.connected,
       toolCount: this.#tools.length,
       detail: this.#detail,
+      endpoint: isHttp(this.#config)
+        ? this.#config.url
+        : [this.#config.command, ...(this.#config.args ?? [])].join(' '),
+      ...(this.#startedAt ? { startedAt: this.#startedAt } : {}),
+      ...(this.#lastActivityAt ? { lastActivityAt: this.#lastActivityAt } : {}),
+      recentCalls: this.#recentCalls,
     };
+  }
+
+  /**
+   * Remember a call so the MCP screen can show what a server has been doing.
+   *
+   * A server that is "connected" but has answered nothing for an hour looks
+   * exactly like a healthy one until its last activity is on screen.
+   */
+  #recordCall(tool: string, ok: boolean): void {
+    const at = new Date().toISOString();
+    this.#lastActivityAt = at;
+    this.#recentCalls = [{ tool, at, ok }, ...this.#recentCalls].slice(0, RECENT_CALL_LIMIT);
   }
 
   async connect(retried = false): Promise<void> {
     if (this.#client) return;
     this.#detail = 'connecting';
     this.#emitStatus();
+    const { Client, StdioClientTransport, StreamableHTTPClientTransport } = await loadMcpSdk();
     const client = new Client(
       { name: 'plif', version: '0.1.0' },
       { capabilities: {} },
@@ -280,7 +347,7 @@ class McpServer {
       await withDeadline(client.connect(transport), deadline, `"${this.name}"`);
     } catch (error) {
       if (
-        error instanceof UnauthorizedError &&
+        isUnauthorizedError(error) &&
         transport instanceof StreamableHTTPClientTransport &&
         this.#provider?.hasPendingCallback() &&
         !retried
@@ -314,6 +381,7 @@ class McpServer {
     this.#client = client;
     this.#tools = listed.tools.map((tool) => this.#wrap(tool));
     this.#detail = `${this.#tools.length} tools`;
+    this.#startedAt = new Date().toISOString();
     this.#emitStatus();
   }
 
@@ -330,6 +398,7 @@ class McpServer {
       );
       this.#tools = listed.tools.map((tool) => this.#wrap(tool));
       this.#detail = `${this.#tools.length} tools`;
+      this.#startedAt = new Date().toISOString();
       this.#emitStatus();
     } catch (error) {
       this.fail(condenseMcpFailure(error instanceof Error ? error.message : String(error)));
@@ -378,6 +447,7 @@ class McpServer {
           },
       );
       const { text, ok } = flattenContent(result);
+      this.#recordCall(toolName, ok);
       return {
         output: formatToolEnvelope({
           status: ok ? 'success' : 'error',
@@ -390,7 +460,7 @@ class McpServer {
         ok,
       };
     } catch (error) {
-      if (error instanceof UnauthorizedError && this.#provider?.hasPendingCallback() && !retried) {
+      if (isUnauthorizedError(error) && this.#provider?.hasPendingCallback() && !retried) {
         const transport = this.#httpTransport;
         if (!transport) throw error;
         this.#detail = 'authenticating';
@@ -439,13 +509,7 @@ class McpServer {
   }
 
   #emitStatus(): void {
-    this.#bus?.emit('mcp.status', {
-      server: this.name,
-      transport: this.transport,
-      connected: this.connected,
-      toolCount: this.#tools.length,
-      detail: this.#detail,
-    });
+    this.#bus?.emit('mcp.status', { ...this.status(), server: this.name });
   }
 }
 

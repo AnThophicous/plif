@@ -78,8 +78,10 @@ import {
   setPermissionMode,
   saveGlobalConfig,
   profilesOf,
+  toolModeOf,
   PlifError,
 } from '@plif/core';
+import type { ToolPresentationMode } from '@plif/core';
 
 import { formatCapabilities, tokenize } from './format.js';
 import {
@@ -184,6 +186,8 @@ export interface CommandContext {
   readonly openUsage?: () => void;
   readonly openAgents?: () => void;
   readonly openSessions?: () => void;
+  readonly openStats?: () => void;
+  readonly openMcp?: () => void;
 }
 
 export interface FlatPickerRequest {
@@ -1791,6 +1795,71 @@ async function runAgentAction(action: string, argv: readonly string[], context: 
   return ok();
 }
 
+const TOOL_MODES = ['native', 'code', 'both'] as const;
+
+const TOOL_MODE_DETAIL: Record<ToolPresentationMode, string> = {
+  native: 'every tool schema on every request · the historical behaviour',
+  code: 'one schema on the wire · the catalogue moves into the cacheable system prefix',
+  both: 'schemas and run_code together · the model chooses · costs the most',
+};
+
+/**
+ * Switch the tool presentation, or show which one is running.
+ *
+ * The environment override is reported rather than silently obeyed: a developer
+ * who exported `PLIF_TOOLS_MODE` for one comparison and forgot deserves to find
+ * out here, not from a config file that says something the session is ignoring.
+ */
+async function runCodeModeAction(
+  requested: string | undefined,
+  context: CommandContext,
+): Promise<CommandResult> {
+  const config = await loadGlobalConfig();
+  const active = toolModeOf(config);
+  const override = process.env['PLIF_TOOLS_MODE']?.trim();
+  const overrideNote = override
+    ? ` · PLIF_TOOLS_MODE=${override} overrides the saved value`
+    : '';
+
+  const value = requested?.trim().toLowerCase();
+  if (!value) {
+    context.openPicker({
+      title: `TOOL PRESENTATION · ${active}`,
+      countLabel: 'modes',
+      hint: `↑↓ navigate · Enter select · Esc close${overrideNote}`,
+      items: TOOL_MODES.map((mode) => ({
+        value: mode,
+        label: mode,
+        current: mode === active,
+        state: mode === active ? ('on' as const) : ('off' as const),
+        detail: TOOL_MODE_DETAIL[mode],
+      })),
+      selected: Math.max(0, TOOL_MODES.indexOf(active)),
+      onPick: (picked) => {
+        void runCodeModeAction(String(picked), context)
+          .then((result) => result.entries.forEach((item) => context.notify?.(item)))
+          .catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error);
+            context.notify?.(entry('notice', `code-mode: ${message}`, { tone: 'danger' }));
+          });
+      },
+    });
+    return ok();
+  }
+
+  if (!(TOOL_MODES as readonly string[]).includes(value)) {
+    throw new PlifError('INVALID_ARGUMENT', `unknown tool mode "${value}"; use native, code or both`);
+  }
+  const mode = value as ToolPresentationMode;
+  await saveGlobalConfig({ ...config, toolMode: mode });
+  return ok(
+    entry('notice', `${glyph.done}  tool presentation    ${mode}`, {
+      tone: mode === 'native' ? 'accent' : 'accentBright',
+      subtitle: `${TOOL_MODE_DETAIL[mode]} · applies to the next request${overrideNote}`,
+    }),
+  );
+}
+
 function tokenSplitListEntry(
   config: Awaited<ReturnType<typeof loadTokenSplitConfig>>,
 ): TimelineEntry {
@@ -2058,6 +2127,16 @@ export const COMMANDS: readonly Command[] = [
     },
   },
   {
+    name: 'code-mode',
+    args: '[native|code|both]',
+    summary: 'Choose how tools reach the model: schemas on the wire, or one run_code program',
+    autocomplete: {
+      getValues: ({ argumentIndex }) => (argumentIndex === 0 ? [...TOOL_MODES] : []),
+      getDetail: (value) => TOOL_MODE_DETAIL[value as ToolPresentationMode],
+    },
+    run: async (argv, context) => runCodeModeAction(argv[0], context),
+  },
+  {
     name: 'token-split',
     args: 'list [--json] | add|remove|toggle <id> | stats [id] | test [id] | now [reason] | reset | audit',
     summary: 'Inspect and control measured context/token projections',
@@ -2087,7 +2166,11 @@ export const COMMANDS: readonly Command[] = [
 
       if (verb === -1) {
         if (words.length === 0) {
-          context.openBrowser('mcp');
+          // The dedicated screen when there is one. The extension browser is
+          // still the fallback for non-interactive runs, which have no screen
+          // lifecycle to hand a full-screen view to.
+          if (context.openMcp) context.openMcp();
+          else context.openBrowser('mcp');
           return ok();
         }
         return ok(
@@ -2395,6 +2478,25 @@ export const COMMANDS: readonly Command[] = [
     run: async (_argv, context) => {
       await context.pasteImage();
       return ok();
+    },
+  },
+  {
+    name: 'stats',
+    concurrent: true,
+    summary: 'Sessions, streaks and token totals across your whole history',
+    run: async (_argv, context) => {
+      if (context.openStats) {
+        context.openStats();
+        return ok();
+      }
+      // A non-interactive run has no screen to open, and printing a heatmap
+      // into a pipe helps nobody.
+      return ok(
+        entry('notice', 'stats needs an interactive session', {
+          tone: 'warn',
+          subtitle: 'run `plif` and use /stats',
+        }),
+      );
     },
   },
   {

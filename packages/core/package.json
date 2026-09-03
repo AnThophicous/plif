@@ -24,6 +24,7 @@
     "schema",
     "src/agenting/instructions",
     "src/agenting/skills",
+    "src/harness/code-mode/runtime",
     "LICENSE",
     "NOTICE"
   ],
@@ -35,6 +36,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@plif/sandbox": "0.4.0",
     "@types/sql.js": "^1.4.11",
+    "koffi": "^2.10.0",
     "openai": "^4.104.0",
     "smol-toml": "^1.8.0",
     "sql.js": "^1.14.2",

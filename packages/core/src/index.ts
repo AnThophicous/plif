@@ -119,8 +119,28 @@ export { securityInstructions } from './harness/security-instructions.js';
 export type { Question, QuestionChoice } from './harness/ask.js';
 export type { QuestionOption } from './events/bus.js';
 export { runLoop, runCompaction, RUN_SCRIPT_SPEC } from './harness/loop.js';
-export { DEFAULT_CODE_MODE_LIMITS, runCodeMode } from './harness/code-mode.js';
-export type { CodeModeLimits, CodeModeOptions, CodeModeResult } from './harness/code-mode.js';
+export {
+  CODE_MODE_COLLAPSE_NOTICE,
+  DEFAULT_CODE_MODE_LIMITS,
+  RUN_CODE_SPEC,
+  RUN_CODE_TOOL_NAME,
+  createRunCodeTool,
+  isJsonLossless,
+  parseToolPresentationMode,
+  renderToolsSdk,
+  resolveCodeModeLimits,
+  runCodeMode,
+  runCodeProgram,
+} from './harness/code-mode.js';
+export type {
+  CodeDispatchRecord,
+  CodeModeLimits,
+  CodeModeOptions,
+  CodeModeResult,
+  CodeRunFailure,
+  CodeRunFailureKind,
+  ToolPresentationMode,
+} from './harness/code-mode.js';
 export type { CompactionRun } from './harness/loop.js';
 export {
   DEFAULT_BTW_CONTEXT_TOKENS,
@@ -533,6 +553,9 @@ export { createModelProvider, isAnthropicEndpoint } from './model/factory.js';
 
 export { Session, SessionStore, workspaceKey } from './session/store.js';
 export type { SessionMeta, TranscriptEvent } from './session/store.js';
+export { dayKey, dayStart, rangeStart, summariseSessions, totalTokens } from './session/stats.js';
+export type { ActivityDay, ModelStats, SessionStats, StatsOptions, TokenTotals } from './session/stats.js';
+export type { SessionUsageRow, UsageDelta } from './session/history-repository.js';
 export {
   adaptLegacyTranscriptEvent,
   decodeConversationEvent,
@@ -600,6 +623,7 @@ export {
   setAutoApprove,
   profilesOf,
   plifModeOf,
+  toolModeOf,
 } from './config/global.js';
 export { stripJsonComments } from './config/global.js';
 export type {

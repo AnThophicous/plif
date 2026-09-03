@@ -10,6 +10,7 @@ export { TOKEN_SPLIT_TECHNIQUE_IDS } from './types.js';
 
 const TECHNIQUE_DEFINITIONS: readonly TokenSplitTechniqueDefinition[] = [
   { id: 'budgets', name: 'Section budgets', layer: 0, defaultOn: true, removable: false, runtime: 'existing-pipeline', description: 'Keeps instructions, tools, history and notes within explicit budgets.' },
+  { id: 'code-mode', name: 'Code Mode collapse', layer: 0, defaultOn: true, removable: false, runtime: 'existing-pipeline', description: 'Reports what the run_code collapse keeps off the wire. Switched by toolMode or PLIF_TOOLS_MODE, not here.' },
   { id: 'lazy', name: 'Lazy content', layer: 0, defaultOn: true, removable: false, runtime: 'existing-pipeline', description: 'Prefers previews and bounded tool results before full content.' },
   { id: 'skills-disclosure', name: 'Skills disclosure', layer: 0, defaultOn: true, removable: false, runtime: 'existing-pipeline', description: 'Lists skill summaries and loads full instructions only when used.' },
   { id: 'state-notes', name: 'State notes', layer: 0, defaultOn: true, removable: false, runtime: 'existing-pipeline', description: 'Reserves authoritative facts for safe compaction and recovery.' },
@@ -27,6 +28,7 @@ const TECHNIQUE_DEFINITIONS: readonly TokenSplitTechniqueDefinition[] = [
 
 const DEFAULT_TECHNIQUE_CONFIGS: Record<TokenSplitTechniqueId, Record<string, unknown>> = {
   budgets: { sections: { instructions: 4000, toolResults: 8000, injected: 3000, history: 20000, skillsList: 400, notes: 1500 }, hard: true },
+  'code-mode': { switchedBy: 'toolMode' },
   lazy: { peekLines: 40, grepMaxResults: 200, smallFileBytes: 1536 },
   'skills-disclosure': { listBudgetFraction: 0.01, listBudgetTokens: 400, reloadAfterCompactionTokens: 3000, descriptionMaxChars: 500 },
   'state-notes': { path: '.plif/NOTES.md', archiveEveryKb: 50 },

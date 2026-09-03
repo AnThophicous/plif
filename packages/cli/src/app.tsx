@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { Box, Static, Text, useApp, useInput, useSlateEvent, useStdin, useStdout } from './ui.js';
+import { Box, Static, Text, hitTargetOf, useApp, useInput, useSlateEvent, useStdin, useStdout } from './ui.js';
 import type { Key } from './ui.js';
 import type { SlateEvent } from '@slate-terminal/react';
 
@@ -56,6 +56,7 @@ import {
   providerForModel,
   saveStoredConfig,
   storedProviderCredentials,
+  toolModeOf,
   userCatalog,
   searchPlugins,
   loadCatalog,
@@ -73,6 +74,8 @@ import {
   scheduleProviderDiscovery,
   startCodexLogin,
   summariseMemory,
+  summariseSessions,
+  rangeStart,
   validateModelConfig,
   PlifError,
   supportedEfforts,
@@ -124,6 +127,15 @@ import { Queue, queueHeight } from './components/Queue.js';
 import { Question, questionChoiceAtRow, questionHeight } from './components/Question.js';
 import { SecretWarning } from './components/SecretWarning.js';
 import { Footer, FOOTER_HEIGHT } from './components/Footer.js';
+
+/**
+ * Rows the transcript keeps for itself before the work dock or an expanded
+ * tool result may claim any more of the window.
+ *
+ * Six is enough to see the last exchange, which is what tells a reader the
+ * session is still there.
+ */
+const TIMELINE_FLOOR_ROWS = 6;
 import type { Hint } from './components/Footer.js';
 import { Header, headerHeight } from './components/Header.js';
 import { ConfigScreen } from './components/ConfigScreen.js';
@@ -211,7 +223,8 @@ import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { AnimationClockProvider } from './hooks/useAnimationClock.js';
 import { useTranscriptController } from './hooks/useTranscriptController.js';
 import { withoutReasoning } from './conversation.js';
-import { entry, initialSession, isListScreen, scrollbackCommitEnd, sessionReducer } from './session.js';
+import { SCREEN_TABS, entry, initialSession, isListScreen, scrollbackCommitEnd, sessionReducer } from './session.js';
+import type { StatsRange } from './session.js';
 import type {
   BrowserRow,
   BrowserState,
@@ -224,6 +237,8 @@ import type {
 import { AgentsScreen, filterAgents } from './components/AgentsScreen.js';
 import type { AgentRow } from './components/AgentsScreen.js';
 import { SessionsScreen, filterSessions } from './components/SessionsScreen.js';
+import { McpScreen, filterMcpServers } from './components/McpScreen.js';
+import { StatsScreen } from './components/StatsScreen.js';
 import { UsageScreen } from './components/UsageScreen.js';
 import { ComposerHistory } from './composer/history.js';
 import { composerReducer, initialComposerState, submissionFromComposer } from './composer/state.js';
@@ -360,6 +375,7 @@ const PLAN_BLOCKED_TOOLS = new Set([
   'edit_file',
   'apply_patch',
   'run_command',
+  'run_code',
   'shell_command',
   'create_profile',
   'create_skill',
@@ -705,7 +721,9 @@ export function App({
   // Keep basic left-click reports alive for thinking rows and other controls.
   // A question temporarily upgrades the terminal to motion tracking so its
   // hover selection works; the effect below always restores the click mode.
-  const questionMouseTracking = state.question !== null;
+  // A menu tracks motion for the same reason a question does: the caret should
+  // follow the pointer, so the row under the cursor is the row a click takes.
+  const questionMouseTracking = state.question !== null || state.picker !== null;
   const mouseTrackingActive = hasTextPasteAttachment || questionMouseTracking;
   const completionIndex = composer.completion?.selected ?? 0;
   const queuedIndex = composer.queuedSelection;
@@ -904,6 +922,8 @@ export function App({
   const compactionSince = useRef<number | null>(null);
   /** The one row all of a turn's retry attempts update, rather than ten rows. */
   const retryRow = useRef<string | null>(null);
+  /** The last provider reason stays with the single final retry failure. */
+  const retryReason = useRef<string | null>(null);
   /** Numbers the compact paste tokens for this session. */
   const pasteCount = useRef(0);
   /** Three clicks on a pasted-text token open its readable clipboard modal. */
@@ -1011,6 +1031,8 @@ export function App({
    * would resolve the wrong row.
    */
   const toolRows = useRef<Map<string, string>>(new Map());
+  /** How many sub-calls each live `run_code` row has reported, by parent call id. */
+  const codeDispatchCounts = useRef<Map<string, number>>(new Map());
   /** The agent's answer row, so streamed text can land in it. */
   const agentRow = useRef<string | null>(null);
   const agentText = useRef<string>('');
@@ -1196,6 +1218,35 @@ export function App({
       dispatch({ type: 'screen.usage.data', usage: null, problem: title });
     }
   }, [provider]);
+
+  /**
+   * Fold the whole session store into the stats screen.
+   *
+   * Read on open rather than kept live: the numbers describe history, and
+   * recomputing them on every turn would be work nobody is looking at.
+   */
+  const loadStatsScreen = useCallback(async (range: StatsRange): Promise<void> => {
+    try {
+      const rows = await engine.sessions.usageRows();
+      const since = rangeStart(range);
+      dispatch({
+        type: 'stats.loaded',
+        stats: summariseSessions(rows, since ? { since } : {}),
+      });
+    } catch (error) {
+      const { title } = formatError(error);
+      dispatch({ type: 'stats.problem', problem: title });
+    }
+  }, [engine]);
+
+  const openStatsScreen = useCallback((): void => {
+    dispatch({ type: 'screen.open', screen: 'stats' });
+    void loadStatsScreen('all');
+  }, [loadStatsScreen]);
+
+  const openMcpScreen = useCallback((): void => {
+    dispatch({ type: 'screen.open', screen: 'mcp' });
+  }, []);
 
   const openUsageScreen = useCallback((): void => {
     dispatch({ type: 'screen.open', screen: 'usage' });
@@ -1663,6 +1714,7 @@ export function App({
    */
   const settleRetry = useCallback((outcome: 'recovered' | 'gave up' | 'cancelled') => {
     const id = retryRow.current;
+    retryReason.current = null;
     if (!id) return;
     retryRow.current = null;
     dispatch({
@@ -1914,6 +1966,7 @@ export function App({
        */
       engine.bus.on('agent.retry', (event) => {
         if (isCurrentLoadingTurn(event.turnId)) updateLoadingPhase(event.turnId, 'waiting');
+        retryReason.current = event.reason;
         const seconds = Math.round(event.waitMs / 1000);
         const patch = {
           title: `${glyph.retry} Retry in ${seconds}s`,
@@ -2019,6 +2072,18 @@ export function App({
           completionMeterRef.current,
           event.completionTokens,
         );
+        // Persist the same figures against the session, which is what the
+        // stats screen reads back later. Deliberately not awaited and never
+        // allowed to reject: a statistic must not be able to fail a turn.
+        void transcript.resolveSession().then((active) => active?.recordUsage(
+          providerRef.current?.info.id ?? '',
+          {
+            inputTokens: event.inputNewTokens ?? Math.max(0, event.promptTokens),
+            outputTokens: written,
+            cacheReadTokens: event.inputCachedTokens ?? 0,
+            cacheWriteTokens: event.cacheWriteTokens ?? 0,
+          },
+        )).catch(() => undefined);
         const active = loadingOperationRef.current;
         if (active?.turnId === event.turnId) {
           loadingMetricPaintAt.current = monotonicNow();
@@ -2133,7 +2198,14 @@ export function App({
 
         usage.current = { ...usage.current, toolCalls: usage.current.toolCalls + 1 };
         const metrics = turnMetricsRef.current;
-        if (metrics?.turnId === event.turnId && event.durationMs) {
+        // Optional chaining on the left of this comparison used to let a
+        // `metrics === null` slip through: `undefined === event.turnId` is
+        // true whenever the event itself carries no turnId, and the write
+        // below then dereferenced the null metrics and threw. Because this ran
+        // before the dispatch further down that marks the row done, the crash
+        // silently aborted the whole handler — the tool call it was completing
+        // never left its running state, and the spinner sat there forever.
+        if (metrics !== null && metrics.turnId === event.turnId && event.durationMs) {
           metrics.toolsMs += event.durationMs;
         }
 
@@ -2152,6 +2224,7 @@ export function App({
 
         const id = toolRows.current.get(event.id) ?? null;
         toolRows.current.delete(event.id);
+        codeDispatchCounts.current.delete(event.id);
         if (toolRows.current.size === 0) {
           pendingRow.current = null;
           // Stop the drain timer overwriting the authoritative output below
@@ -2211,6 +2284,30 @@ export function App({
             }),
           );
         }
+      }),
+
+      /**
+       * A tool call made from inside a `run_code` program.
+       *
+       * Updated onto the program's own row, for the same reason the subagent
+       * count is: a program that reads eight files did one thing the model
+       * asked for, and eight rows would describe eight decisions it never made.
+       * The full ordered list is in the row's expansion when the run finishes.
+       */
+      engine.bus.on('code.dispatch', (event) => {
+        const [parent = ''] = event.id.split(':code:');
+        const id = toolRows.current.get(parent);
+        if (!id) return;
+        const seen = (codeDispatchCounts.current.get(parent) ?? 0) + 1;
+        codeDispatchCounts.current.set(parent, seen);
+        dispatch({
+          type: 'update',
+          id,
+          patch: {
+            toolSummary:
+              `${seen} tool call${seen === 1 ? '' : 's'} · ${event.ok ? '' : 'failed: '}${event.name}`,
+          },
+        });
       }),
 
       /**
@@ -3443,6 +3540,8 @@ export function App({
     openStatus: openStatusScreen,
     openConfig: openConfigScreen,
     openUsage: openUsageScreen,
+    openStats: openStatsScreen,
+    openMcp: openMcpScreen,
     openAgents: openAgentsScreen,
     openSessions: openSessionsScreen,
     switchTheme: async (id) => {
@@ -3902,6 +4001,7 @@ export function App({
     agentRow.current = null;
     agentText.current = '';
     thinkRow.current = null;
+    retryReason.current = null;
     // Last turn's subagents are finished work; the panel is a live view, and
     // carrying four settled tabs into a new question is four tabs of clutter
     // over whatever this turn delegates.
@@ -3952,6 +4052,16 @@ export function App({
     const lspForAgent = lspManager.current ? lspTools(lspManager.current) : [];
     const edits = new EditCoordinator();
     const storedConfig = profileConfig;
+    // The run-budget stop tells the operator to raise the budget deliberately;
+    // this is where that instruction becomes actionable. The env var wins over
+    // config so one long run can be authorised without editing settings.
+    const configuredRunBudget = Number(
+      process.env['PLIF_MAX_RUN_TOKENS'] ?? storedConfig.maxRunTokens ?? Number.NaN,
+    );
+    const runBudgetOverride =
+      Number.isFinite(configuredRunBudget) && configuredRunBudget > 0
+        ? Math.floor(configuredRunBudget)
+        : undefined;
     const configuredConversationState = process.env['PLIF_CONVERSATION_STATE'] ?? storedConfig.conversationState;
     const conversationStateMode = configuredConversationState === 'native' || configuredConversationState === 'replay'
       ? configuredConversationState
@@ -4048,6 +4158,12 @@ export function App({
     // Token Split configuration is read once at turn start. A command can
     // change it safely for the next turn, never halfway through this request.
     const tokenSplitConfig = await loadTokenSplitConfig();
+    // The presentation is resolved once per turn and used twice: the prompt
+    // renders the SDK for it and the loop decides what reaches the wire. Read
+    // in one place so the two can never disagree. A plan-only turn stays
+    // native — exploring is where the model most needs the schemas in front of
+    // it, and it makes no mutations worth batching.
+    const toolMode = planOnly ? 'native' : toolModeOf(storedConfig as GlobalConfig);
 
     try {
       const result = await runLoop(
@@ -4064,8 +4180,9 @@ export function App({
               contextTokens: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
               tools: stableToolSpecs([
                 ...agentTools.map((tool) => tool.spec),
-                ...(planOnly ? [] : [RUN_SCRIPT_SPEC]),
+                ...(planOnly || toolMode === 'code' ? [] : [RUN_SCRIPT_SPEC]),
               ]),
+              toolMode,
               skills: skillRegistry?.catalogue() ?? skillCatalogue,
               loadedSkills: loadedSkillsForPrompt,
               providerId: providerRef.current.info.providerId,
@@ -4099,6 +4216,7 @@ export function App({
           bus: engine.bus,
           turnId: durableTurnId,
           signal: abort.signal,
+          ...(runBudgetOverride ? { executionPolicy: { maxRunTokens: runBudgetOverride } } : {}),
           ...(conversationState ? { conversationState } : {}),
           conversationStateMode,
           tools: agentTools,
@@ -4136,6 +4254,8 @@ export function App({
           enableHarnessCycle: effortRef.current === 'plif',
           runScript: !planOnly,
           runScriptMaxSteps: plifModeOf(storedConfig).runScriptMaxSteps,
+          toolMode,
+          isolation: report.isolation,
           agentId: activeSession?.meta.uuid ?? 'primary',
           goal: goalControllerRef.current ?? undefined,
           sessions: engine.sessions,
@@ -4263,7 +4383,7 @@ export function App({
         push(entry('answer', result.text.trim()));
       }
 
-      if (result.stop !== 'complete') {
+      if (result.stop !== 'complete' && !result.error) {
         if (result.stop === 'cancelled') settleRetry('cancelled');
         push(
           entry('notice', `stopped: ${result.stop}`, {
@@ -4293,7 +4413,32 @@ export function App({
         const recovered = await recoverModelAuth(result.error);
         if (!recovered) {
           const { title, detail } = formatError(result.error);
-          push(entry('step', title, { status: 'failed', tone: 'danger', ...(detail ? { detail } : {}) }));
+          const retryDetail = retryReason.current;
+          const failureDetail = retryDetail && detail
+            ? `${retryDetail}\n\n${detail}`
+            : retryDetail ?? detail;
+          const retryId = retryRow.current;
+          retryRow.current = null;
+          retryReason.current = null;
+          if (retryId) {
+            dispatch({
+              type: 'update',
+              id: retryId,
+              patch: {
+                title,
+                subtitle: undefined,
+                status: 'failed',
+                tone: 'danger',
+                ...(failureDetail ? { detail: failureDetail } : { detail: undefined }),
+              },
+            });
+          } else {
+            push(entry('step', title, {
+              status: 'failed',
+              tone: 'danger',
+              ...(failureDetail ? { detail: failureDetail } : {}),
+            }));
+          }
         }
       }
     } catch (error) {
@@ -4763,7 +4908,7 @@ export function App({
     : EMPTY_TRANSCRIPT_CELLS;
   const transcriptBodyHeight = Math.max(1, surface.panelHeight - 2);
   const transcriptContentLines = transcriptOverlayOpen
-    ? measureTranscriptCells(transcriptCells, width)
+    ? measureTranscriptCells(transcriptCells, width, true)
     : 0;
   const thinkingDoc = useMemo(
     () => thinkingViewport.open
@@ -4919,8 +5064,41 @@ export function App({
   // the one-based coordinates used by the existing layout/hit-test helpers.
   // Keep those events intact instead of
   // round-tripping them through an SGR string and the legacy input parser.
+  /**
+   * Mouse handling for the menus, driven by Slate's own hit-test.
+   *
+   * Slate reports which laid-out element a click landed on, and the picker
+   * labels each of its rows, so a click needs no row arithmetic of its own:
+   * the label carries the index. Returns true when the event belonged to a
+   * menu and must not fall through to the transcript handlers.
+   */
+  function handleMenuMouse(event: SlateEvent): boolean {
+    if (!state.picker) return false;
+    if (event.action === 'scroll') {
+      const delta = (event.deltaY ?? 0) > 0 ? 1 : -1;
+      dispatch({ type: state.picker.groups ? 'picker.moveVisible' : 'picker.move', delta });
+      return true;
+    }
+    const target = hitTargetOf(event.target);
+    const row = target?.startsWith('picker:row:') === true
+      ? Number.parseInt(target.slice('picker:row:'.length), 10)
+      : Number.NaN;
+    if (!Number.isFinite(row)) return true;
+    if (event.action === 'move') {
+      // Hovering only moves the caret. Nothing is committed until a click.
+      dispatch({ type: 'picker.select', index: row });
+      return true;
+    }
+    if (event.action === 'press' && (event.button ?? 'left') === 'left') {
+      dispatch({ type: 'picker.select', index: row });
+      activatePickerRow(row);
+    }
+    return true;
+  }
+
   useSlateEvent((event: SlateEvent) => {
     if (event.kind !== 'mouse') return;
+    if (handleMenuMouse(event)) return;
     handleMouse({
       button: event.button === 'right' ? 2 : event.button === 'middle' ? 1 : 0,
       action: event.action ?? 'press',
@@ -5606,6 +5784,11 @@ export function App({
       if (char === 'r' || char === 'R') void loadUsageScreen();
       return;
     }
+    if (screen.kind === 'mcp' && (char === 'r' || char === 'R') && !screen.state.filter) {
+      const chosen = filterMcpServers(mcpStatuses, screen.state.filter)[screen.state.selected];
+      if (chosen && mcpRegistry) void mcpRegistry.testConnection(chosen.name).catch(() => undefined);
+      return;
+    }
     if (key.return) {
       if (screen.kind === 'sessions') {
         const chosen = filterSessions(screen.sessions, screen.state.filter)[screen.state.selected];
@@ -5625,14 +5808,51 @@ export function App({
   function listScreenCount(screen: Extract<SessionScreen, { state: ListScreenState }>): number {
     if (screen.kind === 'agents') return filterAgents(screen.agents, screen.state.filter).length;
     if (screen.kind === 'sessions') return filterSessions(screen.sessions, screen.state.filter).length;
+    if (screen.kind === 'mcp') return filterMcpServers(mcpStatuses, screen.state.filter).length;
     return 0;
+  }
+
+  /**
+   * Stats answers to three keys and no filter.
+   *
+   * There is nothing on the screen to search, so a bare letter is a command
+   * rather than the first character of a search - the same choice usage makes.
+   */
+  function handleStatsKey(char: string, key: Key): void {
+    const screen = state.screen;
+    if (screen?.kind !== 'stats') return;
+    if (key.escape || (key.ctrl && char === 'c')) {
+      dispatch({ type: 'screen.close' });
+      return;
+    }
+    if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) {
+      dispatch({ type: 'stats.tab', tab: screen.state.tab === 'overview' ? 'models' : 'overview' });
+      return;
+    }
+    if (char === 'r' || char === 'R') {
+      const order = ['all', '7d', '30d'] as const;
+      const next = order[(order.indexOf(screen.state.range) + 1) % order.length]!;
+      dispatch({ type: 'stats.range', range: next });
+      void loadStatsScreen(next);
+    }
   }
 
   function handleConfigKey(char: string, key: Key): void {
     const screen = state.screen;
     if (!screen) return;
+
+    // Tab walks the screen bar from anywhere on it. Checked before every
+    // screen's own keys so it cannot be swallowed by a filter box.
+    if (key.tab) {
+      dispatch({ type: 'screen.tab', delta: key.shift ? -1 : 1 });
+      return;
+    }
     if (screen.kind === 'status') {
       if (key.escape || (key.ctrl && char === 'c')) dispatch({ type: 'screen.close' });
+      return;
+    }
+    if (screen.kind === 'stats') {
+      handleStatsKey(char, key);
       return;
     }
     if (isListScreen(screen)) {
@@ -5944,6 +6164,43 @@ export function App({
     );
   }
 
+  /**
+   * Commit the row at `index`, whatever pointed at it.
+   *
+   * Enter and a mouse click mean the same thing on a menu, so they share one
+   * path: expanding a group, revealing a provider's long tail, or picking the
+   * row and closing the menu.
+   */
+  function activatePickerRow(index: number): void {
+    const picker = state.picker;
+    if (!picker) return;
+    if (picker.groups) {
+      const matches = visiblePickerRows(picker.groups, picker.expanded ?? [], picker.filter);
+      const chosen = matches[index];
+      if (!chosen) return;
+      if (chosen.kind === 'group') {
+        dispatch({ type: 'picker.toggle', id: chosen.group.id });
+        return;
+      }
+      // "show N more" is an expansion, not a choice: it reveals the rest of
+      // the provider and leaves the picker open on the same provider.
+      if (chosen.kind === 'more') {
+        dispatch({ type: 'picker.toggle', id: chosen.id });
+        return;
+      }
+      const selection = catalogSelection(chosen.groupId, chosen.item.value);
+      if (!selection) return;
+      dispatch({ type: 'picker.close' });
+      picker.onPick(selection);
+      return;
+    }
+
+    const matches = filterItems(picker.items ?? [], picker.filter);
+    const chosen = matches[index];
+    dispatch({ type: 'picker.close' });
+    if (chosen) picker.onPick(chosen.selection ?? chosen.value);
+  }
+
   function handlePickerKey(
     char: string,
     key: {
@@ -5993,31 +6250,7 @@ export function App({
       return;
     }
     if (key.return) {
-      if (picker.groups) {
-        const matches = visiblePickerRows(picker.groups, picker.expanded ?? [], picker.filter);
-        const chosen = matches[picker.selected];
-        if (!chosen) return;
-        if (chosen.kind === 'group') {
-          dispatch({ type: 'picker.toggle', id: chosen.group.id });
-          return;
-        }
-        // "show N more" is an expansion, not a choice: it reveals the rest of
-        // the provider and leaves the picker open on the same provider.
-        if (chosen.kind === 'more') {
-          dispatch({ type: 'picker.toggle', id: chosen.id });
-          return;
-        }
-        const selection = catalogSelection(chosen.groupId, chosen.item.value);
-        if (!selection) return;
-        dispatch({ type: 'picker.close' });
-        picker.onPick(selection);
-        return;
-      }
-
-      const matches = filterItems(picker.items ?? [], picker.filter);
-      const chosen = matches[picker.selected];
-      dispatch({ type: 'picker.close' });
-      if (chosen) picker.onPick(chosen.selection ?? chosen.value);
+      activatePickerRow(picker.selected);
       return;
     }
     if (key.backspace || key.delete) {
@@ -6530,11 +6763,15 @@ export function App({
   // Everything Ink has to repaint, other than the timeline. Prompt rows are
   // budgeted from the same frame geometry that Prompt renders; a long draft is
   // clipped to the rows that fit while its complete value remains editable.
-  const fixedChrome =
+  // The conversation is the primary content of this window. The work dock and
+  // an expanded tool result are secondary, and they grow during a long run —
+  // enough, on a busy turn, to consume the entire budget and leave the timeline
+  // with zero rows, at which point the whole transcript vanishes mid-run and
+  // reads as the session having been lost. They yield instead: the timeline
+  // keeps a floor and the secondary surfaces are clipped to what is left.
+  const rigidChrome =
     footerRows + // contextual bottom HUD; zero rows in quiet idle
     workingRows +
-    workRows +
-    toolExpansionRows +
     (showCompletions ? suggestionRows + (completionCount > suggestionRows ? 1 : 0) + 1 + completionHeadingRows : 0) +
     (showEmoji ? suggestionRows + (emojiMatches.length > suggestionRows ? 1 : 0) + 1 : 0) +
     (state.picker
@@ -6558,6 +6795,19 @@ export function App({
     footerRows: promptFooterRows,
     queueRows: promptQueueRows,
   }) - 1;
+  // Never let the secondary surfaces take the last of the window. Zero rows of
+  // history is still legitimate when a dialog genuinely fills a short terminal,
+  // which is why the floor is what is actually available rather than a
+  // constant: on a tall window it is six rows, on a tiny one it is nothing.
+  const timelineFloor = Math.min(
+    TIMELINE_FLOOR_ROWS,
+    Math.max(0, surface.contentHeight - rigidChrome - promptOverhead - 1),
+  );
+  const elasticAllowance = Math.max(
+    0,
+    surface.contentHeight - rigidChrome - promptOverhead - timelineFloor,
+  );
+  const fixedChrome = rigidChrome + Math.min(workRows + toolExpansionRows, elasticAllowance);
   const promptRows = Math.max(
     1,
     Math.min(inputRows, surface.contentHeight - fixedChrome - promptOverhead),
@@ -6586,12 +6836,6 @@ export function App({
     runningSubagent: state.subagents.some((view) => view.status === 'running'),
     runningDiscovery: state.discovery.calls.some((call) => call.ok === undefined),
       runningTimeline: state.entries.some((entry) => entry.status === 'active'),
-    // Only the focused idle prompt may breathe on the shared slow clock. Open
-    // selectors stay completely static; keyboard navigation must be the only
-    // thing that changes them.
-    ambientFocus: Boolean(stdout.isTTY) && (
-      !state.approval && !state.question && !state.picker && !btwInput && !state.browser && !state.screen && !state.exiting
-    ),
   });
   // The full travelling wave is reserved for actual work and bounded
   // transitions; an idle frame that waved as hard as a busy one would make
@@ -6692,6 +6936,8 @@ export function App({
         >
           {state.screen.kind === 'status' && screenStatus ? (
             <StatusScreen
+              tabs={SCREEN_TABS}
+              activeTab="status"
               snapshot={screenStatus}
               version={version}
               config={configSnapshot}
@@ -6705,6 +6951,8 @@ export function App({
             />
           ) : state.screen.kind === 'config' ? (
             <ConfigScreen
+              tabs={SCREEN_TABS}
+              activeTab="config"
               settings={filteredConfigSettings}
               filter={state.screen.state.filter}
               selected={state.screen.state.selected}
@@ -6717,6 +6965,8 @@ export function App({
             />
           ) : state.screen.kind === 'usage' ? (
             <UsageScreen
+              tabs={SCREEN_TABS}
+              activeTab="usage"
               info={state.screen.usage}
               session={usage.current}
               contextUsed={state.contextUsed}
@@ -6743,6 +6993,28 @@ export function App({
               filter={state.screen.state.filter}
               workspace={cwd}
               loading={state.screen.state.loading}
+              width={width}
+              rows={rows}
+            />
+          ) : state.screen.kind === 'stats' ? (
+            <StatsScreen
+              stats={state.screen.stats}
+              range={state.screen.state.range}
+              tab={state.screen.state.tab}
+              loading={state.screen.state.loading}
+              problem={state.screen.state.problem}
+              tabs={SCREEN_TABS}
+              activeTab="stats"
+              width={width}
+              rows={rows}
+            />
+          ) : state.screen.kind === 'mcp' ? (
+            <McpScreen
+              servers={mcpStatuses}
+              selected={state.screen.state.selected}
+              filter={state.screen.state.filter}
+              tabs={SCREEN_TABS}
+              activeTab="mcp"
               width={width}
               rows={rows}
             />

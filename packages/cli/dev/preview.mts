@@ -166,6 +166,25 @@ const SCENARIOS: Record<string, Step[]> = {
   /** A Plif-styled prompt at rest must settle instead of repainting forever. */
   'idle-plif': [{ wait: 900 }],
 
+  /**
+   * Open a stored session from /sessions and type into it immediately.
+   *
+   * The scenario the session browser has to survive: pick a large session,
+   * have its history appear, and still have a prompt that accepts a keystroke.
+   */
+  'resume-session': [
+    { wait: 200 },
+    { type: '/sessions' + String.fromCharCode(13) },
+    { wait: 900 },
+    { capture: 'sessions-list' },
+    { type: String.fromCharCode(13) },
+    { wait: 1500 },
+    { capture: 'resumed' },
+    { type: 'ola mundo' },
+    { wait: 400 },
+    { capture: 'typed' },
+  ],
+
   /** The three list screens, which replace the panel while they are open. */
   'usage-screen': [{ wait: 200 }, { type: '/usage' + String.fromCharCode(13) }, { wait: 900 }, { capture: 'usage' }],
   'agents-screen': [{ wait: 200 }, { type: '/agents' + String.fromCharCode(13) }, { wait: 900 }, { capture: 'agents' }],
@@ -268,6 +287,64 @@ const SCENARIOS: Record<string, Step[]> = {
   completions: [{ wait: 150 }, { type: '/' }, { wait: 400 }],
 
   /** The read-only runtime snapshot, reached through the real slash router. */
+  /** Tab walks the screen bar; the bar is the only navigation between them. */
+  'screen-tabs': [
+    { wait: 200 },
+    { type: '/status' + String.fromCharCode(13) },
+    { wait: 1200 },
+    { capture: 'status, the first tab' },
+    { type: String.fromCharCode(9) },
+    { wait: 700 },
+    { capture: 'one Tab later' },
+    { type: String.fromCharCode(9) + String.fromCharCode(9) },
+    { wait: 800 },
+    { capture: 'three Tabs later' },
+  ],
+
+  'stats-screen': [
+    { wait: 200 },
+    { type: '/stats' + String.fromCharCode(13) },
+    { wait: 900 },
+    { capture: 'stats, overview' },
+  ],
+  'mcp-screen': [
+    { wait: 200 },
+    { type: '/mcp' + String.fromCharCode(13) },
+    { wait: 500 },
+    // Three servers in the three states the screen distinguishes, pushed
+    // straight onto the bus: reaching them for real would need three live
+    // processes and a network.
+    {
+      emit: ['mcp.status', {
+        server: 'filesystem', name: 'filesystem', transport: 'stdio', connected: true,
+        toolCount: 12, detail: '12 tools', endpoint: 'npx @modelcontextprotocol/server-filesystem',
+        startedAt: new Date(Date.now() - 45 * 60_000).toISOString(),
+        lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
+        recentCalls: [
+          { tool: 'read_file', at: new Date(Date.now() - 60_000).toISOString(), ok: true },
+          { tool: 'list_directory', at: new Date(Date.now() - 120_000).toISOString(), ok: true },
+          { tool: 'search_files', at: new Date(Date.now() - 300_000).toISOString(), ok: false },
+        ],
+      }],
+    },
+    {
+      emit: ['mcp.status', {
+        server: 'notion', name: 'notion', transport: 'http', connected: true,
+        toolCount: 14, detail: '14 tools', endpoint: 'https://mcp.notion.com/mcp',
+        startedAt: new Date(Date.now() - 8 * 60_000).toISOString(),
+        recentCalls: [],
+      }],
+    },
+    {
+      emit: ['mcp.status', {
+        server: 'slack', name: 'slack', transport: 'http', connected: false,
+        toolCount: 0, detail: 'connection refused', endpoint: 'https://slack.example/mcp',
+        recentCalls: [],
+      }],
+    },
+    { wait: 600 },
+    { capture: 'mcp' },
+  ],
   'status-screen': [
     { wait: 150 },
     { type: '/status' },
@@ -808,6 +885,45 @@ const SCENARIOS: Record<string, Step[]> = {
    * Emitted rather than run so the frame is the same every time — the point is
    * the rendering, not the edit.
    */
+  /**
+   * A written file whose content is prose, not code: long sentences that must
+   * wrap across several physical rows. This is what the diff height estimate
+   * used to get wrong - it counted one row per diff line and ignored how many
+   * of those wrapped, so old wrapped text was left on screen under the next
+   * frame instead of being cleanly erased.
+   */
+  'diff-wrapped-prose': [
+    { wait: 200 },
+    { emit: ['agent.tool', { id: 't1', name: 'edit_file', input: { path: 'notes/carta.txt' }, phase: 'start' }] },
+    { wait: 200 },
+    {
+      emit: [
+        'agent.tool',
+        {
+          id: 't1',
+          name: 'edit_file',
+          input: { path: 'notes/carta.txt' },
+          phase: 'end',
+          ok: true,
+          durationMs: 30,
+          output: 'edited notes/carta.txt — added 5 lines, removed 0 lines',
+          diff: [
+            '--- a/notes/carta.txt',
+            '+++ b/notes/carta.txt',
+            '@@ -0,0 +1,5 @@',
+            '+CARTA DE APRESENTACAO PROFISSIONAL',
+            '+',
+            '+Gostaria de compartilhar uma parte importante da minha identidade pessoal. Esta e uma verdade sobre mim que levo comigo em todos os espacos da minha vida, incluindo o ambiente de trabalho.',
+            '+',
+            '+Acredito que um ambiente verdadeiramente inclusivo e aquele onde cada pessoa pode trazer sua autenticidade completa para o trabalho, sem precisar esconder partes essenciais de quem e.',
+          ].join(String.fromCharCode(10)),
+        },
+      ],
+    },
+    { wait: 1200 },
+    { capture: 'a wrapped prose diff, right after it settles' },
+  ],
+
   diff: [
     { wait: 200 },
     { emit: ['agent.tool', { id: 't1', name: 'edit_file', input: { path: 'packages/cli/src/app.tsx' }, phase: 'start' }] },
@@ -953,7 +1069,7 @@ const app = render(React.createElement(App, {
     capabilityCache,
     // Plif visual scenarios are event-only; the model picker would obscure
     // the surface being previewed when this machine has no provider config.
-    providerProblem: scenarioName.endsWith('-plif') || scenarioName === 'model-catalog' || scenarioName === 'pasted-popup' || scenarioName === 'sessions' || scenarioName === 'status-screen' || scenarioName === 'config-screen' || scenarioName === 'tool-expand'
+    providerProblem: scenarioName.endsWith('-plif') || scenarioName === 'model-catalog' || scenarioName === 'pasted-popup' || scenarioName === 'sessions' || scenarioName === 'status-screen' || scenarioName === 'screen-tabs' || scenarioName === 'config-screen' || scenarioName === 'tool-expand' || scenarioName === 'diff-wrapped-prose' || scenarioName === 'diff' || scenarioName === 'thinking'
       ? null
       : previewProblem,
     tools: (await import('@plif/core')).DEFAULT_TOOLS,

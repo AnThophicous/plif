@@ -1126,12 +1126,17 @@ export const askUser: Tool = {
                   label: { type: 'string' },
                   description: { type: 'string' },
                 },
-                required: ['value', 'label'],
+                // Either key alone is enough; the other is derived from it.
+                // Demanding both turned a cosmetic omission into a hard tool
+                // failure mid-question, which is the worst moment to fail.
+                anyOf: [{ required: ['value'] }, { required: ['label'] }],
                 additionalProperties: false,
               },
             ],
           },
-          description: 'Suggested answers. Objects add the second-line description shown in the picker.',
+          description:
+            'Suggested answers. A plain string is the whole option. An object may carry '
+            + 'value, label and description; value and label default to each other.',
         },
         context: {
           type: 'string',
@@ -1150,17 +1155,27 @@ export const askUser: Tool = {
           if (typeof option === 'string') return [option];
           if (!option || typeof option !== 'object') return [];
           const item = option as Record<string, unknown>;
-          if (typeof item['value'] !== 'string' || typeof item['label'] !== 'string') return [];
+          // One of the two is enough. The picker needs a label to show and a
+          // value to return; when only one arrives, it plays both parts rather
+          // than failing the whole question over a missing duplicate.
+          const rawValue = typeof item['value'] === 'string' ? item['value'].trim() : '';
+          const rawLabel = typeof item['label'] === 'string' ? item['label'].trim() : '';
+          const value = rawValue || rawLabel;
+          const label = rawLabel || rawValue;
+          if (!value) return [];
           return [{
-            value: item['value'],
-            label: item['label'],
+            value,
+            label,
             ...(typeof item['description'] === 'string' ? { description: item['description'] } : {}),
           }];
         })
       : undefined;
 
     if (Array.isArray(input['options']) && options?.length !== input['options'].length) {
-      throw new PlifError('INVALID_ARGUMENT', 'every ask_user option needs a string value or value and label');
+      throw new PlifError(
+        'INVALID_ARGUMENT',
+        'every ask_user option must be a non-empty string, or an object carrying "value" or "label"',
+      );
     }
     if ((options?.length ?? 0) > 3) {
       throw new PlifError('INVALID_ARGUMENT', 'ask_user accepts at most three options');

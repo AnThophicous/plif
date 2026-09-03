@@ -1,0 +1,41 @@
+{
+  "_comment": "Overrides for package_conformance.py. Eval packs declare a `kind`; the required fields follow from it, so routing and expansion packs are not forced into the prompt/assertion shape.",
+  "eval_case_required": [
+    "id",
+    "prompt",
+    "must",
+    "must_not",
+    "critical"
+  ],
+  "eval_case_required_by_kind": {
+    "behavior": [
+      "id",
+      "prompt",
+      "must",
+      "must_not",
+      "critical"
+    ],
+    "routing": [
+      "id",
+      "prompt",
+      "boundary"
+    ],
+    "expansion": [
+      "id",
+      "query",
+      "expected_any"
+    ]
+  },
+  "eval_case_one_of_by_kind": {
+    "routing": [
+      [
+        "must_route"
+      ],
+      [
+        "must",
+        "must_not",
+        "critical"
+      ]
+    ]
+  }
+}

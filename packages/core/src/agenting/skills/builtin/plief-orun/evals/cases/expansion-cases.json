@@ -1,0 +1,104 @@
+{
+  "version": "1.0.0",
+  "purpose": "Regression cases for capability breadth, hard gates and fallback-aware routing.",
+  "cases": [
+    {
+      "id": "O-EXP-01",
+      "query": "interactive product bottle model",
+      "expected_any": [
+        "three-js",
+        "model-viewer-component",
+        "babylonjs-engine"
+      ]
+    },
+    {
+      "id": "O-EXP-02",
+      "query": "simple vector illustration",
+      "expected_any": [
+        "svg-native",
+        "canvas-2d",
+        "pixijs-renderer"
+      ]
+    },
+    {
+      "id": "O-EXP-03",
+      "query": "huge particle GPU path",
+      "expected_any": [
+        "webgpu-native-runtime",
+        "three-webgpu-renderer",
+        "webgl-native",
+        "babylonjs-engine"
+      ]
+    },
+    {
+      "id": "O-EXP-04",
+      "query": "accessible combobox keyboard",
+      "expected_any": [
+        "downshift-combobox",
+        "ark-ui",
+        "react-aria-components",
+        "radix-primitives"
+      ]
+    },
+    {
+      "id": "O-EXP-05",
+      "query": "100k row virtualization grid",
+      "expected_any": [
+        "tanstack-table",
+        "ag-grid",
+        "react-window-virtualization",
+        "react-virtuoso-virtualization"
+      ]
+    },
+    {
+      "id": "O-EXP-06",
+      "query": "interactive graph diagram",
+      "expected_any": [
+        "cytoscape-network-viz",
+        "react-flow-diagrams",
+        "svg-native",
+        "d3"
+      ]
+    },
+    {
+      "id": "O-EXP-07",
+      "query": "scroll-linked video sequence",
+      "expected_any": [
+        "hls-js",
+        "dashjs-streaming",
+        "mse-streaming",
+        "media-recorder-capture"
+      ]
+    },
+    {
+      "id": "O-EXP-08",
+      "query": "existing GLB model",
+      "expected_any": [
+        "three-js",
+        "model-viewer-component",
+        "gltf-transform-pipeline",
+        "drei"
+      ]
+    },
+    {
+      "id": "O-EXP-09",
+      "query": "Rive state machine",
+      "expected_any": [
+        "rive-web",
+        "lottie-authored-motion",
+        "motion-react-layout"
+      ]
+    },
+    {
+      "id": "O-EXP-10",
+      "query": "simple CSS transition no engine",
+      "expected_any": [
+        "web-animations-api",
+        "scroll-driven-css",
+        "motion-react-layout",
+        "auto-animate-layout"
+      ]
+    }
+  ],
+  "kind": "expansion"
+}

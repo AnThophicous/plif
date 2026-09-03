@@ -1,0 +1,157 @@
+{
+  "pack": "plief-sifr/astronomical-hardening",
+  "cases": [
+    {
+      "id": "S-01",
+      "critical": true,
+      "prompt": "Create a distinctive landing for an incident-response product from a vague brief.",
+      "must": [
+        "infer product job with evidence labels",
+        "retrieve concepts selectively",
+        "write product-causal DesignDNA before implementation",
+        "request one consolidated decision only if material ambiguity remains"
+      ],
+      "must_not": [
+        "style preset output",
+        "generic centered hero as default",
+        "12-field interview"
+      ]
+    },
+    {
+      "id": "S-02",
+      "critical": true,
+      "prompt": "Combine Swiss typography, Memphis and glass for a dense product surface.",
+      "must": [
+        "choose a dominant grammar",
+        "bound supporting rules",
+        "record tension and rejected rules",
+        "reserve glass for a functional layer"
+      ],
+      "must_not": [
+        "average adjectives",
+        "apply every trend to every surface"
+      ]
+    },
+    {
+      "id": "S-03",
+      "critical": true,
+      "prompt": "A screenshot shows a beautiful 3D hero; rebuild the experience.",
+      "must": [
+        "treat screenshot as visual evidence",
+        "test whether viewpoint/volume is necessary",
+        "route engine/runtime facts to Orun",
+        "define DOM/fallback contract"
+      ],
+      "must_not": [
+        "infer 3D from one image",
+        "clone protected identity",
+        "claim browser proof without rendering"
+      ]
+    },
+    {
+      "id": "S-04",
+      "critical": true,
+      "prompt": "Make the responsive layout work at 390, 768 and 1440.",
+      "must": [
+        "recompose structure at intermediate width",
+        "preserve content order and reading measure",
+        "repair root responsive owner",
+        "rerender affected matrix"
+      ],
+      "must_not": [
+        "pile breakpoint patches",
+        "shrink essential type to fit"
+      ]
+    },
+    {
+      "id": "S-05",
+      "critical": true,
+      "prompt": "Make this page maximalist and animated.",
+      "must": [
+        "define one signature sequence and bounded motifs",
+        "state purpose, interruption and settlement",
+        "provide reduced-motion equivalent",
+        "protect utility path and performance budget"
+      ],
+      "must_not": [
+        "animate every section",
+        "unbounded idle loops",
+        "motion hides latency"
+      ]
+    },
+    {
+      "id": "S-06",
+      "critical": true,
+      "prompt": "Use Paper Shaders, Magic UI, a smooth cursor and a 3D globe.",
+      "must": [
+        "run product-job and medium gates",
+        "hand current external facts to Orun",
+        "select at most bounded mechanisms",
+        "define fallback and worst-frame contrast"
+      ],
+      "must_not": [
+        "library sampler",
+        "demo aesthetics as brand",
+        "all named effects installed"
+      ]
+    },
+    {
+      "id": "S-07",
+      "critical": true,
+      "prompt": "The approved surface only needs a 4px CTA spacing repair.",
+      "must": [
+        "use proportional fast path",
+        "invalidate only dependent local artifact",
+        "run affected check"
+      ],
+      "must_not": [
+        "reopen full discovery",
+        "ask ceremonial approval"
+      ]
+    },
+    {
+      "id": "S-08",
+      "critical": true,
+      "prompt": "Audit visual quality with no browser, screenshot or vision capability.",
+      "must": [
+        "mark rendered claims UNVERIFIED",
+        "continue source/static checks when safe",
+        "name missing evidence and exact unverified cases"
+      ],
+      "must_not": [
+        "claim visual balance",
+        "invent screenshot proof"
+      ]
+    },
+    {
+      "id": "S-09",
+      "critical": true,
+      "prompt": "The user explicitly says React + Vite and neo-minimal editorial.",
+      "must": [
+        "record explicit direction",
+        "do not ask the same stack/style question",
+        "preserve the constraint"
+      ],
+      "must_not": [
+        "replace with generic default",
+        "block on redundant interview"
+      ]
+    },
+    {
+      "id": "S-10",
+      "critical": true,
+      "prompt": "Rewrite the design system from the concept corpus.",
+      "must": [
+        "treat concepts as principles and evidence",
+        "map to host tokens and contracts",
+        "keep product-specific identity and accessibility"
+      ],
+      "must_not": [
+        "copy a preset",
+        "duplicate Orun capability records",
+        "call a concept a component library"
+      ]
+    }
+  ],
+  "kind": "behavior"
+}

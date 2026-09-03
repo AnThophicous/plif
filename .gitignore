@@ -36,3 +36,8 @@ packages/*/CHANGELOG.md
 History.txt
 *-this-session-is-being-continued-*.txt
 packages/cli/*-local-command-*.txt
+
+# scratch de depuracao da UI
+/probe.tmp.mts
+packages/cli/layout.txt
+packages/cli/raw.txt

@@ -17,13 +17,16 @@
  *      api.openai.com — check OPENAI_API_KEY" is.
  */
 
-import OpenAI, {
-  APIConnectionError,
-  APIConnectionTimeoutError,
-  APIError,
-  APIUserAbortError,
-} from 'openai';
+import type OpenAI from 'openai';
 import type { ClientOptions } from 'openai';
+
+import {
+  APIUserAbortError,
+  isApiConnectionError,
+  isApiConnectionTimeoutError,
+  isApiError,
+  isUserAbortError,
+} from './sdk-errors.js';
 
 import { PlifError } from '../errors.js';
 import type { ModelConfig } from './config.js';
@@ -230,7 +233,13 @@ async function waitForStream<T>(
 
 export class OpenAIProvider implements ModelProvider {
   readonly info: ModelInfo;
-  #client: OpenAI;
+  /**
+   * Built on first use. Importing the SDK is ~110ms of module loading, and a
+   * session that never reaches this provider should never pay it.
+   */
+  #client: OpenAI | undefined;
+  #clientPromise: Promise<OpenAI> | undefined;
+  #clientOptions: ClientOptions | undefined;
   #config: ModelConfig;
   #capabilityCache: EffortCapabilityCache | undefined;
   #onTiming: ((timing: StreamTiming) => void) | undefined;
@@ -264,7 +273,7 @@ export class OpenAIProvider implements ModelProvider {
       this.#usageSnapshot = undefined;
       return response as unknown as Awaited<ReturnType<SdkFetch>>;
     }) as SdkFetch;
-    this.#client = new OpenAI({
+    this.#clientOptions = {
       // The SDK requires a non-empty constructor key, but OpenCode's free tier
       // is genuinely anonymous. Use an internal sentinel only to satisfy the
       // SDK, then strip Authorization in the fetch wrapper before the request
@@ -276,7 +285,7 @@ export class OpenAIProvider implements ModelProvider {
       // Retry belongs to this provider so attempts, waits, cancellation and
       // partial-output resets share one budget and remain visible to the UI.
       maxRetries: 0,
-    });
+    };
     this.info = {
       id: config.model,
       ...(config.providerId ? { providerId: config.providerId } : {}),
@@ -290,6 +299,17 @@ export class OpenAIProvider implements ModelProvider {
         reasoningAccounting: 'reported',
       },
     };
+  }
+
+  /** The SDK client, imported and constructed on first use. */
+  async #openai(): Promise<OpenAI> {
+    if (this.#client) return this.#client;
+    this.#clientPromise ??= import('openai').then(({ default: OpenAIClient }) => {
+      this.#client = new OpenAIClient(this.#clientOptions);
+      this.#clientOptions = undefined;
+      return this.#client;
+    });
+    return await this.#clientPromise;
   }
 
   /**
@@ -388,11 +408,12 @@ export class OpenAIProvider implements ModelProvider {
    * misbehaves, which is exactly the condition that cannot be arranged on
    * demand against a real host.
    */
-  protected createStream(
+  protected async createStream(
     body: OpenAI.Chat.ChatCompletionCreateParamsStreaming,
     options: { signal?: AbortSignal },
   ): Promise<AsyncIterable<OpenAI.Chat.ChatCompletionChunk>> {
-    return this.#client.chat.completions.create(body, options) as unknown as Promise<
+    const client = await this.#openai();
+    return client.chat.completions.create(body, options) as unknown as Promise<
       AsyncIterable<OpenAI.Chat.ChatCompletionChunk>
     >;
   }
@@ -496,7 +517,7 @@ export class OpenAIProvider implements ModelProvider {
         } catch (error) {
           if (
             isAbort(error) ||
-            error instanceof APIError ||
+            isApiError(error) ||
             error instanceof StreamIdleTimeoutError ||
             error instanceof StreamInterruptedError
           ) {
@@ -681,7 +702,7 @@ export class OpenAIProvider implements ModelProvider {
     try {
       // One token is enough to prove the endpoint, the model id and the key are
       // all good — and costs essentially nothing on a metered API.
-      await this.#client.chat.completions.create({
+      await (await this.#openai()).chat.completions.create({
         model: this.#config.model,
         messages: [{ role: 'user', content: 'ping' }],
         max_tokens: 1,
@@ -711,7 +732,7 @@ export class OpenAIProvider implements ModelProvider {
       // through that contract instead of coupling discovery to one SDK page
       // shape; this also keeps adapters that implement paging compatible.
       const entries: ProviderModel[] = [];
-      for await (const model of this.#client.models.list()) {
+      for await (const model of (await this.#openai()).models.list()) {
         const normalized = normalizeProviderModel(
           model as unknown as Record<string, unknown>,
           this.#config,
@@ -765,7 +786,7 @@ export class OpenAIProvider implements ModelProvider {
    */
   #translate(error: unknown): PlifError {
     const host = safeHost(this.#config.baseURL);
-    const api = error as Partial<APIError> & { status?: number; code?: string | null };
+    const api = error as { status?: number; code?: string | null; message?: string };
 
     if (error instanceof StreamInterruptedError) {
       return new PlifError('MODEL_UNAVAILABLE', `${host} closed the stream early`, {
@@ -775,7 +796,7 @@ export class OpenAIProvider implements ModelProvider {
       });
     }
 
-    if (error instanceof StreamIdleTimeoutError || error instanceof APIConnectionTimeoutError) {
+    if (error instanceof StreamIdleTimeoutError || isApiConnectionTimeoutError(error)) {
       const timeoutMs =
         error instanceof StreamIdleTimeoutError ? error.timeoutMs : this.#config.timeoutMs;
       return new PlifError('MODEL_TIMEOUT', `${host} stopped responding`, {
@@ -839,9 +860,9 @@ export class OpenAIProvider implements ModelProvider {
     // useless string "Connection error." instead of a hint that says which
     // port to start.
     const code = api?.code ?? errnoOf(error);
-    const isConnection = error instanceof APIConnectionError || TRANSIENT_ERRNOS.has(code ?? '');
+    const isConnection = isApiConnectionError(error) || TRANSIENT_ERRNOS.has(code ?? '');
 
-    if (isConnection && !(error instanceof APIConnectionTimeoutError)) {
+    if (isConnection && !isApiConnectionTimeoutError(error)) {
       return new PlifError('MODEL_UNAVAILABLE', `could not reach ${host}`, {
         cause: error,
         detail: { code, endpoint: this.#config.baseURL },
@@ -862,7 +883,7 @@ export class OpenAIProvider implements ModelProvider {
     // Compatible gateways sometimes report an upstream SSE failure as an
     // APIError without an HTTP status. It is a provider/transport failure, not
     // a malformed user request, and is safe to retry before any tool executes.
-    if (error instanceof APIError && api.status === undefined) {
+    if (isApiError(error) && api.status === undefined) {
       return new PlifError('MODEL_UNAVAILABLE', `${host} interrupted the response`, {
         cause: error,
         detail: { code: api.code, endpoint: this.#config.baseURL, phase: 'stream' },
@@ -1063,7 +1084,7 @@ function retryAfterOf(error: unknown): number | undefined {
 }
 
 function isAbort(error: unknown): boolean {
-  return error instanceof APIUserAbortError || (error as Error)?.name === 'AbortError';
+  return isUserAbortError(error);
 }
 
 function safeHost(baseURL: string): string {

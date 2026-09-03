@@ -14,8 +14,10 @@
  * need no entry.
  */
 
-import Anthropic, { APIConnectionTimeoutError, APIError, APIUserAbortError } from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import type { ClientOptions } from '@anthropic-ai/sdk';
+
+import { isApiConnectionTimeoutError, isUserAbortError } from './sdk-errors.js';
 
 import { PlifError } from '../errors.js';
 import type { Effort, ModelConfig } from './config.js';
@@ -40,6 +42,21 @@ import {
 } from './usage.js';
 import { normalizeAnthropicUsage } from './token-usage.js';
 
+/** An endpoint that does not understand cache breakpoints says so in the 400. */
+function mentionsCacheControl(error: unknown): boolean {
+  // The provider translates transport failures into PlifError before they
+  // leave the generator, so the original is reached through `cause`.
+  const candidates = [error, (error as { cause?: unknown }).cause];
+  return candidates.some((candidate) => {
+    if (!candidate) return false;
+    const status = (candidate as { status?: number }).status;
+    if (status !== undefined && status !== 400 && status !== 404 && status !== 422) return false;
+    return /cache[_ -]?control|prompt cach/i.test(
+      String((candidate as { message?: string }).message ?? ''),
+    );
+  });
+}
+
 /** Anthropic requires an output ceiling; Plif's config leaves it optional. */
 const DEFAULT_MAX_TOKENS = 32_000;
 
@@ -52,12 +69,26 @@ export interface AnthropicProviderOptions {
 
 export class AnthropicProvider implements ModelProvider {
   readonly info: ModelInfo;
-  #client: Anthropic;
+  /**
+   * Built on first use. Importing the SDK is ~95ms of module loading, and a
+   * session that never talks to Anthropic should never pay it.
+   */
+  #client: Anthropic | undefined;
+  #clientPromise: Promise<Anthropic> | undefined;
+  #clientOptions: ClientOptions | undefined;
   #config: ModelConfig;
   #usageHeaders: Headers | undefined;
   #usageSnapshot: UsageInfo | undefined;
   /** Verbatim thinking blocks, keyed by the tool-call id of their turn. */
   #thinking = new Map<string, readonly Block[]>();
+  /**
+   * Whether to ask the endpoint to cache the stable prefix of the request.
+   *
+   * Turned off for the rest of the run if an endpoint rejects the field, so a
+   * gateway that only speaks a subset of the Messages API degrades to plain
+   * requests instead of failing every turn.
+   */
+  #caching = true;
 
   constructor(config: ModelConfig, options: AnthropicProviderOptions = {}) {
     this.#config = config;
@@ -68,12 +99,13 @@ export class AnthropicProvider implements ModelProvider {
       this.#usageSnapshot = undefined;
       return response as unknown as Awaited<ReturnType<SdkFetch>>;
     }) as SdkFetch;
-    this.#client = options.client ?? new Anthropic({
+    this.#client = options.client;
+    this.#clientOptions = {
       apiKey: config.apiKey,
       baseURL: config.baseURL.replace(/\/v1\/?$/, ''),
       timeout: config.timeoutMs,
       fetch: captureFetch,
-    });
+    };
     this.info = {
       id: config.model,
       ...(config.providerId ? { providerId: config.providerId } : {}),
@@ -89,29 +121,40 @@ export class AnthropicProvider implements ModelProvider {
     };
   }
 
+  /** The SDK client, imported and constructed on first use. */
+  async #anthropic(): Promise<Anthropic> {
+    if (this.#client) return this.#client;
+    this.#clientPromise ??= import('@anthropic-ai/sdk').then(({ default: AnthropicClient }) => {
+      this.#client = new AnthropicClient(this.#clientOptions);
+      this.#clientOptions = undefined;
+      return this.#client;
+    });
+    return await this.#clientPromise;
+  }
+
   async *stream(request: CompletionRequest): AsyncGenerator<CompletionEvent> {
-    const { system, messages } = this.#toWire(request.messages);
+    // An endpoint that does not understand cache breakpoints must cost one
+    // rejected request, not every turn of the session. The retry is only
+    // allowed before the first event arrives, so nothing is ever emitted twice.
+    const state = { started: false };
+    try {
+      yield* this.#attempt(request, state);
+      return;
+    } catch (error) {
+      if (!this.#caching || state.started || !mentionsCacheControl(error)) throw error;
+      this.#caching = false;
+    }
+    yield* this.#attempt(request, { started: false });
+  }
+
+  async *#attempt(
+    request: CompletionRequest,
+    state: { started: boolean },
+  ): AsyncGenerator<CompletionEvent> {
     let stream;
     try {
-      stream = this.#client.messages.stream(
-        {
-          model: this.#config.model,
-          max_tokens: request.maxTokens ?? this.#config.maxTokens ?? DEFAULT_MAX_TOKENS,
-          ...(system ? { system } : {}),
-          messages: messages as never,
-          ...(request.tools?.length
-            ? {
-                tools: request.tools.map((tool) => ({
-                  name: tool.name,
-                  description: tool.description,
-                  input_schema: tool.parameters as never,
-                })),
-              }
-            : {}),
-          ...(this.#config.effort
-            ? { output_config: { effort: anthropicWireEffort(this.#config.effort) } }
-            : {}),
-        },
+      stream = (await this.#anthropic()).messages.stream(
+        this.#body(request) as never,
         request.signal ? { signal: request.signal } : {},
       );
     } catch (error) {
@@ -121,6 +164,9 @@ export class AnthropicProvider implements ModelProvider {
     const thinkingBlocks: Block[] = [];
     try {
       for await (const event of stream) {
+        // The request opened. From here a failure is a mid-stream failure, and
+        // re-running it would duplicate whatever has already been yielded.
+        state.started = true;
         if (event.type !== 'content_block_delta') continue;
         const delta = event.delta as { type: string; text?: string; thinking?: string };
         if (delta.type === 'text_delta' && delta.text) {
@@ -160,7 +206,7 @@ export class AnthropicProvider implements ModelProvider {
         usage: usageOf(final.usage),
       };
     } catch (error) {
-      if (error instanceof APIUserAbortError || request.signal?.aborted) {
+      if (isUserAbortError(error) || request.signal?.aborted) {
         yield { kind: 'done', reason: 'cancelled', usage: NO_USAGE };
         return;
       }
@@ -170,7 +216,7 @@ export class AnthropicProvider implements ModelProvider {
 
   async probe(): Promise<{ ok: boolean; detail: string }> {
     try {
-      await this.#client.messages.create({
+      await (await this.#anthropic()).messages.create({
         model: this.#config.model,
         max_tokens: 1,
         messages: [{ role: 'user', content: 'ping' }],
@@ -193,7 +239,7 @@ export class AnthropicProvider implements ModelProvider {
   async listModels(): Promise<ModelListResult> {
     try {
       const models: ProviderModel[] = [];
-      for await (const entry of this.#client.models.list()) {
+      for await (const entry of (await this.#anthropic()).models.list()) {
         const raw = entry as unknown as Record<string, unknown>;
         const id = typeof raw['id'] === 'string' ? raw['id'] : '';
         if (!id) continue;
@@ -245,6 +291,62 @@ export class AnthropicProvider implements ModelProvider {
    * parallel batch to arrive together. Splitting them across turns is accepted
    * and then quietly teaches the model to stop calling tools in parallel.
    */
+  /**
+   * The request body, with cache breakpoints on the parts that repeat.
+   *
+   * A turn re-sends the same tools and system prompt every time - together
+   * about 16k tokens here - plus a conversation that only ever grows at the
+   * end. Anthropic caches whatever precedes a breakpoint, and three cover it:
+   * the tool list, which never varies; the system prompt, whose tail carries
+   * the session's memory and notes and so occasionally does; and the final
+   * message, which is the prefix the *next* turn reads back. Cached input is
+   * billed at a tenth of the normal rate, and the usage the provider already
+   * reports shows how much of each turn actually hit.
+   */
+  #body(request: CompletionRequest): Record<string, unknown> {
+    const { system, messages } = this.#toWire(request.messages);
+    const breakpoint = { cache_control: { type: 'ephemeral' } } as const;
+    if (this.#caching) {
+      // The final block of the final message. Every later turn keeps this exact
+      // prefix, so the boundary moves forward one turn at a time.
+      const last = messages.at(-1)?.['content'];
+      if (Array.isArray(last) && last.length > 0) {
+        const block = last.at(-1) as Block;
+        last[last.length - 1] = { ...block, ...breakpoint };
+      }
+    }
+    const tools = request.tools?.length
+      ? request.tools.map((tool, index) => ({
+          name: tool.name,
+          description: tool.description,
+          input_schema: tool.parameters as never,
+          // The tool list is the one part of the prefix that never varies with
+          // session state, so it gets its own breakpoint: a turn that changed
+          // the system prompt - remembering something, loading a skill - still
+          // reads these back instead of re-sending them.
+          ...(this.#caching && index === request.tools!.length - 1
+            ? { cache_control: { type: 'ephemeral' } }
+            : {}),
+        }))
+      : undefined;
+    return {
+      model: this.#config.model,
+      max_tokens: request.maxTokens ?? this.#config.maxTokens ?? DEFAULT_MAX_TOKENS,
+      ...(system
+        ? {
+            system: this.#caching
+              ? [{ type: 'text', text: system, ...breakpoint }]
+              : system,
+          }
+        : {}),
+      messages,
+      ...(tools ? { tools } : {}),
+      ...(this.#config.effort
+        ? { output_config: { effort: anthropicWireEffort(this.#config.effort) } }
+        : {}),
+    };
+  }
+
   #toWire(messages: readonly Message[]): { system: string; messages: Block[] } {
     const system: string[] = [];
     const wire: Block[] = [];
@@ -311,14 +413,14 @@ export class AnthropicProvider implements ModelProvider {
 
   #translate(error: unknown): PlifError {
     const host = safeHost(this.#config.baseURL);
-    if (error instanceof APIConnectionTimeoutError) {
+    if (isApiConnectionTimeoutError(error)) {
       return new PlifError('MODEL_TIMEOUT', `${host} did not answer in time`, {
         cause: error,
         detail: { timeoutMs: this.#config.timeoutMs },
         hint: 'Raise timeoutMs in your personal Plif configuration, or try again.',
       });
     }
-    const status = (error as Partial<APIError> & { status?: number }).status;
+    const status = (error as { status?: number }).status;
     if (status === 401 || status === 403) {
       return new PlifError('MODEL_AUTH', `${host} rejected your Anthropic key`, {
         cause: error,

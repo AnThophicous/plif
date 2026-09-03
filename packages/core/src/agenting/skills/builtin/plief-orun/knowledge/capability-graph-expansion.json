@@ -1,0 +1,5633 @@
+{
+  "version": "1.0.0",
+  "baseline_graph": "knowledge/capability-graph.json",
+  "last_verified": "2026-09-01",
+  "coverage_semantics": "EXPLICIT_ROUTING_AND_COMPATIBILITY_EDGES",
+  "nodes": [
+    {
+      "id": "ark-ui",
+      "type": "capability"
+    },
+    {
+      "id": "zag-js",
+      "type": "capability"
+    },
+    {
+      "id": "cmdk-command-menu",
+      "type": "capability"
+    },
+    {
+      "id": "vaul-drawer",
+      "type": "capability"
+    },
+    {
+      "id": "sonner-toasts",
+      "type": "capability"
+    },
+    {
+      "id": "tanstack-form",
+      "type": "capability"
+    },
+    {
+      "id": "zod-schemas",
+      "type": "capability"
+    },
+    {
+      "id": "valibot-schemas",
+      "type": "capability"
+    },
+    {
+      "id": "downshift-combobox",
+      "type": "capability"
+    },
+    {
+      "id": "react-select-controls",
+      "type": "capability"
+    },
+    {
+      "id": "react-day-picker",
+      "type": "capability"
+    },
+    {
+      "id": "tanstack-query",
+      "type": "capability"
+    },
+    {
+      "id": "tanstack-router",
+      "type": "capability"
+    },
+    {
+      "id": "react-window-virtualization",
+      "type": "capability"
+    },
+    {
+      "id": "react-virtuoso-virtualization",
+      "type": "capability"
+    },
+    {
+      "id": "ag-grid",
+      "type": "capability"
+    },
+    {
+      "id": "react-grid-layout",
+      "type": "capability"
+    },
+    {
+      "id": "react-resizable-panels",
+      "type": "capability"
+    },
+    {
+      "id": "monaco-editor",
+      "type": "capability"
+    },
+    {
+      "id": "codemirror-editor",
+      "type": "capability"
+    },
+    {
+      "id": "react-mentions",
+      "type": "capability"
+    },
+    {
+      "id": "gsap-timelines",
+      "type": "capability"
+    },
+    {
+      "id": "motion-react-layout",
+      "type": "capability"
+    },
+    {
+      "id": "auto-animate-layout",
+      "type": "capability"
+    },
+    {
+      "id": "lottie-authored-motion",
+      "type": "capability"
+    },
+    {
+      "id": "animejs-tweens",
+      "type": "capability"
+    },
+    {
+      "id": "react-spring-physics",
+      "type": "capability"
+    },
+    {
+      "id": "web-animations-api",
+      "type": "capability"
+    },
+    {
+      "id": "scroll-driven-css",
+      "type": "capability"
+    },
+    {
+      "id": "view-transition-api",
+      "type": "capability"
+    },
+    {
+      "id": "gltf-transform-pipeline",
+      "type": "capability"
+    },
+    {
+      "id": "draco-compression",
+      "type": "capability"
+    },
+    {
+      "id": "meshopt-compression",
+      "type": "capability"
+    },
+    {
+      "id": "react-three-rapier",
+      "type": "capability"
+    },
+    {
+      "id": "react-postprocessing",
+      "type": "capability"
+    },
+    {
+      "id": "babylonjs-engine",
+      "type": "capability"
+    },
+    {
+      "id": "playcanvas-engine",
+      "type": "capability"
+    },
+    {
+      "id": "model-viewer-component",
+      "type": "capability"
+    },
+    {
+      "id": "ogl-low-level-webgl",
+      "type": "capability"
+    },
+    {
+      "id": "regl-command-webgl",
+      "type": "capability"
+    },
+    {
+      "id": "pixijs-renderer",
+      "type": "capability"
+    },
+    {
+      "id": "p5-creative-coding",
+      "type": "capability"
+    },
+    {
+      "id": "webgl-native",
+      "type": "capability"
+    },
+    {
+      "id": "three-webgpu-renderer",
+      "type": "capability"
+    },
+    {
+      "id": "webgpu-native-runtime",
+      "type": "capability"
+    },
+    {
+      "id": "webxr-spatial-session",
+      "type": "capability"
+    },
+    {
+      "id": "offscreen-canvas-worker",
+      "type": "capability"
+    },
+    {
+      "id": "echarts-configurable-viz",
+      "type": "capability"
+    },
+    {
+      "id": "vega-declarative-viz",
+      "type": "capability"
+    },
+    {
+      "id": "vega-lite-declarative-viz",
+      "type": "capability"
+    },
+    {
+      "id": "nivo-react-viz",
+      "type": "capability"
+    },
+    {
+      "id": "recharts-react-charts",
+      "type": "capability"
+    },
+    {
+      "id": "plotly-scientific-charts",
+      "type": "capability"
+    },
+    {
+      "id": "deckgl-geospatial-layers",
+      "type": "capability"
+    },
+    {
+      "id": "cytoscape-network-viz",
+      "type": "capability"
+    },
+    {
+      "id": "leaflet-maps",
+      "type": "capability"
+    },
+    {
+      "id": "openlayers-maps",
+      "type": "capability"
+    },
+    {
+      "id": "cesium-globe",
+      "type": "capability"
+    },
+    {
+      "id": "turf-geospatial-analysis",
+      "type": "capability"
+    },
+    {
+      "id": "mse-streaming",
+      "type": "capability"
+    },
+    {
+      "id": "dashjs-streaming",
+      "type": "capability"
+    },
+    {
+      "id": "videojs-player",
+      "type": "capability"
+    },
+    {
+      "id": "mux-player",
+      "type": "capability"
+    },
+    {
+      "id": "webcodecs-pipeline",
+      "type": "capability"
+    },
+    {
+      "id": "media-recorder-capture",
+      "type": "capability"
+    },
+    {
+      "id": "web-audio-graph",
+      "type": "capability"
+    },
+    {
+      "id": "webrtc-realtime",
+      "type": "capability"
+    },
+    {
+      "id": "media-session-controls",
+      "type": "capability"
+    },
+    {
+      "id": "webvtt-captions",
+      "type": "capability"
+    },
+    {
+      "id": "image-bitmap-decode",
+      "type": "capability"
+    },
+    {
+      "id": "vitest-runner",
+      "type": "capability"
+    },
+    {
+      "id": "testing-library-dom",
+      "type": "capability"
+    },
+    {
+      "id": "axe-core-a11y",
+      "type": "capability"
+    },
+    {
+      "id": "storybook-workbench",
+      "type": "capability"
+    },
+    {
+      "id": "lighthouse-audits",
+      "type": "capability"
+    },
+    {
+      "id": "web-vitals-metrics",
+      "type": "capability"
+    },
+    {
+      "id": "bundle-analysis",
+      "type": "capability"
+    },
+    {
+      "id": "rollup-visualizer",
+      "type": "capability"
+    },
+    {
+      "id": "cypress-e2e",
+      "type": "capability"
+    },
+    {
+      "id": "web-test-runner",
+      "type": "capability"
+    },
+    {
+      "id": "otel-browser",
+      "type": "capability"
+    },
+    {
+      "id": "shadcn-source-registry",
+      "type": "capability"
+    },
+    {
+      "id": "magic-ui-source-registry",
+      "type": "capability"
+    },
+    {
+      "id": "aceternity-source-registry",
+      "type": "capability"
+    },
+    {
+      "id": "twentyfirst-component-discovery",
+      "type": "capability"
+    },
+    {
+      "id": "tailwind-ui-library",
+      "type": "capability"
+    },
+    {
+      "id": "daisyui-themes",
+      "type": "capability"
+    },
+    {
+      "id": "mantine-components",
+      "type": "capability"
+    },
+    {
+      "id": "primereact-suite",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-kibo-gantt",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-bklit-area-chart",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-bklit-line-chart",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-bklit-grid",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-bklit-legend",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-bklit-tooltip",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-kokonut-ai-prompt",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-kokonut-command-button",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-kokonut-card-flip",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-kokonut-smooth-drawer",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-kokonut-shape-hero",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-watermelon-hero-4",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-watermelon-footer-10",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-watermelon-navigation-5",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-watermelon-widget-3",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-watermelon-faq-1",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-originkit-black-hole",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-originkit-magnetic-carousel",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-originkit-gravity-gallery",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-originkit-scramble-text",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-originkit-user-cursor",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-originkit-particle-sphere",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-aceternity-3d-card-effect",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-aceternity-3d-pin",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-aceternity-animated-tooltip",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-aceternity-aurora-background",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-aceternity-hero-parallax",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-aceternity-infinite-moving-cards",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-aceternity-text-generate-effect",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-motion-motion-component",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-motion-animate-presence",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-motion-use-scroll",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-motion-use-transform",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-motion-use-spring",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-motion-use-animate",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-motion-use-reduced-motion",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-anime-animation",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-anime-timeline",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-anime-draggable",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-anime-layout",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-anime-scope",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-anime-waapi",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-scrolltrigger",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-scrollsmoother",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-scrollto",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-splittext",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-scrambletext",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-drawsvg",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-morphsvg",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-motionpath",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-motionpathhelper",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-flip",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-draggable",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-inertia",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-observer",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-physics2d",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-physicsprops",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-gsdevtools",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-pixi",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-easel",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-customease",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-easepack",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-customwiggle",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-custombounce",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-gsap-usegsap",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-transitions-card-resize",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-transitions-number-pop-in",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-transitions-notification-badge",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-transitions-text-states-swap",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-transitions-menu-dropdown",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-transitions-modal-open-close",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-transitions-panel-reveal",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-rive-react-webgl2",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-rive-webgl2",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-three-scene",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-three-object3d",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-three-buffergeometry",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-three-raycaster",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-img2threejs-pipeline",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-getlayers-3d-scenes",
+      "type": "capability"
+    },
+    {
+      "id": "catalog-getlayers-templates",
+      "type": "capability"
+    }
+  ],
+  "edges": [
+    {
+      "from": "accessible-primitives",
+      "to": "ark-ui",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "accessible-primitives",
+      "to": "cmdk-command-menu",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "accessible-primitives",
+      "to": "sonner-toasts",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "accessible-primitives",
+      "to": "vaul-drawer",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "accessible-primitives",
+      "to": "zag-js",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "forms-and-validation",
+      "to": "downshift-combobox",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "forms-and-validation",
+      "to": "react-day-picker",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "forms-and-validation",
+      "to": "react-select-controls",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "forms-and-validation",
+      "to": "tanstack-form",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "forms-and-validation",
+      "to": "valibot-schemas",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "forms-and-validation",
+      "to": "zod-schemas",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "data-tables",
+      "to": "ag-grid",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "data-tables",
+      "to": "react-grid-layout",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "data-tables",
+      "to": "react-resizable-panels",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "data-tables",
+      "to": "tanstack-query",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "data-tables",
+      "to": "tanstack-router",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "virtualization",
+      "to": "react-virtuoso-virtualization",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "virtualization",
+      "to": "react-window-virtualization",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "rich-text",
+      "to": "codemirror-editor",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "rich-text",
+      "to": "monaco-editor",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "rich-text",
+      "to": "react-mentions",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "motion",
+      "to": "animejs-tweens",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "motion",
+      "to": "auto-animate-layout",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "motion",
+      "to": "gsap-timelines",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "motion",
+      "to": "lottie-authored-motion",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "motion",
+      "to": "motion-react-layout",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "motion",
+      "to": "react-spring-physics",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "motion",
+      "to": "scroll-driven-css",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "motion",
+      "to": "view-transition-api",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "motion",
+      "to": "web-animations-api",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "3d-rendering",
+      "to": "babylonjs-engine",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "3d-rendering",
+      "to": "draco-compression",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "3d-rendering",
+      "to": "gltf-transform-pipeline",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "3d-rendering",
+      "to": "meshopt-compression",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "3d-rendering",
+      "to": "model-viewer-component",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "3d-rendering",
+      "to": "playcanvas-engine",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "3d-rendering",
+      "to": "react-three-rapier",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "3d-rendering",
+      "to": "webxr-spatial-session",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "shaders",
+      "to": "ogl-low-level-webgl",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "shaders",
+      "to": "react-postprocessing",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "shaders",
+      "to": "regl-command-webgl",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "shaders",
+      "to": "webgl-native",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "2d-canvas-svg",
+      "to": "p5-creative-coding",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "2d-canvas-svg",
+      "to": "pixijs-renderer",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "webgpu",
+      "to": "three-webgpu-renderer",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "webgpu",
+      "to": "webgpu-native-runtime",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "performance-audit",
+      "to": "bundle-analysis",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "performance-audit",
+      "to": "lighthouse-audits",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "performance-audit",
+      "to": "offscreen-canvas-worker",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "performance-audit",
+      "to": "otel-browser",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "performance-audit",
+      "to": "rollup-visualizer",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "performance-audit",
+      "to": "web-vitals-metrics",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "charts-and-data",
+      "to": "cytoscape-network-viz",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "charts-and-data",
+      "to": "echarts-configurable-viz",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "charts-and-data",
+      "to": "nivo-react-viz",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "charts-and-data",
+      "to": "plotly-scientific-charts",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "charts-and-data",
+      "to": "recharts-react-charts",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "charts-and-data",
+      "to": "vega-declarative-viz",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "charts-and-data",
+      "to": "vega-lite-declarative-viz",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "maps",
+      "to": "cesium-globe",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "maps",
+      "to": "deckgl-geospatial-layers",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "maps",
+      "to": "leaflet-maps",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "maps",
+      "to": "openlayers-maps",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "maps",
+      "to": "turf-geospatial-analysis",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "media-playback",
+      "to": "dashjs-streaming",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "media-playback",
+      "to": "image-bitmap-decode",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "media-playback",
+      "to": "media-recorder-capture",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "media-playback",
+      "to": "media-session-controls",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "media-playback",
+      "to": "mse-streaming",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "media-playback",
+      "to": "mux-player",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "media-playback",
+      "to": "videojs-player",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "media-playback",
+      "to": "web-audio-graph",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "media-playback",
+      "to": "webcodecs-pipeline",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "media-playback",
+      "to": "webrtc-realtime",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "media-playback",
+      "to": "webvtt-captions",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "browser-verification",
+      "to": "axe-core-a11y",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "browser-verification",
+      "to": "cypress-e2e",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "browser-verification",
+      "to": "storybook-workbench",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "browser-verification",
+      "to": "testing-library-dom",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "browser-verification",
+      "to": "vitest-runner",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "browser-verification",
+      "to": "web-test-runner",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "aceternity-source-registry",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-aceternity-3d-card-effect",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-aceternity-3d-pin",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-aceternity-animated-tooltip",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-aceternity-aurora-background",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-aceternity-hero-parallax",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-aceternity-infinite-moving-cards",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-aceternity-text-generate-effect",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-anime-animation",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-anime-draggable",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-anime-layout",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-anime-scope",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-anime-timeline",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-anime-waapi",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-bklit-area-chart",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-bklit-grid",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-bklit-legend",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-bklit-line-chart",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-bklit-tooltip",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-getlayers-3d-scenes",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-getlayers-templates",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-custombounce",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-customease",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-customwiggle",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-draggable",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-drawsvg",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-easel",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-easepack",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-flip",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-gsdevtools",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-inertia",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-morphsvg",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-motionpath",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-motionpathhelper",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-observer",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-physics2d",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-physicsprops",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-pixi",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-scrambletext",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-scrollto",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-splittext",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-gsap-usegsap",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-img2threejs-pipeline",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-kibo-gantt",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-kokonut-ai-prompt",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-kokonut-card-flip",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-kokonut-command-button",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-kokonut-shape-hero",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-kokonut-smooth-drawer",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-motion-animate-presence",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-motion-motion-component",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-motion-use-animate",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-motion-use-reduced-motion",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-motion-use-scroll",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-motion-use-spring",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-motion-use-transform",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-originkit-black-hole",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-originkit-gravity-gallery",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-originkit-magnetic-carousel",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-originkit-particle-sphere",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-originkit-scramble-text",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-originkit-user-cursor",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-rive-react-webgl2",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-rive-webgl2",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-three-buffergeometry",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-three-object3d",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-three-raycaster",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-three-scene",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-transitions-card-resize",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-transitions-menu-dropdown",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-transitions-modal-open-close",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-transitions-notification-badge",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-transitions-number-pop-in",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-transitions-panel-reveal",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-transitions-text-states-swap",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-watermelon-faq-1",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-watermelon-footer-10",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-watermelon-hero-4",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-watermelon-navigation-5",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "catalog-watermelon-widget-3",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "daisyui-themes",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "magic-ui-source-registry",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "mantine-components",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "primereact-suite",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "shadcn-source-registry",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "tailwind-ui-library",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "component-registries",
+      "to": "twentyfirst-component-discovery",
+      "kind": "candidate",
+      "evidence": "Expansion record is routed through its owning capability domain."
+    },
+    {
+      "from": "ark-ui",
+      "to": "radix-primitives",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "ark-ui",
+      "to": "zag-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "ark-ui",
+      "to": "react-aria-components",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "ark-ui",
+      "to": "zag-js",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "ark-ui",
+      "to": "cmdk-command-menu",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "ark-ui",
+      "to": "vaul-drawer",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "ark-ui",
+      "to": "accessible-primitives",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "zag-js",
+      "to": "ark-ui",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "zag-js",
+      "to": "radix-primitives",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "zag-js",
+      "to": "react-aria-components",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "zag-js",
+      "to": "ark-ui",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "zag-js",
+      "to": "cmdk-command-menu",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "zag-js",
+      "to": "vaul-drawer",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "zag-js",
+      "to": "accessible-primitives",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "cmdk-command-menu",
+      "to": "radix-primitives",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "cmdk-command-menu",
+      "to": "headless-ui",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "cmdk-command-menu",
+      "to": "ark-ui",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "cmdk-command-menu",
+      "to": "zag-js",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "cmdk-command-menu",
+      "to": "vaul-drawer",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "cmdk-command-menu",
+      "to": "accessible-primitives",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "vaul-drawer",
+      "to": "radix-primitives",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "vaul-drawer",
+      "to": "react-aria-components",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "vaul-drawer",
+      "to": "ark-ui",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "vaul-drawer",
+      "to": "zag-js",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "vaul-drawer",
+      "to": "cmdk-command-menu",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "vaul-drawer",
+      "to": "accessible-primitives",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "sonner-toasts",
+      "to": "radix-primitives",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "sonner-toasts",
+      "to": "ark-ui",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "sonner-toasts",
+      "to": "zag-js",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "sonner-toasts",
+      "to": "cmdk-command-menu",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "sonner-toasts",
+      "to": "accessible-primitives",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "tanstack-form",
+      "to": "react-hook-form",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "tanstack-form",
+      "to": "zod-schemas",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "tanstack-form",
+      "to": "valibot-schemas",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "tanstack-form",
+      "to": "downshift-combobox",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "tanstack-form",
+      "to": "forms-and-validation",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "zod-schemas",
+      "to": "tanstack-form",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "zod-schemas",
+      "to": "valibot-schemas",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "zod-schemas",
+      "to": "downshift-combobox",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "zod-schemas",
+      "to": "forms-and-validation",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "valibot-schemas",
+      "to": "zod-schemas",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "valibot-schemas",
+      "to": "tanstack-form",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "valibot-schemas",
+      "to": "zod-schemas",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "valibot-schemas",
+      "to": "downshift-combobox",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "valibot-schemas",
+      "to": "forms-and-validation",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "downshift-combobox",
+      "to": "react-aria-components",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "downshift-combobox",
+      "to": "zag-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "downshift-combobox",
+      "to": "tanstack-form",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "downshift-combobox",
+      "to": "zod-schemas",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "downshift-combobox",
+      "to": "valibot-schemas",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "downshift-combobox",
+      "to": "forms-and-validation",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "react-select-controls",
+      "to": "downshift-combobox",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "react-select-controls",
+      "to": "react-aria-components",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "react-select-controls",
+      "to": "tanstack-form",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-select-controls",
+      "to": "zod-schemas",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-select-controls",
+      "to": "valibot-schemas",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-select-controls",
+      "to": "forms-and-validation",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "react-day-picker",
+      "to": "react-aria-components",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "react-day-picker",
+      "to": "tanstack-form",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-day-picker",
+      "to": "zod-schemas",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-day-picker",
+      "to": "valibot-schemas",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-day-picker",
+      "to": "forms-and-validation",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "tanstack-query",
+      "to": "tanstack-router",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "tanstack-query",
+      "to": "data-tables",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "tanstack-router",
+      "to": "tanstack-query",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "tanstack-router",
+      "to": "data-tables",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "react-window-virtualization",
+      "to": "tanstack-virtual",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "react-window-virtualization",
+      "to": "react-virtuoso-virtualization",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-window-virtualization",
+      "to": "virtualization",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "react-virtuoso-virtualization",
+      "to": "react-window-virtualization",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "react-virtuoso-virtualization",
+      "to": "tanstack-virtual",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "react-virtuoso-virtualization",
+      "to": "react-window-virtualization",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-virtuoso-virtualization",
+      "to": "virtualization",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "ag-grid",
+      "to": "tanstack-table",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "ag-grid",
+      "to": "react-aria-components",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "ag-grid",
+      "to": "data-tables",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "react-grid-layout",
+      "to": "react-resizable-panels",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "react-grid-layout",
+      "to": "react-resizable-panels",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-grid-layout",
+      "to": "data-tables",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "react-resizable-panels",
+      "to": "react-grid-layout",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "react-resizable-panels",
+      "to": "react-grid-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-resizable-panels",
+      "to": "data-tables",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "monaco-editor",
+      "to": "tiptap",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "monaco-editor",
+      "to": "codemirror-editor",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "monaco-editor",
+      "to": "react-mentions",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "monaco-editor",
+      "to": "rich-text",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "codemirror-editor",
+      "to": "monaco-editor",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "codemirror-editor",
+      "to": "tiptap",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "codemirror-editor",
+      "to": "monaco-editor",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "codemirror-editor",
+      "to": "react-mentions",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "codemirror-editor",
+      "to": "rich-text",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "react-mentions",
+      "to": "downshift-combobox",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "react-mentions",
+      "to": "tiptap",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "react-mentions",
+      "to": "monaco-editor",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-mentions",
+      "to": "codemirror-editor",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-mentions",
+      "to": "rich-text",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "gsap-timelines",
+      "to": "scroll-driven-css",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "gsap-timelines",
+      "to": "motion-react-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "gsap-timelines",
+      "to": "auto-animate-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "gsap-timelines",
+      "to": "lottie-authored-motion",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "gsap-timelines",
+      "to": "motion",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "motion-react-layout",
+      "to": "gsap-timelines",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "motion-react-layout",
+      "to": "gsap-timelines",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "motion-react-layout",
+      "to": "auto-animate-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "motion-react-layout",
+      "to": "lottie-authored-motion",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "motion-react-layout",
+      "to": "motion",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "auto-animate-layout",
+      "to": "motion-react-layout",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "auto-animate-layout",
+      "to": "gsap-timelines",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "auto-animate-layout",
+      "to": "motion-react-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "auto-animate-layout",
+      "to": "lottie-authored-motion",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "auto-animate-layout",
+      "to": "motion",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "lottie-authored-motion",
+      "to": "gsap-timelines",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "lottie-authored-motion",
+      "to": "motion-react-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "lottie-authored-motion",
+      "to": "auto-animate-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "lottie-authored-motion",
+      "to": "motion",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "animejs-tweens",
+      "to": "gsap-timelines",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "animejs-tweens",
+      "to": "motion-react-layout",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "animejs-tweens",
+      "to": "gsap-timelines",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "animejs-tweens",
+      "to": "motion-react-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "animejs-tweens",
+      "to": "auto-animate-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "animejs-tweens",
+      "to": "motion",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "react-spring-physics",
+      "to": "motion-react-layout",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "react-spring-physics",
+      "to": "gsap-timelines",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "react-spring-physics",
+      "to": "gsap-timelines",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-spring-physics",
+      "to": "motion-react-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-spring-physics",
+      "to": "auto-animate-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-spring-physics",
+      "to": "motion",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "web-animations-api",
+      "to": "motion-react-layout",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "web-animations-api",
+      "to": "gsap-timelines",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "web-animations-api",
+      "to": "gsap-timelines",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "web-animations-api",
+      "to": "motion-react-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "web-animations-api",
+      "to": "auto-animate-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "web-animations-api",
+      "to": "motion",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "scroll-driven-css",
+      "to": "gsap-timelines",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "scroll-driven-css",
+      "to": "motion-react-layout",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "scroll-driven-css",
+      "to": "gsap-timelines",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "scroll-driven-css",
+      "to": "motion-react-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "scroll-driven-css",
+      "to": "auto-animate-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "scroll-driven-css",
+      "to": "motion",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "view-transition-api",
+      "to": "motion-react-layout",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "view-transition-api",
+      "to": "gsap-timelines",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "view-transition-api",
+      "to": "motion-react-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "view-transition-api",
+      "to": "auto-animate-layout",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "view-transition-api",
+      "to": "motion",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "gltf-transform-pipeline",
+      "to": "draco-compression",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "gltf-transform-pipeline",
+      "to": "meshopt-compression",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "gltf-transform-pipeline",
+      "to": "three-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "gltf-transform-pipeline",
+      "to": "draco-compression",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "gltf-transform-pipeline",
+      "to": "meshopt-compression",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "gltf-transform-pipeline",
+      "to": "3d-rendering",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "draco-compression",
+      "to": "meshopt-compression",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "draco-compression",
+      "to": "gltf-transform-pipeline",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "draco-compression",
+      "to": "gltf-transform-pipeline",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "draco-compression",
+      "to": "meshopt-compression",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "draco-compression",
+      "to": "3d-rendering",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "meshopt-compression",
+      "to": "draco-compression",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "meshopt-compression",
+      "to": "gltf-transform-pipeline",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "meshopt-compression",
+      "to": "gltf-transform-pipeline",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "meshopt-compression",
+      "to": "draco-compression",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "meshopt-compression",
+      "to": "3d-rendering",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "react-three-rapier",
+      "to": "three-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "react-three-rapier",
+      "to": "playcanvas-engine",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "react-three-rapier",
+      "to": "babylonjs-engine",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-three-rapier",
+      "to": "playcanvas-engine",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-three-rapier",
+      "to": "model-viewer-component",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-three-rapier",
+      "to": "3d-rendering",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "react-postprocessing",
+      "to": "three-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "react-postprocessing",
+      "to": "ogl-low-level-webgl",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-postprocessing",
+      "to": "regl-command-webgl",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-postprocessing",
+      "to": "webgl-native",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "react-postprocessing",
+      "to": "shaders",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "babylonjs-engine",
+      "to": "three-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "babylonjs-engine",
+      "to": "playcanvas-engine",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "babylonjs-engine",
+      "to": "react-three-rapier",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "babylonjs-engine",
+      "to": "playcanvas-engine",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "babylonjs-engine",
+      "to": "model-viewer-component",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "babylonjs-engine",
+      "to": "3d-rendering",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "playcanvas-engine",
+      "to": "babylonjs-engine",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "playcanvas-engine",
+      "to": "three-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "playcanvas-engine",
+      "to": "react-three-rapier",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "playcanvas-engine",
+      "to": "babylonjs-engine",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "playcanvas-engine",
+      "to": "model-viewer-component",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "playcanvas-engine",
+      "to": "3d-rendering",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "model-viewer-component",
+      "to": "three-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "model-viewer-component",
+      "to": "babylonjs-engine",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "model-viewer-component",
+      "to": "playcanvas-engine",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "model-viewer-component",
+      "to": "react-three-rapier",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "model-viewer-component",
+      "to": "babylonjs-engine",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "model-viewer-component",
+      "to": "playcanvas-engine",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "model-viewer-component",
+      "to": "3d-rendering",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "ogl-low-level-webgl",
+      "to": "regl-command-webgl",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "ogl-low-level-webgl",
+      "to": "three-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "ogl-low-level-webgl",
+      "to": "webgl-native",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "ogl-low-level-webgl",
+      "to": "react-postprocessing",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "ogl-low-level-webgl",
+      "to": "regl-command-webgl",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "ogl-low-level-webgl",
+      "to": "webgl-native",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "ogl-low-level-webgl",
+      "to": "shaders",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "regl-command-webgl",
+      "to": "ogl-low-level-webgl",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "regl-command-webgl",
+      "to": "pixijs-renderer",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "regl-command-webgl",
+      "to": "three-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "regl-command-webgl",
+      "to": "react-postprocessing",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "regl-command-webgl",
+      "to": "ogl-low-level-webgl",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "regl-command-webgl",
+      "to": "webgl-native",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "regl-command-webgl",
+      "to": "shaders",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "pixijs-renderer",
+      "to": "canvas-2d",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "pixijs-renderer",
+      "to": "svg-native",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "pixijs-renderer",
+      "to": "p5-creative-coding",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "pixijs-renderer",
+      "to": "p5-creative-coding",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "pixijs-renderer",
+      "to": "2d-canvas-svg",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "p5-creative-coding",
+      "to": "canvas-2d",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "p5-creative-coding",
+      "to": "svg-native",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "p5-creative-coding",
+      "to": "pixijs-renderer",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "p5-creative-coding",
+      "to": "pixijs-renderer",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "p5-creative-coding",
+      "to": "2d-canvas-svg",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "webgl-native",
+      "to": "ogl-low-level-webgl",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "webgl-native",
+      "to": "regl-command-webgl",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "webgl-native",
+      "to": "canvas-2d",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "webgl-native",
+      "to": "react-postprocessing",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "webgl-native",
+      "to": "ogl-low-level-webgl",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "webgl-native",
+      "to": "regl-command-webgl",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "webgl-native",
+      "to": "shaders",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "three-webgpu-renderer",
+      "to": "three-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "three-webgpu-renderer",
+      "to": "webgpu-native",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "three-webgpu-renderer",
+      "to": "webgl-native",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "three-webgpu-renderer",
+      "to": "webgpu-native-runtime",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "three-webgpu-renderer",
+      "to": "webgpu",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "webgpu-native-runtime",
+      "to": "three-webgpu-renderer",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "webgpu-native-runtime",
+      "to": "webgpu-native",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "webgpu-native-runtime",
+      "to": "webgl-native",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "webgpu-native-runtime",
+      "to": "canvas-2d",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "webgpu-native-runtime",
+      "to": "three-webgpu-renderer",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "webgpu-native-runtime",
+      "to": "webgpu",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "webxr-spatial-session",
+      "to": "three-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "webxr-spatial-session",
+      "to": "model-viewer-component",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "webxr-spatial-session",
+      "to": "webgpu-native",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "webxr-spatial-session",
+      "to": "3d-rendering",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "offscreen-canvas-worker",
+      "to": "webgl-native",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "offscreen-canvas-worker",
+      "to": "webgpu-native",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "offscreen-canvas-worker",
+      "to": "canvas-2d",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "offscreen-canvas-worker",
+      "to": "performance-audit",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "echarts-configurable-viz",
+      "to": "d3",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "echarts-configurable-viz",
+      "to": "vega-declarative-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "echarts-configurable-viz",
+      "to": "vega-lite-declarative-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "echarts-configurable-viz",
+      "to": "nivo-react-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "echarts-configurable-viz",
+      "to": "charts-and-data",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "vega-declarative-viz",
+      "to": "vega-lite-declarative-viz",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "vega-declarative-viz",
+      "to": "d3",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "vega-declarative-viz",
+      "to": "echarts-configurable-viz",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "vega-declarative-viz",
+      "to": "echarts-configurable-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "vega-declarative-viz",
+      "to": "vega-lite-declarative-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "vega-declarative-viz",
+      "to": "nivo-react-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "vega-declarative-viz",
+      "to": "charts-and-data",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "vega-lite-declarative-viz",
+      "to": "vega-declarative-viz",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "vega-lite-declarative-viz",
+      "to": "d3",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "vega-lite-declarative-viz",
+      "to": "echarts-configurable-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "vega-lite-declarative-viz",
+      "to": "vega-declarative-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "vega-lite-declarative-viz",
+      "to": "nivo-react-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "vega-lite-declarative-viz",
+      "to": "charts-and-data",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "nivo-react-viz",
+      "to": "visx",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "nivo-react-viz",
+      "to": "echarts-configurable-viz",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "nivo-react-viz",
+      "to": "echarts-configurable-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "nivo-react-viz",
+      "to": "vega-declarative-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "nivo-react-viz",
+      "to": "vega-lite-declarative-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "nivo-react-viz",
+      "to": "charts-and-data",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "recharts-react-charts",
+      "to": "nivo-react-viz",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "recharts-react-charts",
+      "to": "visx",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "recharts-react-charts",
+      "to": "echarts-configurable-viz",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "recharts-react-charts",
+      "to": "echarts-configurable-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "recharts-react-charts",
+      "to": "vega-declarative-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "recharts-react-charts",
+      "to": "vega-lite-declarative-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "recharts-react-charts",
+      "to": "charts-and-data",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "plotly-scientific-charts",
+      "to": "vega-declarative-viz",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "plotly-scientific-charts",
+      "to": "echarts-configurable-viz",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "plotly-scientific-charts",
+      "to": "d3",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "plotly-scientific-charts",
+      "to": "echarts-configurable-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "plotly-scientific-charts",
+      "to": "vega-declarative-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "plotly-scientific-charts",
+      "to": "vega-lite-declarative-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "plotly-scientific-charts",
+      "to": "charts-and-data",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "deckgl-geospatial-layers",
+      "to": "maplibre-gl-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "deckgl-geospatial-layers",
+      "to": "leaflet-maps",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "deckgl-geospatial-layers",
+      "to": "cesium-globe",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "deckgl-geospatial-layers",
+      "to": "leaflet-maps",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "deckgl-geospatial-layers",
+      "to": "openlayers-maps",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "deckgl-geospatial-layers",
+      "to": "cesium-globe",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "deckgl-geospatial-layers",
+      "to": "maps",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "cytoscape-network-viz",
+      "to": "d3",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "cytoscape-network-viz",
+      "to": "svg-native",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "cytoscape-network-viz",
+      "to": "echarts-configurable-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "cytoscape-network-viz",
+      "to": "vega-declarative-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "cytoscape-network-viz",
+      "to": "vega-lite-declarative-viz",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "cytoscape-network-viz",
+      "to": "charts-and-data",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "leaflet-maps",
+      "to": "maplibre-gl-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "leaflet-maps",
+      "to": "openlayers-maps",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "leaflet-maps",
+      "to": "cesium-globe",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "leaflet-maps",
+      "to": "deckgl-geospatial-layers",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "leaflet-maps",
+      "to": "openlayers-maps",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "leaflet-maps",
+      "to": "cesium-globe",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "leaflet-maps",
+      "to": "maps",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "openlayers-maps",
+      "to": "leaflet-maps",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "openlayers-maps",
+      "to": "maplibre-gl-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "openlayers-maps",
+      "to": "cesium-globe",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "openlayers-maps",
+      "to": "deckgl-geospatial-layers",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "openlayers-maps",
+      "to": "leaflet-maps",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "openlayers-maps",
+      "to": "cesium-globe",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "openlayers-maps",
+      "to": "maps",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "cesium-globe",
+      "to": "deckgl-geospatial-layers",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "cesium-globe",
+      "to": "maplibre-gl-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "cesium-globe",
+      "to": "openlayers-maps",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "cesium-globe",
+      "to": "deckgl-geospatial-layers",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "cesium-globe",
+      "to": "leaflet-maps",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "cesium-globe",
+      "to": "openlayers-maps",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "cesium-globe",
+      "to": "maps",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "turf-geospatial-analysis",
+      "to": "openlayers-maps",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "turf-geospatial-analysis",
+      "to": "deckgl-geospatial-layers",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "turf-geospatial-analysis",
+      "to": "deckgl-geospatial-layers",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "turf-geospatial-analysis",
+      "to": "leaflet-maps",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "turf-geospatial-analysis",
+      "to": "openlayers-maps",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "turf-geospatial-analysis",
+      "to": "maps",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "mse-streaming",
+      "to": "hls-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "mse-streaming",
+      "to": "dashjs-streaming",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "mse-streaming",
+      "to": "videojs-player",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "mse-streaming",
+      "to": "dashjs-streaming",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "mse-streaming",
+      "to": "videojs-player",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "mse-streaming",
+      "to": "mux-player",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "mse-streaming",
+      "to": "media-playback",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "dashjs-streaming",
+      "to": "mse-streaming",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "dashjs-streaming",
+      "to": "hls-js",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "dashjs-streaming",
+      "to": "videojs-player",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "dashjs-streaming",
+      "to": "mse-streaming",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "dashjs-streaming",
+      "to": "videojs-player",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "dashjs-streaming",
+      "to": "mux-player",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "dashjs-streaming",
+      "to": "media-playback",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "videojs-player",
+      "to": "mux-player",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "videojs-player",
+      "to": "mse-streaming",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "videojs-player",
+      "to": "mse-streaming",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "videojs-player",
+      "to": "dashjs-streaming",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "videojs-player",
+      "to": "mux-player",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "videojs-player",
+      "to": "media-playback",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "mux-player",
+      "to": "videojs-player",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "mux-player",
+      "to": "mse-streaming",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "mux-player",
+      "to": "mse-streaming",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "mux-player",
+      "to": "dashjs-streaming",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "mux-player",
+      "to": "videojs-player",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "mux-player",
+      "to": "media-playback",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "webcodecs-pipeline",
+      "to": "mse-streaming",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "webcodecs-pipeline",
+      "to": "image-bitmap-decode",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "webcodecs-pipeline",
+      "to": "media-recorder-capture",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "webcodecs-pipeline",
+      "to": "web-audio-graph",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "webcodecs-pipeline",
+      "to": "webrtc-realtime",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "webcodecs-pipeline",
+      "to": "media-playback",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "media-recorder-capture",
+      "to": "webrtc-realtime",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "media-recorder-capture",
+      "to": "webcodecs-pipeline",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "media-recorder-capture",
+      "to": "webcodecs-pipeline",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "media-recorder-capture",
+      "to": "web-audio-graph",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "media-recorder-capture",
+      "to": "webrtc-realtime",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "media-recorder-capture",
+      "to": "media-playback",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "web-audio-graph",
+      "to": "media-session-controls",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "web-audio-graph",
+      "to": "media-recorder-capture",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "web-audio-graph",
+      "to": "webcodecs-pipeline",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "web-audio-graph",
+      "to": "media-recorder-capture",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "web-audio-graph",
+      "to": "webrtc-realtime",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "web-audio-graph",
+      "to": "media-playback",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "webrtc-realtime",
+      "to": "media-recorder-capture",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "webrtc-realtime",
+      "to": "mse-streaming",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "webrtc-realtime",
+      "to": "webcodecs-pipeline",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "webrtc-realtime",
+      "to": "media-recorder-capture",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "webrtc-realtime",
+      "to": "web-audio-graph",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "webrtc-realtime",
+      "to": "media-playback",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "media-session-controls",
+      "to": "web-audio-graph",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "media-session-controls",
+      "to": "mse-streaming",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "media-session-controls",
+      "to": "dashjs-streaming",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "media-session-controls",
+      "to": "videojs-player",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "media-session-controls",
+      "to": "media-playback",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "webvtt-captions",
+      "to": "videojs-player",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "webvtt-captions",
+      "to": "mse-streaming",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "webvtt-captions",
+      "to": "dashjs-streaming",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "webvtt-captions",
+      "to": "videojs-player",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "webvtt-captions",
+      "to": "media-playback",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "image-bitmap-decode",
+      "to": "offscreen-canvas-worker",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "image-bitmap-decode",
+      "to": "canvas-2d",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "image-bitmap-decode",
+      "to": "webcodecs-pipeline",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "image-bitmap-decode",
+      "to": "media-recorder-capture",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "image-bitmap-decode",
+      "to": "web-audio-graph",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "image-bitmap-decode",
+      "to": "media-playback",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "vitest-runner",
+      "to": "testing-library-dom",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "vitest-runner",
+      "to": "testing-library-dom",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "vitest-runner",
+      "to": "axe-core-a11y",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "vitest-runner",
+      "to": "storybook-workbench",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "vitest-runner",
+      "to": "browser-verification",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "testing-library-dom",
+      "to": "vitest-runner",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "testing-library-dom",
+      "to": "cypress-e2e",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "testing-library-dom",
+      "to": "vitest-runner",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "testing-library-dom",
+      "to": "axe-core-a11y",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "testing-library-dom",
+      "to": "storybook-workbench",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "testing-library-dom",
+      "to": "browser-verification",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "axe-core-a11y",
+      "to": "testing-library-dom",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "axe-core-a11y",
+      "to": "lighthouse-audits",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "axe-core-a11y",
+      "to": "vitest-runner",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "axe-core-a11y",
+      "to": "testing-library-dom",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "axe-core-a11y",
+      "to": "storybook-workbench",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "axe-core-a11y",
+      "to": "browser-verification",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "storybook-workbench",
+      "to": "testing-library-dom",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "storybook-workbench",
+      "to": "vitest-runner",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "storybook-workbench",
+      "to": "testing-library-dom",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "storybook-workbench",
+      "to": "axe-core-a11y",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "storybook-workbench",
+      "to": "browser-verification",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "lighthouse-audits",
+      "to": "web-vitals-metrics",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "lighthouse-audits",
+      "to": "bundle-analysis",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "lighthouse-audits",
+      "to": "web-vitals-metrics",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "lighthouse-audits",
+      "to": "bundle-analysis",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "lighthouse-audits",
+      "to": "rollup-visualizer",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "lighthouse-audits",
+      "to": "performance-audit",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "web-vitals-metrics",
+      "to": "lighthouse-audits",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "web-vitals-metrics",
+      "to": "otel-browser",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "web-vitals-metrics",
+      "to": "lighthouse-audits",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "web-vitals-metrics",
+      "to": "bundle-analysis",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "web-vitals-metrics",
+      "to": "rollup-visualizer",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "web-vitals-metrics",
+      "to": "performance-audit",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "bundle-analysis",
+      "to": "rollup-visualizer",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "bundle-analysis",
+      "to": "lighthouse-audits",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "bundle-analysis",
+      "to": "lighthouse-audits",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "bundle-analysis",
+      "to": "web-vitals-metrics",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "bundle-analysis",
+      "to": "rollup-visualizer",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "bundle-analysis",
+      "to": "performance-audit",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "rollup-visualizer",
+      "to": "bundle-analysis",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "rollup-visualizer",
+      "to": "lighthouse-audits",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "rollup-visualizer",
+      "to": "lighthouse-audits",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "rollup-visualizer",
+      "to": "web-vitals-metrics",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "rollup-visualizer",
+      "to": "bundle-analysis",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "rollup-visualizer",
+      "to": "performance-audit",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "cypress-e2e",
+      "to": "web-test-runner",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "cypress-e2e",
+      "to": "testing-library-dom",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "cypress-e2e",
+      "to": "vitest-runner",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "cypress-e2e",
+      "to": "testing-library-dom",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "cypress-e2e",
+      "to": "axe-core-a11y",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "cypress-e2e",
+      "to": "browser-verification",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "web-test-runner",
+      "to": "cypress-e2e",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "web-test-runner",
+      "to": "vitest-runner",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "web-test-runner",
+      "to": "vitest-runner",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "web-test-runner",
+      "to": "testing-library-dom",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "web-test-runner",
+      "to": "axe-core-a11y",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "web-test-runner",
+      "to": "browser-verification",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "otel-browser",
+      "to": "web-vitals-metrics",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "otel-browser",
+      "to": "performance-audit",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "shadcn-source-registry",
+      "to": "radix-primitives",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "shadcn-source-registry",
+      "to": "headless-ui",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "shadcn-source-registry",
+      "to": "tailwind-ui-library",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "shadcn-source-registry",
+      "to": "magic-ui-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "shadcn-source-registry",
+      "to": "aceternity-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "shadcn-source-registry",
+      "to": "twentyfirst-component-discovery",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "shadcn-source-registry",
+      "to": "component-registries",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "magic-ui-source-registry",
+      "to": "shadcn-source-registry",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "magic-ui-source-registry",
+      "to": "aceternity-source-registry",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "magic-ui-source-registry",
+      "to": "motion-react-layout",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "magic-ui-source-registry",
+      "to": "shadcn-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "magic-ui-source-registry",
+      "to": "aceternity-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "magic-ui-source-registry",
+      "to": "twentyfirst-component-discovery",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "magic-ui-source-registry",
+      "to": "component-registries",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "aceternity-source-registry",
+      "to": "magic-ui-source-registry",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "aceternity-source-registry",
+      "to": "shadcn-source-registry",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "aceternity-source-registry",
+      "to": "motion-react-layout",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "aceternity-source-registry",
+      "to": "shadcn-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "aceternity-source-registry",
+      "to": "magic-ui-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "aceternity-source-registry",
+      "to": "twentyfirst-component-discovery",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "aceternity-source-registry",
+      "to": "component-registries",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "twentyfirst-component-discovery",
+      "to": "shadcn-source-registry",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "twentyfirst-component-discovery",
+      "to": "magic-ui-source-registry",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "twentyfirst-component-discovery",
+      "to": "shadcn-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "twentyfirst-component-discovery",
+      "to": "magic-ui-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "twentyfirst-component-discovery",
+      "to": "aceternity-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "twentyfirst-component-discovery",
+      "to": "component-registries",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "tailwind-ui-library",
+      "to": "shadcn-source-registry",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "tailwind-ui-library",
+      "to": "daisyui-themes",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "tailwind-ui-library",
+      "to": "mantine-components",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "tailwind-ui-library",
+      "to": "shadcn-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "tailwind-ui-library",
+      "to": "magic-ui-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "tailwind-ui-library",
+      "to": "aceternity-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "tailwind-ui-library",
+      "to": "component-registries",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "daisyui-themes",
+      "to": "tailwind-ui-library",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "daisyui-themes",
+      "to": "shadcn-source-registry",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "daisyui-themes",
+      "to": "mantine-components",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "daisyui-themes",
+      "to": "shadcn-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "daisyui-themes",
+      "to": "magic-ui-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "daisyui-themes",
+      "to": "aceternity-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "daisyui-themes",
+      "to": "component-registries",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "mantine-components",
+      "to": "primereact-suite",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "mantine-components",
+      "to": "radix-primitives",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "mantine-components",
+      "to": "headless-ui",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "mantine-components",
+      "to": "shadcn-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "mantine-components",
+      "to": "magic-ui-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "mantine-components",
+      "to": "aceternity-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "mantine-components",
+      "to": "component-registries",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "primereact-suite",
+      "to": "mantine-components",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "primereact-suite",
+      "to": "ag-grid",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "primereact-suite",
+      "to": "radix-primitives",
+      "kind": "alternative_to",
+      "evidence": "Curated seed declares an explicit selection alternative."
+    },
+    {
+      "from": "primereact-suite",
+      "to": "shadcn-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "primereact-suite",
+      "to": "magic-ui-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "primereact-suite",
+      "to": "aceternity-source-registry",
+      "kind": "compatible_with",
+      "evidence": "Same capability family; compatibility still requires host-level verification."
+    },
+    {
+      "from": "primereact-suite",
+      "to": "component-registries",
+      "kind": "belongs_to",
+      "evidence": "Curated record declares its retrieval owner domain."
+    },
+    {
+      "from": "catalog-bklit-area-chart",
+      "to": "catalog-bklit-line-chart",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-bklit-area-chart",
+      "to": "catalog-bklit-grid",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-bklit-line-chart",
+      "to": "catalog-bklit-area-chart",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-bklit-line-chart",
+      "to": "catalog-bklit-grid",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-bklit-grid",
+      "to": "catalog-bklit-area-chart",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-bklit-grid",
+      "to": "catalog-bklit-line-chart",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-bklit-legend",
+      "to": "catalog-bklit-area-chart",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-bklit-legend",
+      "to": "catalog-bklit-line-chart",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-bklit-tooltip",
+      "to": "catalog-bklit-area-chart",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-bklit-tooltip",
+      "to": "catalog-bklit-line-chart",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-kokonut-ai-prompt",
+      "to": "catalog-kokonut-command-button",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-kokonut-ai-prompt",
+      "to": "catalog-kokonut-card-flip",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-kokonut-command-button",
+      "to": "catalog-kokonut-ai-prompt",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-kokonut-command-button",
+      "to": "catalog-kokonut-card-flip",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-kokonut-card-flip",
+      "to": "catalog-kokonut-ai-prompt",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-kokonut-card-flip",
+      "to": "catalog-kokonut-command-button",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-kokonut-smooth-drawer",
+      "to": "catalog-kokonut-ai-prompt",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-kokonut-smooth-drawer",
+      "to": "catalog-kokonut-command-button",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-kokonut-shape-hero",
+      "to": "catalog-kokonut-ai-prompt",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-kokonut-shape-hero",
+      "to": "catalog-kokonut-command-button",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-watermelon-hero-4",
+      "to": "catalog-watermelon-footer-10",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-watermelon-hero-4",
+      "to": "catalog-watermelon-navigation-5",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-watermelon-footer-10",
+      "to": "catalog-watermelon-hero-4",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-watermelon-footer-10",
+      "to": "catalog-watermelon-navigation-5",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-watermelon-navigation-5",
+      "to": "catalog-watermelon-hero-4",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-watermelon-navigation-5",
+      "to": "catalog-watermelon-footer-10",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-watermelon-widget-3",
+      "to": "catalog-watermelon-hero-4",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-watermelon-widget-3",
+      "to": "catalog-watermelon-footer-10",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-watermelon-faq-1",
+      "to": "catalog-watermelon-hero-4",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-watermelon-faq-1",
+      "to": "catalog-watermelon-footer-10",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-originkit-black-hole",
+      "to": "catalog-originkit-magnetic-carousel",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-originkit-black-hole",
+      "to": "catalog-originkit-gravity-gallery",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-originkit-magnetic-carousel",
+      "to": "catalog-originkit-black-hole",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-originkit-magnetic-carousel",
+      "to": "catalog-originkit-gravity-gallery",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-originkit-gravity-gallery",
+      "to": "catalog-originkit-black-hole",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-originkit-gravity-gallery",
+      "to": "catalog-originkit-magnetic-carousel",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-originkit-scramble-text",
+      "to": "catalog-originkit-black-hole",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-originkit-scramble-text",
+      "to": "catalog-originkit-magnetic-carousel",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-originkit-user-cursor",
+      "to": "catalog-originkit-black-hole",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-originkit-user-cursor",
+      "to": "catalog-originkit-magnetic-carousel",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-originkit-particle-sphere",
+      "to": "catalog-originkit-black-hole",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-originkit-particle-sphere",
+      "to": "catalog-originkit-magnetic-carousel",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-aceternity-3d-card-effect",
+      "to": "catalog-aceternity-3d-pin",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-aceternity-3d-card-effect",
+      "to": "catalog-aceternity-animated-tooltip",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-aceternity-3d-pin",
+      "to": "catalog-aceternity-3d-card-effect",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-aceternity-3d-pin",
+      "to": "catalog-aceternity-animated-tooltip",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-aceternity-animated-tooltip",
+      "to": "catalog-aceternity-3d-card-effect",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-aceternity-animated-tooltip",
+      "to": "catalog-aceternity-3d-pin",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-aceternity-aurora-background",
+      "to": "catalog-aceternity-3d-card-effect",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-aceternity-aurora-background",
+      "to": "catalog-aceternity-3d-pin",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-aceternity-hero-parallax",
+      "to": "catalog-aceternity-3d-card-effect",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-aceternity-hero-parallax",
+      "to": "catalog-aceternity-3d-pin",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-aceternity-infinite-moving-cards",
+      "to": "catalog-aceternity-3d-card-effect",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-aceternity-infinite-moving-cards",
+      "to": "catalog-aceternity-3d-pin",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-aceternity-text-generate-effect",
+      "to": "catalog-aceternity-3d-card-effect",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-aceternity-text-generate-effect",
+      "to": "catalog-aceternity-3d-pin",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-motion-motion-component",
+      "to": "catalog-motion-animate-presence",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-motion-motion-component",
+      "to": "catalog-motion-use-scroll",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-motion-animate-presence",
+      "to": "catalog-motion-motion-component",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-motion-animate-presence",
+      "to": "catalog-motion-use-scroll",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-motion-use-scroll",
+      "to": "catalog-motion-motion-component",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-motion-use-scroll",
+      "to": "catalog-motion-animate-presence",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-motion-use-transform",
+      "to": "catalog-motion-motion-component",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-motion-use-transform",
+      "to": "catalog-motion-animate-presence",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-motion-use-spring",
+      "to": "catalog-motion-motion-component",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-motion-use-spring",
+      "to": "catalog-motion-animate-presence",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-motion-use-animate",
+      "to": "catalog-motion-motion-component",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-motion-use-animate",
+      "to": "catalog-motion-animate-presence",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-motion-use-reduced-motion",
+      "to": "catalog-motion-motion-component",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-motion-use-reduced-motion",
+      "to": "catalog-motion-animate-presence",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-anime-animation",
+      "to": "catalog-anime-timeline",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-anime-animation",
+      "to": "catalog-anime-draggable",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-anime-timeline",
+      "to": "catalog-anime-animation",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-anime-timeline",
+      "to": "catalog-anime-draggable",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-anime-draggable",
+      "to": "catalog-anime-animation",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-anime-draggable",
+      "to": "catalog-anime-timeline",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-anime-layout",
+      "to": "catalog-anime-animation",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-anime-layout",
+      "to": "catalog-anime-timeline",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-anime-scope",
+      "to": "catalog-anime-animation",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-anime-scope",
+      "to": "catalog-anime-timeline",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-anime-waapi",
+      "to": "catalog-anime-animation",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-anime-waapi",
+      "to": "catalog-anime-timeline",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-scrolltrigger",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-scrolltrigger",
+      "to": "catalog-gsap-scrollto",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-scrollsmoother",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-scrollsmoother",
+      "to": "catalog-gsap-scrollto",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-scrollto",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-scrollto",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-splittext",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-splittext",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-scrambletext",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-scrambletext",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-drawsvg",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-drawsvg",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-morphsvg",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-morphsvg",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-motionpath",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-motionpath",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-motionpathhelper",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-motionpathhelper",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-flip",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-flip",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-draggable",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-draggable",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-inertia",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-inertia",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-observer",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-observer",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-physics2d",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-physics2d",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-physicsprops",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-physicsprops",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-gsdevtools",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-gsdevtools",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-pixi",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-pixi",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-easel",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-easel",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-customease",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-customease",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-easepack",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-easepack",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-customwiggle",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-customwiggle",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-custombounce",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-custombounce",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-usegsap",
+      "to": "catalog-gsap-scrolltrigger",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-gsap-usegsap",
+      "to": "catalog-gsap-scrollsmoother",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-transitions-card-resize",
+      "to": "catalog-transitions-number-pop-in",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-transitions-card-resize",
+      "to": "catalog-transitions-notification-badge",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-transitions-number-pop-in",
+      "to": "catalog-transitions-card-resize",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-transitions-number-pop-in",
+      "to": "catalog-transitions-notification-badge",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-transitions-notification-badge",
+      "to": "catalog-transitions-card-resize",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-transitions-notification-badge",
+      "to": "catalog-transitions-number-pop-in",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-transitions-text-states-swap",
+      "to": "catalog-transitions-card-resize",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-transitions-text-states-swap",
+      "to": "catalog-transitions-number-pop-in",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-transitions-menu-dropdown",
+      "to": "catalog-transitions-card-resize",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-transitions-menu-dropdown",
+      "to": "catalog-transitions-number-pop-in",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-transitions-modal-open-close",
+      "to": "catalog-transitions-card-resize",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-transitions-modal-open-close",
+      "to": "catalog-transitions-number-pop-in",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-transitions-panel-reveal",
+      "to": "catalog-transitions-card-resize",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-transitions-panel-reveal",
+      "to": "catalog-transitions-number-pop-in",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-rive-react-webgl2",
+      "to": "catalog-rive-webgl2",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-rive-webgl2",
+      "to": "catalog-rive-react-webgl2",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-three-scene",
+      "to": "catalog-three-object3d",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-three-scene",
+      "to": "catalog-three-buffergeometry",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-three-object3d",
+      "to": "catalog-three-scene",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-three-object3d",
+      "to": "catalog-three-buffergeometry",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-three-buffergeometry",
+      "to": "catalog-three-scene",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-three-buffergeometry",
+      "to": "catalog-three-object3d",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-three-raycaster",
+      "to": "catalog-three-scene",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-three-raycaster",
+      "to": "catalog-three-object3d",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-getlayers-3d-scenes",
+      "to": "catalog-getlayers-templates",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    },
+    {
+      "from": "catalog-getlayers-templates",
+      "to": "catalog-getlayers-3d-scenes",
+      "kind": "compatible_with",
+      "evidence": "Catalog items share an acquisition source and require independent review."
+    }
+  ],
+  "metrics": {
+    "new_nodes": 170,
+    "new_edges": 823,
+    "domain_edges": 170
+  }
+}

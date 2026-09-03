@@ -3,7 +3,7 @@ import { Box, Text } from '../ui.js';
 
 import { describeStats, diffStats, hunksOf, parseDiff } from '@plif/core';
 import type { DiffLine } from '@plif/core';
-import { color, diffStyle, syntaxColor } from '../theme.js';
+import { color, diffStyle, glyph, syntaxColor } from '../theme.js';
 import { highlight, languageOf } from '../highlight.js';
 import { displayWidth, wrapTerminalText } from '../text.js';
 
@@ -16,11 +16,6 @@ interface DiffProps {
   readonly expand?: boolean;
 }
 
-/** Diff lines shown before the fold. */
-// Kept for layout compatibility; rendering itself always retains the full
-// diff so the historical record is never silently shortened.
-const COLLAPSED_LINES = 14;
-
 /**
  * Background tints for the two sides.
  *
@@ -29,11 +24,68 @@ const COLLAPSED_LINES = 14;
  * still carries the syntax colours — the background says which side, the
  * colours say what the code is, and neither has to shout.
  */
-/** Height in terminal lines, for the caller's layout budget. */
-export function diffHeight(diff: string, expand: boolean): number {
+
+/**
+ * The gutter and code column widths `Diff` lays each row out with.
+ *
+ * Shared rather than recomputed, because the one time this lived twice — once
+ * here and once, separately, in a row-count estimate — the two drifted apart.
+ * The estimate kept assuming a folded, unwrapped diff long after `Diff` was
+ * changed to always render every line; the terminal's own erase-by-row-count
+ * then came up short against what was actually painted, and old wrapped text
+ * was left on screen under the new frame. Every caller that needs to know how
+ * tall a diff will be now goes through the same numbers `Diff` renders with.
+ */
+function diffLayout(lines: readonly DiffLine[], width: number): { gutter: number; codeWidth: number } {
+  const gutter = Math.max(
+    3,
+    String(Math.max(0, ...lines.map((line) => line.after ?? line.before ?? 0))).length,
+  );
+  return { gutter, codeWidth: Math.max(12, width - gutter - 6) };
+}
+
+/**
+ * Height in terminal rows, for the caller's layout budget.
+ *
+ * `Diff` renders every line — nothing is folded — so this has to count the
+ * same thing it does: one physical row per wrapped segment of every line, not
+ * one row per logical diff line. `width` must be the same value the matching
+ * `<Diff>` is given, or the two fall back out of step.
+ */
+export function diffHeight(diff: string, width: number, expand = false): number {
   const lines = parseDiff(diff);
-  const shown = expand ? lines.length : Math.min(lines.length, COLLAPSED_LINES);
-  return shown + 2;
+  if (lines.length === 0) return 0;
+  const { codeWidth } = diffLayout(lines, width);
+  const preview = diffPreview(lines, codeWidth, expand);
+  return preview.rows + (preview.hidden > 0 ? 1 : 0);
+}
+
+/**
+ * How much of a stored diff a settled row shows.
+ *
+ * A single edit can be several hundred lines. Rendering all of them puts a
+ * wall of code between the reader and the rest of the conversation, and — far
+ * worse — makes the cost of every repaint proportional to the largest diff in
+ * the session. Nothing is discarded: the row says how many lines it is holding
+ * back, and expanding it (click, or Ctrl+R for the transcript) renders the
+ * whole thing.
+ */
+export const DIFF_PREVIEW_ROWS = 40;
+
+function diffPreview(
+  lines: readonly DiffLine[],
+  codeWidth: number,
+  expand: boolean,
+): { readonly shown: readonly DiffLine[]; readonly rows: number; readonly hidden: number } {
+  let rows = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    const height = Math.max(1, wrapTerminalText(lines[index]!.text, codeWidth).length);
+    if (!expand && rows + height > DIFF_PREVIEW_ROWS && index > 0) {
+      return { shown: lines.slice(0, index), rows, hidden: lines.length - index };
+    }
+    rows += height;
+  }
+  return { shown: lines, rows, hidden: 0 };
 }
 
 /**
@@ -55,15 +107,11 @@ export function Diff({ diff, width, path, expand = false }: DiffProps): React.Re
   if (lines.length === 0) return null;
 
   const language = languageOf(path ?? '');
-  const shown = lines;
 
   // Wide enough for the largest line number in the diff, so the code column
   // does not shift halfway down a hunk.
-  const gutter = Math.max(
-    3,
-    String(Math.max(...lines.map((line) => line.after ?? line.before ?? 0))).length,
-  );
-  const codeWidth = Math.max(12, width - gutter - 6);
+  const { gutter, codeWidth } = diffLayout(lines, width);
+  const { shown, hidden } = diffPreview(lines, codeWidth, expand);
 
   return (
     <Box flexDirection="column">
@@ -76,6 +124,11 @@ export function Diff({ diff, width, path, expand = false }: DiffProps): React.Re
           language={language}
         />
       ))}
+      {hidden > 0 && (
+        <Text color={color('ghost')}>
+          {`  … ${hidden} more ${hidden === 1 ? 'line' : 'lines'} ${glyph.divider} click or Ctrl+R to review`}
+        </Text>
+      )}
     </Box>
   );
 }

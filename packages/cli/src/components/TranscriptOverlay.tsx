@@ -27,12 +27,12 @@ export function TranscriptOverlay({
     ? [...cells, active]
     : cells;
   const bodyHeight = Math.max(1, height - 2);
-  const contentLines = measureTranscriptCells(all, width);
+  const contentLines = measureTranscriptCells(all, width, true);
   const visible = visibleTranscriptSlice(
     all,
     viewport,
     bodyHeight,
-    (cell) => measureTranscriptCell(cell, width),
+    (cell) => measureTranscriptCell(cell, width, true),
   );
   const end = Math.max(0, contentLines - bodyHeight);
   const position = end === 0 ? 100 : Math.round((viewport.offset / end) * 100);

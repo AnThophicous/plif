@@ -15,6 +15,9 @@ import { clusterLength, displayWidth } from './text.js';
 
 /** React host backed by Slate's flex and ANSI renderer. */
 
+/** Repaints per second. See the note beside `createSlateApp` below. */
+const SLATE_FRAME_RATE = 60;
+
 type UiProps = Record<string, unknown>;
 type HostText = { kind: 'text'; id: string; value: string; revision: number; parent?: HostNode };
 type HostNode = {
@@ -37,6 +40,38 @@ interface CachedSlateChild {
 }
 
 const slateChildCache = new WeakMap<HostNode, CachedSlateChild>();
+
+/**
+ * Slate element id -> the meaning the component attached to that element.
+ *
+ * Slate already hit-tests every mouse report against the laid-out tree and
+ * reports the topmost element as `event.target`. Components label the elements
+ * they want to be clickable with a `hitTarget` string, and this map turns the
+ * element id back into that label. Doing it this way, rather than passing an
+ * `onMouse` closure through the host tree, keeps the conversion cache useful:
+ * a stable string leaves a node's props unchanged between renders, while a
+ * fresh closure per render would invalidate the whole subtree every frame.
+ *
+ * Entries are dropped when their host node leaves the tree.
+ */
+const hitTargets = new Map<string, string>();
+
+/** The label a component attached to the element Slate reports as the target. */
+export function hitTargetOf(elementId: string | number | undefined): string | undefined {
+  return elementId === undefined ? undefined : hitTargets.get(String(elementId));
+}
+
+/**
+ * Every label currently registered, in element order.
+ *
+ * The registry is otherwise only readable through an element id that Slate
+ * assigns, which nothing outside a live mouse report has. This exposes the
+ * labels themselves so a test can assert that a component reached the registry
+ * at all, and that its entries leave when the component does.
+ */
+export function hitTargetLabels(): readonly string[] {
+  return [...hitTargets.values()];
+}
 
 function shallowRecordEqual(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;
@@ -77,8 +112,14 @@ function attachChild(parent: HostNode, child: HostChild): void {
   child.parent = parent;
 }
 
+function forgetHitTargets(child: HostChild): void {
+  hitTargets.delete(child.id);
+  if (child.kind === 'node') for (const grandchild of child.children) forgetHitTargets(grandchild);
+}
+
 function detachChild(parent: HostNode, child: HostChild): void {
   if (child.parent === parent) child.parent = undefined;
+  forgetHitTargets(child);
 }
 
 function contextKey(
@@ -350,6 +391,10 @@ function toSlateChild(
     id: child.id,
     style: normalizeStyle(child.props),
   };
+  // Clickable elements register their meaning under the id Slate will report.
+  if (typeof child.props['hitTarget'] === 'string') {
+    hitTargets.set(child.id, child.props['hitTarget']);
+  }
   const style = props.style as Record<string, unknown>;
   const resolvedWidth = resolveWidth(style.width, available);
   const childAvailable = innerWidth(style, resolvedWidth);
@@ -588,6 +633,18 @@ function measureIntrinsicHostSize(child: HostNode, axis: 'width' | 'height'): nu
     : axis === 'width' ? sizes.reduce((sum, value) => sum + value, 0) + Math.max(0, sizes.length - 1) * gap : Math.max(0, ...sizes);
   const explicit = style[axis];
   const explicitSize = typeof explicit === 'number' && Number.isFinite(explicit) ? explicit : 0;
+  // Content that scrolls or is clipped does not enlarge the box that holds it.
+  //
+  // Without this, a viewport with a fixed height measured as tall as
+  // everything inside it, and the parent then placed the *next* sibling —
+  // the prompt — below that phantom height, off the bottom of the terminal.
+  // The transcript looked fine and the input was simply gone.
+  const clipped = axis === 'height' && (
+    child.nodeType === 'scroll' ||
+    style.overflow === 'scroll' || style.overflow === 'hidden' ||
+    style.overflowY === 'scroll' || style.overflowY === 'hidden'
+  );
+  if (clipped && explicitSize > 0) return Math.max(1, Math.ceil(explicitSize + padding));
   return Math.max(1, Math.ceil(Math.max(own, explicitSize) + padding));
 }
 
@@ -641,7 +698,11 @@ function keyForRaw(char: string): Key {
   const code = char === '\r' || char === '\n' ? 'enter'
     : char === '\u001b' ? 'escape'
       : char === '\u007f' || char === '\b' ? 'backspace'
-        : '';
+        // Tab is a named key everywhere else in the app - it walks the screen
+        // bar, it drives completion - so the raw path has to name it too, or a
+        // terminal that reaches this path silently loses it.
+        : char === '\t' ? 'tab'
+          : '';
   return keyForEvent({
     kind: 'key',
     code,
@@ -776,6 +837,7 @@ function createLosslessInputSource(): ReturnType<typeof createInputSource> {
       return event.phase === undefined ? { ...event, phase: 'press' } : event;
     },
     close: source.close,
+    size: source.size,
   };
 }
 
@@ -850,7 +912,11 @@ const hostConfig = {
   getRootHostContext: () => ({ insideText: false }),
   getChildHostContext: (parent: { insideText: boolean }, type: string) => ({ insideText: parent.insideText || type === 'slate-text' }),
   prepareForCommit: () => null,
-  clearContainer: (root: UiRoot) => { root.children.length = 0; return false; },
+  clearContainer: (root: UiRoot) => {
+    for (const child of root.children) forgetHitTargets(child);
+    root.children.length = 0;
+    return false;
+  },
   resetAfterCommit: (root: UiRoot) => root.repaint(),
   shouldSetTextContent: () => false,
   createInstance: (type: string, props: UiProps) => ({
@@ -909,6 +975,7 @@ const hostConfig = {
     if (index < 0) return;
     root.children.splice(index, 1);
     if (child.kind === 'node' || child.kind === 'text') child.parent = undefined;
+    forgetHitTargets(child);
   },
   prepareUpdate: (_node: HostNode, _type: string, oldProps: UiProps, nextProps: UiProps) =>
     hostPropsEqual(oldProps, nextProps) ? null : true,
@@ -978,6 +1045,7 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
   let paintScheduled = false;
   let skipNextRepaint = false;
   let terminalController: ReturnType<typeof createTerminalController> | null = null;
+  let renderFailure: unknown;
   const initialViewport = {
     width: stdout.columns ?? 80,
     height: stdout.rows ?? 24,
@@ -1009,10 +1077,21 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
       slate.render();
     });
   } };
+  // Coalesce repaints onto a frame budget instead of painting on every
+  // microtask.
+  //
+  // A frame rate of 0 makes Slate schedule with `queueMicrotask`, so a burst of
+  // work — a streaming turn arriving as dozens of deltas per 100 ms, a resize,
+  // an animation tick landing beside them — produced one full render, layout
+  // and paint *per event*. The terminal cannot show them, and the event loop
+  // spent on them is the loop the animation clock needed to keep its own
+  // cadence, which is what made a busy session feel like it was dropping every
+  // other frame. Bounding the work at 60 Hz costs at most 16 ms of latency on
+  // the first event of a burst, and returns the rest of the budget.
   const slate = createSlateApp(() => treeFor(root, viewport.width), {
     viewport: initialViewport,
     autoMount: false,
-    frameRate: 0,
+    frameRate: SLATE_FRAME_RATE,
   });
   const container = reconciler.createContainer(root, 0, null, false, null, 'plif', () => undefined, null);
   const value = {
@@ -1080,11 +1159,26 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
     slate,
     source,
     { write: (frame) => output.write(normalizeSlateFrame(frame)) },
-    { intervalMs: 16, animationFps: 0, render: { hideCursor: true } },
+    {
+      intervalMs: 16,
+      animationFps: 0,
+      render: { hideCursor: true },
+      // Slate stops the controller on a render error, which leaves a frozen
+      // terminal and no explanation. Record it so the failure is at least
+      // reported when the process ends instead of looking like a hang.
+      onError: (error: unknown) => { renderFailure = error; },
+    },
   );
   terminalController.start();
   return {
     unmount: () => {
+      if (renderFailure !== undefined) {
+        process.stderr.write(`plif: the terminal renderer stopped: ${
+          renderFailure instanceof Error ? renderFailure.stack ?? renderFailure.message : String(renderFailure)
+        }
+`);
+        renderFailure = undefined;
+      }
       terminalController?.dispose();
       terminalController = null;
       output.dispose();

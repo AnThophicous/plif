@@ -223,6 +223,30 @@ export interface PlifEvents {
     diff?: string;
   };
   /**
+   * One tool call made from inside a `run_code` program.
+   *
+   * Separate from `agent.tool` because these calls are real work with a
+   * different audience: the developer must be able to audit every tool a
+   * program reached, while the model is deliberately shown only what the
+   * program logged and returned. Emitting them as `agent.tool` would put ten
+   * rows in the timeline for one call the model made, and would imply the
+   * model saw ten results it never received.
+   *
+   * `id` is `<parent call id>:code:<n>`, so a sub-call always names the
+   * `run_code` row it belongs under.
+   */
+  'code.dispatch': {
+    turnId: string;
+    id: string;
+    name: string;
+    input: unknown;
+    ok: boolean;
+    durationMs: number;
+    /** Terminal-facing output only; never the model's context. */
+    output?: string;
+    diff?: string;
+  };
+  /**
    * What one turn cost, and how full the window now is.
    *
    * `promptTokens` is the whole conversation as the endpoint counted it, so it
@@ -377,13 +401,9 @@ export interface PlifEvents {
     tools: readonly string[];
   };
   'auth.required': McpAuthEvent;
-  'mcp.status': {
-    server: string;
-    transport: 'stdio' | 'http';
-    connected: boolean;
-    toolCount: number;
-    detail: string;
-  };
+  // Carries the whole status: the MCP screen renders from these events, and a
+  // subset here meant the screen had to guess at everything it did not carry.
+  'mcp.status': import('../harness/mcp.js').McpServerStatus & { server: string };
   'lsp.ready': {
     server: string;
     label: string;

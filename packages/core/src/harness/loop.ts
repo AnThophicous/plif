@@ -38,6 +38,12 @@ import type {
 } from '../model/conversation-state.js';
 import type { Container } from '../container/container.js';
 import type { QuestionBroker } from './ask.js';
+import {
+  RUN_CODE_SPEC,
+  RUN_CODE_TOOL_NAME,
+  createRunCodeTool,
+} from './code-mode/index.js';
+import type { CodeModeLimits, ToolPresentationMode } from './code-mode/index.js';
 import { compact, estimateTokens } from './compaction.js';
 import type { CompactionResult } from './compaction.js';
 import { computeContextBudget, stableToolSpecs } from './context-budget.js';
@@ -166,6 +172,20 @@ export interface LoopOptions {
   /** Enable the in-turn sequential script tool. Defaults to true. */
   readonly runScript?: boolean;
   readonly runScriptMaxSteps?: number;
+  /**
+   * How much of the tool surface reaches the wire.
+   *
+   * `code` is the one that saves tokens rather than spending them: the schemas
+   * leave the request entirely and the model reaches tools from inside a
+   * program, so a session's whole catalogue is carried once by the cacheable
+   * system prefix instead of on every request. Defaults to `native`, because
+   * changing the presentation changes what the model is being asked to do and
+   * that is a decision for the host, not a default.
+   */
+  readonly toolMode?: ToolPresentationMode;
+  readonly codeModeLimits?: Partial<CodeModeLimits>;
+  /** Sandbox isolation, reported into `run_code` results rather than assumed. */
+  readonly isolation?: string;
   readonly attachments?: readonly Attachment[];
   /**
    * Anything the human typed since the turn started, taken and cleared.
@@ -185,6 +205,7 @@ export interface LoopOptions {
 
 const VISIBLE_TOOL_OUTPUT = new Set([
   'run_command',
+  'run_code',
   'shell_command',
   'write_file',
   'edit_file',
@@ -398,7 +419,13 @@ function runBudgetError(snapshot: ProgressSnapshot, limit: number): PlifError {
         totalRunTokens: snapshot.totalRunTokens,
         progressEpoch: snapshot.progressEpoch,
       },
-      hint: 'Start a new turn or raise the run budget deliberately.',
+      // Naming the knob matters: the previous hint asked for a deliberate
+      // raise without saying where the budget lives, which left the operator
+      // with no move but to start over.
+      hint:
+        'Start a new turn, or raise the budget deliberately: ' +
+        `PLIF_MAX_RUN_TOKENS=${Math.max(limit * 2, limit + 50_000)} ` +
+        'or "maxRunTokens" in the PLIF config.',
     },
   );
 }
@@ -563,11 +590,58 @@ async function runLoopInternal(
       return { output: results.join('\n'), ok: true, toolCallCount: raw.length };
     },
   };
+  const toolMode: ToolPresentationMode = options.toolMode ?? 'native';
+  const collapsed = toolMode === 'code';
+  // `run_script` and `run_code` are the same idea at different resolutions, and
+  // shipping both in code mode would cost a second schema to say something the
+  // program already says better. In `both` the script stays, because the model
+  // is still choosing between presentations there.
+  const scriptEnabled = options.runScript !== false && !collapsed;
+  const runCodeTool = toolMode === 'native'
+    ? undefined
+    : createRunCodeTool({
+        registry: () => registry,
+        container: options.container,
+        ...(options.codeModeLimits ? { limits: options.codeModeLimits } : {}),
+        ...(options.isolation ? { isolation: options.isolation } : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
+        onDispatch: (record) => {
+          options.bus.emit('code.dispatch', {
+            turnId,
+            id: record.id,
+            name: record.name,
+            input: record.args,
+            ok: record.ok,
+            durationMs: record.durationMs,
+            output: terminalToolOutput(record.name, { output: record.output, ok: record.ok }),
+            ...(record.diff ? { diff: record.diff } : {}),
+          });
+        },
+        dispatch: async (name, args, callId) => {
+          const out = await executeCall({
+            call: { id: callId, name, arguments: JSON.stringify(args) },
+            parsed: args,
+            parseError: null,
+            registry,
+            options,
+          });
+          return {
+            ok: out.ok,
+            output: out.output,
+            ...(out.diff !== undefined ? { diff: out.diff } : {}),
+          };
+        },
+      });
   const tools = [
-    ...(options.runScript === false ? baseTools : [...baseTools, runScriptTool]),
+    ...baseTools,
+    ...(scriptEnabled ? [runScriptTool] : []),
+    ...(runCodeTool ? [runCodeTool] : []),
   ];
   registry = toolRegistry(tools);
-  const specs = stableToolSpecs(toolSpecs(tools));
+  // The collapse is the saving. In code mode the wire carries one schema and
+  // the catalogue lives in the system prefix, where a provider can cache it;
+  // sending both would pay for the catalogue twice.
+  const specs = collapsed ? [RUN_CODE_SPEC] : stableToolSpecs(toolSpecs(tools));
   // The review cycle is a PLIF policy, not a property of having mutation tools.
   // Keeping it opt-in prevents ordinary efforts from gaining hidden model turns.
   const cycleEnabled = options.enableHarnessCycle === true &&
@@ -590,6 +664,20 @@ async function runLoopInternal(
   const messages: Message[] = [...history];
   const tokenSplitConfig = options.tokenSplit?.config;
   const tokenSplitTransformations: TokenSplitTransformation[] = [];
+  if (collapsed) {
+    // Recorded once and reported on every turn's metric, because that is how
+    // the saving actually behaves: the schemas the collapse withheld would
+    // have been re-sent with every single request for the whole session.
+    const withheld = stableToolSpecs(toolSpecs(tools)).filter(
+      (spec) => spec.name !== RUN_CODE_TOOL_NAME,
+    );
+    tokenSplitTransformations.push({
+      technique: 'code-mode',
+      action: `kept ${withheld.length} tool schemas off the wire; the catalogue is in the cacheable system prefix`,
+      tokensAffected: estimateTokens([{ role: 'system', content: JSON.stringify(withheld) }]),
+      reversible: true,
+    });
+  }
   const recentCalls: RecentCall[] = [];
   const executionPolicy = {
     ...DEFAULT_AGENT_EXECUTION_POLICY,
@@ -1076,7 +1164,7 @@ async function runLoopInternal(
       safetyEvent('awaiting_tool', false, 'model_requested_tools');
 
       const prepared = batch
-        .map((call) => prepare(call, recentCalls, registry, stateVersion))
+        .map((call) => collapseRefusal(call, collapsed) ?? prepare(call, recentCalls, registry, stateVersion))
         .map((item) => {
           if (item.parseError !== null || item.refusal !== null) return item;
 
@@ -1504,6 +1592,31 @@ interface PreparedCall {
   readonly refusal: string | null;
   /** Set when an unchanged read can reuse a completed result. */
   readonly replay: ReplayedToolResult | null;
+}
+
+/**
+ * Refuse a direct call to a tool that code mode has taken off the wire.
+ *
+ * Deliberately ahead of everything else — argument parsing, the repetition
+ * guard, the review gate. A call that can only fail must not be observed by the
+ * machinery that decides whether calls are allowed, or the transcript fills
+ * with approvals and loop warnings for work that was never going to happen.
+ * The refusal carries the route rather than the rule, because what the model
+ * needs is not to be told it was wrong but to be told where the tool went.
+ */
+function collapseRefusal(call: ToolCall, collapsed: boolean): PreparedCall | null {
+  if (!collapsed || call.name === RUN_CODE_TOOL_NAME) return null;
+  return {
+    call,
+    parsed: {},
+    fingerprint: callSignature(call),
+    parseError: null,
+    replay: null,
+    refusal:
+      `Error: only \`run_code\` can be called directly in this session. ` +
+      `Call \`${call.name}\` from inside a \`run_code\` program instead — the SDK in the ` +
+      `system prompt declares it.`,
+  };
 }
 
 /**
