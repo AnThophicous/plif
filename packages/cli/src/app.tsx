@@ -7047,7 +7047,25 @@ export function App({
           paddingX={surface.panelPaddingX}
           paddingY={surface.panelPaddingY}
         >
-          <Box flexDirection="column" width={surface.contentWidth} flexGrow={1}>
+          {/*
+            The column states its height rather than growing into whatever the
+            frame will allow.
+
+            `flexGrow` on its own only means "take the free space", and the free
+            space is whatever the parent hands down; with a transcript mounted,
+            this column was measured at 104 rows inside a 25 row panel, the
+            spacer below the timeline expanded to 84 of them, and the prompt was
+            laid out at y=112 — correct, complete, and four screens below the
+            bottom of the terminal. That is the input line disappearing after a
+            session is resumed. Bounding the column bounds the spacer, so the
+            prompt can only ever be placed inside the panel.
+          */}
+          <Box
+            flexDirection="column"
+            width={surface.contentWidth}
+            height={surface.contentHeight}
+            flexShrink={0}
+          >
             <Box flexDirection="column">
               <Timeline
                 entries={historyEntries}

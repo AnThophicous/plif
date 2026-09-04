@@ -185,6 +185,25 @@ const SCENARIOS: Record<string, Step[]> = {
     { capture: 'typed' },
   ],
 
+  /**
+   * Resume a session seeded from a real store.
+   *
+   * PLIF_PREVIEW_SEED points at a sessions directory to copy in, and
+   * PLIF_PREVIEW_SESSION is typed into the picker's filter so the run lands
+   * on one specific transcript rather than whichever is newest.
+   */
+  'resume-real': [
+    { wait: 200 },
+    { type: '/sessions' + String.fromCharCode(13) },
+    { wait: 1200 },
+    { type: process.env['PLIF_PREVIEW_SESSION'] ?? '' },
+    { wait: 500 },
+    { capture: 'picker-filtered' },
+    { type: String.fromCharCode(13) },
+    { wait: 5000 },
+    { capture: 'resumed-real' },
+  ],
+
   /** The three list screens, which replace the panel while they are open. */
   'usage-screen': [{ wait: 200 }, { type: '/usage' + String.fromCharCode(13) }, { wait: 900 }, { capture: 'usage' }],
   'agents-screen': [{ wait: 200 }, { type: '/agents' + String.fromCharCode(13) }, { wait: 900 }, { capture: 'agents' }],
@@ -1017,6 +1036,14 @@ process.env['PLIF_CONFIG_PATH'] = path.join(os.tmpdir(), `plif-preview-config-${
 await fs.writeFile(process.env['PLIF_CONFIG_PATH'], '');
 
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-preview-'));
+// A real store can be seeded in, which is the only way to drive the harness
+// with the transcript from a bug report: synthetic fixtures are small, tidy
+// and reproduce nothing. The copy is one-way, so the original is never
+// written to by a preview run.
+const seedStore = process.env['PLIF_PREVIEW_SEED'];
+if (seedStore) {
+  await fs.cp(seedStore, path.join(root, 'sessions'), { recursive: true });
+}
 const engine = new Engine({ root });
 const report = await engine.start();
 const themeCatalogue = await loadThemes();

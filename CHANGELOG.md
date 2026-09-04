@@ -191,6 +191,25 @@ after 0.3.9. It is not a versioned release yet.
 
 ### Fixed
 
+- **The prompt was laid out four screens below the terminal.** The panel holds a
+  column of transcript, spacer and prompt, and that column had `flexGrow: 1` and
+  no height of its own. `flexGrow` claims the free space the parent offers, and
+  with a transcript mounted the parent offered the content's height rather than
+  the panel's: the column measured 104 rows inside a 25 row panel, the spacer
+  between the transcript and the prompt expanded to 84 of them, and the prompt
+  was placed at y=112. Nothing was hidden, unfocused or clipped — the input line
+  was drawn correctly, far below the bottom edge of the window, which is why it
+  reappeared as soon as a session was short enough for the column to fit. The
+  column now declares `surface.contentHeight`, so the spacer can only expand
+  into the panel and the prompt can only be placed inside it.
+
+  Found by seeding the frame previewer with the exact session from the report:
+  `PLIF_PREVIEW_SEED` copies a real session store into the harness and the
+  `resume-real` scenario opens one transcript by name, so a layout bug that only
+  appears with real content can be reproduced without a terminal. The captured
+  layout tree is what showed y=112; guessing had already produced two wrong
+  diagnoses before it.
+
 - **The prompt vanished the moment a session was opened from `/sessions`.**
   Resuming replaces the transcript with a shorter one, and the timeline's
   follow state kept the scroll high-water mark of the transcript that had just
