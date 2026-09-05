@@ -2657,6 +2657,27 @@ export const COMMANDS: readonly Command[] = [
     },
   },
   {
+    name: 'store',
+    args: '[show]',
+    summary: 'Explain PLIF persistent storage and its privacy boundary',
+    concurrent: true,
+    run: async (argv, context) => {
+      if (argv.length > 0 && argv[0] !== 'show') {
+        throw new PlifError('INVALID_ARGUMENT', 'usage: /store [show]');
+      }
+      return ok(entry('notice', '/store', {
+        tone: 'accent',
+        subtitle: 'persistent PLIF state · not mounted into /project',
+        detail: [
+          'Store root: ' + context.engine.paths.root,
+          'Contains session history, image/cache metadata, audit records and encrypted credentials.',
+          'Use /temp for disposable output. /store is runtime-owned and is not a workspace for agent writes.',
+        ].join('\n'),
+        expand: true,
+      }));
+    },
+  },
+  {
     name: 'skills',
     concurrent: true,
     summary: 'The same browser, opened on the skills tab',

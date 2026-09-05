@@ -45,6 +45,7 @@ const effort = COMMANDS.find((command) => command.name === 'effort');
 const persona = COMMANDS.find((command) => command.name === 'persona');
 const usage = COMMANDS.find((command) => command.name === 'usage');
 const temp = COMMANDS.find((command) => command.name === 'temp');
+const store = COMMANDS.find((command) => command.name === 'store');
 
 describe('/permissions', () => {
   it('opens three explicit approval modes without changing the setting until one is picked', async () => {
@@ -59,6 +60,15 @@ describe('/permissions', () => {
     assert.equal(opened[0]?.title, 'Permissões');
     assert.deepEqual(opened[0]?.items.map((item) => item.value), ['ask', 'auto-approve', 'full']);
     assert.deepEqual(opened[0]?.items.map((item) => item.label), ['Perguntar', 'Aprovar para mim', 'Permissão Total']);
+  });
+});
+
+describe('/store', () => {
+  it('describes persistent runtime state without treating it as a workspace', async () => {
+    const result = await store!.run([], { engine: { paths: { root: 'C:/plif-store' } } } as unknown as CommandContext);
+    const rendered = `${result.entries[0]?.title}\n${result.entries[0]?.detail}`;
+    assert.match(rendered, /C:\/plif-store/);
+    assert.match(rendered, /not a workspace for agent writes/);
   });
 });
 
