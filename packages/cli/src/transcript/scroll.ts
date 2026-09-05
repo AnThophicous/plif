@@ -14,7 +14,15 @@ interface ViewportMetrics {
 export type TranscriptViewportAction =
   | ({ readonly type: 'open' } & ViewportMetrics)
   | { readonly type: 'close' }
-  | ({ readonly type: 'line'; readonly delta: -1 | 1 } & ViewportMetrics)
+  /**
+   * Move by whole lines.
+   *
+   * The delta is any integer, not just one step. An arrow key sends 1; a mouse
+   * wheel notch sends several, because a terminal reports one notch per event
+   * and moving a single line per notch is what made scrolling feel broken —
+   * a screenful of transcript took twenty notches to cross.
+   */
+  | ({ readonly type: 'line'; readonly delta: number } & ViewportMetrics)
   | ({ readonly type: 'page'; readonly delta: -1 | 1 } & ViewportMetrics)
   | ({ readonly type: 'home' } & ViewportMetrics)
   | ({ readonly type: 'end' } & ViewportMetrics)
@@ -47,7 +55,7 @@ export function viewportReducer(
     case 'open':
       return { open: true, offset: end, follow: true };
     case 'line': {
-      const offset = clamp(state.offset + action.delta, action);
+      const offset = clamp(state.offset + Math.trunc(action.delta), action);
       return { ...state, open: true, offset, follow: offset === end };
     }
     case 'page': {

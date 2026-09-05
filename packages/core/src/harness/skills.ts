@@ -1,8 +1,8 @@
 import fs from 'node:fs/promises';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
+import { moduleDirectory, resolveAsset } from '../assets.js';
 import { PlifError } from '../errors.js';
 import type { Message } from '../model/provider.js';
 import type { Tool, ToolContext, ToolResult } from './tools.js';
@@ -53,15 +53,40 @@ export function parseSkill(
   const [, frontmatter, body] = match;
   const fields = new Map<string, string>();
 
-  for (const line of (frontmatter ?? '').split(/\r?\n/)) {
+  const lines = (frontmatter ?? '').split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
     const separator = line.indexOf(':');
     if (separator <= 0) continue;
     const key = line.slice(0, separator).trim().toLowerCase();
-    const value = line
-      .slice(separator + 1)
-      .trim()
-      .replace(/^["']|["']$/g, '');
-    if (key) fields.set(key, value);
+    if (!key) continue;
+    const raw = line.slice(separator + 1).trim();
+
+    // YAML block scalars. Several shipped skills write the description as a
+    // folded block, and reading only this line recorded the indicator itself:
+    // the catalogue advertised those skills as ">" and left the model nothing
+    // to route on.
+    const block = /^([>|])[0-9+-]*$/.exec(raw);
+    if (block) {
+      const indent = line.length - line.trimStart().length;
+      const content: string[] = [];
+      while (index + 1 < lines.length) {
+        const continuation = lines[index + 1]!;
+        const blank = continuation.trim() === '';
+        if (!blank && continuation.length - continuation.trimStart().length <= indent) break;
+        content.push(continuation.trim());
+        index += 1;
+      }
+      fields.set(
+        key,
+        block[1] === '>'
+          ? content.filter(Boolean).join(' ')
+          : content.join('\n').trim(),
+      );
+      continue;
+    }
+
+    fields.set(key, raw.replace(/^["']|["']$/g, ''));
   }
 
   const rawName = fields.get('name');
@@ -258,20 +283,19 @@ export class SkillRegistry {
 export const MANDATORY_GLOBAL_SKILLS = ['anti-ai-slop', 'plief-galileu'] as const;
 
 /**
- * Additional skills required by the PLIF effort.
+ * The rest of the pli'ef family, loaded by domain rather than by effort.
  *
- * PLIF is the deliberate, everything-on mode: the whole pli'ef family loads
- * before the work starts, so quality, security, frontend and component
- * selection are all governed rather than remembered. This is not free — five
- * bodies is a materially larger first turn than two — and that cost is the
- * point of it being a separate effort rather than the default.
+ * These three used to be preloaded unconditionally under the PLIF effort.
+ * Measured on this tree, that carried 9,161 tokens of skill body before the
+ * user's first word, of which 7,108 were Argus, Sifr and Orun — bodies a
+ * request that touches none of those domains never reads. DOMAIN_SKILL_ROUTES
+ * already states, non-optionally, when each of them has to load, so the effort
+ * no longer pays for them up front.
  */
-export const MANDATORY_PLIF_SKILLS = [
-  ...MANDATORY_GLOBAL_SKILLS,
-  'plief-argus',
-  'plief-sifr',
-  'plief-orun',
-] as const;
+export const PLIF_FAMILY_SKILLS = ['plief-argus', 'plief-sifr', 'plief-orun'] as const;
+
+/** Mandatory bodies plus the domain-routed family, for load detection. */
+export const TRACKED_SKILLS = [...MANDATORY_GLOBAL_SKILLS, ...PLIF_FAMILY_SKILLS] as const;
 
 /**
  * Skills that any effort must load once the request touches their domain.
@@ -284,6 +308,8 @@ export const MANDATORY_PLIF_SKILLS = [
 export const DOMAIN_SKILL_ROUTES: readonly {
   readonly skills: readonly string[];
   readonly when: string;
+  /** The same condition for the compact layer, where prose is the cost. */
+  readonly compactWhen: string;
 }[] = [
   {
     skills: ['plief-sifr'],
@@ -292,12 +318,16 @@ export const DOMAIN_SKILL_ROUTES: readonly {
       + 'dashboard, landing page, form, table, modal, navigation, design system, '
       + 'theme, styling, responsiveness, accessibility, animation or visual polish '
       + '— in any framework, and including plain HTML and CSS',
+    compactWhen:
+      'the work touches any user interface, in any framework, plain HTML and CSS included',
   },
   {
     skills: ['plief-orun'],
     when:
       'a component, library, package, animation or 3D capability has to be chosen '
       + 'or integrated, and the choice needs evidence rather than a guess',
+    compactWhen:
+      'a component, library, animation or 3D capability has to be chosen with evidence',
   },
   {
     skills: ['plief-argus'],
@@ -305,11 +335,20 @@ export const DOMAIN_SKILL_ROUTES: readonly {
       'the work touches authentication, authorization, secrets, dependencies with '
       + 'known advisories, uploads, deserialization, or anything the user frames as '
       + 'a security review, threat model or hardening pass',
+    compactWhen:
+      'the work touches auth, secrets, vulnerable dependencies, uploads, deserialization, '
+      + 'or anything framed as a security review',
   },
 ];
 
-export function mandatorySkillsForEffort(effort?: string): readonly string[] {
-  return effort === 'plif' ? MANDATORY_PLIF_SKILLS : MANDATORY_GLOBAL_SKILLS;
+/**
+ * The bodies every session must carry, whatever the effort.
+ *
+ * The effort is still the caller's question to ask — a future one may add its
+ * own gate — but PLIF no longer adds three bodies here. See PLIF_FAMILY_SKILLS.
+ */
+export function mandatorySkillsForEffort(_effort?: string): readonly string[] {
+  return MANDATORY_GLOBAL_SKILLS;
 }
 
 /**
@@ -340,20 +379,20 @@ export function loadedSkillNames(messages: readonly Message[]): readonly string[
     }
     if (message.role !== 'tool' || !message.toolCallId) continue;
     const name = calls.get(message.toolCallId);
-    if (!name || !MANDATORY_PLIF_SKILLS.includes(name as (typeof MANDATORY_PLIF_SKILLS)[number])) continue;
+    if (!name || !TRACKED_SKILLS.includes(name as (typeof TRACKED_SKILLS)[number])) continue;
     if (message.content.includes(`# Skill: ${name}`)) loaded.add(name);
   }
 
-  return MANDATORY_PLIF_SKILLS.filter((name) => loaded.has(name));
+  return TRACKED_SKILLS.filter((name) => loaded.has(name));
 }
 
 function builtinSkillDirectory(): string {
-  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+  const here = moduleDirectory(import.meta.url);
   const candidates = [
-    path.join(moduleDirectory, '../agenting/skills/builtin'),
-    path.resolve(moduleDirectory, '../../src/agenting/skills/builtin'),
+    path.join(here, '../agenting/skills/builtin'),
+    path.resolve(here, '../../src/agenting/skills/builtin'),
   ];
-  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
+  return resolveAsset(import.meta.url, 'skills/builtin', candidates) ?? candidates[0]!;
 }
 
 function readBuiltinSkills(): Skill[] {

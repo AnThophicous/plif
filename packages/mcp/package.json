@@ -1,0 +1,36 @@
+{
+  "name": "@plif/mcp",
+  "version": "0.4.0",
+  "description": "plif's tool surface and skill catalogue served as one MCP server — container-confined, tier-granted.",
+  "license": "Apache-2.0",
+  "author": "Anthophicous",
+  "homepage": "https://github.com/AnThophicous/plif",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnThophicous/plif.git",
+    "directory": "packages/mcp"
+  },
+  "bugs": "https://github.com/AnThophicous/plif/issues",
+  "keywords": ["ai", "agent", "mcp", "model-context-protocol", "tools", "skills", "security"],
+  "type": "module",
+  "bin": {
+    "plif-mcp": "dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": ["dist", "README.md", "LICENSE", "NOTICE"],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@plif/core": "0.4.0"
+  },
+  "scripts": {
+    "prepack": "node ../../scripts/prepack.mjs",
+    "build": "tsc -p tsconfig.json"
+  }
+}

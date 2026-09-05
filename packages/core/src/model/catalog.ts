@@ -57,7 +57,7 @@ export interface ModelCatalogProvider {
   readonly preset: string;
   readonly endpoint: string;
   /** Authentication policy; Codex is owned by a local provider bridge. */
-  readonly auth?: 'api-key' | 'none' | 'codex';
+  readonly auth?: 'api-key' | 'none' | 'codex' | 'openai-oauth';
   /** Curated ids, most used first. Used for ranking and when listing fails. */
   readonly models: readonly ModelCatalogModel[];
   /** Provider-declared default, when one was explicitly configured. */
@@ -164,7 +164,7 @@ const provider = (
   label: string,
   description: string,
   models: readonly ModelCatalogModel[],
-  extra: { anonymous?: boolean; product?: string; tier?: string; defaultCost?: ModelCost; auth?: 'codex' } = {},
+  extra: { anonymous?: boolean; product?: string; tier?: string; defaultCost?: ModelCost; auth?: 'codex' | 'openai-oauth' } = {},
 ): ModelCatalogProvider =>
   Object.freeze({
     id,
@@ -209,7 +209,18 @@ export const MODEL_CATALOG: readonly ModelCatalogProvider[] = Object.freeze([
     model('gpt-4.1-mini', 'GPT-4.1 mini', 'Compact long-context model'),
     model('o3', 'o3', 'Reasoning model'),
     model('o4-mini', 'o4-mini', 'Compact reasoning model'),
-  ]),
+    // Current ChatGPT OAuth/Codex-compatible offers. These are kept in the
+    // OpenAI provider catalogue because the public API /models endpoint does
+    // not expose account-backed ChatGPT models when OAuth is used.
+    model('gpt-5.5', 'GPT-5.5', 'Current ChatGPT flagship', ['OAuth']),
+    model('gpt-5.4', 'GPT-5.4', 'Current general-purpose model', ['OAuth']),
+    model('gpt-5.4-mini', 'GPT-5.4 mini', 'Fast current model', ['OAuth']),
+    model('gpt-5.3-codex-spark', 'GPT-5.3 Codex Spark', 'Fast coding model', ['OAuth', 'coding']),
+    model('gpt-5.6-sol', 'GPT-5.6 Sol', 'Frontier reasoning and coding model', ['OAuth', 'coding']),
+    model('gpt-5.6-terra', 'GPT-5.6 Terra', 'Balanced everyday model', ['OAuth']),
+    model('gpt-5.6-luna', 'GPT-5.6 Luna', 'Fast, cost-sensitive model', ['OAuth', 'fast']),
+    model('gpt-6-astra', 'GPT-6 Astra', 'Flagship complex reasoning model', ['OAuth', 'coding']),
+  ], { product: 'OpenAI', tier: 'ChatGPT/API', auth: 'openai-oauth' }),
   provider('openrouter', 'OpenRouter', 'Hundreds of models behind one key', [
     model('deepseek/deepseek-chat-v3:free', 'DeepSeek V3', 'Popular free coding model', ['free']),
     model('z-ai/glm-4.6', 'GLM 4.6', 'Strong open coding model'),
@@ -224,17 +235,6 @@ export const MODEL_CATALOG: readonly ModelCatalogProvider[] = Object.freeze([
     model('gemini-2.5-flash', 'Gemini 2.5 Flash', 'Fast and inexpensive'),
     model('gemini-2.0-flash', 'Gemini 2.0 Flash', 'Previous fast generation'),
   ]),
-  provider('codex', 'OpenAI Codex (ChatGPT)', 'Use your ChatGPT account through the PLIF sign-in window', [
-    model('codex-default', 'Codex default', 'Uses the model selected by your ChatGPT/Codex account', ['ChatGPT login'], ['text', 'image'], {
-      reasoning: true,
-      tools: true,
-      provider: 'codex',
-      product: 'OpenAI',
-      tier: 'Codex / ChatGPT',
-      protocol: 'openai-chat',
-      metadataSource: 'registry',
-    }),
-  ], { product: 'OpenAI', tier: 'Codex / ChatGPT', defaultCost: 'unknown', auth: 'codex' }),
   provider('xai', 'xAI', 'Grok models', [
     model('grok-4', 'Grok 4', 'Flagship model'),
     model('grok-code-fast-1', 'Grok Code Fast', 'Tuned for coding turnaround'),
@@ -325,9 +325,8 @@ export const MODEL_CATALOG: readonly ModelCatalogProvider[] = Object.freeze([
       model('mimo-v2.5-free', 'MiMo v2.5', 'Compact coding model', ['no key']),
       model('laguna-s-2.1-free', 'Laguna S 2.1', 'Compact general model', ['no key']),
       model('claude-sonnet-5', 'Claude Sonnet 5', 'Paid, strong at long refactors', ['key needed']),
-      model('gpt-5.4', 'GPT-5.4', 'Paid general-purpose model', ['key needed']),
     ],
-    { anonymous: true, product: 'OpenCode', tier: 'Zen', defaultCost: 'free' },
+    { anonymous: true, product: 'OpenCode', tier: 'Zen' },
   ),
   provider(
     'opencode-go',
@@ -383,7 +382,6 @@ export const MODEL_CATALOG: readonly ModelCatalogProvider[] = Object.freeze([
       openCodeGoModel('mimo-v2.5', 'MiMo V2.5'),
       openCodeGoModel('hy3', 'HY3'),
       openCodeGoModel('hy3-preview', 'HY3 Preview'),
-      openCodeGoModel('gpt-5.6-luna', 'GPT 5.6 Luna'),
       openCodeGoModel('grok-4.5', 'Grok 4.5'),
       openCodeGoModel('muse-spark-1.2-contributor', 'Muse Spark 1.2 Contributor'),
     ],
@@ -431,8 +429,9 @@ export function providerForModel(
 ): string | undefined {
   const matches = providers.filter((entryProvider) => entryProvider.models.some((entry) => entry.id === modelId));
   if (matches.length === 1) return matches[0]!.id;
-  const anonymous = matches.find((entryProvider) => entryProvider.anonymous);
-  return anonymous?.id;
+  // Never silently choose Zen for an id also offered by Go. Require an
+  // explicit provider-qualified reference when the bare id is ambiguous.
+  return undefined;
 }
 
 /**

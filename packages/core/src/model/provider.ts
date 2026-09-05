@@ -119,7 +119,7 @@ export interface PreloadedSkill {
 }
 
 /** Permission policy shared by PLIF and providers that run a local agent. */
-export type ModelPermissionMode = 'ask' | 'auto-approve' | 'deny';
+export type ModelPermissionMode = 'ask' | 'auto-approve' | 'full' | 'deny';
 
 /** A choice rendered by PLIF's inline question surface. */
 export interface ModelQuestionOption {

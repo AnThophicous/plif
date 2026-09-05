@@ -6,9 +6,16 @@ export const CAPABILITY_TTL_MS = 24 * 60 * 60 * 1_000;
 const CACHE_VERSION = 1;
 const DEFAULT_MAX_ENTRIES = 32;
 
-/** Wire-level reasoning levels that an endpoint can accept. */
-export type CachedEffort = 'max' | 'xhigh' | 'high' | 'medium' | 'low';
-const EFFORTS: ReadonlySet<CachedEffort> = new Set(['max', 'xhigh', 'high', 'medium', 'low']);
+/**
+ * Wire-level reasoning levels that an endpoint can accept.
+ *
+ * `none` is the useful negative: this model rejects `reasoning_effort` at every
+ * level, so the field should not be sent at all. Without somewhere to record
+ * that, the negotiation ladder rediscovered it from the top on every fresh
+ * session — five failed round trips to learn a fact that never changes.
+ */
+export type CachedEffort = 'max' | 'xhigh' | 'high' | 'medium' | 'low' | 'none';
+const EFFORTS: ReadonlySet<CachedEffort> = new Set(['max', 'xhigh', 'high', 'medium', 'low', 'none']);
 
 export interface CapabilityEntry {
   readonly endpointHash: string;

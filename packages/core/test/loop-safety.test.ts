@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import { EventBus } from '../src/events/bus.js';
 import {
   ActionLoopDetector,
+  DEFAULT_AGENT_EXECUTION_POLICY,
   ProgressWatchdog,
   SingleFlight,
   actionFingerprint,
@@ -43,6 +44,12 @@ function toolCall(id: string, name: string, arguments_: Record<string, unknown>)
 }
 
 describe('P0 loop safety primitives', () => {
+  it('keeps a very large token ceiling while independent loop watchdogs remain active', () => {
+    assert.equal(DEFAULT_AGENT_EXECUTION_POLICY.maxRunTokens, 10_000_000);
+    assert.ok(DEFAULT_AGENT_EXECUTION_POLICY.maxIterationsWithoutProgress > 0);
+    assert.ok(DEFAULT_AGENT_EXECUTION_POLICY.maxRepeatedActions > 0);
+  });
+
   it('treats reasoning and token consumption as non-progress and escalates once', () => {
     const watchdog = new ProgressWatchdog({
       softTokensWithoutProgress: 10,

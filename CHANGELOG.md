@@ -10,6 +10,29 @@ installation and session experience.
 
 ### Added
 
+- **Python debugging.** The `debug` tool now speaks the Debug Adapter Protocol
+  as well as the V8 inspector, and picks by file extension: a `.py` program goes
+  through the debugpy that ships with plif, everything else through the
+  inspector Node already speaks. Nothing to install either way. Breakpoints,
+  stepping, the call stack, locals and expression evaluation are the same six
+  sub-actions in both.
+- **`browser eval` and `browser network`.** `network` reports what the page
+  actually requested, recorded from the events as they happen because a request
+  that has finished cannot be asked about afterwards. `eval` runs script inside
+  the page and asks first: it defaults to no, and a timeout or a silence is a no,
+  because a page the model chose to open is untrusted by definition and `eval`
+  can read every token it holds.
+- **Screenshots you can actually look at.** The container writes UTF-8, so the
+  PNG bytes cannot pass through it. A screenshot now also writes an HTML file
+  with the image inlined, which opens as a picture, beside the base64 for
+  anything that wants the data.
+- **Streamed answers are written, not delivered.** A model hands over prose in
+  provider-sized chunks, so a whole sentence lands at once and then nothing
+  happens for a beat; drawing exactly that reads as stuttering, which is a
+  property of the wire and not of the answer. The revealed length now walks
+  toward what has arrived on the interface clock. A finished answer is shown
+  whole immediately — the animation is for text still being written, never for
+  history.
 - **Code Mode (`toolMode = "code"`).** An opt-in tool presentation in which the
   model receives one tool on the wire, `run_code`, plus a generated TypeScript
   declaration of the whole tool catalogue in the system prompt, and calls tools
@@ -191,6 +214,84 @@ after 0.3.9. It is not a versioned release yet.
 
 ### Fixed
 
+- **ChatGPT OAuth failed on the first message after a successful login.** The
+  token store wrote `expires_in`, a duration, and read back `expires`, an
+  absolute deadline that was never written. Every load therefore looked expired
+  and every single request spent a refresh; the first one to be refused took the
+  session down with "ChatGPT OAuth was rejected" seconds after signing in. The
+  deadline is now persisted, and a token stored without one is treated as due —
+  one refresh — rather than having an expiry invented for it.
+- **A failed browser sign-in made every later attempt fail too.** The loopback
+  callback server was closed only on the success path, so an invalid state, a
+  provider error or a cancelled window left port 1455 bound for the life of the
+  process. "Re-run /providers → OpenAI" then failed on the bind rather than on
+  anything the user did. The listener is now released on every exit, and both
+  sign-in flows have a five-minute ceiling instead of waiting forever.
+- **A custom provider on OAuth was asked for an API key.** `needKey` treated
+  only `auth = "none"` as keyless, so an OAuth endpoint was prompted for a
+  credential it has nowhere to put. A configuration written when Codex was still
+  a provider also keeps loading: `auth = "codex"` is migrated to the OpenAI OAuth
+  route rather than failing the file.
+- **A language server that failed to start was retried on every tool call.**
+  Nothing recorded the failure, so each call respawned the process, waited out
+  the initialize timeout and printed the same warning again, for the rest of the
+  session. Failures are now remembered with a five-minute cooldown — long enough
+  to stop the storm, short enough that a toolchain installed mid-session is
+  picked up.
+- **The provider picker opened on the wrong provider.** `/providers` computed its
+  opening row with an offset left over from when the search ran on a shorter
+  list, so the highlight sat one row below the active provider — and past the end
+  of the list when the active provider was last. Enter there opened the models of
+  a provider nobody chose.
+- **A picker could open on a row that did not exist.** Every other picker action
+  clamped its index; the one that opens the menu did not, so a caller working
+  from a stale list could leave the menu with nothing highlighted until the first
+  keypress. The clamp now lives in the reducer, against the rows the menu will
+  actually show.
+- **A failed browser open left Chromium running.** By the time the CDP endpoint
+  is expected the browser is already up, and none of the three ways the open can
+  still fail closed it — so every failure left a headless browser behind and
+  every retry left another. The same guard now clears the half-open session, so
+  the next command reports a closed browser instead of talking to one that is not
+  there.
+- **A browser command whose browser died never returned.** CDP replies were
+  awaited with no timeout and nothing rejected them when the socket closed, so a
+  crash left the caller waiting for an answer that could not arrive. Commands now
+  time out, and losing the socket fails every waiter.
+- **A failed debug attach left the program running.** Connecting, enabling the
+  domains and arming breakpoints all happen after the debuggee has started; a
+  failure there left it stopped at its first line with no session able to reach
+  it.
+- **Streaming disagreed with the layout it was drawn into.** The timeline sizes
+  every row from the entry's full text, so text held back by the reveal was
+  height reserved and not painted, churning as it caught up. The reveal is now
+  bounded to about two wrapped lines, and steps on a frame budget rather than on
+  every tick of the 8 ms clock — roughly half the redraws during an answer were
+  never visible on a terminal.
+- **Debug instrumentation was left in the model and auth paths.** Eight beacons
+  posted provider id, endpoint, auth mode, whether a key was present and the
+  state of the OAuth token to a local HTTP endpoint, on every provider
+  construction, model switch, config resolution and API response. They failed
+  silently, so nothing would ever have surfaced them.
+- **The prompt was laid out four screens below the terminal.** The panel holds a
+  column of transcript, spacer and prompt, and that column had `flexGrow: 1` and
+  no height of its own. `flexGrow` claims the free space the parent offers, and
+  with a transcript mounted the parent offered the content's height rather than
+  the panel's: the column measured 104 rows inside a 25 row panel, the spacer
+  between the transcript and the prompt expanded to 84 of them, and the prompt
+  was placed at y=112. Nothing was hidden, unfocused or clipped — the input line
+  was drawn correctly, far below the bottom edge of the window, which is why it
+  reappeared as soon as a session was short enough for the column to fit. The
+  column now declares `surface.contentHeight`, so the spacer can only expand
+  into the panel and the prompt can only be placed inside it.
+
+  Found by seeding the frame previewer with the exact session from the report:
+  `PLIF_PREVIEW_SEED` copies a real session store into the harness and the
+  `resume-real` scenario opens one transcript by name, so a layout bug that only
+  appears with real content can be reproduced without a terminal. The captured
+  layout tree is what showed y=112; guessing had already produced two wrong
+  diagnoses before it.
+
 - **The prompt vanished the moment a session was opened from `/sessions`.**
   Resuming replaces the transcript with a shorter one, and the timeline's
   follow state kept the scroll high-water mark of the transcript that had just
@@ -273,6 +374,15 @@ after 0.3.9. It is not a versioned release yet.
   repetition guard, and a successful mutation invalidates cached reads.
 - Added regression coverage for both unchanged-read replay and replay
   invalidation after a workspace mutation.
+
+### Removed
+
+- **The Codex provider.** Its preset pointed at `codex://app-server`, an adapter
+  identity rather than an endpoint, which is what sent ChatGPT models into the
+  local Codex app instead of answering in plif. The provider, its adapter, its
+  sign-in dialog, its sandbox recovery and its FAST tier are gone; ChatGPT access
+  is the OpenAI provider over OAuth, which is where it belonged. A configuration
+  saved with the old provider is migrated rather than broken.
 
 ### Changed
 

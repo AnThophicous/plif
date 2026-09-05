@@ -17,6 +17,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { ClientOptions } from '@anthropic-ai/sdk';
 
+import { dispatcherFor } from './proxy.js';
 import { isApiConnectionTimeoutError, isUserAbortError } from './sdk-errors.js';
 
 import { PlifError } from '../errors.js';
@@ -94,7 +95,15 @@ export class AnthropicProvider implements ModelProvider {
     this.#config = config;
     type SdkFetch = NonNullable<ClientOptions['fetch']>;
     const captureFetch = (async (...args: Parameters<SdkFetch>): Promise<Awaited<ReturnType<SdkFetch>>> => {
-      const response = await globalThis.fetch(...args as Parameters<typeof globalThis.fetch>);
+      // `dispatcher` is Node's own extension to RequestInit and is absent from
+      // the DOM typings the SDK's fetch signature is written against; it is
+      // undefined and inert when nothing configured a proxy.
+      const [input, init] = args as Parameters<typeof globalThis.fetch>;
+      const dispatcher = await dispatcherFor(config.baseURL);
+      const response = await globalThis.fetch(
+        input,
+        (dispatcher ? { ...init, dispatcher } : init) as RequestInit,
+      );
       this.#usageHeaders = new globalThis.Headers(response.headers);
       this.#usageSnapshot = undefined;
       return response as unknown as Awaited<ReturnType<SdkFetch>>;
@@ -105,6 +114,8 @@ export class AnthropicProvider implements ModelProvider {
       baseURL: config.baseURL.replace(/\/v1\/?$/, ''),
       timeout: config.timeoutMs,
       fetch: captureFetch,
+      // See the OpenAI adapter: gateway headers are endpoint defaults.
+      ...(config.headers ? { defaultHeaders: { ...config.headers } } : {}),
     };
     this.info = {
       id: config.model,
@@ -422,10 +433,21 @@ export class AnthropicProvider implements ModelProvider {
     }
     const status = (error as { status?: number }).status;
     if (status === 401 || status === 403) {
-      return new PlifError('MODEL_AUTH', `${host} rejected your Anthropic key`, {
-        cause: error,
-        hint: 'Run /model, pick the Claude provider again, and paste a valid key — or set ANTHROPIC_API_KEY.',
-      });
+      // See the OpenAI adapter: `keyPresent` separates a rejected key from a
+      // request that carried none, so recovery does not delete a credential
+      // that was never sent.
+      const keyPresent = Boolean(this.#config.apiKey);
+      return new PlifError(
+        'MODEL_AUTH',
+        keyPresent ? `${host} rejected your Anthropic key` : `${host} refused a request with no key`,
+        {
+          cause: error,
+          detail: { status, endpoint: this.#config.baseURL, keyPresent },
+          hint: keyPresent
+            ? 'Run /model, pick the Claude provider again, and paste a valid key — or set ANTHROPIC_API_KEY.'
+            : 'The stored credential did not reach this request. Run /model to reselect the provider.',
+        },
+      );
     }
     if (status === 404) {
       return new PlifError('MODEL_NOT_FOUND', `${host} does not serve "${this.#config.model}"`, {

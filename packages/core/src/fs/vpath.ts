@@ -231,10 +231,18 @@ export class PathJail {
   #isMasked(virtual: string, mount: Mount): boolean {
     if (!mount.mask?.length) return false;
     const target = normalizeVirtualPath(mount.target);
-    const relative = virtual.slice(target.length) || '/';
+    const relative = target === '/' ? virtual : virtual.slice(target.length) || '/';
     return mount.mask.some((entry) => {
       const masked = normalizeVirtualPath(entry.startsWith('/') ? entry : '/' + entry);
-      return relative === masked || relative.startsWith(masked + '/');
+      if (!masked.includes('*')) return relative === masked || relative.startsWith(masked + '/');
+      const pattern = masked
+        .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*\*\//g, '(?:.*/)?')
+        .replace(/\*\*/g, '.*')
+        .replace(/\*/g, '[^/]*');
+      const matcher = new RegExp(`^${pattern}$`);
+      const segments = relative.split('/').filter(Boolean);
+      return segments.some((_, index) => matcher.test(`/${segments.slice(0, index + 1).join('/')}`));
     });
   }
 

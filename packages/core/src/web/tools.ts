@@ -746,6 +746,8 @@ export const curl: Tool = {
       }
       target.searchParams.append(key, String(value));
     }
+    const unsafeInitial = unsafeCurlTarget(target);
+    if (unsafeInitial) return { output: unsafeInitial, ok: false };
 
     const rawHeaders = input['headers'];
     if (rawHeaders !== undefined && (!rawHeaders || typeof rawHeaders !== 'object' || Array.isArray(rawHeaders))) {
@@ -782,6 +784,8 @@ export const curl: Tool = {
     let requestBody = body;
     const requestHeaders = new Headers(headers);
     for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
+      const unsafeCurrent = unsafeCurlTarget(current);
+      if (unsafeCurrent) return { output: unsafeCurrent, ok: false };
       await authorize(context, [current.hostname], `${requestMethod} ${current.hostname}`);
       response = await webNetworkPool.run(
         () => fetch(current, {
@@ -872,6 +876,14 @@ async function readLimited(response: Response, limit: number): Promise<{ bytes: 
     offset += chunk.length;
   }
   return { bytes, truncated };
+}
+
+function unsafeCurlTarget(target: URL): string | null {
+  const sensitive = sensitiveQueryParameter(target);
+  if (sensitive) return `Error: curl will not send credential-like query parameter ${JSON.stringify(sensitive)}.`;
+  const unsafe = unsafeTargetReason(target);
+  if (unsafe) return `Error: curl refused ${target.hostname}: ${unsafe}.`;
+  return null;
 }
 
 function decodeUtf8Prefix(bytes: Uint8Array, truncated: boolean): string {

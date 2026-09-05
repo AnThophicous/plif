@@ -60,12 +60,22 @@ fn parse_args() -> Result<Args, String> {
         return Err("only @plif/cli is supported".to_string());
     }
     verify::version(&result.version)?;
-    if result.registry.is_empty() {
-        return Err("registry is required".to_string());
+    let registry_authority = result
+        .registry
+        .strip_prefix("https://")
+        .and_then(|rest| rest.split(|character| matches!(character, '/' | '?' | '#')).next())
+        .unwrap_or("");
+    if result.registry.is_empty()
+        || !result.registry.starts_with("https://")
+        || result.registry.chars().any(char::is_whitespace)
+        || registry_authority.is_empty()
+        || registry_authority.contains('@')
+        || registry_authority.contains(':')
+    {
+        return Err("registry must be an https URL".to_string());
     }
-    if let Some(integrity) = &result.integrity {
-        verify::integrity(integrity)?;
-    }
+    let integrity = result.integrity.as_ref().ok_or_else(|| "package integrity is required".to_string())?;
+    verify::integrity(integrity)?;
     if result.relaunch.is_none() && result.install_root.is_none() {
         return Err("relaunch or install root is required".to_string());
     }
@@ -73,7 +83,7 @@ fn parse_args() -> Result<Args, String> {
 }
 
 fn usage() -> String {
-    "usage: plif-updater --package @plif/cli --version X.Y.Z --registry URL --relaunch COMMAND [--relaunch-arg ARG]...".to_string()
+    "usage: plif-updater --package @plif/cli --version X.Y.Z --registry HTTPS_URL --integrity sha512-... --relaunch COMMAND [--relaunch-arg ARG]...".to_string()
 }
 
 fn main() {
@@ -88,7 +98,12 @@ fn main() {
         thread::sleep(Duration::from_millis(500));
         install::wait_for_parent(pid, Duration::from_secs(30));
     }
-    if let Err(error) = npm::install_exact(&args.package, &args.version, &args.registry) {
+    if let Err(error) = npm::install_exact(
+        &args.package,
+        &args.version,
+        &args.registry,
+        args.integrity.as_deref().expect("integrity validated during argument parsing"),
+    ) {
         eprintln!("plif-updater: update failed: {error}");
         process::exit(1);
     }

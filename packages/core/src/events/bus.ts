@@ -84,6 +84,13 @@ export interface PlifEvents {
     /** Whether the answer applies to future identical requests this session. */
     remember: boolean;
   };
+  /** One configured hook finished. Advisory: the loop already acted on it. */
+  'hook.ran': {
+    event: string;
+    hook: string;
+    exitCode: number;
+    durationMs: number;
+  };
   'exec.start': {
     containerId: string;
     execId: string;
@@ -104,6 +111,8 @@ export interface PlifEvents {
   /** The agent is stuck and wants information — not permission. */
   'question.asked': {
     id: string;
+    /** Optional broker namespace for concurrent frontends such as ACP. */
+    scopeId?: string;
     text: string;
     options: readonly QuestionOption[] | undefined;
     context: string | undefined;
@@ -112,6 +121,8 @@ export interface PlifEvents {
   };
   'question.answered': {
     id: string;
+    /** Mirrors question.asked.scopeId when the broker is namespaced. */
+    scopeId?: string;
     /** Null when it timed out. The loop must not treat that as agreement. */
     answer: string | null;
     /** Answered, but the value is a credential and is deliberately withheld. */

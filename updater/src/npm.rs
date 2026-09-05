@@ -1,8 +1,36 @@
 use std::process::{Command, Stdio};
 
-pub fn install_exact(package: &str, version: &str, registry: &str) -> Result<(), String> {
+pub fn install_exact(package: &str, version: &str, registry: &str, expected_integrity: &str) -> Result<(), String> {
     let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
     let target = format!("{package}@{version}");
+    let metadata = Command::new(npm)
+        .args([
+            "view",
+            &target,
+            "dist.integrity",
+            "--json",
+            "--registry",
+            registry,
+            "--loglevel",
+            "error",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("could not start npm for integrity verification: {error}"))?;
+    if !metadata.status.success() {
+        let detail = String::from_utf8_lossy(&metadata.stderr).trim().to_string();
+        return Err(if detail.is_empty() {
+            format!("npm integrity lookup exited with {}", metadata.status)
+        } else {
+            format!("could not verify package integrity: {detail}")
+        });
+    }
+    let actual = String::from_utf8_lossy(&metadata.stdout).trim().trim_matches('"').to_string();
+    if actual != expected_integrity {
+        return Err(format!(
+            "registry integrity changed for {target}: expected {expected_integrity}, got {actual}"
+        ));
+    }
     let output = Command::new(npm)
         .args([
             "install",
@@ -12,6 +40,9 @@ pub fn install_exact(package: &str, version: &str, registry: &str) -> Result<(),
             registry,
             "--loglevel",
             "error",
+            "--ignore-scripts",
+            "--no-audit",
+            "--no-fund",
         ])
         .stdin(Stdio::null())
         .output()

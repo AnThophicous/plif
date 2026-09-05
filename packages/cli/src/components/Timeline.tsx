@@ -1,5 +1,5 @@
-import React from 'react';
-import { Box, ScrollView, Text } from '../ui.js';
+import React, { useRef } from 'react';
+import { Box, ScrollView, Text, useSlateEvent } from '../ui.js';
 
 import { diffHeight } from './Diff.js';
 import { Markdown } from './Markdown.js';
@@ -72,6 +72,15 @@ export const Timeline = React.memo(function Timeline({
   // tail all behave as if the full transcript were mounted.
   const slice = useTimelineWindow(byCount, inner, maxLines);
   const visible = slice.rows;
+  // Some Windows Terminal/ConPTY builds do not dispatch the scroll callback
+  // from a controlled ScrollView. Keep a small application-level fallback so
+  // the same wheel event still releases follow mode and produces the notice.
+  const logicalScroll = React.useRef(0);
+  useSlateEvent(React.useCallback((event) => {
+    if (event.kind !== 'mouse' || event.action !== 'scroll' || !event.deltaY) return;
+    logicalScroll.current = Math.max(0, logicalScroll.current + event.deltaY);
+    slice.onScroll(logicalScroll.current);
+  }, [slice.onScroll]));
   // The tail is pinned while the reader is at it, and released while they are
   // not.
   //
@@ -81,16 +90,38 @@ export const Timeline = React.memo(function Timeline({
   // the high-water mark resets whenever the transcript shrinks or empties, so a
   // cleared or freshly resumed session re-anchors on its own, and the reader
   // keeps the position they chose in every other case.
-  const follow = useTailFollow(visible.length, slice.onScroll);
+  // Follow the real transcript, not the windowed subset. The subset remains
+  // roughly one viewport long while activity streams, which used to make the
+  // controlled scroll value identical on every update. Slate correctly treats
+  // an identical prop as no instruction, so the viewport stopped above new
+  // work even though `pinned` was true.
+  const follow = useTailFollow(byCount.length, slice.onScroll);
   // Shown only when this view has genuinely been scrolled away from its newest
   // row and there is something to be away from. An empty session has nothing
   // below it, and a marker pointing at nothing is a control that lies.
   const showJump = !follow.pinned && visible.length > 0;
-  const viewport = maxLines === undefined ? {} : timelineViewport(maxLines, follow.pinned, showJump, follow.onScroll);
+  const viewport = maxLines === undefined ? {} : timelineViewport(
+    maxLines,
+    follow.pinned,
+    showJump,
+    follow.onScroll,
+    // Use the measured end, not an unsafe sentinel. ConPTY/Slate clamps this
+    // exact offset consistently and applies it again as the content grows.
+    Math.max(0, slice.contentHeight - Math.max(1, maxLines - (showJump ? 1 : 0))),
+  );
 
   return (
     <Box flexDirection="column">
-      <ScrollView flexDirection="column" paddingX={layout.gutter} {...viewport}>
+      <ScrollView
+        // Recreate only the pinned viewport as new streamed rows arrive. The
+        // terminal renderer keeps native scroll state on a node; updating its
+        // prop alone does not move that state on every ConPTY build. A stable
+        // key while the reader is away preserves manual scrolling.
+        key={follow.pinned ? `timeline-tail-${slice.contentHeight}` : 'timeline-manual'}
+        flexDirection="column"
+        paddingX={layout.gutter}
+        {...viewport}
+      >
         {!process.env.NOSP && slice.above > 0 && <Box height={slice.above} flexShrink={0} />}
         {visible.map((item) => (
           <TimelineRow
@@ -157,6 +188,8 @@ export function timelineViewport(
   pinned: boolean,
   showJump: boolean,
   onScroll: (x: number, y: number) => void,
+  /** Exact content offset to use while following the tail. */
+  tailOffset = 0,
 ): {
   readonly height: number;
   readonly overflow: 'scroll';
@@ -166,7 +199,7 @@ export function timelineViewport(
   return {
     height: Math.max(1, maxLines - (showJump ? 1 : 0)),
     overflow: 'scroll' as const,
-    ...(pinned ? { scrollTop: Number.MAX_SAFE_INTEGER } : {}),
+    ...(pinned ? { scrollTop: tailOffset } : {}),
     onScroll,
   };
 }
@@ -176,6 +209,7 @@ interface TimelineWindow {
   readonly rows: readonly TimelineEntry[];
   readonly above: number;
   readonly below: number;
+  readonly contentHeight: number;
   readonly onScroll: (y: number) => void;
 }
 
@@ -201,10 +235,10 @@ function useTimelineWindow(
 
   return React.useMemo((): TimelineWindow => {
     if (maxLines === undefined) {
-      return { rows: entries, above: 0, below: 0, onScroll };
+      return { rows: entries, above: 0, below: 0, contentHeight: 0, onScroll };
     }
     if (maxLines <= 0 || entries.length === 0) {
-      return { rows: [], above: 0, below: 0, onScroll };
+      return { rows: [], above: 0, below: 0, contentHeight: 0, onScroll };
     }
 
     const heights = entries.map((entry) => cachedHeight(entry, width));
@@ -240,6 +274,7 @@ function useTimelineWindow(
       rows: entries.slice(start, end),
       above: Math.max(0, above),
       below: Math.max(0, below),
+      contentHeight,
       onScroll,
     };
   }, [entries, maxLines, onScroll, scrollTop, width]);
@@ -497,7 +532,39 @@ function entryFromTranscriptCell(
   }
 }
 
+/**
+ * Cell heights, remembered per cell object.
+ *
+ * The transcript overlay asks how tall every cell is on every render, so this
+ * is O(transcript) work at the paint cadence — 27.76ms of a 33ms frame at a
+ * thousand cells, and 91.91ms at three thousand, which is roughly eleven
+ * frames a second. That is the whole of "the scroll is slow": the cost of
+ * drawing a long session grows with the session, and the work is the same
+ * answer recomputed for text that has not changed since it settled.
+ *
+ * A WeakMap keyed by the cell object is the right shape because cells are
+ * immutable — a changed cell is a new object, so it simply misses the cache,
+ * and a cell that falls out of the transcript is collected with it. The inner
+ * key carries width and expansion because both change the answer.
+ *
+ * The one thing this relies on is that cells are never mutated in place. They
+ * are built fresh by the reducer; a future cell that is edited rather than
+ * replaced would read a stale height from here.
+ */
+const cellHeights = new WeakMap<TranscriptCell, Map<string, number>>();
+
 export function measureTranscriptCell(cell: TranscriptCell, width: number, expanded = false): number {
+  const key = `${width}:${expanded ? 1 : 0}`;
+  const cached = cellHeights.get(cell);
+  const hit = cached?.get(key);
+  if (hit !== undefined) return hit;
+  const height = computeTranscriptCellHeight(cell, width, expanded);
+  if (cached) cached.set(key, height);
+  else cellHeights.set(cell, new Map([[key, height]]));
+  return height;
+}
+
+function computeTranscriptCellHeight(cell: TranscriptCell, width: number, expanded: boolean): number {
   const inner = Math.max(8, width - layout.gutter * 2);
   const wrap = (text: string, columns = inner): number =>
     text.split('\n').reduce((total, line) => total + wrappedHeight(line, columns), 0);
@@ -763,6 +830,90 @@ function tailLine(line: string, maxColumns: number): string {
   const suffix = line.slice(-maxColumns);
   const first = suffix.charCodeAt(0);
   return first >= 0xdc00 && first <= 0xdfff ? suffix.slice(1) : suffix;
+}
+
+/**
+ * How fast the revealed text closes the gap on what has arrived.
+ *
+ * A fraction of the remaining distance per frame rather than a fixed rate, so
+ * the reveal is quick when a large chunk lands and slows as it catches up —
+ * and never falls behind a fast model, because the gap itself is what drives
+ * it. The floor keeps single characters moving when the fraction rounds to
+ * nothing.
+ */
+const REVEAL_CATCHUP = 0.14;
+const REVEAL_MIN_CHARS = 2;
+
+/**
+ * The most text the reveal is allowed to be holding back.
+ *
+ * The window sizes every row from the entry's full text, so anything withheld
+ * is height the timeline reserved and the row did not draw — which shows up as
+ * a gap or a clipped tail while an answer streams, and churns as it catches up.
+ * Roughly two wrapped lines of disagreement is invisible; a whole paragraph is
+ * not. Ordinary chunks are smaller than this, so the smoothing survives.
+ */
+const REVEAL_MAX_LAG = 240;
+
+/**
+ * The shortest gap between two steps of the reveal.
+ *
+ * The fast clock ticks every 8 ms for gradient sweeps. Advancing text on every
+ * one of those means about 125 re-renders a second of the row being written,
+ * and a terminal cannot show more than a fraction of them — so half the work
+ * was never visible. This is that clock sampled down to roughly 60 Hz.
+ */
+const REVEAL_FRAME_MS = 16;
+
+/**
+ * How far the reveal moves in one frame.
+ *
+ * Pulled out of the hook so the pacing can be tested without a renderer: the
+ * feel of the animation is arithmetic, and arithmetic is the part worth pinning.
+ */
+export function nextRevealed(revealed: number, length: number): number {
+  if (revealed >= length) return length;
+  const remaining = length - revealed;
+  return Math.min(length, revealed + Math.max(REVEAL_MIN_CHARS, Math.ceil(remaining * REVEAL_CATCHUP)));
+}
+
+/**
+ * Show streamed text as writing rather than as arrivals.
+ *
+ * A model does not deliver prose evenly: it lands in provider-sized chunks, so
+ * a whole sentence appears at once and then nothing happens for a beat. Drawing
+ * exactly what arrived reads as stuttering, which is a property of the wire and
+ * not of the answer. This keeps a revealed length that walks toward whatever has
+ * arrived, sampled on the same 60 Hz clock the rest of the interface animates on.
+ *
+ * It only ever withholds text that is still being written. The moment the entry
+ * settles the whole body is shown, because an answer the model has finished is
+ * not something to make someone wait for.
+ */
+function useSmoothReveal(text: string, streaming: boolean): string {
+  const revealed = useRef(0);
+  const source = useRef(text);
+  const steppedAt = useRef(0);
+
+  // A different entry, or a body that was rewritten rather than appended, has
+  // nothing to do with the progress made on the last one.
+  if (!text.startsWith(source.current)) revealed.current = 0;
+  source.current = text;
+  if (!streaming) revealed.current = text.length;
+
+  useAnimationFrame(streaming && revealed.current < text.length, 'fast');
+
+  if (revealed.current >= text.length) return text;
+
+  const now = Date.now();
+  if (now - steppedAt.current >= REVEAL_FRAME_MS) {
+    steppedAt.current = now;
+    revealed.current = nextRevealed(revealed.current, text.length);
+  }
+  // Never hold back more than the timeline can absorb without the row and its
+  // reserved height disagreeing.
+  if (text.length - revealed.current > REVEAL_MAX_LAG) revealed.current = text.length - REVEAL_MAX_LAG;
+  return text.slice(0, revealed.current);
 }
 
 export const LIVE_THOUGHT_LINES = 3;
@@ -1183,7 +1334,7 @@ function AnswerRow({
   // very long paragraphs, so counting `\n` would find four lines where the
   // terminal draws forty and clip nothing at all.
   const streaming = entry.status === 'active';
-  const source = body;
+  const source = useSmoothReveal(body, streaming);
 
   return (
     <Box marginBottom={1} width="100%">

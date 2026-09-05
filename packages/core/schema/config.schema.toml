@@ -218,6 +218,56 @@ minimum = 1
 [definitions.agent.fields.disable]
 type = "boolean"
 
+[definitions.hooks]
+description = """
+Commands plif runs at fixed points in the loop. Written as a list of tables:
+
+  [[hooks]]
+  event = "tool.before"
+  match = "^(write_file|edit_file|apply_patch)$"
+  name = "protect vendored code"
+  command = "if grep -q vendor/ <<< \"$PLIF_HOOK_SUBJECT\"; then echo 'vendored' >&2; exit 2; fi"
+
+A hook is a command, not a JavaScript module, and it runs through the same
+container, path jail, policy engine and audit log as every tool. Installing one
+cannot grant more privilege than the model already has.
+
+The event arrives as PLIF_HOOK_EVENT and PLIF_HOOK_SUBJECT, and as JSON on
+stdin. The exit code is the answer: 0 allows and sends stdout to the model, 2
+blocks with stderr as the reason, anything else is reported as a failed hook
+while the action proceeds.
+
+Only tool.before can block; the others have nothing left to stop.
+
+Because a hook is an ordinary command, the policy engine reviews it like any
+other: under permission mode "ask" every hook run asks for approval, which for
+a lint-on-every-edit hook is not what you want. Run /permissions auto-approve
+if hooks should run unattended. That is deliberate — hooks are not silently
+exempt from the approval model.
+"""
+type = "array"
+
+[definitions.hooks.fields.event]
+type = "string"
+enum = ["tool.before", "tool.after", "user.prompt", "turn.end", "session.start", "session.end"]
+
+[definitions.hooks.fields.command]
+type = "string"
+description = "The script to run, in this machine's shell dialect."
+
+[definitions.hooks.fields.match]
+type = "string"
+description = "Regular expression the tool name (or prompt) must match. Anchor it for an exact name."
+
+[definitions.hooks.fields.name]
+type = "string"
+description = "Shown in the timeline and audit log instead of the raw command."
+
+[definitions.hooks.fields.timeoutMs]
+type = "integer"
+minimum = 1
+description = "Defaults to 30000. A hook sits on the critical path of a tool call."
+
 [examples.directVision]
 description = "The primary model receives text and image inputs itself."
 model = "custom/vision-primary"

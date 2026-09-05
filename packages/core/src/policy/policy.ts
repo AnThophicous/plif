@@ -156,7 +156,11 @@ export const STRICT_POLICY: PolicyDocument = Object.freeze({
 export const DEVELOPER_POLICY: PolicyDocument = Object.freeze({
   fallback: 'ask',
   trust: 'trusted',
-  networkAllowlist: Object.freeze(['registry.npmjs.org', 'github.com', 'api.anthropic.com']),
+  networkAllowlist: Object.freeze([
+    'registry.npmjs.org', 'github.com', 'api.github.com', 'raw.githubusercontent.com',
+    'api.anthropic.com', 'api.duckduckgo.com', 'html.duckduckgo.com',
+    'duckduckgo.com', 'r.jina.ai',
+  ]),
   rules: Object.freeze([
     ...STRICT_POLICY.rules,
     {

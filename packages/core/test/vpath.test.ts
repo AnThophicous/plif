@@ -155,6 +155,25 @@ describe('PathJail', () => {
     );
   });
 
+  it('applies wildcard masks at the mount root and in nested directories', async () => {
+    await fs.writeFile(path.join(outside, '.env.production'), 'secret', 'utf8');
+    await fs.mkdir(path.join(outside, 'nested'), { recursive: true });
+    await fs.writeFile(path.join(outside, 'nested', 'server.pem'), 'secret', 'utf8');
+    const j = jail([{
+      source: outside,
+      target: '/vendor',
+      mode: 'ro',
+      mask: ['/.env.*', '/**/*.pem'],
+    }]);
+    await assert.rejects(() => j.resolveRead('/vendor/.env.production'), /no such file/);
+    await assert.rejects(() => j.resolveRead('/vendor/nested/server.pem'), /no such file/);
+  });
+
+  it('keeps masks aligned when the mount target itself is root', async () => {
+    const j = jail([{ source: outside, target: '/', mode: 'ro', mask: ['/secret.txt'] }]);
+    await assert.rejects(() => j.resolveRead('/secret.txt'), /no such file/);
+  });
+
   it('prefers the longest matching mount target', async () => {
     const inner = path.join(root, 'inner');
     await fs.mkdir(inner, { recursive: true });

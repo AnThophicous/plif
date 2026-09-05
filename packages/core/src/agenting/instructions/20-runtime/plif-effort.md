@@ -67,7 +67,7 @@ responsible layer. Prefer PowerShell on Windows and use literal paths; use `rg` 
 
 Before changing implementation files, make the durable plan the first authorized
 file mutation. When `update_plan` is available, call it before creating the plan;
-the runtime persists its checkpoint mirror at `.plif/plans/current.md`. Keep that
+the runtime persists its session-private checkpoint mirror at `/temp/plif/plans/current.md`. Keep that
 mirror synchronized, then create the detailed task plan below rather than treating
 the concise mirror as a substitute for design evidence.
 Create the plan at:

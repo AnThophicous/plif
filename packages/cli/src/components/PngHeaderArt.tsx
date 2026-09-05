@@ -1,5 +1,8 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import zlib from 'node:zlib';
+
+import { moduleDirectory, resolveAsset } from '@plif/core';
 
 import React from 'react';
 import { Box, Text } from '../ui.js';
@@ -31,7 +34,13 @@ export interface PngHeaderCell {
 
 // Canonical PLIF mascot. Keep the source canvas and its transparent margins so
 // the supplied artwork is placed as-is instead of being enlarged by cropping.
-const ASSET_URL = new URL('../../assets/negaopelao2.png', import.meta.url);
+function assetFile(): string {
+  const found = resolveAsset(import.meta.url, 'negaopelao2.png', [
+    path.resolve(moduleDirectory(import.meta.url), '../../assets/negaopelao2.png'),
+  ]);
+  if (found === null) throw new Error('the plif header mascot is missing from this install');
+  return found;
+}
 const PANEL_FALLBACK = '#303030';
 // Keep the mascot legible without letting the raster dominate the header card.
 const TARGET_WIDTH = 16;
@@ -205,7 +214,7 @@ function composite(pixelValue: Rgba, background: readonly [number, number, numbe
   ]);
 }
 
-const image = decodePng(new Uint8Array(fs.readFileSync(ASSET_URL)));
+const image = decodePng(new Uint8Array(fs.readFileSync(assetFile())));
 const crop: Crop = { left: 0, top: 0, width: image.width, height: image.height };
 export const PNG_HEADER_ART_WIDTH = TARGET_WIDTH;
 export const PNG_HEADER_ART_PIXEL_HEIGHT = Math.max(1, Math.round(

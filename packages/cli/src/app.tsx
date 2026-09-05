@@ -14,6 +14,7 @@ import {
   discoverProviderModels,
   forgetProviderKey,
   findCatalogProvider,
+  findCatalogModel,
   forgetDiscoveredModels,
   buildSystemPrompt,
   catalogSelection,
@@ -26,12 +27,18 @@ import {
   loadStoredConfig,
   migrateProviderCredentials,
   mcpServersOf,
+  OpenAIOAuthClient,
   openOAuthBrowser,
   parseServerConfigs,
   readAgentInstructions,
   resolveConfig,
   resolveServerConfigs,
   runCompaction,
+  HookRunner,
+  SpillStore,
+  parseHooks,
+  promptProfileOf,
+  detectShellDialect,
   runLoop,
   RUN_SCRIPT_SPEC,
   stableToolSpecs,
@@ -44,6 +51,11 @@ import {
   WEB_TOOLS,
   TaskManager,
   LspManager,
+  DebugSessions,
+  debugTools,
+  BrowserSession,
+  browserTools,
+  WorktreeManager,
   lspTools,
   EditCoordinator,
   agentsOf,
@@ -72,7 +84,6 @@ import {
   mandatorySkillsForEffort,
   saveGlobalConfig,
   scheduleProviderDiscovery,
-  startCodexLogin,
   summariseMemory,
   summariseSessions,
   rangeStart,
@@ -107,7 +118,6 @@ import type {
   ConversationEvent,
   TaskSnapshot,
   Effort,
-  CodexLoginFlow,
   EffortCapabilityCache,
   GoalState as PlifGoalState,
   LspStatus,
@@ -118,8 +128,6 @@ import { Approval, APPROVAL_CHOICES, approvalHeight } from './components/Approva
 import { Browser, mcpStatusKind, sessionAge, sortMcpStatuses } from './components/Browser.js';
 import { Compaction, COMPACTION_HEIGHT } from './components/Compaction.js';
 import { Completions, EmojiMenu } from './components/Completions.js';
-import { CodexLoginDialog } from './components/CodexLoginDialog.js';
-import type { CodexLoginStatus } from './components/CodexLoginDialog.js';
 import { Discovery, discoveryHeight } from './components/Discovery.js';
 import { BtwPanel, btwPanelHeight } from './components/BtwPanel.js';
 import type { BtwViewState } from './components/BtwPanel.js';
@@ -167,6 +175,7 @@ import { ThinkingOverlay, thinkingBodyHeight } from './components/ThinkingOverla
 import {
   commandPrefix,
   findCommand,
+  RETIRED_COMMANDS,
   matchArgumentCompletions,
   matchCommands,
   isExactCommandMatch,
@@ -358,14 +367,17 @@ function initialSessionState({
 }
 
 /** How often command output is flushed into the timeline. */
-const STREAM_FLUSH_MS = 90;
+// Keep streaming visibly live; 90 ms felt like input/agent output was stuck.
+// The renderer still coalesces frames, so this does not mean one repaint per
+// provider chunk.
+const STREAM_FLUSH_MS = 16;
 /**
  * Stream text gets its own bounded cadence. It must not wait for the visual
  * animation clock: that clock is intentionally slow for spinners, while text
  * already received from the provider should reach the terminal within one
  * ordinary paint window.
  */
-const SEMANTIC_STREAM_FRAME_MS = 33;
+const SEMANTIC_STREAM_FRAME_MS = 16;
 const EMPTY_TRANSCRIPT_CELLS: readonly import('./transcript/types.js').TranscriptCell[] = [];
 /** Window in which a second Ctrl+C means "really quit". */
 const DOUBLE_INTERRUPT_MS = 1500;
@@ -525,12 +537,30 @@ function verticalCursor(text: string, cursor: number, delta: -1 | 1): number | n
   return targetStart + Math.min(column, targetLength);
 }
 
+/**
+ * Lines a single wheel notch moves.
+ *
+ * Three is what terminal scrollback itself uses, so the transcript moves at
+ * the speed the surrounding terminal has already taught the user to expect.
+ */
+const WHEEL_LINES_PER_NOTCH = 3;
+
+/**
+ * The shell this machine speaks, resolved once per process.
+ *
+ * `resolveShellDialect` existed and was tested, but nothing ever called it
+ * with a real interpreter list — so `shell_command` never appeared in a
+ * session, and hooks would have had no shell to run in. PATH does not change
+ * under a running process, so this is computed once.
+ */
+const shellDialect = detectShellDialect().dialect ?? undefined;
+
 export const BANNER_ROW_ID = 'plif:banner';
 
 /**
  * The startup identity is append-only terminal chrome, not live conversation
- * state. Keeping a stable item in Ink's Static list prevents Ink from
- * printing the header again every time a settled turn moves into scrollback.
+ * state. Keeping a stable item in the renderer's static list stops the header
+ * being printed again every time a settled turn moves into scrollback.
  */
 const STATIC_HEADER_ITEM = { id: 'plif:header', kind: 'header' } as const;
 
@@ -753,12 +783,6 @@ export function App({
   );
   const [projectRootSetupPending, setProjectRootSetupPending] = useState(projectRootSetup);
   const projectRootSetupStarted = useRef(false);
-  const [codexLogin, setCodexLogin] = useState<{
-    readonly status: CodexLoginStatus;
-    readonly detail?: string;
-    readonly userCode?: string;
-  } | null>(null);
-  const codexLoginFlow = useRef<CodexLoginFlow | null>(null);
   const [, setThemeRevision] = useState(0);
   const [emojiIndex, setEmojiIndex] = useState(0);
   /** Live MCP status and loaded skills, for the browser's first two tabs. */
@@ -774,9 +798,6 @@ export function App({
   const activityHudSaveQueue = useRef<Promise<void>>(Promise.resolve());
   useEffect(() => () => {
     if (plifActivationTimer.current) clearTimeout(plifActivationTimer.current);
-  }, []);
-  useEffect(() => () => {
-    void codexLoginFlow.current?.cancel();
   }, []);
   useEffect(() => () => {
     btwAbort.current?.abort();
@@ -853,7 +874,16 @@ export function App({
     };
   }, [credentials]);
   // Completion tokens live in loadingTelemetry, not App state. A fast stream
-  // must not reconcile the whole Ink tree just to update one number.
+  // must not reconcile the whole render tree just to update one number.
+  /**
+   * Where oversized tool output goes, for the life of the container.
+   *
+   * One store per session so spill files are numbered in the order the run
+   * produced them, which is what makes the directory readable afterwards.
+   */
+  const spillStore = useRef<SpillStore | null>(null);
+  /** Malformed hook entries are reported once, not above every answer. */
+  const reportedHookProblems = useRef(false);
   const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
   const [tasksOpen, setTasksOpen] = useState(false);
   const [lspStatuses, setLspStatuses] = useState<readonly LspStatus[] | null>(null);
@@ -896,7 +926,7 @@ export function App({
     headerHeight(headerAvailableWidth),
   );
   // The header is an append-only Static item now. It occupies real terminal
-  // rows before Ink's live canvas, so the dynamic surface must use the panel
+  // rows before the live canvas, so the dynamic surface must use the panel
   // height that remains below it instead of claiming the whole terminal again.
   const liveSurfaceHeight = pastedTextPopup ? surface.canvasHeight : surface.panelHeight;
   const transcript = useTranscriptController({ engine, workspace: cwd, session, replay });
@@ -942,6 +972,10 @@ export function App({
   const execAbort = useRef<AbortController | null>(null);
   const taskManager = useRef<TaskManager | null>(null);
   const lspManager = useRef<LspManager | null>(null);
+  // One debugger for the whole session: `continue` means nothing without the
+  // `launch` before it, so the state has to outlive the turn that started it.
+  const debugSessions = useRef(new DebugSessions());
+  const browserSession = useRef(new BrowserSession());
   const subagents = useRef(new SubagentCoordinator());
   const interruptTimer = useRef<NodeJS.Timeout | null>(null);
   const sessionStartedAt = useRef(Date.now());
@@ -950,14 +984,6 @@ export function App({
   const subagentTokens = useRef(new Map<string, number>());
   /** Identity for the loading line; late events from an older turn are ignored. */
   const loadingOperationRef = useRef<{ id: number; turnId: string } | null>(null);
-  /** Aggregated, redacted timing for the optional Plif end-of-turn report. */
-  const turnMetricsRef = useRef<{
-    turnId: string;
-    startedAt: number;
-    reasoningMs: number;
-    toolsMs: number;
-    compactionMs: number;
-  } | null>(null);
   const loadingSequence = useRef(0);
   const loadingMetricPaintAt = useRef(0);
   const updatePromptPending = useRef(false);
@@ -965,13 +991,6 @@ export function App({
   const beginLoading = useCallback((turnId: string): number => {
     const id = ++loadingSequence.current;
     loadingOperationRef.current = { id, turnId };
-    turnMetricsRef.current = {
-      turnId,
-      startedAt: Date.now(),
-      reasoningMs: 0,
-      toolsMs: 0,
-      compactionMs: 0,
-    };
     loadingMetricPaintAt.current = 0;
     activityModel.start(id, turnId);
     setAgentTurnStartedAt(Date.now());
@@ -1753,7 +1772,7 @@ export function App({
 
   /**
    * Restore model context and leave a small resume marker after the durable
-   * rows already seeded into Ink's normal scrollback by the reducer initializer.
+   * rows already seeded into normal scrollback by the reducer initializer.
    */
   useEffect(() => {
     if (replay.length === 0) return;
@@ -1911,10 +1930,6 @@ export function App({
         // loop's wall-clock duration, which can jump when the system clock is
         // adjusted during a long request.
         if (currentLoading && active) activityModel.reasoningEnd(active.id);
-        const metrics = turnMetricsRef.current;
-        if (metrics !== null && metrics.turnId === event.turnId && event.durationMs) {
-          metrics.reasoningMs += event.durationMs;
-        }
         closeThinking(event.durationMs);
       }),
 
@@ -2019,10 +2034,6 @@ export function App({
       }),
 
       engine.bus.on('agent.compacted', (event) => {
-        const metrics = turnMetricsRef.current;
-        if (metrics && compactionSince.current !== null) {
-          metrics.compactionMs += Math.max(0, Date.now() - compactionSince.current);
-        }
         compactionSince.current = null;
         dispatch({ type: 'compaction.end' });
         if (event.failure) {
@@ -2197,18 +2208,6 @@ export function App({
         }
 
         usage.current = { ...usage.current, toolCalls: usage.current.toolCalls + 1 };
-        const metrics = turnMetricsRef.current;
-        // Optional chaining on the left of this comparison used to let a
-        // `metrics === null` slip through: `undefined === event.turnId` is
-        // true whenever the event itself carries no turnId, and the write
-        // below then dereferenced the null metrics and threw. Because this ran
-        // before the dispatch further down that marks the row done, the crash
-        // silently aborted the whole handler — the tool call it was completing
-        // never left its running state, and the spinner sat there forever.
-        if (metrics !== null && metrics.turnId === event.turnId && event.durationMs) {
-          metrics.toolsMs += event.durationMs;
-        }
-
         if (discoveryKind) {
           dispatch({
             type: 'discovery.finish',
@@ -2612,66 +2611,6 @@ export function App({
     [mcpRegistry],
   );
 
-  const cancelCodexLogin = useCallback(async (): Promise<void> => {
-    const flow = codexLoginFlow.current;
-    if (!flow) {
-      setCodexLogin(null);
-      return;
-    }
-    await flow.cancel();
-  }, []);
-
-  const loginCodex = useCallback(async (): Promise<boolean> => {
-    if (codexLoginFlow.current) return false;
-    setCodexLogin({ status: 'starting' });
-    try {
-      const flow = await startCodexLogin();
-      codexLoginFlow.current = flow;
-      if (flow.alreadyAuthenticated) {
-        setCodexLogin(null);
-        return true;
-      }
-
-      setCodexLogin({
-        status: 'waiting',
-        ...(flow.userCode ? { userCode: flow.userCode } : {}),
-      });
-      const loginUrl = flow.authUrl ?? flow.verificationUrl;
-      if (!loginUrl) throw new Error('the Codex sign-in URL was empty');
-      try {
-        await openOAuthBrowser(new URL(loginUrl));
-      } catch (error) {
-        await flow.cancel();
-        const { title } = formatError(error);
-        setCodexLogin({ status: 'error', detail: `Could not open ChatGPT sign-in: ${title}` });
-        return false;
-      }
-
-      const result = await flow.wait();
-      if (result.ok) {
-        setCodexLogin(null);
-        return true;
-      }
-      if (result.cancelled) {
-        setCodexLogin(null);
-        return false;
-      }
-      setCodexLogin({
-        status: 'error',
-        detail: result.detail ?? 'ChatGPT sign-in was not completed',
-      });
-      return false;
-    } catch (error) {
-      const { title, detail } = formatError(error);
-      setCodexLogin({
-        status: 'error',
-        detail: [title, detail].filter(Boolean).join(' · '),
-      });
-      return false;
-    } finally {
-      codexLoginFlow.current = null;
-    }
-  }, []);
 
   const runMcpBrowserAction = useCallback(
     async (action: 'connect' | 'disconnect' | 'authenticate' | 'test', server: string): Promise<void> => {
@@ -3087,25 +3026,70 @@ export function App({
     const stored = await loadStoredConfig(engine.paths);
     const preset = providerIdForConfig(stored) ?? '';
     const model = providerRef.current?.info.id ?? resolveConfig(stored).model;
-    let cleared = forgetProviderKey(stored, preset);
-    if (credentials) await credentials.forget(credentialVariableForProvider(preset, stored));
-    if (credentials) {
-      cleared = (await persistModelSelection(
-        engine,
-        cleared,
-        { preset, model },
-        undefined,
-        credentials,
-      )).config;
-    } else {
-      await saveGlobalConfig(cleared, globalConfigPath(), { preserveProviderKeys: false });
+
+    /**
+     * Did the request that failed actually carry a key?
+     *
+     * The provider adapters report this, and the two cases need opposite
+     * handling. A rejected key is the user's to replace. A request that
+     * carried *no* key means the stored credential never reached the
+     * provider — and treating that as a rejection deletes a working
+     * credential, asks for the same key back, saves it, and then fails
+     * identically on the next turn. That loop is what this branch ends.
+     *
+     * An adapter that says nothing is treated as "a key was sent", which is
+     * the older and more conservative reading.
+     */
+    const keyPresent = error.detail['keyPresent'] !== false;
+
+    if (preset === 'openai') {
+      const oauth = await new OpenAIOAuthClient().load().catch(() => undefined);
+      if (oauth) {
+        push(entry('notice', 'ChatGPT OAuth was rejected', {
+          tone: 'warn',
+          subtitle: 'Re-run /providers → OpenAI and finish browser or headless login. Do not paste an API key for that path.',
+        }));
+        return true;
+      }
     }
+
+    if (!keyPresent && credentials) {
+      const stashed = await credentials
+        .lookup(credentialVariableForProvider(preset, stored))
+        .catch(() => undefined);
+      if (stashed) {
+        providerRef.current = createModelProvider(
+          resolveConfig(stored, { preset, model, apiKey: stashed }),
+          { capabilityCache, bus: engine.bus },
+        );
+        dispatch({
+          type: 'context',
+          max: providerRef.current.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+        });
+        push(entry('notice', 'reloaded the stored credential', {
+          tone: 'accent',
+          subtitle: 'That request had gone out without a key. Retry the message.',
+        }));
+        return true;
+      }
+    }
+
+    /**
+     * Only now is discarding the old credential defensible, and even then not
+     * before a replacement exists: the prompt comes first, and the stored key
+     * is overwritten rather than removed and possibly not replaced. Several
+     * providers also share one credential variable — `opencode` and
+     * `opencode-go` are both OPENCODE_API_KEY — so the eager delete that used
+     * to run here took the sibling provider's key with it.
+     */
     const key = await requestModelKey(model, [
-      `${preset || 'This provider'} rejected the saved API key.`,
-      'The old credential was removed from this provider only.',
+      keyPresent
+        ? `${preset || 'This provider'} rejected the saved API key.`
+        : `${preset || 'This provider'} answered 401, and no stored credential was found.`,
       'Paste a new API key to save it in the encrypted credential store, or press Esc to keep the model unconfigured.',
     ].join('\n'));
     if (!key) return true;
+    const cleared = forgetProviderKey(stored, preset);
     const persisted = await persistModelSelection(
       engine,
       cleared,
@@ -3163,19 +3147,39 @@ export function App({
     credentials,
     switchModel: async (requested: ModelSelection | string) => {
       const stored = await loadStoredConfig(engine.paths);
-      const selection: ModelSelection =
-        typeof requested === 'string'
-          // A known catalog id carries an unambiguous provider. This is what
-          // keeps a bare free model on OpenCode instead of inheriting a stale
-          // paid provider and prompting for its unrelated key.
-          ? { preset: providerForModel(requested) ?? providerIdForConfig(stored) ?? '', model: requested }
-          : requested;
-      const savedKey = await providerCredential(credentials, selection.preset, stored);
+      const selection: ModelSelection = (() => {
+        const base: ModelSelection =
+          typeof requested === 'string'
+            ? { preset: providerForModel(requested) ?? providerIdForConfig(stored) ?? '', model: requested }
+            : requested;
+        const oauthOffer = findCatalogModel('openai', base.model);
+        if (oauthOffer?.badges.includes('OAuth') && base.preset !== 'openai') {
+          return { ...base, preset: 'openai' };
+        }
+        return base;
+      })();
+      if (selection.preset === 'codex') {
+        push(entry('notice', 'Codex provider is no longer available', {
+          tone: 'warn',
+          subtitle: 'Use OpenAI ChatGPT OAuth from /provider instead.',
+        }));
+        return;
+      }
+      const catalogAuth = findCatalogProvider(selection.preset)?.auth;
+      const oauthListed = findCatalogModel('openai', selection.model)?.badges.includes('OAuth') === true;
+      const chatGptOAuth = catalogAuth === 'openai-oauth' || selection.preset === 'openai' || oauthListed;
+      const oauthSession = chatGptOAuth
+        ? await new OpenAIOAuthClient().load().catch(() => undefined)
+        : undefined;
+      const savedKey = oauthSession || oauthListed
+        ? undefined
+        : await providerCredential(credentials, selection.preset, stored);
       let config = resolveConfig(stored, {
         model: selection.model,
         preset: selection.preset,
         ...(selection.protocol ? { protocol: selection.protocol } : {}),
         ...(selection.streamSemantics ? { streamSemantics: selection.streamSemantics } : {}),
+        ...(oauthSession || (chatGptOAuth && !savedKey) ? { authMode: 'openai-oauth' } : {}),
         ...(savedKey ? { apiKey: savedKey } : {}),
       });
       // resolveConfig applies the same capability policy used by the effort
@@ -3197,10 +3201,21 @@ export function App({
         }
       };
       rememberNormalizedEffort(config);
+      if (chatGptOAuth && !savedKey) {
+        config = {
+          ...config,
+          authMode: 'openai-oauth',
+          needKey: false,
+          apiKey: '',
+          baseURL: config.baseURL.includes('chatgpt.com')
+            ? config.baseURL
+            : 'https://chatgpt.com/backend-api/codex/v1',
+        };
+      }
       let check = validateModelConfig(config);
       let typedKey: string | undefined;
       if (!check.ok) {
-        if (!config.apiKey && config.needKey) {
+        if (!config.apiKey && config.needKey && !chatGptOAuth) {
           const providerLabel =
             userCatalog(stored).find((entryProvider) => entryProvider.id === selection.preset)?.label ??
             findCatalogProvider(selection.preset)?.label ?? (selection.preset || 'This provider');
@@ -3361,6 +3376,7 @@ export function App({
         setPlifActivation(false);
       }
     },
+    planMode,
     setPlanMode: async (enabled, description) => {
       planModeRef.current = enabled;
       setPlanModeState(enabled);
@@ -3468,7 +3484,6 @@ export function App({
     pasteImage: () => pasteImage(),
     openBrowser: (tab) => dispatch({ type: 'browser.open', tab }),
     loginMcp,
-    loginCodex,
     mcpNames: mcpStatuses.map((server) => server.name),
     openPicker: (picker) => dispatch({ type: 'picker.open', picker }),
     openEnv: openEnvironmentPicker,
@@ -3596,8 +3611,8 @@ export function App({
     setConfigSnapshot(next);
   }, [credentials]);
 
-  const setPermissionFromConfig = useCallback(async (mode: 'ask' | 'auto-approve' | 'deny'): Promise<void> => {
-    await updateGlobalConfig({ permissionMode: mode, autoApprove: mode === 'auto-approve' });
+  const setPermissionFromConfig = useCallback(async (mode: 'ask' | 'auto-approve' | 'full' | 'deny'): Promise<void> => {
+    await updateGlobalConfig({ permissionMode: mode, autoApprove: mode === 'auto-approve' || mode === 'full' });
     context.engine.approvals.setPermissionMode(mode);
   }, [context.engine, updateGlobalConfig]);
 
@@ -3856,6 +3871,20 @@ export function App({
     const [name, ...argv] = tokenize(line.slice(1));
     const command = findCommand(name ?? '');
     if (!command) {
+      // A command that was retired in favour of another gets a real answer
+      // rather than a fuzzy guess: the name is gone on purpose, and the user
+      // typed it because it used to work.
+      const retired = RETIRED_COMMANDS[(name ?? '').toLowerCase()];
+      if (retired) {
+        push(
+          entry('step', `/${name} is now ${retired.replacement}`, {
+            status: 'failed',
+            tone: 'warn',
+            detail: retired.why,
+          }),
+        );
+        return;
+      }
       const suggestions = matchCommands(name ?? '').slice(0, 5);
       push(
         entry('step', `unknown command /${name}`, {
@@ -4050,6 +4079,9 @@ export function App({
     // tool — that is what stops recursion, and it is enforced here rather than
     // trusted to the prompt.
     const lspForAgent = lspManager.current ? lspTools(lspManager.current) : [];
+    // The debugger holds state between calls, so it is created once per session
+    // rather than per turn: `continue` means nothing without the `launch` before it.
+    const debugForAgent = debugTools(debugSessions.current, lspManager.current?.root ?? process.cwd());
     const edits = new EditCoordinator();
     const storedConfig = profileConfig;
     // The run-budget stop tells the operator to raise the budget deliberately;
@@ -4058,9 +4090,12 @@ export function App({
     const configuredRunBudget = Number(
       process.env['PLIF_MAX_RUN_TOKENS'] ?? storedConfig.maxRunTokens ?? Number.NaN,
     );
+    // Older profiles often contain 10k, which is smaller than one real PLIF
+    // turn on a large workspace. Loops remain bounded by iteration, repeated
+    // action and no-progress watchdogs; do not let that stale cap kill a run.
     const runBudgetOverride =
       Number.isFinite(configuredRunBudget) && configuredRunBudget > 0
-        ? Math.floor(configuredRunBudget)
+        ? Math.max(10_000_000, Math.floor(configuredRunBudget))
         : undefined;
     const configuredConversationState = process.env['PLIF_CONVERSATION_STATE'] ?? storedConfig.conversationState;
     const conversationStateMode = configuredConversationState === 'native' || configuredConversationState === 'replay'
@@ -4114,7 +4149,7 @@ export function App({
       agentAutoLaunch: storedConfig.agentAutoLaunch !== false,
       extraTools: [
         ...(skillRegistry ? [skillTool(skillRegistry)] : []),
-        ...lspForAgent,
+        ...debugForAgent,
         ...WEB_TOOLS,
       ],
       skillCatalogue: skillRegistry?.catalogue() ?? skillCatalogue,
@@ -4127,11 +4162,41 @@ export function App({
       parentContext: () => activeConversation.current ?? carried,
       continuable: plifModeOf(storedConfig).continuableSubagents !== false,
       skillBootstrap: codexSkillBootstrap,
+      // A child gets a detached checkout, a distinct container and a distinct
+      // LSP root. This factory is runtime control-plane code, never exposed as
+      // a model tool, so a model cannot point a mount at an arbitrary path.
+      worktrees: new WorktreeManager(path.join(tempDir, 'worktrees')),
+      createChildRuntime: async (worktreePath: string, childTitle: string) => {
+        const childTemp = await fs.mkdtemp(path.join(tempDir, 'subagent-'));
+        const image = await engine.ensureBaseImage();
+        const child = await engine.run({
+          image: image.reference,
+          mounts: [containerMount(worktreePath), containerTempMount(childTemp)],
+          workdir: containerWorkdir(worktreePath),
+          capabilities: { hostWrite: true, network: true },
+        });
+        if (Object.keys(sessionEnvironment.current).length > 0) child.applyEnvironment(sessionEnvironment.current);
+        const childLsp = new LspManager({
+          root: await child.hostPathFor(child.workdir), tempRoot: childTemp, bus: engine.bus,
+        });
+        void childLsp.warmup().catch(() => undefined);
+        return {
+          container: child,
+          tools: lspTools(childLsp),
+          cleanup: async () => {
+            await childLsp.stop().catch(() => undefined);
+            await child.remove().catch(() => undefined);
+            await fs.rm(childTemp, { recursive: true, force: true }).catch(() => undefined);
+          },
+        };
+      },
     };
     const allAgentTools = [
       ...tools,
       ...(planOnly ? [] : mcpRegistry?.tools() ?? []),
       ...lspForAgent,
+      ...debugForAgent,
+      ...browserTools(browserSession.current),
       ...WEB_TOOLS,
       ...(planOnly ? [] : visionTools(childOptions)),
       ...(planOnly ? [] : [subagentTool(childOptions)]),
@@ -4142,6 +4207,35 @@ export function App({
     const agentTools = planOnly
       ? allAgentTools.filter((tool) => !PLAN_BLOCKED_TOOLS.has(tool.spec.name))
       : allAgentTools;
+
+    /**
+     * Hooks for this turn, rebuilt from the config each time.
+     *
+     * Rebuilt rather than cached because a hook edited during a session should
+     * take effect on the next turn — the whole point of a hook is to encode a
+     * rule the user just decided on, and making them restart to apply it is
+     * how a feature stops being used.
+     */
+    const { hooks: hookDefinitions, problems: hookProblems } = parseHooks(storedConfig.hooks);
+    if (hookProblems.length > 0 && !reportedHookProblems.current) {
+      // Said once per session, not once per turn: a malformed hooks table
+      // would otherwise repeat the same complaint above every answer.
+      reportedHookProblems.current = true;
+      push(entry('notice', 'some hooks were ignored', {
+        tone: 'warn',
+        detail: hookProblems.join('\n'),
+        subtitle: globalConfigPath(),
+      }));
+    }
+    const hookRunner = hookDefinitions.length > 0
+      ? new HookRunner({
+          container,
+          hooks: hookDefinitions,
+          bus: engine.bus,
+          signal: abort.signal,
+          ...(shellDialect ? { dialect: shellDialect } : {}),
+        })
+      : undefined;
 
     const outgoing: Message[] = [
       ...carried,
@@ -4194,6 +4288,7 @@ export function App({
               notes: snapshot.notes,
               sandboxGaps: report.degradations,
               effort: effortRef.current,
+              promptProfile: promptProfileOf(storedConfig),
               ...(turnInstructions ? { agentInstructions: turnInstructions } : {}),
               ...(planOnly ? { mode: 'explore' as const } : {}),
               ...(activeProfile
@@ -4220,6 +4315,9 @@ export function App({
           ...(conversationState ? { conversationState } : {}),
           conversationStateMode,
           tools: agentTools,
+          ...(shellDialect ? { shellDialect } : {}),
+          ...(hookRunner ? { hooks: hookRunner } : {}),
+          spill: spillStore.current ??= new SpillStore(container),
           skillBootstrap: codexSkillBootstrap,
           memory: engine.memory,
           workspace: cwd,
@@ -4395,18 +4493,6 @@ export function App({
         push(entry('notice', 'PLIF turn limit reached', {
           tone: 'warn',
           subtitle: 'The turn was capped at 50 cycles to protect the session. Type /continue to resume from the saved transcript.',
-        }));
-      }
-      if (effortRef.current === 'plif' && result.iterations > 3) {
-        const metrics = turnMetricsRef.current?.turnId === durableTurnId
-          ? turnMetricsRef.current
-          : null;
-        const timing = metrics
-          ? ` · wall ${formatDuration(Date.now() - metrics.startedAt)} · reasoning ${formatDuration(metrics.reasoningMs)} · tools ${formatDuration(metrics.toolsMs)} · compaction ${formatDuration(metrics.compactionMs)}`
-          : '';
-        push(entry('notice', `PLIF turn report · ${result.iterations} cycles`, {
-          tone: 'accent',
-          subtitle: `${result.toolCalls} tool calls · ${result.retries} retries · ${formatCount(result.promptTokens)} input tokens · ${formatCount(result.completionTokens)} output tokens${timing}`,
         }));
       }
       if (result.error) {
@@ -5033,7 +5119,7 @@ export function App({
   function handleMouse(mouse: { readonly button: number; readonly action: string; readonly column: number; readonly row: number }): void {
     if ((mouse.action !== 'press' && mouse.action !== 'move') || pastedTextPopup) return;
     if (mouse.action === 'move' && !state.question) return;
-    if (state.screen || state.browser || state.approval || state.picker || credentialPromptPending || codexLogin) return;
+    if (state.screen || state.browser || state.approval || state.picker || credentialPromptPending) return;
 
     if (state.question) {
       if (mouse.action === 'move' && mouse.button !== 0) return;
@@ -5096,9 +5182,49 @@ export function App({
     return true;
   }
 
+  /**
+   * The mouse wheel, over the transcript and the thinking overlay.
+   *
+   * These events used to reach `handleMouse`, which returns early for
+   * anything that is not a press or a move — so the wheel did nothing at all
+   * and the only way to move through a long transcript was the arrow keys, one
+   * line per press. That is the whole of "the scroll is slow".
+   *
+   * A notch moves three lines, the step every terminal scrollback uses, and a
+   * terminal that reports a magnitude in `deltaY` is believed rather than
+   * flattened to one notch — a fast flick then travels as far as it should.
+   */
+  function handleWheel(event: SlateEvent): boolean {
+    if (event.action !== 'scroll') return false;
+    const raw = event.deltaY ?? 0;
+    if (raw === 0) return true;
+    const notches = Math.max(1, Math.min(Math.abs(Math.trunc(raw)), 10));
+    const delta = (raw > 0 ? 1 : -1) * notches * WHEEL_LINES_PER_NOTCH;
+    if (thinkingViewport.open) {
+      dispatchThinkingViewport({
+        type: 'line',
+        delta,
+        contentLines: thinkingLines,
+        height: thinkingRows,
+      });
+      return true;
+    }
+    if (transcriptViewport.open) {
+      dispatchTranscriptViewport({
+        type: 'line',
+        delta,
+        contentLines: transcriptContentLines,
+        height: transcriptBodyHeight,
+      });
+      return true;
+    }
+    return true;
+  }
+
   useSlateEvent((event: SlateEvent) => {
     if (event.kind !== 'mouse') return;
     if (handleMenuMouse(event)) return;
+    if (handleWheel(event)) return;
     handleMouse({
       button: event.button === 'right' ? 2 : event.button === 'middle' ? 1 : 0,
       action: event.action ?? 'press',
@@ -5144,10 +5270,6 @@ export function App({
       return;
     }
 
-    if (codexLogin) {
-      if (key.escape || (key.ctrl && char === 'c')) void cancelCodexLogin();
-      return;
-    }
 
     if (state.screen) {
       handleConfigKey(char, key);
@@ -6098,52 +6220,48 @@ export function App({
       dispatch({ type: 'browser.close' });
       push(entry('notice', `installing ${plugin.displayName ?? plugin.name}`, { tone: 'accent' }));
       try {
-        const installed = await installMarketplacePlugin(plugin, globalConfigPath());
+        const installed = await installMarketplacePlugin(
+          plugin,
+          globalConfigPath(),
+          path.join(engine.paths.root, 'skills'),
+        );
         push(entry('notice', `installed ${plugin.displayName ?? plugin.name}`, {
           tone: installed.replaced.length ? 'warn' : 'accent',
           expand: true,
           detail: [
-            `MCP: ${installed.mcpServers.join(', ')}`,
+            installed.mcpServers.length ? `MCP: ${installed.mcpServers.join(', ')}` : null,
+            installed.skills.length ? `skills: ${installed.skills.join(', ')}` : null,
             installed.replaced.length
               ? `replaced your existing config for: ${installed.replaced.join(', ')}`
               : null,
-            installed.skills.length
-              ? `declares skills plif does not install: ${installed.skills.join(', ')}`
+            // Named rather than swallowed: a plugin that declared four skills
+            // and installed one should say which three did not arrive.
+            installed.skippedSkills.length
+              ? `not installed: ${installed.skippedSkills
+                  .map((skipped) => `${skipped.name} (${skipped.reason})`)
+                  .join('; ')}`
+              : null,
+            installed.skillsDirectory && installed.skills.length
+              ? `skills directory: ${installed.skillsDirectory}`
               : null,
             `config: ${installed.configFile}`,
           ].filter(Boolean).join('\n'),
         }));
         if (installed.mcpServers.length) await reconnectMcp(installed.mcpServers);
+        // A skill is loadable as soon as it is on disk, but the catalogue the
+        // model sees was built at turn start, so say when a restart is needed.
+        if (installed.skills.length) {
+          push(entry('notice', 'restart plif to offer the new skills to the model', {
+            tone: 'muted',
+            subtitle: 'they are on disk now; the session catalogue is built at startup',
+          }));
+        }
       } catch (error) {
         const { title, detail } = formatError(error);
         push(entry('step', `could not install ${plugin.name}`, {
           status: 'failed', tone: 'warn', detail: [title, detail].filter(Boolean).join('\n'),
         }));
       }
-      return;
-      const url = sourceUrl(plugin);
-      dispatch({ type: 'browser.close' });
-      push(
-        entry('notice', `${plugin.displayName ?? plugin.name}`, {
-          tone: 'accent',
-          subtitle: `${plugin.origin === 'official' ? 'official' : 'community'}${
-            plugin.author ? ` · ${plugin.author}` : ''
-          }`,
-          expand: true,
-          detail: [
-            plugin.description,
-            '',
-            url ? `source   ${url}` : `source   ${plugin.source.kind}`,
-            plugin.homepage ? `homepage ${plugin.homepage}` : null,
-            '',
-            'To use it, add its MCP servers to the "mcp" block of',
-            globalConfigPath() + ',',
-            'or copy its skills into your skills directory.',
-          ]
-            .filter((line) => line !== null)
-            .join('\n'),
-        }),
-      );
       return;
     }
 
@@ -6947,7 +7065,7 @@ export function App({
               configLoading={configLoading}
               configProblem={configProblem}
               width={width}
-              rows={rows}
+              rows={surface.panelHeight}
             />
           ) : state.screen.kind === 'config' ? (
             <ConfigScreen
@@ -6961,7 +7079,7 @@ export function App({
               loading={configLoading}
               problem={configProblem}
               width={width}
-              rows={rows}
+              rows={surface.panelHeight}
             />
           ) : state.screen.kind === 'usage' ? (
             <UsageScreen
@@ -6976,7 +7094,7 @@ export function App({
               loading={state.screen.state.loading}
               problem={state.screen.state.problem}
               width={width}
-              rows={rows}
+              rows={surface.panelHeight}
             />
           ) : state.screen.kind === 'agents' ? (
             <AgentsScreen
@@ -6984,7 +7102,7 @@ export function App({
               selected={state.screen.state.selected}
               filter={state.screen.state.filter}
               width={width}
-              rows={rows}
+              rows={surface.panelHeight}
             />
           ) : state.screen.kind === 'sessions' ? (
             <SessionsScreen
@@ -6994,7 +7112,7 @@ export function App({
               workspace={cwd}
               loading={state.screen.state.loading}
               width={width}
-              rows={rows}
+              rows={surface.panelHeight}
             />
           ) : state.screen.kind === 'stats' ? (
             <StatsScreen
@@ -7006,7 +7124,7 @@ export function App({
               tabs={SCREEN_TABS}
               activeTab="stats"
               width={width}
-              rows={rows}
+              rows={surface.panelHeight}
             />
           ) : state.screen.kind === 'mcp' ? (
             <McpScreen
@@ -7016,7 +7134,7 @@ export function App({
               tabs={SCREEN_TABS}
               activeTab="mcp"
               width={width}
-              rows={rows}
+              rows={surface.panelHeight}
             />
           ) : null}
         </Box>
@@ -7036,7 +7154,7 @@ export function App({
             skills={skillList}
             sessions={browserView?.sessions ?? []}
             width={width}
-            rows={rows}
+            rows={surface.panelHeight}
           />
         </Box>
       ) : (
@@ -7047,7 +7165,25 @@ export function App({
           paddingX={surface.panelPaddingX}
           paddingY={surface.panelPaddingY}
         >
-          <Box flexDirection="column" width={surface.contentWidth} flexGrow={1}>
+          {/*
+            The column states its height rather than growing into whatever the
+            frame will allow.
+
+            `flexGrow` on its own only means "take the free space", and the free
+            space is whatever the parent hands down; with a transcript mounted,
+            this column was measured at 104 rows inside a 25 row panel, the
+            spacer below the timeline expanded to 84 of them, and the prompt was
+            laid out at y=112 — correct, complete, and four screens below the
+            bottom of the terminal. That is the input line disappearing after a
+            session is resumed. Bounding the column bounds the spacer, so the
+            prompt can only ever be placed inside the panel.
+          */}
+          <Box
+            flexDirection="column"
+            width={surface.contentWidth}
+            height={surface.contentHeight}
+            flexShrink={0}
+          >
             <Box flexDirection="column">
               <Timeline
                 entries={historyEntries}
@@ -7056,16 +7192,6 @@ export function App({
               />
             </Box>
 
-            {codexLogin && (
-              <Box paddingX={1}>
-                <CodexLoginDialog
-                  status={codexLogin.status}
-                  detail={codexLogin.detail}
-                  userCode={codexLogin.userCode}
-                  width={Math.max(1, surface.contentWidth - 2)}
-                />
-              </Box>
-            )}
 
             {state.picker && (
               <Box paddingX={1}>
@@ -7193,7 +7319,7 @@ export function App({
                 // Focused while busy too: the field takes input the whole time, and
                 // an unfocused-looking box that nonetheless accepts typing is a lie
                 // about where the keystrokes are going.
-                focused={!codexLogin && !state.approval && !state.question && !state.picker && !btwInput}
+                focused={!state.approval && !state.question && !state.picker && !btwInput}
                 busy={state.busy}
                 busyLabel={state.busyLabel}
                 width={surface.contentWidth}

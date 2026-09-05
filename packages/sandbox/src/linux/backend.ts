@@ -491,7 +491,8 @@ async function prepareMounts(
     const source = await fs.realpath(mount.source);
     const target = normalizeTarget(mount.target);
     const masks: PreparedMask[] = [];
-    for (const [maskIndex, rawMask] of (mount.mask ?? []).entries()) {
+    const expandedMasks = await expandMaskPatterns(source, mount.mask ?? []);
+    for (const [maskIndex, rawMask] of expandedMasks.entries()) {
       const relative = normalizeTarget(rawMask.startsWith('/') ? rawMask : `/${rawMask}`);
       const parts = relative.split('/').filter(Boolean);
       let host = source;
@@ -540,6 +541,36 @@ async function prepareMounts(
     prepared.push({ ...mount, source, target, masks });
   }
   return prepared;
+}
+
+async function expandMaskPatterns(source: string, masks: readonly string[]): Promise<string[]> {
+  const exact = masks.filter((mask) => !mask.includes('*'));
+  const patterns = masks.filter((mask) => mask.includes('*'));
+  if (patterns.length === 0) return [...exact];
+
+  const matchers = patterns.map((raw) => {
+    const normalized = normalizeTarget(raw.startsWith('/') ? raw : `/${raw}`);
+    const regex = normalized
+      .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*\*\//g, '(?:.*/)?')
+      .replace(/\*\*/g, '.*')
+      .replace(/\*/g, '[^/]*');
+    return new RegExp(`^${regex}$`);
+  });
+  const matches = new Set<string>();
+  const pending: Array<{ host: string; relative: string }> = [{ host: source, relative: '' }];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    const entries = await fs.readdir(current.host, { withFileTypes: true });
+    for (const entry of entries) {
+      const relative = `${current.relative}/${entry.name}`;
+      if (matchers.some((matcher) => matcher.test(relative))) matches.add(relative);
+      if (entry.isDirectory() && !entry.isSymbolicLink()) {
+        pending.push({ host: path.join(current.host, entry.name), relative });
+      }
+    }
+  }
+  return [...exact, ...matches];
 }
 
 function normalizeTarget(input: string): string {

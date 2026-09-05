@@ -89,6 +89,7 @@ export async function materialize(
           break;
 
         case 'directory':
+          await removeNonDirectory(target);
           await fs.mkdir(target, { recursive: true });
           break;
 
@@ -99,11 +100,11 @@ export async function materialize(
             });
           }
           await fs.mkdir(path.dirname(target), { recursive: true });
-          await fs.rm(target, { force: true });
+          await fs.rm(target, { recursive: true, force: true });
           // Symlinks are recreated, never followed, so a layer cannot smuggle
           // in a link that the jail then resolves outside the rootfs — the
           // PathJail re-checks resolution on every access regardless.
-          await fs.symlink(entry.target, target).catch(() => undefined);
+          await fs.symlink(entry.target, target);
           break;
         }
 
@@ -130,6 +131,14 @@ export async function materialize(
   }
 
   return { files, bytes, linked, durationMs: Date.now() - started };
+}
+
+async function removeNonDirectory(target: string): Promise<void> {
+  const stat = await fs.lstat(target).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  });
+  if (stat && !stat.isDirectory()) await fs.rm(target, { recursive: true, force: true });
 }
 
 /**
@@ -235,7 +244,7 @@ export async function layerFromDirectory(
     readonly name: string;
     /** Where the tree lands inside the container. */
     readonly mountAt: string;
-    /** Directory names skipped entirely, e.g. node_modules, .git. */
+    /** File or directory basename patterns skipped entirely, e.g. node_modules, .env.*, *.pem. */
     readonly exclude?: readonly string[];
     readonly maxFileBytes?: number;
   },
@@ -312,14 +321,15 @@ async function* walk(
   let dirents;
   try {
     dirents = await fs.readdir(current, { withFileTypes: true });
-  } catch {
-    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
   }
 
   for (const dirent of dirents) {
-    if (exclude.has(dirent.name)) continue;
     const host = path.join(current, dirent.name);
     const virtual = '/' + path.relative(root, host).split(path.sep).join('/');
+    if ([...exclude].some((pattern) => globBasename(pattern, dirent.name))) continue;
 
     if (dirent.isSymbolicLink()) {
       yield { host, virtual, kind: 'symlink', mode: 0o777 };
@@ -333,12 +343,26 @@ async function* walk(
       continue;
     }
     if (dirent.isFile()) {
-      const stat = await fs.stat(host).catch(() => null);
+      let stat;
+      try {
+        stat = await fs.stat(host);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        stat = null;
+      }
       yield { host, virtual, kind: 'file', mode: stat ? stat.mode & 0o777 : 0o644 };
     }
     // Sockets, FIFOs and devices are intentionally dropped: they cannot be
     // content-addressed, and an image is meant to be reproducible.
   }
+}
+
+function globBasename(pattern: string, name: string): boolean {
+  if (!pattern.includes('*')) return pattern === name;
+  const regex = pattern
+    .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*');
+  return new RegExp(`^${regex}$`).test(name);
 }
 
 function resolveInto(root: string, virtual: string): string {

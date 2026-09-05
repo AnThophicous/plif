@@ -1,3 +1,6 @@
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
 import {
   StreamMessageReader,
   StreamMessageWriter,
@@ -68,6 +71,30 @@ connection.onNotification('textDocument/didChange', (params) => {
       message: 'unchanged text was sent as didChange',
     }],
   });
+});
+
+// Windows rejects a driveless file URL, so build the fixture URIs the way the
+// platform would actually emit them.
+const fakeUri = (name) => pathToFileURL(path.join(path.sep + 'project', name)).toString();
+
+connection.onRequest('workspace/symbol', ({ query }) => {
+  if (!String(query ?? '').toLowerCase().startsWith('widget')) return [];
+  return [
+    {
+      name: 'Widget',
+      kind: 5,
+      containerName: 'shell',
+      location: {
+        uri: fakeUri('widget.ts'),
+        range: { start: { line: 11, character: 0 }, end: { line: 11, character: 6 } },
+      },
+    },
+    // A WorkspaceSymbol may carry only a uri until workspaceSymbol/resolve runs.
+    { name: 'WidgetProps', kind: 11, location: { uri: fakeUri('props.ts') } },
+    // No location at all: there is nothing to report, so it must be dropped
+    // rather than invented at line 1 of an unknown file.
+    { name: 'WidgetGhost', kind: 12 },
+  ];
 });
 
 connection.onRequest('shutdown', () => null);

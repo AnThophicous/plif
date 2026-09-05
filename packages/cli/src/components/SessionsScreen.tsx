@@ -29,16 +29,24 @@ export interface SessionsScreenProps {
 const MAX_LIST_WIDTH = 88;
 
 /** Narrow by title, model, or workspace — whatever the person remembers. */
+let lastFilter: {
+  readonly sessions: readonly SessionMeta[];
+  readonly needle: string;
+  readonly result: readonly SessionMeta[];
+} | null = null;
+
 export function filterSessions(
   sessions: readonly SessionMeta[],
   filter: string,
 ): readonly SessionMeta[] {
   const needle = filter.trim().toLowerCase();
-  if (!needle) return sessions;
-  return sessions.filter((session) =>
+  if (lastFilter?.sessions === sessions && lastFilter.needle === needle) return lastFilter.result;
+  const result = !needle ? sessions : sessions.filter((session) =>
     session.title.toLowerCase().includes(needle) ||
     (session.modelId ?? '').toLowerCase().includes(needle) ||
     session.workspace.toLowerCase().includes(needle));
+  lastFilter = { sessions, needle, result };
+  return result;
 }
 
 export type SessionBucket = 'Today' | 'Yesterday' | 'Earlier this week' | 'Older';
@@ -122,6 +130,15 @@ export function sessionRows(
   return rows;
 }
 
+/** Row position of each selectable session after headings are interleaved. */
+export function sessionRowPositions(rows: readonly SessionListRow[]): ReadonlyMap<number, number> {
+  const positions = new Map<number, number>();
+  rows.forEach((row, position) => {
+    if (row.kind === 'session' && row.index !== undefined) positions.set(row.index, position);
+  });
+  return positions;
+}
+
 /**
  * Conversations in this workspace, and how to get back into one.
  *
@@ -142,15 +159,16 @@ export function SessionsScreen({
 }: SessionsScreenProps): React.ReactElement {
   const contentWidth = Math.max(24, width - 4);
   const listWidth = Math.min(contentWidth, MAX_LIST_WIDTH);
-  const visible = filterSessions(sessions, filter);
+  const visible = React.useMemo(() => filterSessions(sessions, filter), [sessions, filter]);
   const active = visible[Math.min(selected, Math.max(0, visible.length - 1))];
 
   const columns = React.useMemo(() => metaColumns(visible), [visible]);
   const all = React.useMemo(() => sessionRows(visible), [visible]);
+  const positions = React.useMemo(() => sessionRowPositions(all), [all]);
   const listRows = Math.max(4, rows - 14);
   // Scroll by row, not by session, so a heading never pushes the selection out
   // of the window it is supposed to keep visible.
-  const selectedRow = all.findIndex((row) => row.index === selected);
+  const selectedRow = positions.get(selected) ?? -1;
   const start = Math.max(0, Math.min(
     Math.max(0, selectedRow - listRows + 2),
     Math.max(0, all.length - listRows),

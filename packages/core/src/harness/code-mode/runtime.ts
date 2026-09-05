@@ -22,8 +22,8 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
+import { moduleDirectory, resolveAsset } from '../../assets.js';
 import type { Container } from '../../container/container.js';
 import { PlifError } from '../../errors.js';
 import { DispatchScheduler, type DispatchOutcome } from './scheduler.js';
@@ -89,20 +89,18 @@ const installedRuntimes = new WeakSet<Container>();
  */
 function runnerSource(): string {
   if (cachedRunnerSource !== undefined) return cachedRunnerSource;
-  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    path.join(moduleDirectory, 'runtime', 'runner.mjs'),
-    path.resolve(moduleDirectory, '../../../src/harness/code-mode/runtime/runner.mjs'),
-  ];
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      cachedRunnerSource = fs.readFileSync(candidate, 'utf8');
-      return cachedRunnerSource;
-    }
+  const here = moduleDirectory(import.meta.url);
+  const found = resolveAsset(import.meta.url, 'code-mode/runner.mjs', [
+    path.join(here, 'runtime', 'runner.mjs'),
+    path.resolve(here, '../../../src/harness/code-mode/runtime/runner.mjs'),
+  ]);
+  if (found === null) {
+    throw new PlifError('INTERNAL', 'the Code Mode runtime asset is missing from this install', {
+      hint: 'Reinstall @plif/core, or set the tool presentation mode back to native.',
+    });
   }
-  throw new PlifError('INTERNAL', 'the Code Mode runtime asset is missing from this install', {
-    hint: 'Reinstall @plif/core, or set the tool presentation mode back to native.',
-  });
+  cachedRunnerSource = fs.readFileSync(found, 'utf8');
+  return cachedRunnerSource;
 }
 
 /**

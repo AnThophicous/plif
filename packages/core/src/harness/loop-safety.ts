@@ -32,7 +32,9 @@ export const DEFAULT_AGENT_EXECUTION_POLICY: AgentExecutionPolicy = Object.freez
   maxRecoveryAttempts: 1,
   maxRepeatedActions: 2,
   repeatedSequenceWindow: 6,
-  maxRunTokens: 100_000,
+  // The iteration, repeated-action and no-progress watchdogs stop loops. This
+  // ceiling is only the last-resort guard for an otherwise productive long run.
+  maxRunTokens: 10_000_000,
   maxRetries: 3,
 });
 

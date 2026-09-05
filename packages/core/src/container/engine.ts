@@ -101,7 +101,7 @@ export class Engine {
     // Independent directories, so they are created together rather than in a
     // serial chain of round trips to the filesystem.
     await Promise.all(
-      this.paths.bootstrapDirs().map((dir) => fs.mkdir(dir, { recursive: true })),
+      this.paths.bootstrapDirs().map((dir) => fs.mkdir(dir, { recursive: true, mode: 0o700 })),
     );
     await this.audit.open();
 
@@ -224,7 +224,11 @@ export class Engine {
       source: options.source,
       name: path.basename(path.resolve(options.source)),
       mountAt: options.mountAt ?? '/',
-      exclude: options.exclude ?? ['node_modules', '.git', 'dist', '.plif', '.next', 'target'],
+      exclude: options.exclude ?? [
+        'node_modules', '.git', 'dist', '.plif', '.next', 'target',
+        '.env', '.env.*', '.npmrc', '.pypirc', '.netrc', '*.pem', '*.key',
+        'secrets*', 'credentials*',
+      ],
     });
 
     return await this.images.build({
@@ -322,8 +326,18 @@ export class Engine {
   /** Create and start in one step — what the CLI's `run` does. */
   async run(spec: Omit<ContainerSpec, 'name'> & { name?: string }): Promise<Container> {
     const container = await this.create(spec);
-    await container.start();
-    return container;
+    try {
+      await container.start();
+      return container;
+    } catch (error) {
+      // `run` is an atomic convenience operation. A failed start must not
+      // leave a created container, rootfs, or partially-created jail in the
+      // engine for the next command to trip over.
+      await container.stop('start failed').catch(() => undefined);
+      await container.remove().catch(() => undefined);
+      this.#containers.delete(container.id);
+      throw error;
+    }
   }
 
   /** Look up by name, full id, or unambiguous id prefix. */

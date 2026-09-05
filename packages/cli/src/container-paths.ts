@@ -2,6 +2,24 @@ import path from 'node:path';
 
 import { TEMP_WORKDIR } from './temp-workspace.js';
 
+export const WORKSPACE_SECRET_MASKS: readonly string[] = [
+  '/.git',
+  '/.env',
+  '/.env.*',
+  '/.npmrc',
+  '/.pypirc',
+  '/.netrc',
+  '/.plif',
+  '/*.pem',
+  '/*.key',
+  '/**/*.pem',
+  '/**/*.key',
+  '/secrets*',
+  '/credentials*',
+  '/**/secrets*',
+  '/**/credentials*',
+];
+
 export function containerWorkdir(_hostCwd: string): string {
   return '/project';
 }
@@ -17,7 +35,7 @@ export function containerMount(hostCwd: string): {
     source,
     target: '/project',
     mode: 'rw',
-    mask: ['/.git/config', '/.env', '/.env.local'],
+    mask: WORKSPACE_SECRET_MASKS,
   };
 }
 

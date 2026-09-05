@@ -52,6 +52,8 @@ import {
   tokenSplitDefinition,
   tokenSplitDefinitions,
   tokenSplitSanityRate,
+  OpenAIOAuthClient,
+  openOAuthBrowser,
 } from '@plif/core';
 import type {
   Container,
@@ -78,6 +80,13 @@ import {
   setPermissionMode,
   saveGlobalConfig,
   profilesOf,
+  CURATED_MCP_SERVERS,
+  PROMPT_PROFILES,
+  findCuratedServer,
+  installCuratedServer,
+  isPromptProfile,
+  type PromptProfile,
+  promptProfileOf,
   toolModeOf,
   PlifError,
 } from '@plif/core';
@@ -125,6 +134,8 @@ export interface CommandContext {
   readonly modelCompletionValues?: () => readonly string[];
   /** Enter or leave the read-only planning mode. */
   readonly setPlanMode?: (enabled: boolean, description?: string) => Promise<void>;
+  /** Whether plan mode is on, so the menu can say which state is active. */
+  readonly planMode?: boolean;
   /** Start a session-scoped completion condition. */
   readonly startGoal?: (condition: string) => Promise<void>;
   readonly goalStatus?: () => {
@@ -516,6 +527,13 @@ export function validateEffortArgument(
   return value as Effort;
 }
 
+/** ChatGPT/OpenAI gpt-* ids are Codex offers, not OpenCode Zen/Go catalog rows. */
+function isOpenCodeChatGptId(providerId: string, id: string): boolean {
+  if (providerId !== 'opencode' && providerId !== 'opencode-go') return false;
+  const tail = (id.split('/').pop() ?? id).toLowerCase();
+  return tail.startsWith('gpt-');
+}
+
 /** Keep verified built-ins visible while adding everything the endpoint reports. */
 export function providerModelIds(
   catalog: ModelCatalogProvider,
@@ -526,6 +544,7 @@ export function providerModelIds(
 ): string[] {
   if (!live) {
     return catalog.models
+      .filter((item) => !isOpenCodeChatGptId(catalog.id, item.id))
       .filter((item) => access !== 'free' || item.badges.includes('no key'))
       .map((item) => item.id);
   }
@@ -533,6 +552,7 @@ export function providerModelIds(
   // here would keep retired models selectable forever.
   const metadata = new Map(discoveredModels.map((model) => [model.id, model]));
   return [...new Set(discoveredIds)].filter((id) => {
+    if (isOpenCodeChatGptId(catalog.id, id)) return false;
     if (access !== 'free') return true;
     // A live response is authoritative for availability, but not for
     // authentication. Unknown/paid rows must not inherit Zen's provider-level
@@ -571,7 +591,9 @@ function providerSources(stored: StoredConfig): ProviderSource[] {
   const mine = userCatalog(stored);
   return [
     ...mine.map((entryProvider) => ({ entryProvider, section: 'your providers' })),
-    ...builtInPickerProviders(mine).map((entryProvider) => ({ entryProvider, section: 'built into PLIF' })),
+    ...builtInPickerProviders(mine)
+      .filter((entryProvider) => entryProvider.id !== 'codex')
+      .map((entryProvider) => ({ entryProvider, section: 'built into PLIF' })),
   ];
 }
 
@@ -902,17 +924,17 @@ export function mergeDiscoveredModel(
     curated.streamSemantics,
     curated.metadataSource,
   ].some((value) => value !== undefined);
-  const sourceHasExplicitMetadata = source.product !== undefined || source.tier !== undefined || source.defaultCost !== undefined;
   const metadataSource = discovered.metadataSource
     ?? curated?.metadataSource
-    ?? (curatedHasExplicitMetadata || sourceHasExplicitMetadata ? 'registry' : undefined);
+    ?? (curatedHasExplicitMetadata ? 'registry' : undefined);
+  const inheritProviderCost = source.defaultCost === 'paid' ? 'paid' as const : undefined;
   const registryFallback = curated ? {} : {
     ...(source.product ? { product: source.product } : {}),
     ...(source.tier ? { tier: source.tier } : {}),
-    ...(source.defaultCost ? { cost: source.defaultCost } : {}),
+    ...(inheritProviderCost ? { cost: inheritProviderCost } : {}),
     ...(metadataSource ? { metadataSource } : {}),
   };
-  return {
+  const merged = {
     ...(curated ?? {
       id,
       label: discovered.name ?? friendlyModelName(id),
@@ -937,8 +959,9 @@ export function mergeDiscoveredModel(
     ...(discovered.streamSemantics === undefined ? {} : { streamSemantics: discovered.streamSemantics }),
     ...(discovered.ranking === undefined ? {} : { ranking: discovered.ranking }),
     ...(metadataSource ? { metadataSource } : {}),
-    ...(discovered.cost === undefined && curated?.cost === undefined && source.defaultCost ? { cost: source.defaultCost } : {}),
+    ...(discovered.cost === undefined && curated?.cost === undefined && inheritProviderCost ? { cost: inheritProviderCost } : {}),
   };
+  return merged;
 }
 
 function friendlyModelName(id: string): string {
@@ -972,7 +995,8 @@ async function configureProvider(
   stored: StoredConfig,
   source: ModelCatalogProvider,
 ): Promise<boolean> {
-  const needsCredential = !isLocal(source.endpoint) && source.id !== 'codex';
+  const isOpenAIOAuth = source.id === 'openai' || source.auth === 'openai-oauth';
+  const needsCredential = !isLocal(source.endpoint) && source.id !== 'codex' && !isOpenAIOAuth;
   if (needsCredential && !context.credentials) {
     context.notify?.(entry('notice', `cannot configure ${source.label} without secure credential storage`, {
       tone: 'warn',
@@ -981,7 +1005,28 @@ async function configureProvider(
     return false;
   }
   const keyEnv = credentialVariableForProvider(source.id, stored);
-  const key = needsCredential
+  if (isOpenAIOAuth) {
+    const method = await context.engine.questions.ask({
+      text: 'OpenAI authentication method',
+      options: ['ChatGPT Pro/Plus (browser)', 'ChatGPT Pro/Plus (headless)', 'Manually enter API Key'],
+      context: 'OAuth stays in PLIF and does not create a Codex app-server chat.',
+    });
+    if (method === 'ChatGPT Pro/Plus (browser)') {
+      try {
+        await new OpenAIOAuthClient().startBrowserLogin((url) => openOAuthBrowser(new URL(url)));
+        return true;
+      } catch { return false; }
+    }
+    if (method === 'ChatGPT Pro/Plus (headless)') {
+      try {
+        await new OpenAIOAuthClient().startHeadlessLogin(5_000, undefined, (code) => {
+          context.notify?.(entry('notice', `OpenAI device code: ${code}`, { tone: 'accent', subtitle: 'Open https://auth.openai.com/codex/device to finish login.' }));
+        });
+        return true;
+      } catch { return false; }
+    }
+  }
+  const key = needsCredential || isOpenAIOAuth
     ? (await context.engine.questions.ask({
       text: `API key · ${source.label}`,
       secret: true,
@@ -1032,6 +1077,12 @@ async function providerAccessMap(
     // user can discover and select it before the explicit sign-in step.
     if (entryProvider.auth === 'codex') {
       return [entryProvider.id, 'configured' as const] as const;
+    }
+    if (entryProvider.auth === 'openai-oauth') {
+      if (!credentials) return null;
+      const oauth = await new OpenAIOAuthClient().load();
+      const apiKey = await providerKey(entryProvider.id, stored, credentials);
+      return oauth || apiKey ? [entryProvider.id, 'configured' as const] as const : null;
     }
     const key = await providerKey(entryProvider.id, stored, credentials);
     if (entryProvider.anonymous) return [entryProvider.id, key ? 'configured' as const : 'free' as const] as const;
@@ -1120,6 +1171,106 @@ function safeProviderEndpoint(value: string): string {
   } catch {
     return 'custom endpoint';
   }
+}
+
+
+/**
+ * Ask for one line of text, the way `/models` already does.
+ *
+ * Four commands took an argument a picker cannot supply — a layer name, an
+ * image reference, a directory, a goal condition — and refused with a usage
+ * string when called bare. That refusal is the interface knowing exactly what
+ * it needs and declining to ask for it.
+ *
+ * The surface is the one the credential prompt and the custom-provider flow
+ * already use, so this adds no new kind of window; it only routes more
+ * commands to it. Esc answers null, which every caller treats as "changed my
+ * mind" rather than as an error, because abandoning a prompt is not a failure.
+ */
+async function promptText(
+  context: CommandContext,
+  question: { readonly text: string; readonly why: string },
+): Promise<string | null> {
+  const answer = await context.engine.questions.ask({
+    text: question.text,
+    context: question.why,
+  });
+  const trimmed = answer?.trim();
+  return trimmed ? trimmed : null;
+}
+
+
+/** Snapshot one container, asking for the layer name when it was not given. */
+async function commitContainer(
+  container: Container,
+  layerName: string | undefined,
+  context: CommandContext,
+): Promise<CommandResult> {
+  const name = layerName ?? await promptText(context, {
+    text: 'Layer name',
+    why: `Snapshots the workspace of ${container.name} into a reusable layer.`,
+  });
+  if (!name) return cancelled('commit');
+  const layer = await container.commit(name);
+  return ok(
+    entry('step', `committed ${name}`, {
+      status: 'done',
+      subtitle: `${layer.digest.slice(0, 12)} · ${layer.entries.length} entries · ${formatBytes(layer.size)}`,
+    }),
+  );
+}
+
+/** The entry a command returns when the person pressed Esc at a prompt. */
+function cancelled(what: string): CommandResult {
+  return ok(entry('notice', `${what} cancelled`, { tone: 'muted' }));
+}
+
+
+/**
+ * The recommended servers, as one pick.
+ *
+ * plif has no browser and no debugger of its own, and the servers that cover
+ * that are known. What made them hard was not the choosing — it was reading a
+ * README and hand-editing TOML to write six lines of stdio config correctly.
+ * Each row says what the agent gains and what the server costs to run, because
+ * a recommendation that hides either is not a recommendation.
+ */
+function openCuratedServerPicker(context: CommandContext): CommandResult {
+  context.openPicker({
+    title: 'Add a recommended MCP server',
+    countLabel: 'servers',
+    hint: '↑↓ navigate · Enter adds · Esc closes',
+    items: CURATED_MCP_SERVERS.map((server) => ({
+      value: server.id,
+      label: server.label,
+      detail: [
+        server.summary,
+        server.requires?.length ? `needs ${server.requires.join(', ')}` : '',
+        server.note ?? '',
+      ].filter(Boolean).join(' · '),
+      searchText: [server.id, server.label, server.fills, server.summary].join(' '),
+    })),
+    onPick: (picked) => {
+      const server = findCuratedServer(String(picked));
+      if (!server) return;
+      void installCuratedServer(server, globalConfigPath())
+        .then((result) => {
+          context.notify?.(entry('notice', `${result.replaced ? 'updated' : 'added'} ${server.label}`, {
+            tone: 'accent',
+            subtitle: result.unsetVariables.length
+              ? `${result.unsetVariables.join(' and ')} is not set, so it will start unauthenticated`
+              : 'restart plif, or reconnect from /mcp, to load its tools',
+            detail: `${server.command} ${server.args.join(' ')}
+${result.configFile}`,
+          }));
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          context.notify?.(entry('notice', `could not add ${server.label}`, { tone: 'danger', detail: message }));
+        });
+    },
+  });
+  return ok();
 }
 
 /** One guided path for a custom OpenAI-compatible gateway and its model list. */
@@ -1241,7 +1392,7 @@ async function openProviderPicker(
     hint: `active: ${activeLabel ?? 'none'} · Enter opens models · choose Add custom provider for a guided setup`,
     countLabel: 'providers',
     items,
-    selected: Math.max(0, items.findIndex((item) => item.current) + 1),
+    selected: Math.max(0, items.findIndex((item) => item.current)),
     onPick: (value) => {
       if (String(value) === ADD_CUSTOM_PROVIDER) {
         void (async () => {
@@ -1258,7 +1409,8 @@ async function openProviderPicker(
       const isCodex = selected.auth === 'codex';
       const isLocked = !isCodex && !access.has(selected.id) && !selected.anonymous && !isLocalEndpoint(selected.endpoint);
       void (async () => {
-        if (isLocked && !(await configureProvider(context, stored, selected))) return;
+        const isOpenAIOAuth = selected.id === 'openai' || selected.auth === 'openai-oauth';
+        if ((isLocked || isOpenAIOAuth) && !(await configureProvider(context, stored, selected))) return;
         const pickerStored = stored;
         // Selecting Codex is also the explicit session-verification action.
         // Do this even when the config already points at Codex: that state only
@@ -1860,6 +2012,68 @@ async function runCodeModeAction(
   );
 }
 
+
+/**
+ * The prompt layer, chosen and priced.
+ *
+ * The numbers in the picker are measured, not asserted: they come from
+ * compiling both layers against the same tool set. They are on the row because
+ * this is a spending decision, and a menu that offered "compact" without
+ * saying what compact buys is asking someone to guess.
+ */
+const PROMPT_PROFILE_DETAIL: Readonly<Record<PromptProfile, string>> = {
+  auto: 'Pick by context window — compact under 32k, full above. What plif has always done.',
+  compact: 'Short instruction layer at any context size. About half the fixed per-request cost.',
+  full: 'Long instruction layer at any context size. The most detailed guidance, the highest fixed cost.',
+};
+
+async function runPromptProfileAction(
+  requested: string | undefined,
+  context: CommandContext,
+): Promise<CommandResult> {
+  const config = await loadGlobalConfig();
+  const active = promptProfileOf(config);
+  const override = process.env['PLIF_PROMPT_PROFILE']?.trim();
+  const overrideNote = override ? ` · PLIF_PROMPT_PROFILE=${override} overrides the saved value` : '';
+
+  const value = requested?.trim().toLowerCase();
+  if (!value) {
+    context.openPicker({
+      title: `PROMPT LAYER · ${active}`,
+      countLabel: 'layers',
+      hint: `↑↓ navigate · Enter select · Esc close${overrideNote}`,
+      items: PROMPT_PROFILES.map((profile) => ({
+        value: profile,
+        label: profile,
+        current: profile === active,
+        state: profile === active ? ('on' as const) : ('off' as const),
+        detail: PROMPT_PROFILE_DETAIL[profile],
+      })),
+      selected: Math.max(0, PROMPT_PROFILES.indexOf(active)),
+      onPick: (picked) => {
+        void runPromptProfileAction(String(picked), context)
+          .then((result) => result.entries.forEach((item) => context.notify?.(item)))
+          .catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error);
+            context.notify?.(entry('notice', `prompt-layer: ${message}`, { tone: 'danger' }));
+          });
+      },
+    });
+    return ok();
+  }
+
+  if (!isPromptProfile(value)) {
+    throw new PlifError('INVALID_ARGUMENT', `unknown prompt layer "${value}"; use auto, compact or full`);
+  }
+  await saveGlobalConfig({ ...config, promptProfile: value });
+  return ok(
+    entry('notice', `${glyph.done}  prompt layer    ${value}`, {
+      tone: value === 'compact' ? 'accentBright' : 'accent',
+      subtitle: `${PROMPT_PROFILE_DETAIL[value]} · applies to the next request${overrideNote}`,
+    }),
+  );
+}
+
 function tokenSplitListEntry(
   config: Awaited<ReturnType<typeof loadTokenSplitConfig>>,
 ): TimelineEntry {
@@ -2137,6 +2351,16 @@ export const COMMANDS: readonly Command[] = [
     run: async (argv, context) => runCodeModeAction(argv[0], context),
   },
   {
+    name: 'prompt-layer',
+    args: '[auto|compact|full]',
+    summary: 'Choose the instruction layer: compact roughly halves the fixed per-request cost',
+    autocomplete: {
+      getValues: ({ argumentIndex }) => (argumentIndex === 0 ? [...PROMPT_PROFILES] : []),
+      getDetail: (value) => PROMPT_PROFILE_DETAIL[value as PromptProfile],
+    },
+    run: async (argv, context) => runPromptProfileAction(argv[0], context),
+  },
+  {
     name: 'token-split',
     args: 'list [--json] | add|remove|toggle <id> | stats [id] | test [id] | now [reason] | reset | audit',
     summary: 'Inspect and control measured context/token projections',
@@ -2153,8 +2377,8 @@ export const COMMANDS: readonly Command[] = [
   {
     name: 'mcp',
     concurrent: true,
-    args: '[<server> login]',
-    summary: 'Browse MCP servers, skills, and the plugin marketplace',
+    args: '[add | <server> login]',
+    summary: 'Browse MCP servers, add a recommended one, or authenticate one',
     /**
      * Both word orders are accepted. `/mcp github login` reads as a sentence
      * and `/mcp login github` is the shape every other CLI uses; guessing
@@ -2165,6 +2389,9 @@ export const COMMANDS: readonly Command[] = [
       const verb = words.findIndex((word) => word.toLowerCase() === 'login');
 
       if (verb === -1) {
+        if (words.length === 1 && words[0]?.toLowerCase() === 'add') {
+          return openCuratedServerPicker(context);
+        }
         if (words.length === 0) {
           // The dedicated screen when there is one. The extension browser is
           // still the fallback for non-interactive runs, which have no screen
@@ -2207,13 +2434,18 @@ export const COMMANDS: readonly Command[] = [
      * The store is already consulted on every turn and already survives
      * restarts; what it lacked was a way to see what it had decided. A wrong
      * fact that keeps steering the agent is invisible until you can list it,
-     * and then it is one command to clear.
+     * and then it is one row to clear.
+     *
+     * The sections are separate views rather than one dump because they answer
+     * different questions — "what does it believe" and "what has it already
+     * tried" are not read at the same moment, and printing both every time is
+     * what made this unreadable.
      */
     run: async (argv, context) => {
       const workspace = context.cwd;
       const verb = argv.map((word) => word.trim().toLowerCase()).filter(Boolean)[0];
 
-      if (verb === 'forget') {
+      const forget = async (): Promise<CommandResult> => {
         await context.engine.memory.forget(workspace);
         return ok(
           entry('notice', 'memory for this workspace is gone', {
@@ -2221,40 +2453,27 @@ export const COMMANDS: readonly Command[] = [
             subtitle: 'facts, failures, strategies and notes',
           }),
         );
-      }
+      };
 
+      if (verb === 'forget') return await forget();
       if (verb) {
         return ok(
           entry('notice', `/memory does not know "${verb}"`, {
             tone: 'warn',
-            subtitle: '/memory to read it · /memory forget to drop it',
+            subtitle: '/memory opens the menu · /memory forget drops it',
           }),
         );
       }
 
       const snapshot = await context.engine.memory.snapshot(workspace);
-      const lines: string[] = [];
-      const section = (title: string, rows: readonly string[]): void => {
-        if (rows.length === 0) return;
-        lines.push(lines.length ? `\n${title}` : title, ...rows);
-      };
-
-      section(
-        'Facts',
-        rankFacts(snapshot.facts, 20).map(
-          (fact) =>
-            `  ${fact.text}${fact.confirmations > 1 ? `  (seen ${fact.confirmations}x)` : ''}`,
-        ),
-      );
-      section('Known not to work', rankFacts(snapshot.failures, 20).map((fact) => `  ${fact.text}`));
-      section(
-        'Strategies',
-        snapshot.strategies.slice(-10).map((strategy) => `  ${strategy.approach} — ${strategyStatus(strategy)}`),
-      );
       const notes = snapshot.notes.trim();
-      if (notes) section('Notes', notes.split('\n').map((line) => `  ${line}`));
+      const empty =
+        snapshot.facts.length === 0 &&
+        snapshot.failures.length === 0 &&
+        snapshot.strategies.length === 0 &&
+        !notes;
 
-      if (lines.length === 0) {
+      if (empty) {
         return ok(
           entry('notice', 'nothing remembered about this workspace yet', {
             tone: 'muted',
@@ -2263,16 +2482,59 @@ export const COMMANDS: readonly Command[] = [
         );
       }
 
-      return ok(
-        entry('notice', `memory for ${shortenPath(workspace, 48)}`, {
-          tone: 'accent',
-          subtitle: `${snapshot.facts.length} facts · ${snapshot.failures.length} failures · ${snapshot.strategies.length} strategies`,
-          detail: lines.join('\n'),
-          expand: true,
-        }),
-      );
+      return openReportMenu(context, {
+        title: `Memory · ${shortenPath(workspace, 40)}`,
+        hint: '↑↓ navigate · Enter opens',
+        views: [
+          {
+            value: 'facts',
+            label: 'Facts',
+            detail: `${snapshot.facts.length} thing(s) it believes about this workspace`,
+            primary: true,
+            run: () =>
+              reportEntry(
+                'facts',
+                rankFacts(snapshot.facts, 40).map(
+                  (fact) =>
+                    `${fact.text}${fact.confirmations > 1 ? `  (seen ${fact.confirmations}x)` : ''}`,
+                ),
+              ),
+          },
+          {
+            value: 'failures',
+            label: 'Known not to work',
+            detail: `${snapshot.failures.length} approach(es) already ruled out`,
+            run: () =>
+              reportEntry('known not to work', rankFacts(snapshot.failures, 40).map((fact) => fact.text)),
+          },
+          {
+            value: 'strategies',
+            label: 'Strategies',
+            detail: `${snapshot.strategies.length} recorded approach(es)`,
+            run: () =>
+              reportEntry(
+                'strategies',
+                snapshot.strategies.slice(-20).map((strategy) => `${strategy.approach} · ${strategyStatus(strategy)}`),
+              ),
+          },
+          {
+            value: 'notes',
+            label: 'Notes',
+            detail: notes ? `${notes.split(NEWLINE).length} line(s)` : 'No notes',
+            run: () => reportEntry('notes', notes ? notes.split(NEWLINE) : []),
+          },
+          {
+            value: 'forget',
+            label: 'Forget everything here',
+            detail: 'Drop facts, failures, strategies and notes for this workspace',
+            tone: 'danger',
+            run: forget,
+          },
+        ],
+      });
     },
   },
+
   {
     name: 'env',
     concurrent: true,
@@ -2438,6 +2700,27 @@ export const COMMANDS: readonly Command[] = [
     },
   },
   {
+    name: 'content-store',
+    args: '[show]',
+    summary: 'Explain PLIF persistent storage and its privacy boundary',
+    concurrent: true,
+    run: async (argv, context) => {
+      if (argv.length > 0 && argv[0] !== 'show') {
+        throw new PlifError('INVALID_ARGUMENT', 'usage: /content-store [show]');
+      }
+      return ok(entry('notice', '/store', {
+        tone: 'accent',
+        subtitle: 'persistent PLIF state · not mounted into /project',
+        detail: [
+          'Store root: ' + context.engine.paths.root,
+          'Contains session history, image/cache metadata, audit records and encrypted credentials.',
+          'Use /temp for disposable output. /store is runtime-owned and is not a workspace for agent writes.',
+        ].join('\n'),
+        expand: true,
+      }));
+    },
+  },
+  {
     name: 'skills',
     concurrent: true,
     summary: 'The same browser, opened on the skills tab',
@@ -2532,29 +2815,57 @@ export const COMMANDS: readonly Command[] = [
   {
     name: 'help',
     concurrent: true,
-    summary: 'List every command',
-    run: async () => {
-      // Column width comes from the longest *name*, not name+args. Including
-      // args pushes the column past the terminal width and the summaries
-      // collide with them; args get their own indented line instead.
+    args: '[--list]',
+    summary: 'Browse every command and run one',
+    /**
+     * The way in, so it should not be a wall.
+     *
+     * This printed forty-two lines of text, which is the least usable shape
+     * for the one surface whose job is discovery: you cannot act on it, and by
+     * the time you have read to the bottom the top has scrolled away. As a
+     * picker it is navigable, filterable by typing, and Enter runs the command
+     * the cursor is on — which, for most of them, opens that command's own
+     * menu. Discovery and use become the same gesture.
+     *
+     * `--list` keeps the printed form, because a flat list is what you want
+     * when you are copying a name into a note or a script.
+     */
+    run: async (argv, context) => {
       const nameWidth = Math.max(...COMMANDS.map((command) => command.name.length)) + 3;
-      const lines: string[] = [];
 
-      for (const command of COMMANDS) {
-        lines.push(`/${command.name}`.padEnd(nameWidth) + command.summary);
-        if (command.args) lines.push(' '.repeat(nameWidth) + command.args);
+      if (argv.includes('--list')) {
+        const lines: string[] = [];
+        for (const command of COMMANDS) {
+          lines.push(`/${command.name}`.padEnd(nameWidth) + command.summary);
+          if (command.args) lines.push(' '.repeat(nameWidth) + command.args);
+        }
+        return ok(
+          entry('notice', 'commands', { tone: 'accent', detail: lines.join(NEWLINE), expand: true }),
+          entry('notice', 'Anything not starting with / runs as a command in the active container.', {
+            tone: 'muted',
+          }),
+        );
       }
+      if (argv.length > 0) throw new PlifError('INVALID_ARGUMENT', 'usage: /help [--list]');
 
-      return ok(
-        entry('notice', 'commands', {
-          tone: 'accent',
-          detail: lines.join('\n'),
-          expand: true,
-        }),
-        entry('notice', 'Anything not starting with / runs as a command in the active container.', {
-          tone: 'muted',
-        }),
-      );
+      context.openPicker({
+        title: 'Commands',
+        countLabel: 'commands',
+        hint: 'type to filter · Enter runs · Esc closes',
+        items: COMMANDS.map((command) => ({
+          value: command.name,
+          label: `/${command.name}`,
+          detail: command.args ? `${command.summary} · ${command.args}` : command.summary,
+          // Aliases are how people actually reach some of these, so filtering
+          // has to find a command by the name the person knows it under.
+          searchText: [command.name, ...(command.aliases ?? []), command.summary].join(' '),
+        })),
+        onPick: (picked) => {
+          // Run it bare, which for most commands now opens their own menu.
+          runCommandFromMenu(String(picked), [], context);
+        },
+      });
+      return ok();
     },
   },
 
@@ -2619,32 +2930,13 @@ export const COMMANDS: readonly Command[] = [
   {
     name: 'ps',
     concurrent: true,
-    summary: 'List containers',
-    run: async (_argv, context) => {
-      const containers = context.engine.list();
-      if (containers.length === 0) {
-        return ok(entry('notice', 'No containers. Run /new to create one.', { tone: 'muted' }));
-      }
-      return ok(
-        entry('notice', 'containers', {
-          tone: 'accent',
-          detail: containers
-            .map((container) => {
-              const status = container.status();
-              const marker = container.name === context.current?.name ? glyph.caret : ' ';
-              return [
-                `${marker} ${container.name.padEnd(18)}`,
-                container.id.slice(0, 8).padEnd(10),
-                status.state.padEnd(9),
-                `${status.usage.execCount} execs`.padEnd(10),
-                formatBytes(status.usage.peakMemoryBytes),
-              ].join(' ');
-            })
-            .join('\n'),
-          expand: true,
-        }),
-      );
-    },
+    summary: 'Browse containers and act on one',
+    run: async (_argv, context) =>
+      openContainerPicker(context, {
+        title: 'Containers',
+        hint: '↑↓ navigate · Enter opens actions',
+        onPick: (name) => openContainerActions(name, context),
+      }),
   },
 
   {
@@ -2653,7 +2945,13 @@ export const COMMANDS: readonly Command[] = [
     summary: 'Aim input at a container',
     run: async (argv, context) => {
       const ref = argv[0];
-      if (!ref) throw new PlifError('INVALID_ARGUMENT', 'usage: /use <container>');
+      if (!ref) {
+        return openContainerPicker(context, {
+          title: 'Target a container',
+          hint: '↑↓ navigate · Enter targets',
+          onPick: (name) => runCommandFromMenu('use', [name], context),
+        });
+      }
       const container = context.engine.require(ref);
       context.setCurrent(container);
       return ok(entry('notice', `now targeting ${container.name}`, { tone: 'accent' }));
@@ -2665,6 +2963,15 @@ export const COMMANDS: readonly Command[] = [
     args: '[container]',
     summary: 'Stop a container and reap its process tree',
     run: async (argv, context) => {
+      // Bare, with nothing targeted, this used to be an error telling you to
+      // go and run two other commands first. Offer the list instead.
+      if (!argv[0] && !context.current) {
+        return openContainerPicker(context, {
+          title: 'Stop a container',
+          hint: '↑↓ navigate · Enter stops',
+          onPick: (name) => runCommandFromMenu('stop', [name], context),
+        });
+      }
       const container = resolveTarget(argv[0], context);
       await container.stop('stopped from the CLI');
       const usage = container.status().usage;
@@ -2682,6 +2989,14 @@ export const COMMANDS: readonly Command[] = [
     args: '[container]',
     summary: 'Remove a container and discard its layer',
     run: async (argv, context) => {
+      // As with /stop: no target is a reason to show the list, not to refuse.
+      if (!argv[0] && !context.current) {
+        return openContainerPicker(context, {
+          title: 'Remove a container',
+          hint: '↑↓ navigate · Enter removes',
+          onPick: (picked) => runCommandFromMenu('rm', [picked], context),
+        });
+      }
       const container = resolveTarget(argv[0], context);
       const name = container.name;
       await context.engine.remove(container.id);
@@ -2692,31 +3007,49 @@ export const COMMANDS: readonly Command[] = [
 
   {
     name: 'commit',
-    args: '<layer-name> [container]',
+    args: '[layer-name] [container]',
     summary: 'Snapshot the container workspace into a layer',
     run: async (argv, context) => {
-      const name = argv[0];
-      if (!name) throw new PlifError('INVALID_ARGUMENT', 'usage: /commit <layer-name>');
-      const container = resolveTarget(argv[1], context);
-      const layer = await container.commit(name);
-      return ok(
-        entry('step', `committed ${name}`, {
-          status: 'done',
-          subtitle: `${layer.digest.slice(0, 12)} · ${layer.entries.length} entries · ${formatBytes(layer.size)}`,
-        }),
-      );
+      // No container named and none targeted: choose one, the same way /stop
+      // and /rm do, rather than refusing with a usage string. The chosen
+      // container goes straight to the commit path rather than back through
+      // this command, which with no target would just reopen the picker.
+      if (!argv[1] && !context.current) {
+        return openContainerPicker(context, {
+          title: 'Commit a container',
+          hint: '↑↓ navigate · Enter asks for the layer name',
+          onPick: (picked) => {
+            const container = context.engine.get(picked);
+            if (!container) return;
+            void commitContainer(container, argv[0], context)
+              .then((result) => result.entries.forEach((item) => context.notify?.(item)))
+              .catch((error: unknown) => {
+                const message = error instanceof Error ? error.message : String(error);
+                context.notify?.(entry('notice', `commit: ${message}`, { tone: 'danger' }));
+              });
+          },
+        });
+      }
+      return await commitContainer(resolveTarget(argv[1], context), argv[0], context);
     },
   },
 
   {
     name: 'build',
-    args: '<reference> <directory>',
+    args: '[reference] [directory]',
     summary: 'Build an image from a host directory',
     run: async (argv, context) => {
-      const [reference, source] = argv;
-      if (!reference || !source) {
-        throw new PlifError('INVALID_ARGUMENT', 'usage: /build <reference> <directory>');
-      }
+      const reference = argv[0] ?? await promptText(context, {
+        text: 'Image reference',
+        why: 'How the image will be named, for example myproject/base:1.0.',
+      });
+      if (!reference) return cancelled('build');
+      const source = argv[1] ?? await promptText(context, {
+        text: 'Source directory',
+        why: `Relative to ${shortenPath(context.cwd, 48)}, or an absolute path.`,
+      });
+      if (!source) return cancelled('build');
+
       const image = await context.engine.buildImage({
         reference,
         source: path.resolve(context.cwd, source),
@@ -2733,24 +3066,37 @@ export const COMMANDS: readonly Command[] = [
   {
     name: 'images',
     concurrent: true,
-    summary: 'List images in the store',
+    summary: 'Browse images in the store',
     run: async (_argv, context) => {
       const images = await context.engine.images.list();
       if (images.length === 0) {
         return ok(entry('notice', 'No images yet. Run /build to make one.', { tone: 'muted' }));
       }
-      return ok(
-        entry('notice', 'images', {
-          tone: 'accent',
-          detail: images
-            .map(
-              (image) =>
-                `${image.reference.padEnd(28)} ${image.digest.slice(0, 12)}  ${image.layers.length} layers`,
-            )
-            .join('\n'),
-          expand: true,
-        }),
-      );
+      // Same shape as /ps: the facts that were columns in a printed table are
+      // the detail line of the row they describe.
+      context.openPicker({
+        title: 'Images',
+        countLabel: 'images',
+        hint: '↑↓ navigate · Enter shows the layers · Esc closes',
+        items: images.map((image) => ({
+          value: image.reference,
+          label: image.reference,
+          detail: `${image.digest.slice(0, 12)} · ${image.layers.length} layer${image.layers.length === 1 ? '' : 's'}`,
+        })),
+        onPick: (picked) => {
+          const image = images.find((candidate) => candidate.reference === String(picked));
+          if (!image) return;
+          context.notify?.(
+            entry('notice', image.reference, {
+              tone: 'accent',
+              subtitle: image.digest,
+              detail: image.layers.map((layer, index) => `${String(index + 1).padStart(2)}  ${layer}`).join(NEWLINE),
+              expand: true,
+            }),
+          );
+        },
+      });
+      return ok();
     },
   },
 
@@ -2781,13 +3127,28 @@ export const COMMANDS: readonly Command[] = [
   {
     name: 'providers',
     aliases: ['provider'],
-    args: '[add]',
-    summary: 'Choose a provider, then one of its models',
+    args: '[add|disconnect]',
+    summary: 'Connect, disconnect, or choose a provider and model',
     run: async (argv, context) => {
       const stored = (await loadGlobalConfig().catch(() => ({}))) as StoredConfig;
       const action = argv[0]?.trim().toLowerCase();
-      if (action && action !== 'add') {
-        throw new PlifError('INVALID_ARGUMENT', 'usage: /providers [add]');
+      if (action && action !== 'add' && action !== 'disconnect') {
+        throw new PlifError('INVALID_ARGUMENT', 'usage: /providers [add|disconnect]');
+      }
+      if (action === 'disconnect') {
+        const selected = argv[1]?.trim();
+        if (!selected) throw new PlifError('INVALID_ARGUMENT', 'usage: /providers disconnect <provider>');
+        if (selected === 'openai') {
+          await new OpenAIOAuthClient().disconnect();
+        }
+        if (context.credentials) {
+          await context.credentials.forget(credentialVariableForProvider(selected, stored));
+        }
+        context.notify?.(entry('notice', `${selected} disconnected`, {
+          tone: 'accent',
+          subtitle: 'Its saved credential was removed. Reconnect with /provider.',
+        }));
+        return ok();
       }
       if (action === 'add') {
         if (await addCustomProvider(context, stored)) {
@@ -2918,20 +3279,55 @@ export const COMMANDS: readonly Command[] = [
       }
       const value = argv.join(' ').trim();
       const command = value.toLowerCase();
-      if (command === 'off' || command === 'clear' || command === 'execute' || command === 'work') {
-        await context.setPlanMode(false);
+
+      const leave = async (): Promise<CommandResult> => {
+        await context.setPlanMode!(false);
         return ok(entry('notice', `${binaryStateIndicator('off').icon} plan mode`, {
           tone: 'danger',
           subtitle: 'the next agent turn may make workspace changes',
         }));
+      };
+      const enter = async (request?: string): Promise<CommandResult> => {
+        await context.setPlanMode!(true, request);
+        return ok(entry('notice', `${binaryStateIndicator('on').icon} plan mode`, {
+          tone: 'success',
+          subtitle: request
+            ? 'the plan request was sent without write tools'
+            : 'inspect files and propose a plan; use /plan off to resume work',
+        }));
+      };
+
+      if (command === 'off' || command === 'clear' || command === 'execute' || command === 'work') {
+        return await leave();
       }
-      await context.setPlanMode(true, value || undefined);
-      return ok(entry('notice', `${binaryStateIndicator('on').icon} plan mode`, {
-        tone: 'success',
-        subtitle: value
-          ? 'the plan request was sent without write tools'
-          : 'inspect files and propose a plan; use /plan off to resume work',
-      }));
+      // A description is a request, not a mode name: send it straight through.
+      if (value) return await enter(value);
+
+      // Bare, this is a mode switch with two states — the same shape as
+      // /permissions — so it says which one is active instead of silently
+      // toggling and leaving you to infer where you landed.
+      const active = context.planMode === true;
+      return openReportMenu(context, {
+        title: `Plan mode · ${active ? 'on' : 'off'}`,
+        hint: '↑↓ navigate · Enter switches',
+        countLabel: 'modes',
+        views: [
+          {
+            value: 'on',
+            label: 'Enter plan mode',
+            detail: 'Read and propose only; the write tools are withheld',
+            ...(active ? { primary: true } : {}),
+            run: () => enter(),
+          },
+          {
+            value: 'off',
+            label: 'Leave plan mode',
+            detail: 'The next agent turn may change the workspace',
+            ...(active ? {} : { primary: true }),
+            run: leave,
+          },
+        ],
+      });
     },
   },
 
@@ -2945,26 +3341,56 @@ export const COMMANDS: readonly Command[] = [
       }
       const value = argv.join(' ').trim();
       const command = value.toLowerCase();
-      if (!value) {
-        const goal = context.goalStatus();
-        return ok(entry('notice', goal
-          ? `goal ${goal.status}: ${goal.condition}`
-          : 'no active goal', {
-            tone: goal ? 'accent' : 'muted',
-          }));
-      }
-      if (command === 'clear' || command === 'off' || command === 'reset') {
-        await context.clearGoal();
+
+      const clear = async (): Promise<CommandResult> => {
+        await context.clearGoal!();
         return ok(entry('notice', 'goal cleared', { tone: 'accent' }));
-      }
-      if (value.length > 2000) {
-        throw new PlifError('INVALID_ARGUMENT', 'goal condition must be 2000 characters or fewer');
-      }
-      await context.startGoal(value);
-      return ok(entry('notice', 'goal active', {
-        tone: 'accent',
-        subtitle: value,
-      }));
+      };
+      const start = async (condition: string): Promise<CommandResult> => {
+        if (condition.length > 2000) {
+          throw new PlifError('INVALID_ARGUMENT', 'goal condition must be 2000 characters or fewer');
+        }
+        await context.startGoal!(condition);
+        return ok(entry('notice', 'goal active', { tone: 'accent', subtitle: condition }));
+      };
+      const ask = async (): Promise<CommandResult> => {
+        const condition = await promptText(context, {
+          text: 'Completion condition',
+          why: 'Something checkable, so the agent can tell when it is done — "npm test passes and the lint job is clean".',
+        });
+        return condition ? await start(condition) : cancelled('goal');
+      };
+
+      if (command === 'clear' || command === 'off' || command === 'reset') return await clear();
+      // A condition typed inline is a request, not a menu selection.
+      if (value) return await start(value);
+
+      // Bare, this used to print the status and stop — a dead end that told
+      // you a goal existed but not how to set or clear one.
+      const goal = context.goalStatus();
+      return openReportMenu(context, {
+        title: goal ? `Goal · ${goal.status}` : 'Goal · none',
+        hint: '↑↓ navigate · Enter selects',
+        countLabel: 'actions',
+        views: [
+          {
+            value: 'set',
+            label: goal ? 'Replace the goal' : 'Set a goal',
+            detail: goal ? goal.condition : 'Describe a condition the agent can verify',
+            primary: true,
+            run: ask,
+          },
+          ...(goal
+            ? [{
+                value: 'clear',
+                label: 'Clear the goal',
+                detail: 'Stop working toward it',
+                tone: 'danger' as const,
+                run: clear,
+              }]
+            : []),
+        ],
+      });
     },
   },
 
@@ -3019,21 +3445,42 @@ export const COMMANDS: readonly Command[] = [
         ['network block', report.networkBlock],
         ['accounting', report.accounting],
       ] as const;
-
-      return ok(
-        entry('notice', `sandbox: ${report.backend} (${report.isolation})`, {
-          tone: report.isolation === 'none' ? 'danger' : 'accent',
-          detail: [
+      const enforcement = (): CommandResult =>
+        reportEntry(
+          `sandbox: ${report.backend} (${report.isolation})`,
+          [
             ...flags.map(([label, on]) => `${on ? glyph.done : glyph.failed} ${label}`),
             '',
             `output decoded as ${report.textEncoding}`,
-            ...(report.degradations.length
-              ? ['', ...report.degradations.map((note) => `! ${note}`)]
-              : []),
-          ].join('\n'),
-          expand: true,
-        }),
-      );
+          ],
+          { tone: report.isolation === 'none' ? 'danger' : 'accent' },
+        );
+
+      // With nothing degraded there is one thing to say, and a menu offering a
+      // single row would be ceremony. The second view appears only when there
+      // is a second thing to read.
+      if (report.degradations.length === 0) return enforcement();
+
+      return openReportMenu(context, {
+        title: `Sandbox · ${report.backend} (${report.isolation})`,
+        hint: '↑↓ navigate · Enter opens',
+        views: [
+          {
+            value: 'enforcement',
+            label: 'What is enforced',
+            detail: `${flags.filter(([, on]) => on).length} of ${flags.length} controls active`,
+            primary: true,
+            run: enforcement,
+          },
+          {
+            value: 'degradations',
+            label: 'What this machine cannot enforce',
+            detail: `${report.degradations.length} gap(s) in the isolation`,
+            tone: 'danger',
+            run: () => reportEntry('sandbox degradations', [...report.degradations], { tone: 'warn' }),
+          },
+        ],
+      });
     },
   },
 
@@ -3043,74 +3490,114 @@ export const COMMANDS: readonly Command[] = [
     summary: 'Show the active policy rules',
     run: async (_argv, context) => {
       const document = context.engine.policy.document;
-      return ok(
-        entry('notice', `policy: trust=${document.trust} fallback=${document.fallback}`, {
-          tone: 'accent',
-          detail: [
-            ...document.rules.map(
-              (rule) =>
-                `${rule.decision.padEnd(6)} ${rule.name.padEnd(24)} ${
-                  rule.match ?? rule.argvPattern ?? '*'
-                }`,
-            ),
-            '',
-            `network allowlist: ${
-              document.networkAllowlist.length ? document.networkAllowlist.join(', ') : '(empty)'
-            }`,
-          ].join('\n'),
-          expand: true,
-        }),
+      const rules = document.rules.map(
+        (rule) =>
+          `${rule.decision.padEnd(6)} ${rule.name.padEnd(28)} ${rule.match ?? rule.argvPattern ?? '*'}`,
       );
+      const byDecision = (decision: string): string[] =>
+        document.rules
+          .filter((rule) => rule.decision === decision)
+          .map((rule) => `${rule.name.padEnd(28)} ${rule.match ?? rule.argvPattern ?? '*'}`);
+
+      return openReportMenu(context, {
+        title: `Policy · trust=${document.trust} · fallback=${document.fallback}`,
+        hint: '↑↓ navigate · Enter opens',
+        views: [
+          {
+            value: 'all',
+            label: 'All rules',
+            detail: `${rules.length} rule${rules.length === 1 ? '' : 's'}, in evaluation order`,
+            primary: true,
+            run: () => reportEntry('policy rules', rules),
+          },
+          {
+            // The rules that refuse outright are the ones worth being able to
+            // read on their own: they are why an action failed.
+            value: 'deny',
+            label: 'What is denied',
+            detail: `${byDecision('deny').length} rule(s) that refuse outright`,
+            run: () => reportEntry('denied by policy', byDecision('deny'), { tone: 'danger' }),
+          },
+          {
+            value: 'ask',
+            label: 'What needs approval',
+            detail: `${byDecision('ask').length} rule(s) that prompt first`,
+            run: () => reportEntry('needs approval', byDecision('ask'), { tone: 'warn' }),
+          },
+          {
+            value: 'network',
+            label: 'Network allowlist',
+            detail: document.networkAllowlist.length
+              ? `${document.networkAllowlist.length} host(s) reachable`
+              : 'Empty — no outbound host is allowed',
+            run: () => reportEntry('network allowlist', [...document.networkAllowlist]),
+          },
+        ],
+      });
     },
   },
 
   {
     name: 'config',
     concurrent: true,
-    args: 'auto-approve [on|off|show]',
-    summary: 'Open PLIF settings, or change approval mode directly',
+    summary: 'Open PLIF settings',
     run: async (argv, context) => {
-      if (argv.length === 0 && context.openConfig) {
+      if (argv.length > 0) {
+        // `/config auto-approve on|off` used to write the approval setting too,
+        // through a boolean that could not express all four modes: turning it
+        // "off" from `full` silently landed on `ask`, and "show" reported `full`
+        // as on. One setting with two commands and two vocabularies disagreed in
+        // exactly the case that matters. /permissions owns it now.
+        throw new PlifError(
+          'INVALID_ARGUMENT',
+          'approval mode moved to /permissions [ask|auto-approve|full|deny]',
+        );
+      }
+      if (context.openConfig) {
         context.openConfig();
         return ok();
       }
-      const config = await loadGlobalConfig();
-      const action = argv[0] === 'auto-approve' ? (argv[1] ?? 'show') : (argv[0] ?? 'show');
-      if (action === 'show') {
-        const state = isAutoApproveEnabled(config) ? 'on' : 'off';
-        return ok(entry('notice', `${binaryStateIndicator(state).icon} auto approve`, {
-          tone: state === 'on' ? 'success' : 'danger',
-          subtitle: globalConfigPath(),
-        }));
-      }
-      if (action !== 'on' && action !== 'off') {
-        throw new PlifError('INVALID_ARGUMENT', 'usage: /config auto-approve [on|off|show]');
-      }
-      const next = await setAutoApprove(action === 'on');
-      context.engine.approvals.setAutoApprove(isAutoApproveEnabled(next));
-      return ok(entry('notice', `${binaryStateIndicator(action === 'on' ? 'on' : 'off').icon} auto approve`, {
-        tone: action === 'on' ? 'success' : 'danger',
+      return ok(entry('notice', 'settings need an interactive session', {
+        tone: 'warn',
         subtitle: globalConfigPath(),
       }));
     },
   },
 
   {
-    name: 'permission',
+    name: 'permissions',
+    aliases: ['permission'],
     concurrent: true,
-    args: '[ask|auto-approve|deny]',
-    summary: 'Show or set the global approval mode',
+    args: '[ask|auto-approve|full|deny]',
+    summary: 'Choose how PLIF approves model actions',
     run: async (argv, context) => {
       const current = await loadGlobalConfig();
       const mode = argv[0];
       if (!mode) {
-        return ok(entry('notice', `permission: ${permissionMode(current)}`, {
-          tone: 'accent',
-          subtitle: globalConfigPath(),
-        }));
+        context.openPicker({
+          title: 'Permissões',
+          hint: `ativo: ${permissionMode(current)} · escolha um modo · Esc cancela`,
+          countLabel: 'modos',
+          items: [
+            { value: 'ask', label: 'Perguntar', detail: 'Pede confirmação antes de cada ação de modelo, ferramenta, arquivo ou rede.', current: permissionMode(current) === 'ask' },
+            { value: 'auto-approve', label: 'Aprovar para mim', detail: 'Aprova ações dentro do workspace sem pausar. Restrições de segurança continuam.', current: permissionMode(current) === 'auto-approve' },
+            { value: 'full', label: 'Permissão Total', detail: 'Sem prompts para ações PLIF na sessão e workspace. Sandbox, máscaras e bloqueios rígidos continuam.', current: permissionMode(current) === 'full' },
+          ],
+          onPick: async (selected) => {
+            const selectedMode = String(selected);
+            if (selectedMode !== 'ask' && selectedMode !== 'auto-approve' && selectedMode !== 'full') return;
+            const next = await setPermissionMode(selectedMode);
+            context.engine.approvals.setPermissionMode(permissionMode(next));
+            context.notify?.(entry('notice', `permissão: ${selectedMode}`, {
+              tone: selectedMode === 'full' ? 'warn' : selectedMode === 'auto-approve' ? 'success' : 'accent',
+              subtitle: globalConfigPath(),
+            }));
+          },
+        });
+        return ok();
       }
-      if (mode !== 'ask' && mode !== 'auto-approve' && mode !== 'deny') {
-        throw new PlifError('INVALID_ARGUMENT', 'usage: /permission [ask|auto-approve|deny]');
+      if (mode !== 'ask' && mode !== 'auto-approve' && mode !== 'full' && mode !== 'deny') {
+        throw new PlifError('INVALID_ARGUMENT', 'usage: /permissions [ask|auto-approve|full|deny]');
       }
       const next = await setPermissionMode(mode);
       context.engine.approvals.setPermissionMode(permissionMode(next));
@@ -3132,46 +3619,6 @@ export const COMMANDS: readonly Command[] = [
       getDetail: () => 'Menu interativo de agentes · Enter abre',
     },
     run: async (argv, context) => runAgentAction(argv[0] ?? 'menu', argv.slice(1), context),
-  },
-
-  {
-    name: 'profile',
-    args: 'list | add <name> <model> <system prompt> | use <name> | remove <name>',
-    summary: 'Manage the persistent main-agent identity',
-    run: async (argv, context) => {
-      const config = await loadGlobalConfig();
-      const profiles = { ...profilesOf(config) };
-      const action = argv[0] ?? 'list';
-      if (action === 'list') {
-        const names = Object.entries(profiles).map(([name, profile]) =>
-          `${name}${config.activeProfile === name ? ' (active)' : ''} → ${profile.model ?? '(current model)'}${profile.name ? ` — ${profile.name}` : ''}${profile.description ? ` · ${profile.description}` : ''}`,
-        );
-        return ok(entry('notice', names.length ? names.join('\n') : 'no profiles configured', { tone: 'accent', subtitle: globalConfigPath(), expand: true }));
-      }
-      if (action === 'add') {
-        const name = argv[1]?.trim();
-        const model = argv[2]?.trim();
-        const systemPrompt = argv.slice(3).join(' ').trim();
-        if (!name || !model || !systemPrompt) throw new PlifError('INVALID_ARGUMENT', 'usage: /profile add <name> <model> <system prompt>');
-        profiles[name] = { model, name, systemPrompt };
-        await saveGlobalConfig({ ...config, profiles });
-        return ok(entry('notice', `profile ${name} saved`, { tone: 'success', subtitle: globalConfigPath() }));
-      }
-      if (action === 'use') {
-        const name = argv[1]?.trim();
-        if (!name || !profiles[name]) throw new PlifError('INVALID_ARGUMENT', 'unknown profile; use /profile list');
-        await context.switchProfile(name);
-        return ok(entry('notice', `profile is now ${name}`, { tone: 'accent', subtitle: 'conversation reset for the new identity' }));
-      }
-      if (action === 'remove') {
-        const name = argv[1]?.trim();
-        if (!name || !profiles[name]) throw new PlifError('INVALID_ARGUMENT', 'usage: /profile remove <name>');
-        delete profiles[name];
-        await saveGlobalConfig({ ...config, profiles, ...(config.activeProfile === name ? { activeProfile: undefined } : {}) });
-        return ok(entry('notice', `profile ${name} removed`, { tone: 'accent' }));
-      }
-      throw new PlifError('INVALID_ARGUMENT', 'usage: /profile list | add | use | remove');
-    },
   },
 
   {
@@ -3242,28 +3689,50 @@ export const COMMANDS: readonly Command[] = [
     run: async (argv, context) => {
       await context.engine.audit.flush();
 
-      if (argv.includes('--verify')) {
+      const recent = async (): Promise<CommandResult> => {
+        const records: string[] = [];
+        for await (const record of context.engine.audit.read()) {
+          records.push(
+            `${record.at.slice(11, 19)}  ${record.type.padEnd(20)} ${JSON.stringify(record.data).slice(0, 90)}`,
+          );
+        }
+        return reportEntry(`audit · ${records.length} records today`, records.slice(-20));
+      };
+
+      const verify = async (): Promise<CommandResult> => {
         const result = await context.engine.audit.verify();
         return ok(
           entry('notice', result.ok ? 'audit chain intact' : 'AUDIT CHAIN BROKEN', {
             tone: result.ok ? 'success' : 'danger',
-            subtitle: result.ok ? undefined : `first bad record: seq ${result.brokenAt}`,
+            ...(result.ok ? {} : { subtitle: `first bad record: seq ${result.brokenAt}` }),
           }),
         );
-      }
+      };
 
-      const records: string[] = [];
-      for await (const record of context.engine.audit.read()) {
-        records.push(
-          `${record.at.slice(11, 19)}  ${record.type.padEnd(20)} ${JSON.stringify(record.data).slice(0, 90)}`,
-        );
-      }
-      return ok(
-        entry('notice', `audit — ${records.length} records today`, {
-          tone: 'accent',
-          detail: records.slice(-20).join('\n') || '(empty)',
-        }),
-      );
+      // `--verify` was a flag you had to know existed. It is a row now, and
+      // the flag still works for anyone who already learned it.
+      if (argv.includes('--verify')) return await verify();
+      if (argv.length > 0) throw new PlifError('INVALID_ARGUMENT', 'usage: /audit [--verify]');
+
+      return openReportMenu(context, {
+        title: 'Audit log',
+        hint: '↑↓ navigate · Enter opens',
+        views: [
+          {
+            value: 'recent',
+            label: 'Recent records',
+            detail: 'The last 20 audited actions from today',
+            primary: true,
+            run: recent,
+          },
+          {
+            value: 'verify',
+            label: 'Verify the hash chain',
+            detail: 'Re-hash every record and report the first break',
+            run: verify,
+          },
+        ],
+      });
     },
   },
 
@@ -3285,6 +3754,25 @@ export const COMMANDS: readonly Command[] = [
     },
   },
 ];
+
+/**
+ * Commands that were removed because another command already did the job.
+ *
+ * They are not kept as aliases: an alias would leave two names for one
+ * behaviour in `/help`, which is the thing being fixed. What is kept is the
+ * redirect, so muscle memory lands on an explanation rather than on "unknown
+ * command" plus a fuzzy guess.
+ */
+export const RETIRED_COMMANDS: Readonly<Record<string, { readonly replacement: string; readonly why: string }>> = {
+  profile: {
+    replacement: '/persona',
+    why: 'Both stored and switched the same persistent identity; /persona is the one with a menu, a guided form, /persona show and /persona off.',
+  },
+  'auto-approve': {
+    replacement: '/permissions',
+    why: 'Approval mode has four settings, and the boolean spelling could not express them.',
+  },
+};
 
 export function findCommand(name: string): Command | null {
   const needle = name.toLowerCase();
@@ -3462,6 +3950,180 @@ export function tabArgumentCompletion(state: ArgumentCompletionState): string | 
 }
 
 // ---------------------------------------------------------------------------
+
+
+/**
+ * The containers, as something you can act on.
+ *
+ * The old flow was: run `/ps`, read a name off a printed table, remember it,
+ * then type `/stop <name>` — four steps and one act of memorisation for one
+ * decision. Every fact `/ps` printed is on the row here, and Enter opens the
+ * verbs for the container the cursor is already on, so the name never has to
+ * be transcribed.
+ *
+ * `/use`, `/stop`, `/rm` and `/commit` still take a name, because a name typed
+ * from memory is faster than a menu when you already know it. They open this
+ * picker only when called bare, which previously was an error.
+ */
+
+/**
+ * One shape for every read-only report that has more than one view.
+ *
+ * `/usage` worked out the pattern — a title, a hint, and one row per view with
+ * a label and a line saying what it contains — and the reason to factor it out
+ * rather than copy it five times is that the value here is *consistency*. A
+ * surface where each report invented its own layout is the thing that made
+ * plif feel like a pile of separate tools, and five hand-written pickers drift
+ * apart the moment one of them is edited.
+ *
+ * Views run on pick and report through the live notice channel, because a
+ * picker has already closed by the time its work finishes.
+ */
+interface ReportView {
+  readonly value: string;
+  readonly label: string;
+  readonly detail: string;
+  /** Marked as the row the cursor starts on. */
+  readonly primary?: boolean;
+  readonly tone?: 'danger';
+  run(): CommandResult | Promise<CommandResult>;
+}
+
+function openReportMenu(
+  context: CommandContext,
+  options: {
+    readonly title: string;
+    readonly hint: string;
+    readonly countLabel?: string;
+    readonly views: readonly ReportView[];
+  },
+): CommandResult {
+  const views = options.views;
+  context.openPicker({
+    title: options.title,
+    countLabel: options.countLabel ?? 'views',
+    hint: `${options.hint} · Esc closes`,
+    items: views.map((view) => ({
+      value: view.value,
+      label: view.label,
+      detail: view.detail,
+      ...(view.primary ? { current: true } : {}),
+      ...(view.tone ? { tone: view.tone } : {}),
+    })),
+    selected: Math.max(0, views.findIndex((view) => view.primary)),
+    onPick: (picked) => {
+      const view = views.find((candidate) => candidate.value === String(picked));
+      if (!view) return;
+      void Promise.resolve(view.run())
+        .then((result) => result.entries.forEach((item) => context.notify?.(item)))
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          context.notify?.(entry('notice', `${options.title}: ${message}`, { tone: 'danger' }));
+        });
+    },
+  });
+  return ok();
+}
+
+/** Splitting on this rather than an inline literal keeps the source free of raw newlines. */
+const NEWLINE = '\n';
+
+/** A report body, in the one shape every view returns. */
+function reportEntry(
+  title: string,
+  lines: readonly string[],
+  options: { readonly tone?: 'accent' | 'danger' | 'muted' | 'success' | 'warn'; readonly subtitle?: string } = {},
+): CommandResult {
+  return ok(
+    entry('notice', title, {
+      tone: options.tone ?? 'accent',
+      ...(options.subtitle ? { subtitle: options.subtitle } : {}),
+      detail: lines.length > 0 ? lines.join('\n') : '(nothing to show)',
+      expand: true,
+    }),
+  );
+}
+
+function containerRows(context: CommandContext): FlatPickerRequest['items'] {
+  return context.engine.list().map((container) => {
+    const status = container.status();
+    const active = container.name === context.current?.name;
+    return {
+      value: container.name,
+      label: container.name,
+      current: active,
+      detail: [
+        container.id.slice(0, 8),
+        status.state,
+        `${status.usage.execCount} execs`,
+        formatBytes(status.usage.peakMemoryBytes),
+        active ? 'active' : '',
+      ].filter(Boolean).join(' · '),
+    };
+  });
+}
+
+function openContainerPicker(
+  context: CommandContext,
+  options: {
+    readonly title: string;
+    readonly hint: string;
+    readonly onPick: (name: string) => void;
+  },
+): CommandResult {
+  const items = containerRows(context);
+  if (items.length === 0) {
+    return ok(entry('notice', 'No containers. Run /new to create one.', { tone: 'muted' }));
+  }
+  context.openPicker({
+    title: options.title,
+    countLabel: 'containers',
+    hint: `${options.hint} · Esc closes`,
+    items,
+    selected: Math.max(0, items.findIndex((item) => item.current)),
+    onPick: (picked) => options.onPick(String(picked)),
+  });
+  return ok();
+}
+
+/**
+ * Run any command from a menu, reporting through the live notice channel.
+ *
+ * A picker has already closed by the time the command it started finishes, so
+ * the result cannot be a return value; it goes to the same notice channel the
+ * rest of the interface uses.
+ */
+function runCommandFromMenu(name: string, argv: readonly string[], context: CommandContext): void {
+  void findCommand(name)?.run(argv, context)
+    .then((result) => result.entries.forEach((item) => context.notify?.(item)))
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      context.notify?.(entry('notice', `${name}: ${message}`, { tone: 'danger' }));
+    });
+}
+
+/** The verbs available for one container, once it has been chosen. */
+function openContainerActions(container: string, context: CommandContext): void {
+  context.openPicker({
+    title: `Container · ${container}`,
+    countLabel: 'actions',
+    hint: 'Enter runs · Esc closes',
+    /**
+     * Only the verbs a container name is the whole argument for.
+     *
+     * `/commit` is deliberately absent: it takes a layer name first and the
+     * container second, so a row that sent one value would commit under the
+     * container's own name. A picker cannot ask for the layer name, so that
+     * one stays a typed command until there is a surface that can.
+     */
+    items: [
+      { value: 'use', label: 'Target this container', detail: 'Send the next commands here' },
+      { value: 'stop', label: 'Stop', detail: 'Stop it and reap its process tree' },
+      { value: 'rm', label: 'Remove', detail: 'Remove it and discard its layer', tone: 'danger' as const },
+    ],
+    onPick: (picked) => runCommandFromMenu(String(picked), [container], context),
+  });
+}
 
 function resolveTarget(ref: string | undefined, context: CommandContext): Container {
   if (ref) return context.engine.require(ref);

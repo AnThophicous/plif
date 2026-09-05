@@ -30,11 +30,36 @@ export function compileAgentInstructions(
   const availableTools = new Set(context.tools?.map((tool) => tool.name) ?? []);
   const contextTokens = context.contextTokens ?? Number.POSITIVE_INFINITY;
 
-  const staticModules = loadMarkdownInstructions()
+  /**
+   * Pick the full or the compact layer, by profile or by context size.
+   *
+   * The two layers are already distinguished by id: every compact module is
+   * `<something>-compact`, and the full one it replaces is `<something>`. So an
+   * explicit profile needs no new frontmatter — it keeps one side of each pair
+   * and every module that has no twin. `auto` falls through to the
+   * context-window rule the modules already declare.
+   */
+  const loaded = loadMarkdownInstructions();
+  const compactIds = new Set(
+    loaded.map((module) => module.id).filter((id) => id.endsWith('-compact')),
+  );
+  const hasCompactTwin = (id: string): boolean => compactIds.has(`${id}-compact`);
+  const profile = context.promptProfile ?? 'auto';
+  const layerFilter = (module: { id: string; minContext?: number; maxContext?: number }): boolean => {
+    if (profile === 'compact') {
+      return module.id.endsWith('-compact') || !hasCompactTwin(module.id);
+    }
+    if (profile === 'full') return !module.id.endsWith('-compact');
+    return (
+      (module.minContext === undefined || contextTokens >= module.minContext) &&
+      (module.maxContext === undefined || contextTokens <= module.maxContext)
+    );
+  };
+
+  const staticModules = loaded
     .filter((module) => module.modes?.includes(context.mode) ?? true)
     .filter((module) => !module.effort || module.effort === context.effort)
-    .filter((module) => module.minContext === undefined || contextTokens >= module.minContext)
-    .filter((module) => module.maxContext === undefined || contextTokens <= module.maxContext)
+    .filter(layerFilter)
     .filter((module) => module.tools?.every((name) => availableTools.has(name)) ?? true)
     .map((module) => ({ id: module.id, order: module.order, render: () => renderInstruction(module.source) }));
 

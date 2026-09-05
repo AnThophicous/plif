@@ -62,7 +62,7 @@ describe('modular system prompt', () => {
     assert.match(plif, /evaluator-optimizer/i);
   });
 
-  it('requires anti-AI-slop and Pli\'ef Galileu globally, plus Argus in the Plif effort', () => {
+  it('requires anti-AI-slop and Galileu in every effort, and routes Argus by domain', () => {
     const skills = [
       '- anti-ai-slop: Clean, human-readable output without generated-sounding prose',
       '- plief-galileu: Socratic decision review',
@@ -79,7 +79,10 @@ describe('modular system prompt', () => {
     assert.match(plif, /## Mandatory PLIF skills and review checkpoint/);
     assert.match(plif, /skill.*name.*anti-ai-slop/s);
     assert.match(plif, /skill.*name.*plief-galileu/s);
-    assert.match(plif, /skill.*name.*plief-argus/s);
+    // Argus is no longer preloaded by the effort: it reaches the model as a domain
+    // rule, so the gate must not name it and the routing table must.
+    assert.doesNotMatch(plif, /\{ "name": "plief-argus" \}/);
+    assert.match(plif, /Load `plief-argus` when/);
     assert.match(plif, /before answering.*using another tool/i);
     assert.match(plif, /wait for all requested results/i);
     assert.match(plif, /do not print gate narration/i);
@@ -127,7 +130,7 @@ describe('modular system prompt', () => {
       tools: [{ name: 'skill', description: 'Load a skill.', parameters: {} }],
     });
 
-    assert.match(prompt, /native Codex adapter must preload anti-ai-slop and plief-galileu and plief-argus/i);
+    assert.match(prompt, /native Codex adapter must preload anti-ai-slop and plief-galileu/i);
     assert.match(prompt, /do not try to call the host-only skill tool/i);
     assert.doesNotMatch(prompt, /call the skill tool for \{ "name": "plief-galileu" \}/i);
   });
@@ -143,7 +146,6 @@ describe('modular system prompt', () => {
     assert.match(prompt, /this session is misconfigured/i);
     assert.match(prompt, /anti-ai-slop.*not present in the catalogue/i);
     assert.match(prompt, /plief-galileu.*not present in the catalogue/i);
-    assert.match(prompt, /plief-argus.*not present in the catalogue/i);
   });
 
   it('loads research guidance whenever discovery exists and degrades opening honestly', () => {

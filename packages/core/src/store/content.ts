@@ -122,7 +122,7 @@ export class ContentStore {
   async materialize(digest: Digest, target: string, options: { copy?: boolean } = {}): Promise<void> {
     const source = this.#paths.blob(digest);
     await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.rm(target, { force: true });
+    await fs.rm(target, { recursive: true, force: true });
 
     if (!options.copy) {
       try {

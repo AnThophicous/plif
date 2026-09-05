@@ -28,7 +28,7 @@ const noop = (): void => undefined;
 
 test('pinning is only asserted while the view is at the tail', () => {
   const pinned = timelineViewport(20, true, false, noop);
-  assert.equal(pinned.scrollTop, Number.MAX_SAFE_INTEGER);
+  assert.equal(pinned.scrollTop, 0);
 
   const away = timelineViewport(20, false, true, noop);
   assert.equal(
@@ -36,6 +36,13 @@ test('pinning is only asserted while the view is at the tail', () => {
     false,
     'a scrolled-away view must keep its own offset, or the wheel is re-clamped every frame',
   );
+});
+
+test('a pinned viewport receives a fresh tail instruction when activity appends rows', () => {
+  const before = timelineViewport(20, true, false, noop, 120);
+  const after = timelineViewport(20, true, false, noop, 121);
+  assert.notEqual(before.scrollTop, after.scrollTop);
+  assert.equal(after.scrollTop, 121);
 });
 
 test('the jump pill comes out of the timeline budget, not out of the prompt', () => {

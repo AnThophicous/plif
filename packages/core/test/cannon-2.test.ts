@@ -150,6 +150,30 @@ describe('Canhão 2.0 runtime features', () => {
     assert.match(followUp, /step 2: bad_step FAILED: localized failure/);
   });
 
+  it('stops at the declared consecutive tool failure ceiling', async () => {
+    const fake = provider((_request, call) => [
+      { kind: 'tool', call: { id: `bad-${call}`, name: 'always_bad', arguments: '{}' } },
+      { kind: 'done', reason: 'tool_calls', usage: { promptTokens: 1, completionTokens: 1 } },
+    ]);
+
+    const result = await runLoop([{ role: 'user', content: 'keep retrying' }], {
+      provider: fake,
+      container: {} as never,
+      questions: {} as never,
+      bus: new EventBus(),
+      tools: [{
+        spec: { name: 'always_bad', description: 'always fails', parameters: {} },
+        async run() { return { output: 'still broken', ok: false }; },
+      }],
+      maxConsecutiveFailures: 2,
+      maxIterations: 10,
+    });
+
+    assert.equal(result.stop, 'too_many_failures');
+    assert.equal(result.toolCalls, 2);
+    assert.equal(result.error?.code, 'INTERNAL');
+  });
+
   it('keeps model goals unarmed and enforces durable CAS plus blocker streak', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-goal-'));
     roots.push(root);

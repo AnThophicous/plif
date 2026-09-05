@@ -26,6 +26,7 @@ import path from 'node:path';
 
 import { PlifError } from '../errors.js';
 import { loadGlobalConfig, saveGlobalConfig } from '../config/global.js';
+import { parseSkill, writeSkill } from '../harness/skills.js';
 
 export interface MarketplaceSource {
   readonly id: string;
@@ -99,11 +100,15 @@ export interface Catalog {
 export interface MarketplaceInstallResult {
   readonly name: string;
   readonly mcpServers: readonly string[];
-  /** Skills the plugin declares. Reported only — plif does not install these. */
+  /** Skills written to the user's skills directory. */
   readonly skills: readonly string[];
+  /** Skills the plugin declared that could not be fetched, with the reason. */
+  readonly skippedSkills: readonly { readonly name: string; readonly reason: string }[];
   /** Servers that were already configured and have just been overwritten. */
   readonly replaced: readonly string[];
   readonly configFile: string;
+  /** Where installed skills landed, when any did. */
+  readonly skillsDirectory?: string;
 }
 
 /** How long a cached catalogue is served without re-fetching. */
@@ -452,9 +457,106 @@ export function declaredServers(parsed: Record<string, unknown>): Record<string,
 }
 
 /** Install the machine-readable MCP/skill manifests exposed by a plugin. */
+
+/**
+ * Fetch and write the skills a plugin ships.
+ *
+ * plif used to report these and throw them away — the install failed with
+ * "it ships skills rather than a server, copy them into your skills directory
+ * by hand", which is the interface knowing exactly what to do and declining to
+ * do it.
+ *
+ * Two things are deliberate. Skills land under the plugin's own name, so two
+ * plugins that both ship a `review` skill do not silently overwrite each
+ * other and the winner is not decided by install order. And every installed
+ * skill records where it came from: a skill is *instructions the model will
+ * follow*, so installing one from a three-thousand-entry community catalogue
+ * is installing behaviour, and the provenance has to survive into the file
+ * where someone reading it later can see it.
+ */
+async function installPluginSkills(
+  plugin: CatalogPlugin,
+  declared: readonly string[],
+  bases: readonly string[],
+  skillsRoot: string,
+): Promise<{
+  readonly installed: string[];
+  readonly skipped: { name: string; reason: string }[];
+}> {
+  const installed: string[] = [];
+  const skipped: { name: string; reason: string }[] = [];
+
+  for (const entry of declared) {
+    // A manifest may name the directory (`skills/review`) or just the skill.
+    const declaredName =
+      entry.split(/[\\/]+/).filter(Boolean).at(-1) ?? '';
+    if (!/^[a-z0-9][a-z0-9-]{0,48}$/.test(declaredName)) {
+      skipped.push({ name: entry, reason: 'the declared name is not a usable skill name' });
+      continue;
+    }
+
+    const candidates = bases.flatMap((base) => [
+      `${base}/${entry.replace(/^\/+/, '')}/SKILL.md`,
+      `${base}/skills/${declaredName}/SKILL.md`,
+    ]);
+
+    let source: string | null = null;
+    for (const url of distinct(candidates)) {
+      try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+        if (!response.ok) continue;
+        source = await response.text();
+        break;
+      } catch {
+        continue;
+      }
+    }
+    if (source === null) {
+      skipped.push({ name: declaredName, reason: 'no SKILL.md was found in the plugin source' });
+      continue;
+    }
+
+    const parsed = parseSkill(source, 'plugin', 'user');
+    if (!parsed) {
+      skipped.push({ name: declaredName, reason: 'the SKILL.md has no readable frontmatter' });
+      continue;
+    }
+
+    // Namespaced by plugin, so a common skill name cannot collide.
+    const name = `${slugForSkill(plugin.name)}-${declaredName}`.slice(0, 48).replace(/-+$/, '');
+    try {
+      await writeSkill(skillsRoot, {
+        name,
+        description: parsed.description,
+        instructions:
+          `${parsed.instructions.trim()}
+
+---
+` +
+          `Installed from the "${plugin.name}" plugin (${plugin.origin} marketplace).`,
+      });
+      installed.push(name);
+    } catch (error) {
+      skipped.push({
+        name: declaredName,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return { installed, skipped };
+}
+
+/** A plugin name, reduced to something a skill name can start with. */
+function slugForSkill(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'plugin';
+}
+
 export async function installMarketplacePlugin(
   plugin: CatalogPlugin,
   configFile: string,
+  /** Where a plugin's skills are written. Omit to install servers only. */
+  skillsRoot?: string,
 ): Promise<MarketplaceInstallResult> {
   const bases = manifestBaseUrls(plugin);
   if (bases.length === 0) {
@@ -486,21 +588,49 @@ export async function installMarketplacePlugin(
     if (Object.keys(mcp).length > 0) break;
   }
 
-  // Success means MCP servers, and only that. Declared skills are reported but
-  // never written anywhere, so counting them as an install would announce work
-  // that did not happen.
-  if (Object.keys(mcp).length === 0) {
+  // A plugin that ships skills and no server is a real install now, so the
+  // fetch happens before anything is judged missing.
+  //
+  // Deduplicated first: the manifest is looked for under several base URLs and
+  // several filenames, so a repo that answers on both `main` and `master` — or
+  // ships both `.mcp.json` and `plugin.json` — declares the same skill more
+  // than once, and installing it twice writes the same file twice and reports
+  // it twice.
+  const declaredSkills = distinct(skills);
+  const skillOutcome = declaredSkills.length > 0 && skillsRoot
+    ? await installPluginSkills(plugin, declaredSkills, bases, skillsRoot)
+    : { installed: [], skipped: [] as { name: string; reason: string }[] };
+
+  // Nothing to install only means nothing of *either* kind arrived.
+  if (Object.keys(mcp).length === 0 && skillOutcome.installed.length === 0) {
     throw manifest
-      ? new PlifError('INVALID_ARGUMENT', `${plugin.name} declares no MCP server`, {
-          detail: { manifest, ...(skills.length ? { declaredSkills: skills } : {}) },
-          hint: skills.length
-            ? 'It ships skills rather than a server. Copy them into your skills directory by hand.'
-            : 'It is a Claude Code plugin of commands or agents. plif installs MCP servers here.',
+      ? new PlifError('INVALID_ARGUMENT', `${plugin.name} installed nothing plif can use`, {
+          detail: {
+            manifest,
+            ...(declaredSkills.length ? { declaredSkills } : {}),
+            ...(skillOutcome.skipped.length ? { skippedSkills: skillOutcome.skipped } : {}),
+          },
+          hint: declaredSkills.length
+            ? 'It declares skills, but none of them could be fetched from its source.'
+            : 'It is a Claude Code plugin of commands or agents. plif installs MCP servers and skills here.',
         })
       : new PlifError('INVALID_ARGUMENT', `${plugin.name} publishes no manifest plif can read`, {
           detail: { tried },
           hint: `Add its MCP servers by hand under "mcp" in ${configFile}.`,
         });
+  }
+
+  // Skills alone are a complete install; there is no config to write for them.
+  if (Object.keys(mcp).length === 0) {
+    return {
+      name: plugin.name,
+      mcpServers: [],
+      skills: skillOutcome.installed,
+      skippedSkills: skillOutcome.skipped,
+      replaced: [],
+      configFile,
+      ...(skillsRoot ? { skillsDirectory: skillsRoot } : {}),
+    };
   }
 
   const current = await loadGlobalConfig(configFile);
@@ -515,7 +645,15 @@ export async function installMarketplacePlugin(
   const replaced = Object.keys(mcp).filter((server) => server in existing);
 
   await saveGlobalConfig({ ...current, [key]: { ...existing, ...mcp } }, configFile);
-  return { name: plugin.name, mcpServers: Object.keys(mcp), skills, replaced, configFile };
+  return {
+    name: plugin.name,
+    mcpServers: Object.keys(mcp),
+    skills: skillOutcome.installed,
+    skippedSkills: skillOutcome.skipped,
+    replaced,
+    configFile,
+    ...(skillsRoot ? { skillsDirectory: skillsRoot } : {}),
+  };
 }
 
 async function readCache(file: string): Promise<Catalog | null> {

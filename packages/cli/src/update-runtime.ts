@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
+import { moduleDirectory, resolveAsset } from '@plif/core';
 import type { UpdateStatus } from '@plif/core';
 
 function updaterFile(): string | null {
@@ -12,12 +12,15 @@ function updaterFile(): string | null {
   const binary = platform === 'windows' ? 'plif-updater.exe' : 'plif-updater';
   const override = process.env['PLIF_UPDATER_PATH']?.trim();
   if (override) return path.resolve(override);
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'updater', `${platform}-${arch}`, binary);
+  const relative = path.join('updater', `${platform}-${arch}`, binary);
+  return resolveAsset(import.meta.url, relative, [
+    path.resolve(moduleDirectory(import.meta.url), '..', 'assets', relative),
+  ]);
 }
 
 export function launchUpdater(update: UpdateStatus): boolean {
   const updater = updaterFile();
-  if (!updater || !update.packageName || !existsSync(updater)) return false;
+  if (!updater || !update.packageName || !update.integrity || !existsSync(updater)) return false;
   const entrypoint = process.argv[1];
   if (!entrypoint) return false;
   const args = [

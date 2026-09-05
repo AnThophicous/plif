@@ -30,6 +30,7 @@ import type { Session, SessionStore } from '../session/store.js';
 import {
   applyPatch,
   editFile,
+  hashlineEdit,
   globFiles,
   grepFiles,
   listDir,
@@ -48,6 +49,8 @@ import {
 import type { EditCoordinator } from './edits.js';
 import type { Tool } from './tools.js';
 import type { ShellDialect } from '../execution/shell-dialects.js';
+import type { Container } from '../container/container.js';
+import { WorktreeManager, type WorktreeLease } from './worktrees.js';
 
 export interface SubagentOptions {
   /** The parent's provider, used when no model is named. */
@@ -82,6 +85,15 @@ export interface SubagentOptions {
   readonly parentSession?: Session;
   readonly parentSessionId?: string;
   readonly parentContext?: readonly Message[] | (() => readonly Message[]);
+  /** Control-plane worktree manager. When supplied, each child gets a detached checkout. */
+  readonly worktrees?: WorktreeManager;
+  /** Creates the child container/LSP for that checkout; never model-callable. */
+  readonly createChildRuntime?: (workspace: string, title: string) => Promise<{
+    readonly container: Container;
+    /** Tools closed over services rooted at this child checkout (not the parent). */
+    readonly tools?: readonly Tool[];
+    readonly cleanup: () => Promise<void>;
+  }>;
 }
 
 export interface SubagentRecord {
@@ -95,6 +107,15 @@ export interface SubagentRecord {
   readonly effort?: Effort;
   readonly compatibilityId?: string;
   readonly forkedFrom?: string;
+}
+
+/** Durable, model-safe summary of a child run; never a transcript dump. */
+export interface SubagentResult {
+  readonly status: 'done' | 'failed' | 'cancelled';
+  readonly stop: string;
+  readonly summary: string;
+  readonly toolCalls: number;
+  readonly completedAt: number;
 }
 
 export class SubagentCoordinator {
@@ -182,6 +203,7 @@ export function subagentTools(
     updatePlan,
     writeFile,
     editFile,
+    hashlineEdit,
     applyPatch,
     listDir,
     globFiles,
@@ -262,6 +284,7 @@ interface SubagentManifest {
   readonly effort?: Effort;
   readonly compatibilityId?: string;
   readonly forkedFrom?: string;
+  readonly result?: SubagentResult;
 }
 
 function manifestPath(sessions: SessionStore, sessionId: string): string {
@@ -576,11 +599,29 @@ export function subagentTool(options: SubagentOptions): Tool {
         }
       }
       let childSession: Session | null = null;
+      let worktree: WorktreeLease | null = null;
+      let childRuntime: Awaited<ReturnType<NonNullable<typeof options.createChildRuntime>>> | null = null;
+      let childWorkspace = context.workspace;
+      let childContainer = context.container;
+      if (options.worktrees && options.createChildRuntime && context.workspace) {
+        try {
+          worktree = await options.worktrees.create(context.workspace, title);
+          childWorkspace = worktree.path;
+          childRuntime = await options.createChildRuntime(worktree.path, title);
+          childContainer = childRuntime.container;
+        } catch (error) {
+          if (worktree) await options.worktrees.release(worktree).catch(() => undefined);
+          return { output: `Could not create an isolated worktree for this subagent: ${String(error)}`, ok: false };
+        }
+      }
+      const runTools = childRuntime
+        ? subagentTools(options.shellDialect ?? null, [...(options.extraTools ?? []), ...(childRuntime.tools ?? [])])
+        : tools;
       const continuable = options.continuable !== false && options.sessions !== undefined && context.workspace !== undefined;
       if (continuable) {
         try {
-          childSession = await options.sessions!.create(context.workspace!, {
-            container: context.container.name,
+          childSession = await options.sessions!.create(childWorkspace!, {
+            container: childContainer.name,
             parentId: forkedFrom,
             forkCheckpoint: fork.sourceSequence,
             ...(resolved.provider.info.providerId ? { providerId: resolved.provider.info.providerId } : {}),
@@ -593,7 +634,7 @@ export function subagentTool(options: SubagentOptions): Tool {
           await saveManifest(options.sessions!, {
             subagentId,
             sessionId: childSession.id,
-            workspace: context.workspace!,
+            workspace: childWorkspace!,
             modelRef: resolved.ref,
             title,
             maxIterations: resolved.maxIterations ?? options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
@@ -612,11 +653,11 @@ export function subagentTool(options: SubagentOptions): Tool {
       // the whole run so a duplicate continuation cannot enter the same
       // child loop through two asynchronous paths.
       const childTurnId = subagentId ?? taskId;
-      const record: SubagentRecord | undefined = childSession && context.workspace && subagentId
+      const record: SubagentRecord | undefined = childSession && childWorkspace && subagentId
         ? {
             subagentId,
             sessionId: childSession.id,
-            workspace: context.workspace,
+            workspace: childWorkspace,
             modelRef: resolved.ref,
             title,
             provider: resolved.provider,
@@ -770,7 +811,7 @@ export function subagentTool(options: SubagentOptions): Tool {
              modelDisplayName: resolved.provider.info.id,
              endpointRoute: resolved.provider.info.endpoint,
              contextTokens: resolved.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
-            tools: stableToolSpecs(tools.map((tool) => tool.spec)),
+            tools: stableToolSpecs(runTools.map((tool) => tool.spec)),
             ...(options.skillCatalogue ? { skills: options.skillCatalogue } : {}),
             ...(options.agentInstructions ? { agentInstructions: options.agentInstructions } : {}),
              ...(resolved.instructions && resolved.agentName
@@ -790,18 +831,18 @@ export function subagentTool(options: SubagentOptions): Tool {
 
       const result = await runLoop(messages, {
         provider: resolved.provider,
-        container: context.container,
+        container: childContainer,
         questions: context.questions,
         bus: inner,
         turnId: childTurnId,
-        tools,
+        tools: runTools,
         skillBootstrap: options.skillBootstrap,
         maxIterations:
           resolved.maxIterations ?? options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
         contextTokens: resolved.provider.info.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
         enableHarnessCycle: options.stored.effort === 'plif',
         signal: childAbort.signal,
-        ...(context.workspace ? { workspace: context.workspace } : {}),
+        ...(childWorkspace ? { workspace: childWorkspace } : {}),
         ...(context.execution ? { execution: context.execution } : {}),
         ...(context.lsp ? { lsp: context.lsp } : {}),
         ...(context.edits ? { edits: context.edits } : {}),
@@ -823,18 +864,34 @@ export function subagentTool(options: SubagentOptions): Tool {
       }).finally(() => {
         context.signal?.removeEventListener('abort', abortChild);
         options.coordinator?.finish(taskId);
+        void childRuntime?.cleanup().catch(() => undefined);
+        if (worktree) void options.worktrees?.release(worktree).catch(() => undefined);
       });
 
       await childPersistence;
 
       const answer = result.text.trim();
       const ok = result.stop === 'complete' && answer.length > 0;
+      const outcome: SubagentResult = {
+        status: result.stop === 'cancelled' ? 'cancelled' : ok ? 'done' : 'failed',
+        stop: result.stop,
+        summary: answer.split('\n').find((line) => line.trim())?.trim() ?? `stopped: ${result.stop}`,
+        toolCalls: result.toolCalls,
+        completedAt: Date.now(),
+      };
+      if (childSession) await saveManifest(options.sessions!, {
+        subagentId: continuationId(childSession), sessionId: childSession.id,
+        workspace: childWorkspace!, modelRef: resolved.ref, title,
+        maxIterations: resolved.maxIterations ?? options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+        ...(resolved.effort ? { effort: resolved.effort } : {}), compatibilityId: childSession.id,
+        forkedFrom, result: outcome,
+      }).catch(() => undefined);
       parent?.emit('subagent.finished', {
         taskId,
-        status: result.stop === 'cancelled' ? 'cancelled' : ok ? 'done' : 'failed',
+        status: outcome.status,
         at: Date.now(),
         durationMs: Date.now() - startedAt,
-        summary: answer.split('\n').find((line) => line.trim())?.trim() ?? `stopped: ${result.stop}`,
+        summary: outcome.summary,
       });
 
       if (!answer) {

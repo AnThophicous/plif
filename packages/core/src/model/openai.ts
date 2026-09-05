@@ -20,6 +20,7 @@
 import type OpenAI from 'openai';
 import type { ClientOptions } from 'openai';
 
+import { dispatcherFor } from './proxy.js';
 import {
   APIUserAbortError,
   isApiConnectionError,
@@ -30,7 +31,8 @@ import {
 
 import { PlifError } from '../errors.js';
 import type { ModelConfig } from './config.js';
-import { isLocal, keyOptional } from './config.js';
+import { isLocal, keyOptional, usesChatGptOAuth } from './config.js';
+import { OpenAIOAuthClient } from '../auth/openai-oauth.js';
 import type { CachedEffort, EffortCapabilityCache } from './capabilities.js';
 import { redactedProviderId, streamTiming } from './stream-timing.js';
 import { modelListResult, normalizeProviderModel } from './metadata.js';
@@ -64,11 +66,16 @@ import type {
 import { NO_USAGE, safeToolCallArguments } from './provider.js';
 
 /** One owner, one visible budget. The SDK's hidden retries are disabled below. */
-const RETRY_ATTEMPTS = 6;
+// A stalled gateway used to consume 120 seconds per attempt, six times. That
+// looked indistinguishable from a frozen terminal and made Ctrl+C the only
+// practical escape hatch. Keep recovery for brief upstream faults, but bound
+// a silent request to a short, visible retry window.
+const RETRY_ATTEMPTS = 3;
 const RETRY_BASE_MS = 1_000;
 const RETRY_MAX_WAIT_MS = 30_000;
 const RETRY_MAX_SERVER_WAIT_MS = 60_000;
-const RETRY_DEADLINE_MS = 180_000;
+const RETRY_DEADLINE_MS = 90_000;
+const FIRST_RESPONSE_TIMEOUT_MS = 45_000;
 
 /**
  * Wire values accepted by current OpenAI reasoning endpoints. The installed
@@ -246,8 +253,16 @@ export class OpenAIProvider implements ModelProvider {
   #capabilityLoad: Promise<void> | undefined;
   #usageHeaders: Headers | undefined;
   #usageSnapshot: UsageInfo | undefined;
+  #oauth = new OpenAIOAuthClient();
   /** Highest Plif candidate accepted by this provider instance. */
   #plifEffortIndex = 0;
+  /**
+   * This endpoint rejects `reasoning_effort` at every level.
+   *
+   * Set when the ladder runs out, and cached as `none` so the next session
+   * starts here instead of rediscovering it from the top.
+   */
+  #effortUnsupported = false;
 
   constructor(config: ModelConfig, options: OpenAIProviderOptions = {}) {
     this.#config = config;
@@ -268,7 +283,26 @@ export class OpenAIProvider implements ModelProvider {
       );
       new globalThis.Headers(init?.headers as any).forEach((value, key) => headers.set(key, value));
       if (anonymous) headers.delete('authorization');
-      const response = await globalThis.fetch(input as any, { ...init, headers } as any);
+      if (usesChatGptOAuth(config) && !config.apiKey) {
+        const token = await this.#oauth.accessToken();
+        if (!token) {
+          throw new PlifError('MODEL_AUTH', 'ChatGPT OAuth session is missing', {
+            detail: { endpoint: config.baseURL, keyPresent: false },
+            hint: 'Run /providers, pick OpenAI, and finish browser or headless login. An API key is not required for that path.',
+          });
+        }
+        headers.set('Authorization', `Bearer ${token}`);
+        const accountId = (await this.#oauth.load())?.accountId;
+        if (accountId) headers.set('ChatGPT-Account-ID', accountId);
+      }
+      // `dispatcher` is Node's own extension to RequestInit, absent from the
+      // DOM typings this signature is written against, and inert when nothing
+      // configured a proxy.
+      const dispatcher = await dispatcherFor(config.baseURL);
+      const response = await globalThis.fetch(
+        input as any,
+        { ...init, headers, ...(dispatcher ? { dispatcher } : {}) } as any,
+      );
       this.#usageHeaders = new globalThis.Headers(response.headers);
       this.#usageSnapshot = undefined;
       return response as unknown as Awaited<ReturnType<SdkFetch>>;
@@ -278,10 +312,14 @@ export class OpenAIProvider implements ModelProvider {
       // is genuinely anonymous. Use an internal sentinel only to satisfy the
       // SDK, then strip Authorization in the fetch wrapper before the request
       // leaves the process. Paid providers still use their real credential.
-      apiKey: config.apiKey || (anonymous ? 'plif-anonymous' : ''),
+      apiKey: config.apiKey || (anonymous || usesChatGptOAuth(config) ? 'plif-anonymous' : ''),
       baseURL: config.baseURL,
       timeout: config.timeoutMs,
       fetch: captureFetch,
+      // Gateway headers ride as SDK defaults rather than being written in the
+      // fetch wrapper, so a per-request header the SDK sets still wins — these
+      // are defaults for the endpoint, not overrides of the conversation.
+      ...(config.headers ? { defaultHeaders: { ...config.headers } } : {}),
       // Retry belongs to this provider so attempts, waits, cancellation and
       // partial-output resets share one budget and remain visible to the UI.
       maxRetries: 0,
@@ -423,7 +461,10 @@ export class OpenAIProvider implements ModelProvider {
   }
 
   protected firstChunkTimeoutMs(): number {
-    return this.#config.timeoutMs;
+    // Long answers may legitimately stream for longer than this. The cap is
+    // only for the period with no first event at all — the state that users
+    // experience as a frozen "Composing" line.
+    return Math.min(this.#config.timeoutMs, FIRST_RESPONSE_TIMEOUT_MS);
   }
 
   protected interChunkTimeoutMs(): number {
@@ -447,7 +488,11 @@ export class OpenAIProvider implements ModelProvider {
         ...extra,
       }));
     };
-    const acceptedEffort = this.#config.effort === 'plif' ? this.#wireEffort() : undefined;
+    // Nothing was sent when the field is known to be unsupported, so there is
+    // no accepted level to remember — caching one here would record a rung the
+    // endpoint never saw, and the next session would send it and fail.
+    const acceptedEffort =
+      this.#config.effort === 'plif' && !this.#effortUnsupported ? this.#wireEffort() : undefined;
     const pending = new ToolCallBuffer();
     // Two channels arrive as one on models that write `<think>` into content.
     // Splitting here rather than in the loop means every consumer — the TUI,
@@ -482,7 +527,9 @@ export class OpenAIProvider implements ModelProvider {
           ...(request.maxTokens ?? this.#config.maxTokens
             ? { max_tokens: request.maxTokens ?? this.#config.maxTokens }
             : {}),
-          ...(this.#config.effort
+          // A model known to reject the field is sent no field, rather than a
+          // level it will refuse. This is the whole payoff of caching `none`.
+          ...(this.#config.effort && !this.#effortUnsupported
             ? {
                 reasoning_effort: this.#wireEffort() as unknown as OpenAI.Chat.ChatCompletionReasoningEffort,
               }
@@ -644,12 +691,31 @@ export class OpenAIProvider implements ModelProvider {
   }
 
   async #loadCachedEffort(): Promise<void> {
-    if (this.#config.effort !== 'plif' || !this.#capabilityCache) return;
+    if (this.#config.effort !== 'plif') return;
+
+    /**
+     * A model already declared as non-reasoning needs no negotiation.
+     *
+     * Walking the ladder to prove it costs five refused requests on the first
+     * turn of every session with a cold cache. Only the negative is trusted:
+     * `reasoning: true` says the model thinks, not which level names its
+     * endpoint accepts, so that is still negotiated.
+     */
+    if (this.#config.reasoning === false) {
+      this.#effortUnsupported = true;
+      return;
+    }
+
+    if (!this.#capabilityCache) return;
     if (!this.#capabilityLoad) {
       this.#capabilityLoad = (async () => {
         try {
           const cached = await this.#capabilityCache!.get(this.#config.baseURL, this.#config.model);
           if (!cached) return;
+          if (cached === 'none') {
+            this.#effortUnsupported = true;
+            return;
+          }
           const index = PLIF_EFFORTS.indexOf(cached as (typeof PLIF_EFFORTS)[number]);
           if (index >= 0) this.#plifEffortIndex = index;
         } catch {
@@ -686,16 +752,49 @@ export class OpenAIProvider implements ModelProvider {
     return this.#config.effort ?? 'high';
   }
 
+  /**
+   * Step down the ladder, and know when to stop asking.
+   *
+   * Two things changed here. The bottom rung used to give up: at `low`, a
+   * rejection fell through to the transport path and the turn failed, so a
+   * model that does not speak `reasoning_effort` at all was simply unusable in
+   * Plif mode — the one mode meant to adapt to whatever the model supports.
+   * Now the ladder ends by dropping the field entirely and retrying, which is
+   * the answer that was always available.
+   *
+   * And the outcome is cached either way. Rediscovering "this model takes no
+   * reasoning level" costs five failed round trips, every session, forever;
+   * `none` costs one lookup.
+   */
   #advancePlifEffort(error: unknown): boolean {
-    if (this.#config.effort !== 'plif') return false;
+    if (this.#config.effort !== 'plif' || this.#effortUnsupported) return false;
     const current = PLIF_EFFORTS[this.#plifEffortIndex];
-    if (!current || this.#plifEffortIndex >= PLIF_EFFORTS.length - 1) return false;
+    if (!current) return false;
     if (!isUnsupportedReasoningEffort(error, current)) return false;
+
+    if (this.#plifEffortIndex >= PLIF_EFFORTS.length - 1) {
+      this.#effortUnsupported = true;
+      void this.#rememberUnsupportedEffort();
+      return true;
+    }
+
+    // The cached level was the one just refused, so it is wrong and worth
+    // clearing. Intermediate rungs are cleared for the same reason.
     void Promise.resolve(
       this.#capabilityCache?.invalidate?.(this.#config.baseURL, this.#config.model),
     ).catch(() => undefined);
     this.#plifEffortIndex += 1;
     return true;
+  }
+
+  async #rememberUnsupportedEffort(): Promise<void> {
+    if (!this.#capabilityCache) return;
+    try {
+      await this.#capabilityCache.set(this.#config.baseURL, this.#config.model, 'none');
+    } catch {
+      // Same rule as every other cache write: never turn an optimisation into
+      // a failed turn.
+    }
   }
 
   async probe(): Promise<{ ok: boolean; detail: string }> {
@@ -818,7 +917,12 @@ export class OpenAIProvider implements ModelProvider {
           : `${host} rejected the API key`,
         {
           cause: error,
-          detail: { status: api.status, endpoint: this.#config.baseURL },
+          // `keyPresent` is the difference between "this key is wrong" and
+          // "no key reached the request at all", and only this layer knows
+          // which happened. Recovery that cannot tell them apart deletes a
+          // perfectly good stored credential to fix a request that never
+          // carried it — and then asks for the same key again, forever.
+          detail: { status: api.status, endpoint: this.#config.baseURL, keyPresent: !anonymous },
           hint: anonymous
             ? 'This model is not on the free tier. Pick another with /model, or set a key for this endpoint.'
             : 'Check the key for this endpoint, or run `plif model` to see which one is loaded.',

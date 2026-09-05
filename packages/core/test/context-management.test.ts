@@ -5,6 +5,7 @@ import {
   computeContextBudget,
   stableToolSpecs,
 } from '../src/harness/context-budget.js';
+import { runBudgetTokens } from '../src/harness/loop.js';
 import { compact, estimateTokens } from '../src/harness/compaction.js';
 import {
   mergeTokenUsage,
@@ -44,6 +45,17 @@ describe('canonical provider token accounting', () => {
       requestCount: 1,
       source: 'derived',
     });
+  });
+
+  it('does not spend the run watchdog budget on cache reads', () => {
+    const usage = normalizeOpenAIUsage({
+      prompt_tokens: 100_000,
+      prompt_cache_hit_tokens: 90_000,
+      prompt_cache_miss_tokens: 10_000,
+      completion_tokens: 20,
+    })!.tokenUsage;
+
+    assert.equal(runBudgetTokens(usage, { promptTokens: 100_000, completionTokens: 20 }), 10_020);
   });
 
   it('keeps Anthropic cache reads and writes separate from new input', () => {

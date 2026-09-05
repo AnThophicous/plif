@@ -81,12 +81,6 @@ describe('config precedence', () => {
     assert.equal(resolveConfig({ effort: 'high', maxTokens: 32_000 }, { env: { PLIF_MAX_TOKENS: '12' } }).maxTokens, 12);
   });
 
-  it('keeps Codex FAST opt-in and provider-scoped', () => {
-    assert.equal(resolveConfig({ preset: 'codex', model: 'codex/codex-default', codexFast: true }, { env: {} }).codexFast, true);
-    assert.equal(resolveConfig({ preset: 'codex', model: 'codex/codex-default', codexFast: false }, { env: {} }).codexFast, false);
-    assert.equal(resolveConfig({ preset: 'openai', model: 'gpt-4.1', codexFast: true }, { env: {} }).codexFast, undefined);
-  });
-
   it('defaults continuation to auto and accepts only the supported policies', () => {
     assert.equal(resolveConfig({}, { env: {} }).conversationState, 'auto');
     assert.equal(resolveConfig({ conversationState: 'replay' }, { env: {} }).conversationState, 'replay');
@@ -428,6 +422,35 @@ describe('config precedence', () => {
     assert.equal(config.model, 'from-env');
   });
 
+  it('treats built-in OpenAI without an API key as ChatGPT OAuth, not a missing key', () => {
+    const config = resolveConfig({}, { preset: 'openai', model: 'gpt-5.6-luna', env: {} });
+    assert.equal(config.authMode, 'openai-oauth');
+    assert.equal(config.needKey, false);
+    assert.equal(config.apiKey, '');
+    assert.match(config.baseURL, /chatgpt\.com/);
+    assert.equal(validate(config).ok, true);
+  });
+
+  it('does not demand OPENAI_API_KEY for ChatGPT OAuth models like gpt-5.3-codex-spark', () => {
+    const config = resolveConfig({}, { preset: 'openai', model: 'gpt-5.3-codex-spark', env: {} });
+    assert.equal(config.needKey, false);
+    assert.equal(validate(config).ok, true);
+    assert.equal(validate({ ...config, authMode: undefined, needKey: true, apiKey: '' }).ok, true);
+  });
+
+  it('keeps OpenAI on the public API when an API key is present', () => {
+    const config = resolveConfig({}, {
+      preset: 'openai',
+      model: 'gpt-4o',
+      apiKey: 'sk-test',
+      env: {},
+    });
+    assert.equal(config.authMode, undefined);
+    assert.equal(config.apiKey, 'sk-test');
+    assert.equal(config.baseURL, PRESETS.openai.baseURL);
+    assert.equal(validate(config).ok, true);
+  });
+
   it('falls back to the stored file, and to nothing at all after that', () => {
     assert.equal(resolveConfig({ model: 'from-file' }, { env: {} }).model, 'from-file');
     // Plif ships unconfigured on purpose. Resolving nothing must produce no
@@ -520,24 +543,6 @@ describe('config precedence', () => {
     assert.equal(next.baseURL, 'https://gateway.internal/v1');
   });
 
-  it('persists the Codex FAST choice and clears it outside Codex', () => {
-    const fast = adoptProvider(
-      { preset: 'openai', model: 'gpt-4.1' },
-      { preset: 'codex', model: 'codex-default', codexFast: true },
-    );
-    assert.equal(fast.codexFast, true);
-
-    const standard = adoptProvider(fast, {
-      preset: 'codex',
-      model: 'codex-default',
-      codexFast: false,
-    });
-    assert.equal(standard.codexFast, false);
-
-    const nonCodex = adoptProvider(standard, { preset: 'openai', model: 'gpt-4.1' });
-    assert.equal(nonCodex.codexFast, undefined);
-  });
-
   it('rejects an unknown preset with the list of real ones', () => {
     assert.throws(
       () => resolveConfig({}, { preset: 'nope', env: {} }),
@@ -611,12 +616,45 @@ describe('the free tier needs no credential', () => {
       preset: 'opencode-go',
       model: 'qwen3.8-max',
       env: {},
+      // A paid endpoint no longer yields a provider without one; this test is
+      // about adapter selection, so it supplies the key the endpoint requires.
+      apiKey: 'sk-test',
     });
     const provider = createModelProvider(config);
     assert.equal(config.needKey, true);
     assert.equal(provider instanceof AnthropicProvider, true);
     assert.equal(MODEL_CATALOG.find((item) => item.id === 'opencode-go')?.label, 'OpenCode Go');
     assert.equal(MODEL_CATALOG.find((item) => item.id === 'opencode-go')?.anonymous, undefined);
+  });
+
+  it('refuses to build a paid provider that no credential reached', () => {
+    // The credential store is async and resolveConfig is not, so a caller that
+    // forgets to look the key up used to get an empty one and a 401 a round
+    // trip later — which recovery then mistook for a rejected key and deleted
+    // the good credential over. Fail here, locally, where it is legible.
+    const config = resolveConfig({}, { preset: 'opencode-go', model: 'qwen3.8-max', env: {} });
+    assert.equal(config.needKey, true);
+    assert.equal(config.apiKey, '');
+    assert.throws(
+      () => createModelProvider(config),
+      (error: unknown) => {
+        assert.ok(PlifError.is(error));
+        assert.equal(error.code, 'MODEL_NOT_CONFIGURED');
+        assert.match(error.message, /no credential reached the provider/);
+        return true;
+      },
+    );
+  });
+
+  it('still builds a provider for an endpoint that needs no key', () => {
+    // The guard must not catch the anonymous free tier or a local server.
+    const anonymous = resolveConfig({}, {
+      preset: 'opencode',
+      model: 'deepseek-v4-flash-free',
+      env: {},
+    });
+    assert.equal(anonymous.needKey, false);
+    assert.doesNotThrow(() => createModelProvider(anonymous));
   });
 
   it('constructs an anonymous OpenCode provider without asking for an API key', () => {
@@ -1111,6 +1149,53 @@ describe('error translation', () => {
         assert.ok(PlifError.is(error));
         assert.equal(error.code, 'MODEL_AUTH');
         assert.match(error.hint ?? '', /key/i);
+        return true;
+      },
+    );
+  });
+
+  it('reports that a rejected request did carry a key', async () => {
+    // The recovery path in the terminal deletes the stored credential on this
+    // signal, so it has to mean what it says.
+    const provider = new OpenAIProvider({
+      model: 'fake',
+      baseURL,
+      apiKey: 'bad',
+      temperature: 0,
+      maxTokens: undefined,
+      timeoutMs: 5_000,
+    });
+
+    await assert.rejects(
+      () => collect(provider.stream({ messages: [{ role: 'user', content: 'hi' }] })),
+      (error: unknown) => {
+        assert.ok(PlifError.is(error));
+        assert.equal(error.detail['keyPresent'], true);
+        assert.match(error.message, /rejected the API key/);
+        return true;
+      },
+    );
+  });
+
+  it('reports that a rejected request carried no key at all', async () => {
+    // This is the case that used to be indistinguishable from a bad key: the
+    // credential never reached the request, so deleting it fixes nothing and
+    // loses a working key.
+    const provider = new OpenAIProvider({
+      model: 'fake',
+      baseURL,
+      apiKey: '',
+      temperature: 0,
+      maxTokens: undefined,
+      timeoutMs: 5_000,
+    });
+
+    await assert.rejects(
+      () => collect(provider.stream({ messages: [{ role: 'user', content: 'hi' }] })),
+      (error: unknown) => {
+        assert.ok(PlifError.is(error));
+        assert.equal(error.detail['keyPresent'], false);
+        assert.match(error.message, /without a key/);
         return true;
       },
     );

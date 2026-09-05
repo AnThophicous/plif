@@ -196,17 +196,18 @@ export function createConfigSettings(runtime: ConfigRuntime, actions: ConfigActi
       description: 'One PLIF policy inherited by every provider, including Codex, before actions run.',
       kind: 'enum',
       scope: 'global',
-      value: permission === 'auto-approve' ? 'Auto-approve' : permission === 'deny' ? 'Deny' : 'Ask',
+      value: permission === 'full' ? 'Permissão Total' : permission === 'auto-approve' ? 'Aprovar para mim' : permission === 'deny' ? 'Bloquear' : 'Perguntar',
       inputValue: permission,
       options: [
-        option('ask', 'Ask', 'confirm provider, tool, file, and network actions'),
-        option('auto-approve', 'Auto-approve', 'allow actions only inside the active workspace'),
-        option('deny', 'Deny', 'block provider actions and keep the workspace read-only'),
+        option('ask', 'Perguntar', 'mostra cada ação de modelo, ferramenta, arquivo e rede antes de executar'),
+        option('auto-approve', 'Aprovar para mim', 'aprova ações solicitadas dentro do workspace sem interromper a sessão'),
+        option('full', 'Permissão Total', 'executa ações PLIF dentro do workspace e sessão sem prompts; isolamento e bloqueios rígidos continuam ativos'),
+        option('deny', 'Bloquear', 'bloqueia ações do modelo e mantém o workspace somente leitura'),
       ],
       searchableTerms: ['approval', 'security', 'tools'],
       apply: async (value) => {
-        if (value !== 'ask' && value !== 'auto-approve' && value !== 'deny') {
-          throw new Error('Choose ask, auto-approve, or deny.');
+        if (value !== 'ask' && value !== 'auto-approve' && value !== 'full' && value !== 'deny') {
+          throw new Error('Choose Perguntar, Aprovar para mim, Permissão Total, or Bloquear.');
         }
         await actions.setPermissionMode(value);
       },
@@ -218,9 +219,9 @@ export function createConfigSettings(runtime: ConfigRuntime, actions: ConfigActi
       description: 'Shortcut for the shared PLIF policy: allow actions without prompts inside the active workspace.',
       kind: 'boolean',
       scope: 'global',
-      value: binaryStateIndicator(permission === 'auto-approve' ? 'on' : 'off').icon,
-      state: permission === 'auto-approve' ? 'on' : 'off',
-      inputValue: permission === 'auto-approve' ? 'true' : 'false',
+      value: binaryStateIndicator(permission === 'auto-approve' || permission === 'full' ? 'on' : 'off').icon,
+      state: permission === 'auto-approve' || permission === 'full' ? 'on' : 'off',
+      inputValue: permission === 'auto-approve' || permission === 'full' ? 'true' : 'false',
       searchableTerms: ['approval', 'permissions', 'security', 'tools', 'boolean'],
       apply: async (value) => {
         if (value !== 'true' && value !== 'false') throw new Error('Enter true or false.');

@@ -45,6 +45,32 @@ const effort = COMMANDS.find((command) => command.name === 'effort');
 const persona = COMMANDS.find((command) => command.name === 'persona');
 const usage = COMMANDS.find((command) => command.name === 'usage');
 const temp = COMMANDS.find((command) => command.name === 'temp');
+const store = COMMANDS.find((command) => command.name === 'content-store');
+
+describe('/permissions', () => {
+  it('opens three explicit approval modes without changing the setting until one is picked', async () => {
+    const opened: Array<{ title: string; items: readonly { value: string; label: string }[] }> = [];
+    const result = await findCommand('permissions')!.run([], {
+      openPicker: (request) => {
+        if ('items' in request) opened.push(request as typeof opened[number]);
+      },
+    } as unknown as CommandContext);
+
+    assert.equal(result.entries.length, 0);
+    assert.equal(opened[0]?.title, 'Permissões');
+    assert.deepEqual(opened[0]?.items.map((item) => item.value), ['ask', 'auto-approve', 'full']);
+    assert.deepEqual(opened[0]?.items.map((item) => item.label), ['Perguntar', 'Aprovar para mim', 'Permissão Total']);
+  });
+});
+
+describe('/store', () => {
+  it('describes persistent runtime state without treating it as a workspace', async () => {
+    const result = await store!.run([], { engine: { paths: { root: 'C:/plif-store' } } } as unknown as CommandContext);
+    const rendered = `${result.entries[0]?.title}\n${result.entries[0]?.detail}`;
+    assert.match(rendered, /C:\/plif-store/);
+    assert.match(rendered, /not a workspace for agent writes/);
+  });
+});
 
 describe('/temp session scratch space', () => {
   it('explains the isolated virtual path without exposing the host path', async () => {
@@ -465,7 +491,11 @@ describe('/plan', () => {
 
 describe('/goal', () => {
   it('sets, reports, and clears a session goal', async () => {
+    // Bare `/goal` used to print the status and stop, which told you a goal
+    // existed but not how to change it. It opens the actions menu now, and the
+    // status it used to print is the menu's title.
     let current: { condition: string; turns: number; status: string } | null = null;
+    const opened: Array<{ title: string; items: readonly { value: string }[] }> = [];
     const context = {
       startGoal: async (condition: string) => {
         current = { condition, status: 'active' };
@@ -474,13 +504,20 @@ describe('/goal', () => {
       clearGoal: () => {
         current = null;
       },
+      openPicker: (request: unknown) => {
+        if (request && typeof request === 'object' && 'items' in request) {
+          opened.push(request as typeof opened[number]);
+        }
+      },
     } as unknown as CommandContext;
 
     await goal!.run(['tests', 'pass'], context);
     const status = await goal!.run([], context);
     await goal!.run(['clear'], context);
 
-    assert.match(status.entries[0]?.title ?? '', /goal active: tests pass/);
+    assert.equal(status.entries.length, 0, 'the menu is the output');
+    assert.match(opened[0]?.title ?? '', /active/);
+    assert.deepEqual(opened[0]?.items.map((item) => item.value), ['set', 'clear']);
     assert.equal(current, null);
   });
 });
@@ -598,24 +635,8 @@ describe('/effort validation', () => {
     assert.deepEqual(switched, ['z-ai/glm-5.2']);
     assert.equal(result.entries.length, 0);
   });
-
-  it('asks for the Codex FAST tier before applying a typed Codex model', async () => {
-    let question: { text?: string; options?: readonly { value: string; description?: string }[] } | undefined;
-    let switched: unknown;
-    const models = COMMANDS.find((command) => command.name === 'models')!;
-    await models.run(['codex-default'], {
-      engine: { questions: { ask: async (value: typeof question) => {
-        question = value;
-        return 'fast';
-      } } },
-      switchModel: async (selection) => { switched = selection; },
-    } as unknown as CommandContext);
-
-    assert.equal(question?.text, 'Deseja usar o modo FAST?');
-    assert.match(question?.options?.[0]?.description ?? '', /1,5×.*tokens/i);
-    assert.deepEqual(switched, { preset: 'codex', model: 'codex-default', codexFast: true });
-  });
 });
+
 
 describe('/export', () => {
   it('opens a navigable choice between clipboard and file', async () => {
@@ -635,7 +656,7 @@ describe('/export', () => {
 });
 
 describe('provider model picker', () => {
-  it('discovers live Codex models in /models without making Codex active', async () => {
+  it('does not expose the removed Codex provider in /models', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-codex-model-catalog-'));
     const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
     const previousCodexCommand = process.env['PLIF_CODEX_COMMAND'];
@@ -660,15 +681,8 @@ describe('provider model picker', () => {
           if ('items' in request) picker = request as typeof picker;
         },
       } as unknown as CommandContext);
-      const luna = picker?.items?.find((item) => item.value === 'codex:gpt-5.6-luna');
-      const mini = picker?.items?.find((item) => item.value === 'codex:gpt-5.4-mini');
-      assert.ok(luna, 'live Codex models must be present in the global model picker');
-      assert.ok(mini, 'all live Codex models must be present in the global model picker');
-      assert.match(luna.provider ?? '', /OpenAI Codex/i);
-      assert.match(luna.auth ?? '', /ChatGPT sign-in/i);
-      assert.equal(luna.reasoning, true);
-      assert.equal(luna.tools, true);
-      assert.deepEqual(luna.capabilities, ['text', 'vision']);
+      assert.equal(picker?.items?.some((item) => item.value === 'codex'), false);
+      assert.equal(picker?.items?.some((item) => item.value.startsWith('codex:')), false);
     } finally {
       if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
       else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
@@ -684,6 +698,34 @@ describe('provider model picker', () => {
     assert.equal(findCommand('model')?.name, 'models');
     assert.equal(findCommand('provider')?.name, 'providers');
     assert.deepEqual(matchCommands('prov').map((command) => command.name), ['providers']);
+  });
+
+  it('highlights the provider that is actually active', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-provider-selected-'));
+    const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
+    process.env['PLIF_CONFIG_PATH'] = path.join(root, 'config.toml');
+    await fs.writeFile(process.env['PLIF_CONFIG_PATH'], '');
+    let picker:
+      | { selected?: number; items?: readonly { value: string; current?: boolean }[] }
+      | undefined;
+    try {
+      await findCommand('providers')!.run([], {
+        openPicker: (request: never) => {
+          if ('items' in (request as object)) picker = request;
+        },
+      } as unknown as CommandContext);
+
+      // The row the menu opens on has to be the row marked current. An offset
+      // here points Enter at the neighbouring provider, and puts the highlight
+      // past the end when the active provider is the last row.
+      const current = picker?.items?.findIndex((item) => item.current) ?? -1;
+      assert.equal(picker?.selected, Math.max(0, current));
+      assert.ok((picker?.selected ?? 0) < (picker?.items?.length ?? 0));
+    } finally {
+      if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
+      else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 
   it('opens a provider-first picker without probing provider credentials', async () => {
@@ -709,7 +751,7 @@ describe('provider model picker', () => {
     }
   });
 
-  it('revalidates an already selected Codex session before opening its models', async () => {
+  it('does not offer Codex after it has been removed', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-codex-provider-picker-'));
     const previousConfigPath = process.env['PLIF_CONFIG_PATH'];
     const previousCodexCommand = process.env['PLIF_CODEX_COMMAND'];
@@ -729,11 +771,8 @@ describe('provider model picker', () => {
           if ('items' in request) opened.push(request as typeof opened[number]);
         },
       } as unknown as CommandContext);
-      assert.ok(opened[0]?.items.some((item) => item.value === 'codex'));
-      opened[0]!.onPick('codex');
-      await new Promise<void>((resolve) => setTimeout(resolve, 150));
-      assert.equal(loginCalls, 1);
-      assert.equal(opened.length, 1, 'a failed session check must not open the model picker');
+      assert.equal(opened[0]?.items.some((item) => item.value === 'codex'), false);
+      assert.equal(loginCalls, 0);
     } finally {
       if (previousConfigPath === undefined) delete process.env['PLIF_CONFIG_PATH'];
       else process.env['PLIF_CONFIG_PATH'] = previousConfigPath;
@@ -779,6 +818,36 @@ describe('provider model picker', () => {
       providerModelIds(catalog, ['ox-alpha-free'], true, 'free', [{ id: 'ox-alpha-free', name: 'OX Alpha Free' }]),
       ['ox-alpha-free'],
     );
+  });
+
+  it('does not list ChatGPT gpt-* ids under OpenCode Zen or Go', () => {
+    const zen = findCatalogProvider('opencode');
+    const go = findCatalogProvider('opencode-go');
+    assert.ok(zen);
+    assert.ok(go);
+    assert.deepEqual(
+      providerModelIds(zen, ['gpt-6-astra', 'gpt-5.6-sol', 'deepseek-v4-flash-free'], true, 'configured', [
+        { id: 'gpt-6-astra' },
+        { id: 'gpt-5.6-sol' },
+        { id: 'deepseek-v4-flash-free', cost: 'free' },
+      ]),
+      ['deepseek-v4-flash-free'],
+    );
+    assert.deepEqual(
+      providerModelIds(go, ['gpt-5.6-luna', 'qwen3.8-max'], true, 'configured', [
+        { id: 'gpt-5.6-luna' },
+        { id: 'qwen3.8-max' },
+      ]),
+      ['qwen3.8-max'],
+    );
+  });
+
+  it('does not stamp Zen defaultCost onto uncurated GPT discovery rows', () => {
+    const zen = findCatalogProvider('opencode');
+    assert.ok(zen);
+    const merged = mergeDiscoveredModel(zen, 'gpt-6-astra', { id: 'gpt-6-astra' } as ProviderModel);
+    assert.notEqual(merged.cost, 'free');
+    assert.notEqual(merged.metadataSource, 'registry');
   });
 
   it('adds only registry facts to an id-only OpenCode Go discovery row', () => {

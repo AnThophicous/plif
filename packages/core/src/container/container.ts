@@ -35,7 +35,7 @@ import { commit as commitOverlay, materialize } from '../fs/overlay.js';
 import { PathJail, normalizeVirtualPath } from '../fs/vpath.js';
 import type { ApprovalBroker } from '../policy/approval.js';
 import { denialError } from '../policy/approval.js';
-import type { PolicyAction, PolicyEngine, TrustTier } from '../policy/policy.js';
+import type { PolicyAction, PolicyEngine, PolicyRule, TrustTier } from '../policy/policy.js';
 import type { ContentStore } from '../store/content.js';
 import type { ImageStore, LayerStore } from '../store/images.js';
 import type { StorePaths } from '../store/paths.js';
@@ -79,6 +79,51 @@ function redactEnvironmentValues(text: string, secrets: readonly string[]): stri
     redacted = redacted.split(secret).join(REDACTED_ENVIRONMENT_VALUE);
   }
   return redacted;
+}
+
+const SENSITIVE_ARG = /(?:token|secret|password|passwd|api[-_]?key|authorization|cookie|credential|private[-_]?key)/i;
+
+/**
+ * Windows Job Objects and the portable backend constrain processes, but they
+ * do not make a host-backed mount read-only at the OS boundary. When a mount
+ * is intentionally exposed to a process, every command needs an explicit
+ * approval unless a stronger backend is doing the write isolation for us.
+ */
+const HOST_MOUNT_EXEC_GUARD: PolicyRule = Object.freeze({
+  name: 'runtime-host-mount-exec-guard',
+  actions: ['exec'] as const,
+  argvPattern: '.*',
+  decision: 'ask',
+  rationale: 'This backend cannot enforce host-mount write isolation; approve the command explicitly.',
+});
+
+function redactArgv(argv: readonly string[], secrets: readonly string[]): string[] {
+  const output: string[] = [];
+  let redactNext = false;
+  for (const argument of argv) {
+    if (redactNext) {
+      output.push(REDACTED_ENVIRONMENT_VALUE);
+      redactNext = false;
+      continue;
+    }
+    const knownSecret = redactEnvironmentValues(argument, secrets);
+    if (knownSecret !== argument) {
+      output.push(knownSecret);
+      continue;
+    }
+    const equals = argument.match(/^((?:--?|\/)[^=]+)=/);
+    if (equals && SENSITIVE_ARG.test(equals[1] ?? '')) {
+      output.push(`${equals[1]}=${REDACTED_ENVIRONMENT_VALUE}`);
+      continue;
+    }
+    if (/^(?:--?|\/)/.test(argument) && SENSITIVE_ARG.test(argument)) {
+      output.push(argument);
+      redactNext = true;
+      continue;
+    }
+    output.push(argument);
+  }
+  return output;
 }
 
 export interface ContainerDeps {
@@ -150,6 +195,8 @@ export class Container {
   #finishedTerminals = new Set<string>();
   /** Session/runtime variables; never copied from the host environment. */
   #runtimeEnvironment: Record<string, string> = {};
+  /** Set after probe when a process can see a host mount without OS write isolation. */
+  #requiresExecApproval = false;
 
   constructor(
     id: string,
@@ -240,6 +287,20 @@ export class Container {
         isolation: report.isolation,
         degradations: report.degradations,
       });
+    }
+    const hasProcessVisibleHostMount = this.mounts.some(
+      (mount) => normalizeVirtualPath(mount.target) !== '/temp',
+    );
+    this.#requiresExecApproval = !report.filesystemWriteBlock && hasProcessVisibleHostMount;
+    if (this.capabilities.exec && !this.capabilities.hostWrite && this.#requiresExecApproval) {
+      throw new PlifError(
+        'SANDBOX_UNAVAILABLE',
+        'refusing to start: this backend cannot enforce host-write confinement for a host mount',
+        {
+          detail: { backend: report.backend, filesystemWriteBlock: report.filesystemWriteBlock },
+          hint: 'Use a backend with filesystem write isolation, remove the host mount, or explicitly grant hostWrite.',
+        },
+      );
     }
 
     // A restart re-materialises from the image, deliberately: a container is a
@@ -454,6 +515,12 @@ export class Container {
    */
   async reachNetwork(host: string, reason: string): Promise<void> {
     this.#requireCapability('network', 'reach the network');
+    if (!this.#deps.policy.allowsHost(host)) {
+      throw new PlifError('NETWORK_ERROR', `network target ${host} is not in the policy allowlist`, {
+        detail: { host },
+        hint: 'Add the exact host (or its parent domain) to the policy allowlist before retrying.',
+      });
+    }
     await this.#authorize('net.connect', host, undefined, reason);
   }
 
@@ -505,8 +572,12 @@ export class Container {
       throw new PlifError('SANDBOX_UNAVAILABLE', 'container has no active sandbox jail');
     }
 
+    const redactionSecrets = environmentSecrets({
+      ...this.#runtimeEnvironment,
+      ...(request.env ?? {}),
+    });
     const argv0 = request.argv[0] as string;
-    await this.#authorize('exec', argv0, request.argv, request.reason);
+    await this.#authorize('exec', argv0, request.argv, request.reason, redactionSecrets);
 
     const execId = randomUUID().slice(0, 8);
     const cwdVirtual = normalizeVirtualPath(request.cwd ?? this.workdir);
@@ -517,14 +588,14 @@ export class Container {
     this.#deps.bus.emit('exec.start', {
       containerId: this.id,
       execId,
-      argv: request.argv,
+      argv: redactArgv(request.argv, redactionSecrets),
       cwd: cwdVirtual,
     });
     await this.#deps.audit.append('exec.start', this.id, {
       execId,
-      argv: request.argv,
+      argv: redactArgv(request.argv, redactionSecrets),
       cwd: cwdVirtual,
-      reason: request.reason,
+      reason: redactEnvironmentValues(request.reason ?? '', redactionSecrets),
     });
 
     const timeoutMs = Math.min(
@@ -535,11 +606,6 @@ export class Container {
     // Capture the values belonging to this child. A later `/env delete` or
     // session switch must not make output from an already-running process
     // visible for the few milliseconds before that process exits.
-    const redactionSecrets = environmentSecrets({
-      ...this.#runtimeEnvironment,
-      ...(request.env ?? {}),
-    });
-
     // Two ways to stop this exec: the container going down, or the caller
     // cancelling just this one. Both must work, so they are merged rather than
     // the caller's signal replacing the container's.
@@ -618,15 +684,15 @@ export class Container {
       throw new PlifError('SANDBOX_UNAVAILABLE', 'container has no active sandbox jail');
     }
     const ownerId = request.ownerId?.trim() || 'primary';
-    const argv0 = request.argv[0] as string;
-    await this.#authorize('exec', argv0, request.argv, request.reason);
-    const cwdVirtual = normalizeVirtualPath(request.cwd ?? this.workdir);
-    const cwdResolved = await this.#jail.resolveRead(cwdVirtual).catch(() => null);
-    const cwdHost = cwdResolved?.host ?? path.join(this.rootfs, ...cwdVirtual.split('/').filter(Boolean));
     const redactionSecrets = environmentSecrets({
       ...this.#runtimeEnvironment,
       ...(request.env ?? {}),
     });
+    const argv0 = request.argv[0] as string;
+    await this.#authorize('exec', argv0, request.argv, request.reason, redactionSecrets);
+    const cwdVirtual = normalizeVirtualPath(request.cwd ?? this.workdir);
+    const cwdResolved = await this.#jail.resolveRead(cwdVirtual).catch(() => null);
+    const cwdHost = cwdResolved?.host ?? path.join(this.rootfs, ...cwdVirtual.split('/').filter(Boolean));
     const terminal = new TerminalSession({
       terminal: await this.#sandbox.openTerminal({
         argv: request.argv,
@@ -646,14 +712,14 @@ export class Container {
     this.#deps.bus.emit('exec.start', {
       containerId: this.id,
       execId: terminal.id,
-      argv: request.argv,
+      argv: redactArgv(request.argv, redactionSecrets),
       cwd: cwdVirtual,
     });
     await this.#deps.audit.append('exec.start', this.id, {
       execId: terminal.id,
-      argv: request.argv,
+      argv: redactArgv(request.argv, redactionSecrets),
       cwd: cwdVirtual,
-      reason: request.reason,
+      reason: redactEnvironmentValues(request.reason, redactionSecrets),
       terminal: true,
       ownerId,
     });
@@ -870,9 +936,19 @@ export class Container {
     target: string,
     argv?: readonly string[],
     reason?: string,
+    secrets: readonly string[] = [],
   ): Promise<void> {
     const request = { action, target, containerId: this.id, ...(argv ? { argv } : {}), ...(reason ? { reason } : {}) };
-    const verdict = this.#deps.policy.evaluate(request);
+    let verdict = this.#deps.policy.evaluate(request);
+    if (action === 'exec' && this.#requiresExecApproval && verdict.decision === 'allow') {
+      verdict = {
+        decision: 'ask',
+        rule: HOST_MOUNT_EXEC_GUARD,
+        reason: HOST_MOUNT_EXEC_GUARD.rationale ?? 'Approve this command explicitly.',
+      };
+    }
+    const displayArgv = argv ? redactArgv(argv, secrets) : undefined;
+    const displayReason = redactEnvironmentValues(reason ?? '', secrets);
 
     this.#deps.bus.emit('policy.decision', {
       containerId: this.id,
@@ -883,10 +959,10 @@ export class Container {
     await this.#deps.audit.append('policy.decision', this.id, {
       action,
       target,
-      argv: argv ?? null,
+      argv: displayArgv ?? null,
       decision: verdict.decision,
       rule: verdict.rule?.name ?? null,
-      reason: verdict.reason,
+      reason: redactEnvironmentValues(verdict.reason, secrets),
     });
 
     if (verdict.decision === 'allow') return;
@@ -902,8 +978,8 @@ export class Container {
       containerId: this.id,
       action,
       target,
-      ...(argv ? { argv } : {}),
-      reason: reason ?? `The agent wants to ${action} ${target}.`,
+      ...(displayArgv ? { argv: displayArgv } : {}),
+      reason: displayReason || `The agent wants to ${action} ${target}.`,
       rationale: verdict.reason,
     };
     const answer = await this.#deps.approvals.ask(question);

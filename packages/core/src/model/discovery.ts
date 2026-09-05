@@ -11,7 +11,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { findCatalogProvider, rankProviderModels } from './catalog.js';
-import { PRESETS, resolveConfig, type ModelConfig, type StoredConfig } from './config.js';
+import { PRESETS, resolveConfig, usesChatGptOAuth, type ModelConfig, type StoredConfig } from './config.js';
 import { createModelProvider } from './factory.js';
 import type { ModelSource, ProviderModel } from './provider.js';
 import { globalConfigPath } from '../config/global.js';
@@ -238,7 +238,7 @@ async function probeProvider(config: ModelConfig, providerId: string): Promise<P
   const anonymous = findCatalogProvider(providerId)?.anonymous ?? false;
   // Codex authentication belongs to the official local CLI session. It does
   // not use an API key and must still be discoverable in the picker.
-  if (preset && config.authMode !== 'codex' && !anonymous && !config.apiKey) {
+  if (preset && config.authMode !== 'codex' && !usesChatGptOAuth(config) && !anonymous && !config.apiKey) {
     return { supported: false, models: [] };
   }
   const provider = createModelProvider(config);

@@ -1421,11 +1421,22 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case 'effort.apply':
       return { ...state, effort: action.effort, picker: null };
 
-    case 'picker.open':
+    case 'picker.open': {
+      // A caller computes its opening row from its own list, and a list that
+      // has since changed — or an index derived with an offset — would open the
+      // menu on a row that does not exist. Every other picker action clamps;
+      // this one has to as well, or the invariant only holds after the first
+      // keypress.
+      const rows = action.picker.groups
+        ? pickerRows(action.picker.groups, action.picker.expanded ?? [], '').length
+        : (action.picker.items?.length ?? 0);
+      const requested = action.picker.selected ?? 0;
+      const selected = Math.max(0, Math.min(requested, Math.max(0, rows - 1)));
       return {
         ...state,
-        picker: { ...action.picker, filter: '', selected: action.picker.selected ?? 0 },
+        picker: { ...action.picker, filter: '', selected },
       };
+    }
 
     case 'picker.filter': {
       if (!state.picker) return state;
