@@ -1,8 +1,9 @@
 import path from 'node:path';
 
 import type { Tool, ToolContext, ToolResult } from '../harness/tools.js';
+import { DapSession } from './dap.js';
 import { DebugSession } from './session.js';
-import type { DebugLauncher, DebugProcess, DebugStop } from './session.js';
+import type { DebugLauncher, DebugProcess, DebugStop, DebuggerBackend } from './session.js';
 
 /**
  * The slice of the container a debuggee needs.
@@ -19,6 +20,7 @@ interface DebugHost {
     argv: readonly string[];
     cwd?: string;
     reason: string;
+    env?: Readonly<Record<string, string>>;
   }): Promise<{ terminalId: string; ownerId: string }>;
   readTerminal(
     id: string,
@@ -29,11 +31,12 @@ interface DebugHost {
 
 function launcherFor(host: DebugHost): DebugLauncher {
   return {
-    async launch(argv, cwd, reason): Promise<DebugProcess> {
+    async launch(argv, cwd, reason, env): Promise<DebugProcess> {
       const { terminalId, ownerId } = await host.startTerminal({
         argv,
         ...(cwd ? { cwd } : {}),
         reason,
+        ...(env ? { env } : {}),
       });
       return {
         async output(): Promise<string> {
@@ -57,10 +60,10 @@ function launcherFor(host: DebugHost): DebugLauncher {
  * debug two programs at once and every reason not to leave one running.
  */
 export class DebugSessions {
-  #active: DebugSession | null = null;
+  #active: DebuggerBackend | null = null;
   #pending = new Map<string, Set<number>>();
 
-  get active(): DebugSession | null {
+  get active(): DebuggerBackend | null {
     return this.#active;
   }
 
@@ -74,9 +77,20 @@ export class DebugSessions {
     this.#pending.set(file, lines);
   }
 
-  async open(script: string): Promise<DebugSession> {
+  /**
+   * Which debugger the file needs.
+   *
+   * Node speaks the inspector protocol itself, so a JavaScript program needs
+   * nothing installed. Python does not, so it goes through the debugpy that
+   * ships with plif — vendored for the same reason the browser vendors
+   * Chromium: a debugger that only works on machines where someone already
+   * ran pip is a debugger that mostly does not work.
+   */
+  async open(script: string): Promise<DebuggerBackend> {
     await this.close();
-    const session = new DebugSession(script);
+    const session: DebuggerBackend = script.toLowerCase().endsWith('.py')
+      ? new DapSession(script)
+      : new DebugSession(script);
     for (const [file, lines] of this.#pending) {
       for (const line of lines) await session.setBreakpoint(file, line);
     }
@@ -142,7 +156,7 @@ export function debugTool(sessions: DebugSessions, root: string): Tool {
         'Run a program under a debugger and look at it while it is stopped, instead of ' +
         'adding print statements and running it again. Set a breakpoint, launch, then ' +
         'step and inspect expressions in the frame where it stopped. One session at a ' +
-        'time. Node programs only for now.',
+        'time. Node and Python programs.',
       parameters: {
         type: 'object',
         properties: {

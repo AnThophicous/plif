@@ -9,9 +9,8 @@
 
 import { PlifError } from '../errors.js';
 import { AnthropicProvider } from './anthropic.js';
-import { CodexProvider } from './codex.js';
 import { OpenAIProvider, type OpenAIProviderOptions } from './openai.js';
-import type { ModelConfig } from './config.js';
+import { usesChatGptOAuth, type ModelConfig } from './config.js';
 import type { ModelProvider } from './provider.js';
 
 /** True when this endpoint needs the Anthropic SDK rather than the OpenAI one. */
@@ -42,7 +41,7 @@ export function isAnthropicEndpoint(baseURL: string): boolean {
  * those would break the picker.
  */
 function assertCredentialPresent(config: ModelConfig): void {
-  if (config.authMode === 'codex' || config.providerId === 'codex') return;
+  if (usesChatGptOAuth(config)) return;
   if (config.apiKey || config.needKey !== true) return;
   throw new PlifError(
     'MODEL_NOT_CONFIGURED',
@@ -61,9 +60,6 @@ export function createModelProvider(
   options: OpenAIProviderOptions = {},
 ): ModelProvider {
   assertCredentialPresent(config);
-  if (config.authMode === 'codex' || config.providerId === 'codex') {
-    return new CodexProvider(config);
-  }
   if (config.protocol === 'anthropic-messages' || isAnthropicEndpoint(config.baseURL)) {
     return new AnthropicProvider(config);
   }

@@ -14,6 +14,7 @@ import {
   discoverProviderModels,
   forgetProviderKey,
   findCatalogProvider,
+  findCatalogModel,
   forgetDiscoveredModels,
   buildSystemPrompt,
   catalogSelection,
@@ -26,6 +27,7 @@ import {
   loadStoredConfig,
   migrateProviderCredentials,
   mcpServersOf,
+  OpenAIOAuthClient,
   openOAuthBrowser,
   parseServerConfigs,
   readAgentInstructions,
@@ -82,7 +84,6 @@ import {
   mandatorySkillsForEffort,
   saveGlobalConfig,
   scheduleProviderDiscovery,
-  startCodexLogin,
   summariseMemory,
   summariseSessions,
   rangeStart,
@@ -117,7 +118,6 @@ import type {
   ConversationEvent,
   TaskSnapshot,
   Effort,
-  CodexLoginFlow,
   EffortCapabilityCache,
   GoalState as PlifGoalState,
   LspStatus,
@@ -128,8 +128,6 @@ import { Approval, APPROVAL_CHOICES, approvalHeight } from './components/Approva
 import { Browser, mcpStatusKind, sessionAge, sortMcpStatuses } from './components/Browser.js';
 import { Compaction, COMPACTION_HEIGHT } from './components/Compaction.js';
 import { Completions, EmojiMenu } from './components/Completions.js';
-import { CodexLoginDialog } from './components/CodexLoginDialog.js';
-import type { CodexLoginStatus } from './components/CodexLoginDialog.js';
 import { Discovery, discoveryHeight } from './components/Discovery.js';
 import { BtwPanel, btwPanelHeight } from './components/BtwPanel.js';
 import type { BtwViewState } from './components/BtwPanel.js';
@@ -785,12 +783,6 @@ export function App({
   );
   const [projectRootSetupPending, setProjectRootSetupPending] = useState(projectRootSetup);
   const projectRootSetupStarted = useRef(false);
-  const [codexLogin, setCodexLogin] = useState<{
-    readonly status: CodexLoginStatus;
-    readonly detail?: string;
-    readonly userCode?: string;
-  } | null>(null);
-  const codexLoginFlow = useRef<CodexLoginFlow | null>(null);
   const [, setThemeRevision] = useState(0);
   const [emojiIndex, setEmojiIndex] = useState(0);
   /** Live MCP status and loaded skills, for the browser's first two tabs. */
@@ -806,9 +798,6 @@ export function App({
   const activityHudSaveQueue = useRef<Promise<void>>(Promise.resolve());
   useEffect(() => () => {
     if (plifActivationTimer.current) clearTimeout(plifActivationTimer.current);
-  }, []);
-  useEffect(() => () => {
-    void codexLoginFlow.current?.cancel();
   }, []);
   useEffect(() => () => {
     btwAbort.current?.abort();
@@ -2622,66 +2611,6 @@ export function App({
     [mcpRegistry],
   );
 
-  const cancelCodexLogin = useCallback(async (): Promise<void> => {
-    const flow = codexLoginFlow.current;
-    if (!flow) {
-      setCodexLogin(null);
-      return;
-    }
-    await flow.cancel();
-  }, []);
-
-  const loginCodex = useCallback(async (): Promise<boolean> => {
-    if (codexLoginFlow.current) return false;
-    setCodexLogin({ status: 'starting' });
-    try {
-      const flow = await startCodexLogin();
-      codexLoginFlow.current = flow;
-      if (flow.alreadyAuthenticated) {
-        setCodexLogin(null);
-        return true;
-      }
-
-      setCodexLogin({
-        status: 'waiting',
-        ...(flow.userCode ? { userCode: flow.userCode } : {}),
-      });
-      const loginUrl = flow.authUrl ?? flow.verificationUrl;
-      if (!loginUrl) throw new Error('the Codex sign-in URL was empty');
-      try {
-        await openOAuthBrowser(new URL(loginUrl));
-      } catch (error) {
-        await flow.cancel();
-        const { title } = formatError(error);
-        setCodexLogin({ status: 'error', detail: `Could not open ChatGPT sign-in: ${title}` });
-        return false;
-      }
-
-      const result = await flow.wait();
-      if (result.ok) {
-        setCodexLogin(null);
-        return true;
-      }
-      if (result.cancelled) {
-        setCodexLogin(null);
-        return false;
-      }
-      setCodexLogin({
-        status: 'error',
-        detail: result.detail ?? 'ChatGPT sign-in was not completed',
-      });
-      return false;
-    } catch (error) {
-      const { title, detail } = formatError(error);
-      setCodexLogin({
-        status: 'error',
-        detail: [title, detail].filter(Boolean).join(' · '),
-      });
-      return false;
-    } finally {
-      codexLoginFlow.current = null;
-    }
-  }, []);
 
   const runMcpBrowserAction = useCallback(
     async (action: 'connect' | 'disconnect' | 'authenticate' | 'test', server: string): Promise<void> => {
@@ -3113,6 +3042,17 @@ export function App({
      */
     const keyPresent = error.detail['keyPresent'] !== false;
 
+    if (preset === 'openai') {
+      const oauth = await new OpenAIOAuthClient().load().catch(() => undefined);
+      if (oauth) {
+        push(entry('notice', 'ChatGPT OAuth was rejected', {
+          tone: 'warn',
+          subtitle: 'Re-run /providers → OpenAI and finish browser or headless login. Do not paste an API key for that path.',
+        }));
+        return true;
+      }
+    }
+
     if (!keyPresent && credentials) {
       const stashed = await credentials
         .lookup(credentialVariableForProvider(preset, stored))
@@ -3207,19 +3147,39 @@ export function App({
     credentials,
     switchModel: async (requested: ModelSelection | string) => {
       const stored = await loadStoredConfig(engine.paths);
-      const selection: ModelSelection =
-        typeof requested === 'string'
-          // A known catalog id carries an unambiguous provider. This is what
-          // keeps a bare free model on OpenCode instead of inheriting a stale
-          // paid provider and prompting for its unrelated key.
-          ? { preset: providerForModel(requested) ?? providerIdForConfig(stored) ?? '', model: requested }
-          : requested;
-      const savedKey = await providerCredential(credentials, selection.preset, stored);
+      const selection: ModelSelection = (() => {
+        const base: ModelSelection =
+          typeof requested === 'string'
+            ? { preset: providerForModel(requested) ?? providerIdForConfig(stored) ?? '', model: requested }
+            : requested;
+        const oauthOffer = findCatalogModel('openai', base.model);
+        if (oauthOffer?.badges.includes('OAuth') && base.preset !== 'openai') {
+          return { ...base, preset: 'openai' };
+        }
+        return base;
+      })();
+      if (selection.preset === 'codex') {
+        push(entry('notice', 'Codex provider is no longer available', {
+          tone: 'warn',
+          subtitle: 'Use OpenAI ChatGPT OAuth from /provider instead.',
+        }));
+        return;
+      }
+      const catalogAuth = findCatalogProvider(selection.preset)?.auth;
+      const oauthListed = findCatalogModel('openai', selection.model)?.badges.includes('OAuth') === true;
+      const chatGptOAuth = catalogAuth === 'openai-oauth' || selection.preset === 'openai' || oauthListed;
+      const oauthSession = chatGptOAuth
+        ? await new OpenAIOAuthClient().load().catch(() => undefined)
+        : undefined;
+      const savedKey = oauthSession || oauthListed
+        ? undefined
+        : await providerCredential(credentials, selection.preset, stored);
       let config = resolveConfig(stored, {
         model: selection.model,
         preset: selection.preset,
         ...(selection.protocol ? { protocol: selection.protocol } : {}),
         ...(selection.streamSemantics ? { streamSemantics: selection.streamSemantics } : {}),
+        ...(oauthSession || (chatGptOAuth && !savedKey) ? { authMode: 'openai-oauth' } : {}),
         ...(savedKey ? { apiKey: savedKey } : {}),
       });
       // resolveConfig applies the same capability policy used by the effort
@@ -3241,10 +3201,21 @@ export function App({
         }
       };
       rememberNormalizedEffort(config);
+      if (chatGptOAuth && !savedKey) {
+        config = {
+          ...config,
+          authMode: 'openai-oauth',
+          needKey: false,
+          apiKey: '',
+          baseURL: config.baseURL.includes('chatgpt.com')
+            ? config.baseURL
+            : 'https://chatgpt.com/backend-api/codex/v1',
+        };
+      }
       let check = validateModelConfig(config);
       let typedKey: string | undefined;
       if (!check.ok) {
-        if (!config.apiKey && config.needKey) {
+        if (!config.apiKey && config.needKey && !chatGptOAuth) {
           const providerLabel =
             userCatalog(stored).find((entryProvider) => entryProvider.id === selection.preset)?.label ??
             findCatalogProvider(selection.preset)?.label ?? (selection.preset || 'This provider');
@@ -3513,7 +3484,6 @@ export function App({
     pasteImage: () => pasteImage(),
     openBrowser: (tab) => dispatch({ type: 'browser.open', tab }),
     loginMcp,
-    loginCodex,
     mcpNames: mcpStatuses.map((server) => server.name),
     openPicker: (picker) => dispatch({ type: 'picker.open', picker }),
     openEnv: openEnvironmentPicker,
@@ -5149,7 +5119,7 @@ export function App({
   function handleMouse(mouse: { readonly button: number; readonly action: string; readonly column: number; readonly row: number }): void {
     if ((mouse.action !== 'press' && mouse.action !== 'move') || pastedTextPopup) return;
     if (mouse.action === 'move' && !state.question) return;
-    if (state.screen || state.browser || state.approval || state.picker || credentialPromptPending || codexLogin) return;
+    if (state.screen || state.browser || state.approval || state.picker || credentialPromptPending) return;
 
     if (state.question) {
       if (mouse.action === 'move' && mouse.button !== 0) return;
@@ -5300,10 +5270,6 @@ export function App({
       return;
     }
 
-    if (codexLogin) {
-      if (key.escape || (key.ctrl && char === 'c')) void cancelCodexLogin();
-      return;
-    }
 
     if (state.screen) {
       handleConfigKey(char, key);
@@ -7226,16 +7192,6 @@ export function App({
               />
             </Box>
 
-            {codexLogin && (
-              <Box paddingX={1}>
-                <CodexLoginDialog
-                  status={codexLogin.status}
-                  detail={codexLogin.detail}
-                  userCode={codexLogin.userCode}
-                  width={Math.max(1, surface.contentWidth - 2)}
-                />
-              </Box>
-            )}
 
             {state.picker && (
               <Box paddingX={1}>
@@ -7363,7 +7319,7 @@ export function App({
                 // Focused while busy too: the field takes input the whole time, and
                 // an unfocused-looking box that nonetheless accepts typing is a lie
                 // about where the keystrokes are going.
-                focused={!codexLogin && !state.approval && !state.question && !state.picker && !btwInput}
+                focused={!state.approval && !state.question && !state.picker && !btwInput}
                 busy={state.busy}
                 busyLabel={state.busyLabel}
                 width={surface.contentWidth}

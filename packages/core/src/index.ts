@@ -117,6 +117,8 @@ export {
   mcpOAuthKey,
 } from './auth/store.js';
 export type { McpOAuthStore, OAuthCredentialScope, StoredMcpOAuthState, SystemdCredsRunner } from './auth/store.js';
+export { OpenAIOAuthClient, OPENAI_AUTH_METHODS, buildOpenAIAuthorizeUrl, generateOpenAIPkce, refreshOpenAIAccessToken } from './auth/openai-oauth.js';
+export type { OpenAIOAuthMethod, OpenAIOAuthTokens } from './auth/openai-oauth.js';
 export {
   SessionEnvironmentStore,
   normalizeEnvironmentMap,
@@ -511,6 +513,7 @@ export {
   saveStoredConfig,
   storedProviderCredentials,
   stripStoredCredentials,
+  usesChatGptOAuth,
   validate as validateModelConfig,
   visionCandidates,
 } from './model/config.js';
@@ -597,8 +600,6 @@ export type {
 export { discoverProviderModels, forgetDiscoveredModels, scheduleProviderDiscovery } from './model/discovery.js';
 export type { DiscoveredModels, DiscoverOptions, DiscoverySource } from './model/discovery.js';
 export { AnthropicProvider } from './model/anthropic.js';
-export { CodexProvider, startCodexLogin } from './model/codex.js';
-export type { CodexLoginFlow, CodexLoginResult, CodexProviderOptions } from './model/codex.js';
 export { createModelProvider, isAnthropicEndpoint } from './model/factory.js';
 
 export { Session, SessionStore, workspaceKey } from './session/store.js';
@@ -760,6 +761,7 @@ export { SEARCH_HOSTS, parseResults, resolveRedirect, search, stripTags } from '
 export type { InstantAnswer, SearchOptions, SearchResponse, SearchResult } from './web/duckduckgo.js';
 export { WEB_TOOLS, curl, research, webFetch, webSearch } from './web/tools.js';
 
+export { DapSession, vendoredPythonPath } from './debug/dap.js';
 export { DebugSession } from './debug/session.js';
 export type {
   DebugFrame,
@@ -767,6 +769,7 @@ export type {
   DebugProcess,
   DebugStop,
   DebugValue,
+  DebuggerBackend,
 } from './debug/session.js';
 export { DebugSessions, debugTool, debugTools } from './debug/tools.js';
 export { BrowserSession } from './browser/session.js';

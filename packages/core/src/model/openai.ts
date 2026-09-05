@@ -31,7 +31,8 @@ import {
 
 import { PlifError } from '../errors.js';
 import type { ModelConfig } from './config.js';
-import { isLocal, keyOptional } from './config.js';
+import { isLocal, keyOptional, usesChatGptOAuth } from './config.js';
+import { OpenAIOAuthClient } from '../auth/openai-oauth.js';
 import type { CachedEffort, EffortCapabilityCache } from './capabilities.js';
 import { redactedProviderId, streamTiming } from './stream-timing.js';
 import { modelListResult, normalizeProviderModel } from './metadata.js';
@@ -252,6 +253,7 @@ export class OpenAIProvider implements ModelProvider {
   #capabilityLoad: Promise<void> | undefined;
   #usageHeaders: Headers | undefined;
   #usageSnapshot: UsageInfo | undefined;
+  #oauth = new OpenAIOAuthClient();
   /** Highest Plif candidate accepted by this provider instance. */
   #plifEffortIndex = 0;
   /**
@@ -281,6 +283,18 @@ export class OpenAIProvider implements ModelProvider {
       );
       new globalThis.Headers(init?.headers as any).forEach((value, key) => headers.set(key, value));
       if (anonymous) headers.delete('authorization');
+      if (usesChatGptOAuth(config) && !config.apiKey) {
+        const token = await this.#oauth.accessToken();
+        if (!token) {
+          throw new PlifError('MODEL_AUTH', 'ChatGPT OAuth session is missing', {
+            detail: { endpoint: config.baseURL, keyPresent: false },
+            hint: 'Run /providers, pick OpenAI, and finish browser or headless login. An API key is not required for that path.',
+          });
+        }
+        headers.set('Authorization', `Bearer ${token}`);
+        const accountId = (await this.#oauth.load())?.accountId;
+        if (accountId) headers.set('ChatGPT-Account-ID', accountId);
+      }
       // `dispatcher` is Node's own extension to RequestInit, absent from the
       // DOM typings this signature is written against, and inert when nothing
       // configured a proxy.
@@ -298,7 +312,7 @@ export class OpenAIProvider implements ModelProvider {
       // is genuinely anonymous. Use an internal sentinel only to satisfy the
       // SDK, then strip Authorization in the fetch wrapper before the request
       // leaves the process. Paid providers still use their real credential.
-      apiKey: config.apiKey || (anonymous ? 'plif-anonymous' : ''),
+      apiKey: config.apiKey || (anonymous || usesChatGptOAuth(config) ? 'plif-anonymous' : ''),
       baseURL: config.baseURL,
       timeout: config.timeoutMs,
       fetch: captureFetch,

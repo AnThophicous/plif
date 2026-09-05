@@ -90,7 +90,7 @@ export interface ModelConfig {
    */
   readonly headers?: Readonly<Record<string, string>>;
   /** Authentication owned by a local provider bridge rather than an API key. */
-  readonly authMode?: 'codex';
+  readonly authMode?: 'codex' | 'openai-oauth';
   readonly temperature: number;
   readonly maxTokens: number | undefined;
   /** Declared model capacity, when the custom catalogue knows it. */
@@ -185,21 +185,13 @@ export function normalizeEffort(
  * with one flag instead of a URL nobody remembers. Anything missing still works
  * via `--base-url`; that is the whole benefit of a standard wire format.
  */
-export const PRESETS: Readonly<Record<string, { baseURL: string; keyEnv: string; note: string; authMode?: 'codex' }>> =
+export const PRESETS: Readonly<Record<string, { baseURL: string; keyEnv: string; note: string; authMode?: 'openai-oauth' }>> =
   Object.freeze({
-    codex: {
-      // This is an adapter identity, not an HTTP endpoint. Requests are sent
-      // to the official local Codex app-server, which owns ChatGPT login and
-      // token refresh. PLIF never reads the Codex auth file or private tokens.
-      baseURL: 'codex://app-server',
-      keyEnv: 'CODEX_LOGIN',
-      note: 'OpenAI Codex — sign in with your ChatGPT account',
-      authMode: 'codex',
-    },
     openai: {
       baseURL: 'https://api.openai.com/v1',
       keyEnv: 'OPENAI_API_KEY',
-      note: 'OpenAI',
+      note: 'OpenAI — ChatGPT OAuth or API key',
+      authMode: 'openai-oauth',
     },
     ollama: {
       // Local models need no key, but the SDK insists on a non-empty string.
@@ -454,7 +446,7 @@ export interface ProviderOffer {
  */
 const PROVIDER_OFFERS: Readonly<Record<string, ProviderOffer>> = Object.freeze({
   codex: { product: 'OpenAI', tier: 'Codex / ChatGPT', cost: 'unknown', protocol: 'openai-chat' },
-  opencode: { product: 'OpenCode', tier: 'Zen', cost: 'free', protocol: 'openai-chat' },
+  opencode: { product: 'OpenCode', tier: 'Zen', cost: 'unknown', protocol: 'openai-chat' },
   'opencode-go': { product: 'OpenCode', tier: 'Go', cost: 'paid', protocol: 'openai-chat' },
   nexapi: { product: 'NexAPI', tier: 'Hosted', cost: 'unknown', protocol: 'openai-chat' },
 });
@@ -639,6 +631,7 @@ export interface ResolveOptions {
   readonly apiKey?: string;
   readonly protocol?: ModelProtocol;
   readonly streamSemantics?: StreamSemantics;
+  readonly authMode?: 'codex' | 'openai-oauth';
   /** Injected in tests so resolution can be checked without touching the real env. */
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
@@ -747,8 +740,7 @@ export function resolveConfig(
   const model = ref.model || custom?.defaultModel || custom?.options?.defaultModel || '';
   const providerId = presetName;
   const customAuth = custom?.auth ?? custom?.options?.auth ?? custom?.authMode ?? custom?.options?.authMode;
-  const authMode = preset?.authMode ?? (customAuth === 'codex' ? 'codex' : undefined);
-  const usesCodexAuth = authMode === 'codex';
+  const declaredAuth = customAuth as string | undefined;
   const modelMetadata = custom?.models?.[model];
   const configuredNeedKey = firstBoolean(
     ...(rootFieldsApply ? [stored.NeedKey, stored.needKey] : []),
@@ -760,14 +752,6 @@ export function resolveConfig(
     custom?.options?.needKey,
   );
   const anonymousRemote = !isLocal(baseURL) && keyOptional(baseURL, model, providerId);
-  // A stale NeedKey from a paid model must not override the provider's live
-  // anonymous contract when the user switches to a newly discovered `-free`
-  // offer. Keep explicit NeedKey behavior for local/custom endpoints.
-  const needKey = usesCodexAuth
-    ? false
-    : customAuth === 'none'
-      ? false
-    : anonymousRemote ? false : configuredNeedKey ?? !keyOptional(baseURL, model, providerId);
   const protocol = options.protocol ?? modelMetadata?.protocol ?? custom?.protocol ?? custom?.options?.protocol ?? protocolForModel(providerId, model) ?? providerOffer(providerId)?.protocol;
 
   // Try the preset's own key variable before the generic one, so switching
@@ -776,11 +760,8 @@ export function resolveConfig(
   // reason `rootFieldsApply` exists: a credential with no provider attached is
   // a guess, and guessing wrong means posting somebody's key to a host it was
   // never issued for.
-  const apiKey = usesCodexAuth
-    ? ''
-    : customAuth === 'none'
-      ? (isLocal(baseURL) ? 'local' : '')
-    : options.apiKey ??
+  const resolvedApiKey =
+    options.apiKey ??
       (preset ? env[preset.keyEnv] : undefined) ??
       (custom && presetName ? env[credentialVariableForProvider(presetName, stored)] : undefined) ??
       custom?.options?.apiKey ??
@@ -793,8 +774,39 @@ export function resolveConfig(
       // find the free models broken for a reason nothing on screen explains.
       (keyOptional(baseURL, model, providerId) || custom ? undefined : env['OPENAI_API_KEY']) ??
       (rootFieldsApply && !customCollision ? stored.apiKey : undefined) ??
+      '';
+  const builtinChatGptOauth = !custom && providerId === 'openai' && !resolvedApiKey.trim();
+  // A configuration saved while Codex was still a provider keeps working, on the
+  // OpenAI OAuth route it should have been on all along: the Codex adapter sent
+  // requests to the local Codex app, which is the flow being removed here.
+  const declared = options.authMode;
+  const authMode = (declared === 'codex' ? 'openai-oauth' : declared)
+    ?? (declaredAuth === 'codex'
+      ? 'openai-oauth'
+      : resolvedApiKey.trim()
+        ? undefined
+        : (preset?.authMode === 'openai-oauth' || declaredAuth === 'openai-oauth' || builtinChatGptOauth)
+          ? 'openai-oauth'
+          : undefined);
+  const usesOpenAIOAuth = authMode === 'openai-oauth';
+  // A stale NeedKey from a paid model must not override the provider's live
+  // anonymous contract when the user switches to a newly discovered `-free`
+  // offer. Keep explicit NeedKey behavior for local/custom endpoints.
+  const needKey = usesOpenAIOAuth
+    ? false
+    : declaredAuth === 'none'
+      ? false
+    : anonymousRemote ? false : configuredNeedKey ?? !keyOptional(baseURL, model, providerId);
+  const apiKey = usesOpenAIOAuth
+    ? ''
+    : declaredAuth === 'none'
+      ? (isLocal(baseURL) ? 'local' : '')
+    : resolvedApiKey ||
       // Local servers ignore the value but the SDK refuses an empty one.
       (isLocal(baseURL) && !needKey ? 'local' : '');
+  const resolvedBaseURL = usesOpenAIOAuth && !options.baseURL && !custom
+    ? 'https://chatgpt.com/backend-api/codex/v1'
+    : baseURL;
 
   /**
    * Extra headers for this provider, expanded against the environment.
@@ -827,12 +839,12 @@ export function resolveConfig(
 
   const effort = normalizeEffort(
     stored.effort,
-    supportedEfforts(baseURL, model, { providerId }),
+    supportedEfforts(resolvedBaseURL, model, { providerId }),
   );
 
   return {
     model,
-    baseURL,
+    baseURL: resolvedBaseURL,
     apiKey,
     ...(providerId ? { providerId } : {}),
     ...(authMode ? { authMode } : {}),
@@ -846,7 +858,7 @@ export function resolveConfig(
     contextWindow: modelMetadata?.contextWindow,
     timeoutMs: numberFrom(env['PLIF_TIMEOUT_MS']) ?? stored.timeoutMs ?? DEFAULTS.timeoutMs,
     effort,
-    ...(providerId === 'codex' ? { codexFast: stored.codexFast === true } : {}),
+
     conversationState,
   };
 }
@@ -889,11 +901,6 @@ export function adoptProvider(
 
   next['preset'] = selection.preset;
   next['model'] = selection.model;
-  if (selection.preset === 'codex' && selection.codexFast !== undefined) {
-    next['codexFast'] = selection.codexFast;
-  } else if (selection.preset !== 'codex') {
-    delete next['codexFast'];
-  }
   if (persistCredential && Object.keys(providerKeys).length > 0) next['providerKeys'] = providerKeys;
 
   // Only a real change of provider invalidates the root fields. Re-picking a
@@ -1122,7 +1129,6 @@ export function discoveredModelCost(
  * a 401 three seconds into the first turn.
  */
 export function keyOptional(baseURL: string, model: string, providerId?: string): boolean {
-  if (providerId === 'codex') return true;
   if (isLocal(baseURL)) return true;
   if (providerId !== 'opencode') return false;
   const normalizedModel = model.toLowerCase();
@@ -1144,6 +1150,12 @@ export function isLocal(baseURL: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Built-in OpenAI without an API key is ChatGPT OAuth, not a missing key. */
+export function usesChatGptOAuth(config: Pick<ModelConfig, 'authMode' | 'providerId' | 'apiKey'>): boolean {
+  if (config.authMode === 'openai-oauth') return true;
+  return config.providerId === 'openai' && !config.apiKey;
 }
 
 /**
@@ -1171,7 +1183,7 @@ export function validate(config: ModelConfig): { ok: boolean; problem?: string; 
       hint: 'Set PLIF_BASE_URL, or pick a preset with --preset.',
     };
   }
-  if (config.authMode === 'codex') return { ok: true };
+  if (usesChatGptOAuth(config)) return { ok: true };
   if (!config.apiKey && (config.needKey ?? !keyOptional(config.baseURL, config.model, config.providerId))) {
     return {
       ok: false,
@@ -1197,7 +1209,9 @@ export function describe(config: ModelConfig): Record<string, string> {
     endpoint: config.baseURL,
     key: config.authMode === 'codex'
       ? '(ChatGPT session via PLIF)'
-      : config.apiKey || (config.needKey ?? !keyOptional(config.baseURL, config.model, config.providerId))
+      : usesChatGptOAuth(config)
+        ? '(ChatGPT OAuth via PLIF)'
+        : config.apiKey || (config.needKey ?? !keyOptional(config.baseURL, config.model, config.providerId))
         ? redact(config.apiKey)
         : '(not required — free model)',
     // The route matters as much as the key when a request fails to arrive at

@@ -16,7 +16,38 @@ export interface DebugProcess {
 }
 
 export interface DebugLauncher {
-  launch(argv: readonly string[], cwd: string | undefined, reason: string): Promise<DebugProcess>;
+  launch(
+    argv: readonly string[],
+    cwd: string | undefined,
+    reason: string,
+    /** Extra variables the debuggee needs, such as where a vendored adapter lives. */
+    env?: Readonly<Record<string, string>>,
+  ): Promise<DebugProcess>;
+}
+
+/**
+ * What the debug tool needs from a session, whichever protocol it speaks.
+ *
+ * The Node session talks CDP and the Python one talks DAP, and the tool holds
+ * one or the other without asking which: the difference between a breakpoint in
+ * one language and a breakpoint in another is not the model's problem.
+ */
+export interface DebuggerBackend {
+  readonly script: string;
+  readonly exited: boolean;
+  readonly frames: readonly DebugFrame[];
+  readonly stopReason: string;
+  setBreakpoint(file: string, line: number): Promise<void>;
+  launch(
+    launcher: DebugLauncher,
+    argv: readonly string[],
+    cwd: string | undefined,
+  ): Promise<DebugStop>;
+  resume(): Promise<DebugStop>;
+  step(kind: 'over' | 'in' | 'out'): Promise<DebugStop>;
+  inspect(expression: string): Promise<string>;
+  locals(): Promise<DebugValue[]>;
+  stop(): Promise<void>;
 }
 
 export interface DebugFrame {
@@ -103,12 +134,19 @@ export class DebugSession {
     this.#process = started;
 
     const url = await this.#awaitInspectorUrl(started);
-    await this.#connect(url);
-
-    await this.#send('Runtime.enable', {});
-    await this.#send('Debugger.enable', {});
-    for (const [file, lines] of this.#breakpoints) {
-      for (const line of lines) await this.#armBreakpoint(file, line);
+    // The program is running by now. Everything from here can still fail, and
+    // a failure that left it running would leave a stopped process nobody can
+    // reach and no session to stop it with.
+    try {
+      await this.#connect(url);
+      await this.#send('Runtime.enable', {});
+      await this.#send('Debugger.enable', {});
+      for (const [file, lines] of this.#breakpoints) {
+        for (const line of lines) await this.#armBreakpoint(file, line);
+      }
+    } catch (error) {
+      await this.stop();
+      throw error;
     }
 
     // The runtime is holding at the first line waiting for exactly this.

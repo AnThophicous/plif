@@ -25,7 +25,7 @@ export type CustomProviderProtocol = typeof CUSTOM_PROVIDER_PROTOCOLS[number];
 export const CUSTOM_PROVIDER_AUTHS = Object.freeze([
   'api-key',
   'none',
-  'codex',
+  'openai-oauth',
 ] as const);
 
 export type CustomProviderAuth = typeof CUSTOM_PROVIDER_AUTHS[number];
@@ -102,7 +102,7 @@ export interface CustomProviderDefinitionInput {
   readonly baseURL?: string;
   readonly protocol?: CustomProviderProtocol;
   readonly auth?: CustomProviderAuth;
-  readonly authMode?: 'codex';
+  readonly authMode?: 'codex' | 'openai-oauth';
   readonly needKey?: boolean;
   readonly NeedKey?: boolean;
   readonly defaultModel?: string;
@@ -119,7 +119,7 @@ export interface CustomProviderDefinitionInput {
     readonly NeedKey?: boolean;
     readonly protocol?: CustomProviderProtocol;
     readonly auth?: CustomProviderAuth;
-    readonly authMode?: 'codex';
+    readonly authMode?: 'codex' | 'openai-oauth';
     readonly defaultModel?: string;
     readonly [key: string]: unknown;
   }>;
@@ -491,8 +491,12 @@ function normalizeProtocol(value: unknown, path: string): CustomProviderProtocol
 
 function normalizeAuth(value: unknown, path: string): CustomProviderAuth | undefined {
   if (value === undefined) return undefined;
-  if (value === 'api-key' || value === 'none' || value === 'codex') return value;
-  fail(path, value, '"api-key", "none", or "codex"', '{ "auth": "api-key" }');
+  if (value === 'api-key' || value === 'none' || value === 'openai-oauth') return value;
+  // A config written while Codex was still a provider keeps loading, on the
+  // OpenAI OAuth route that replaced it. Failing here instead would turn a
+  // removed provider into a broken startup for a file the user never touched.
+  if (value === 'codex') return 'openai-oauth';
+  fail(path, value, '"api-key", "none", or "openai-oauth"', '{ "auth": "api-key" }');
 }
 
 function normalizePricing(value: unknown, path: string): ModelPricing {
@@ -757,11 +761,14 @@ function normalizeProviderInput(input: unknown, options: { readonly requireBaseU
   ], 'provider', '{ "needKey": false }');
   if (needKeyInput.explicit) explicit.add('needKey');
   const local = isLoopbackURL(normalizedBaseURL);
-  const needKey = auth === 'none' || auth === 'codex'
+  // OAuth carries its own credential, so a provider on that route must not be
+  // asked for an API key it has no place to put.
+  const keyless = auth === 'none' || auth === 'openai-oauth';
+  const needKey = keyless
     ? false
     : needKeyInput.value ?? !local;
-  if ((auth === 'none' || auth === 'codex') && needKeyInput.value === true) {
-    fail('provider.needKey', true, 'false when provider.auth is "none" or "codex"', '{ "auth": "none", "needKey": false }', 'contradicts the provider authentication mode');
+  if (keyless && needKeyInput.value === true) {
+    fail('provider.needKey', true, `false when provider.auth is "${auth}"`, '{ "auth": "none", "needKey": false }', 'contradicts the provider authentication mode');
   }
   const normalizedAuth = auth ?? (needKey ? 'api-key' : 'none');
 

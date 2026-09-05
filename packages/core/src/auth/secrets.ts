@@ -227,6 +227,7 @@ export class CredentialBroker {
   readonly #prompt: ((request: CredentialRequest) => Promise<string | null>) | undefined;
   readonly #environment: Readonly<Record<string, string | undefined>>;
   readonly #refused = new Set<string>();
+  readonly #memory = new Map<string, string>();
 
   constructor(options: CredentialBrokerOptions) {
     this.#store = options.store;
@@ -242,8 +243,16 @@ export class CredentialBroker {
   async lookup(variable: string): Promise<string | undefined> {
     const fromEnvironment = this.#environment[variable];
     if (fromEnvironment?.trim()) return fromEnvironment.trim();
-    const stored = await this.#store.get(variable);
-    return stored?.trim() || undefined;
+    const cached = this.#memory.get(variable);
+    if (cached) return cached;
+    try {
+      const stored = await this.#store.get(variable);
+      const value = stored?.trim() || undefined;
+      if (value) this.#memory.set(variable, value);
+      return value;
+    } catch {
+      return cached;
+    }
   }
 
   /** Read only the encrypted store, ignoring an environment override. */
@@ -257,12 +266,14 @@ export class CredentialBroker {
     const normalized = value.trim();
     if (!normalized) throw new PlifError('INVALID_ARGUMENT', 'credential cannot be empty');
     this.#refused.delete(variable);
+    this.#memory.set(variable, normalized);
     await this.#store.set(variable, normalized);
   }
 
   /** Remove a saved credential and allow a later resolve to ask again. */
   async forget(variable: string): Promise<void> {
     this.#refused.delete(variable);
+    this.#memory.delete(variable);
     await this.#store.delete(variable);
   }
 

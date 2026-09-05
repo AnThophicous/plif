@@ -52,6 +52,8 @@ import {
   tokenSplitDefinition,
   tokenSplitDefinitions,
   tokenSplitSanityRate,
+  OpenAIOAuthClient,
+  openOAuthBrowser,
 } from '@plif/core';
 import type {
   Container,
@@ -525,6 +527,13 @@ export function validateEffortArgument(
   return value as Effort;
 }
 
+/** ChatGPT/OpenAI gpt-* ids are Codex offers, not OpenCode Zen/Go catalog rows. */
+function isOpenCodeChatGptId(providerId: string, id: string): boolean {
+  if (providerId !== 'opencode' && providerId !== 'opencode-go') return false;
+  const tail = (id.split('/').pop() ?? id).toLowerCase();
+  return tail.startsWith('gpt-');
+}
+
 /** Keep verified built-ins visible while adding everything the endpoint reports. */
 export function providerModelIds(
   catalog: ModelCatalogProvider,
@@ -535,6 +544,7 @@ export function providerModelIds(
 ): string[] {
   if (!live) {
     return catalog.models
+      .filter((item) => !isOpenCodeChatGptId(catalog.id, item.id))
       .filter((item) => access !== 'free' || item.badges.includes('no key'))
       .map((item) => item.id);
   }
@@ -542,6 +552,7 @@ export function providerModelIds(
   // here would keep retired models selectable forever.
   const metadata = new Map(discoveredModels.map((model) => [model.id, model]));
   return [...new Set(discoveredIds)].filter((id) => {
+    if (isOpenCodeChatGptId(catalog.id, id)) return false;
     if (access !== 'free') return true;
     // A live response is authoritative for availability, but not for
     // authentication. Unknown/paid rows must not inherit Zen's provider-level
@@ -580,7 +591,9 @@ function providerSources(stored: StoredConfig): ProviderSource[] {
   const mine = userCatalog(stored);
   return [
     ...mine.map((entryProvider) => ({ entryProvider, section: 'your providers' })),
-    ...builtInPickerProviders(mine).map((entryProvider) => ({ entryProvider, section: 'built into PLIF' })),
+    ...builtInPickerProviders(mine)
+      .filter((entryProvider) => entryProvider.id !== 'codex')
+      .map((entryProvider) => ({ entryProvider, section: 'built into PLIF' })),
   ];
 }
 
@@ -911,17 +924,17 @@ export function mergeDiscoveredModel(
     curated.streamSemantics,
     curated.metadataSource,
   ].some((value) => value !== undefined);
-  const sourceHasExplicitMetadata = source.product !== undefined || source.tier !== undefined || source.defaultCost !== undefined;
   const metadataSource = discovered.metadataSource
     ?? curated?.metadataSource
-    ?? (curatedHasExplicitMetadata || sourceHasExplicitMetadata ? 'registry' : undefined);
+    ?? (curatedHasExplicitMetadata ? 'registry' : undefined);
+  const inheritProviderCost = source.defaultCost === 'paid' ? 'paid' as const : undefined;
   const registryFallback = curated ? {} : {
     ...(source.product ? { product: source.product } : {}),
     ...(source.tier ? { tier: source.tier } : {}),
-    ...(source.defaultCost ? { cost: source.defaultCost } : {}),
+    ...(inheritProviderCost ? { cost: inheritProviderCost } : {}),
     ...(metadataSource ? { metadataSource } : {}),
   };
-  return {
+  const merged = {
     ...(curated ?? {
       id,
       label: discovered.name ?? friendlyModelName(id),
@@ -946,8 +959,9 @@ export function mergeDiscoveredModel(
     ...(discovered.streamSemantics === undefined ? {} : { streamSemantics: discovered.streamSemantics }),
     ...(discovered.ranking === undefined ? {} : { ranking: discovered.ranking }),
     ...(metadataSource ? { metadataSource } : {}),
-    ...(discovered.cost === undefined && curated?.cost === undefined && source.defaultCost ? { cost: source.defaultCost } : {}),
+    ...(discovered.cost === undefined && curated?.cost === undefined && inheritProviderCost ? { cost: inheritProviderCost } : {}),
   };
+  return merged;
 }
 
 function friendlyModelName(id: string): string {
@@ -981,7 +995,8 @@ async function configureProvider(
   stored: StoredConfig,
   source: ModelCatalogProvider,
 ): Promise<boolean> {
-  const needsCredential = !isLocal(source.endpoint) && source.id !== 'codex';
+  const isOpenAIOAuth = source.id === 'openai' || source.auth === 'openai-oauth';
+  const needsCredential = !isLocal(source.endpoint) && source.id !== 'codex' && !isOpenAIOAuth;
   if (needsCredential && !context.credentials) {
     context.notify?.(entry('notice', `cannot configure ${source.label} without secure credential storage`, {
       tone: 'warn',
@@ -990,7 +1005,28 @@ async function configureProvider(
     return false;
   }
   const keyEnv = credentialVariableForProvider(source.id, stored);
-  const key = needsCredential
+  if (isOpenAIOAuth) {
+    const method = await context.engine.questions.ask({
+      text: 'OpenAI authentication method',
+      options: ['ChatGPT Pro/Plus (browser)', 'ChatGPT Pro/Plus (headless)', 'Manually enter API Key'],
+      context: 'OAuth stays in PLIF and does not create a Codex app-server chat.',
+    });
+    if (method === 'ChatGPT Pro/Plus (browser)') {
+      try {
+        await new OpenAIOAuthClient().startBrowserLogin((url) => openOAuthBrowser(new URL(url)));
+        return true;
+      } catch { return false; }
+    }
+    if (method === 'ChatGPT Pro/Plus (headless)') {
+      try {
+        await new OpenAIOAuthClient().startHeadlessLogin(5_000, undefined, (code) => {
+          context.notify?.(entry('notice', `OpenAI device code: ${code}`, { tone: 'accent', subtitle: 'Open https://auth.openai.com/codex/device to finish login.' }));
+        });
+        return true;
+      } catch { return false; }
+    }
+  }
+  const key = needsCredential || isOpenAIOAuth
     ? (await context.engine.questions.ask({
       text: `API key · ${source.label}`,
       secret: true,
@@ -1041,6 +1077,12 @@ async function providerAccessMap(
     // user can discover and select it before the explicit sign-in step.
     if (entryProvider.auth === 'codex') {
       return [entryProvider.id, 'configured' as const] as const;
+    }
+    if (entryProvider.auth === 'openai-oauth') {
+      if (!credentials) return null;
+      const oauth = await new OpenAIOAuthClient().load();
+      const apiKey = await providerKey(entryProvider.id, stored, credentials);
+      return oauth || apiKey ? [entryProvider.id, 'configured' as const] as const : null;
     }
     const key = await providerKey(entryProvider.id, stored, credentials);
     if (entryProvider.anonymous) return [entryProvider.id, key ? 'configured' as const : 'free' as const] as const;
@@ -1350,7 +1392,7 @@ async function openProviderPicker(
     hint: `active: ${activeLabel ?? 'none'} · Enter opens models · choose Add custom provider for a guided setup`,
     countLabel: 'providers',
     items,
-    selected: Math.max(0, items.findIndex((item) => item.current) + 1),
+    selected: Math.max(0, items.findIndex((item) => item.current)),
     onPick: (value) => {
       if (String(value) === ADD_CUSTOM_PROVIDER) {
         void (async () => {
@@ -1367,7 +1409,8 @@ async function openProviderPicker(
       const isCodex = selected.auth === 'codex';
       const isLocked = !isCodex && !access.has(selected.id) && !selected.anonymous && !isLocalEndpoint(selected.endpoint);
       void (async () => {
-        if (isLocked && !(await configureProvider(context, stored, selected))) return;
+        const isOpenAIOAuth = selected.id === 'openai' || selected.auth === 'openai-oauth';
+        if ((isLocked || isOpenAIOAuth) && !(await configureProvider(context, stored, selected))) return;
         const pickerStored = stored;
         // Selecting Codex is also the explicit session-verification action.
         // Do this even when the config already points at Codex: that state only
@@ -2657,13 +2700,13 @@ export const COMMANDS: readonly Command[] = [
     },
   },
   {
-    name: 'store',
+    name: 'content-store',
     args: '[show]',
     summary: 'Explain PLIF persistent storage and its privacy boundary',
     concurrent: true,
     run: async (argv, context) => {
       if (argv.length > 0 && argv[0] !== 'show') {
-        throw new PlifError('INVALID_ARGUMENT', 'usage: /store [show]');
+        throw new PlifError('INVALID_ARGUMENT', 'usage: /content-store [show]');
       }
       return ok(entry('notice', '/store', {
         tone: 'accent',
@@ -3084,13 +3127,28 @@ export const COMMANDS: readonly Command[] = [
   {
     name: 'providers',
     aliases: ['provider'],
-    args: '[add]',
-    summary: 'Choose a provider, then one of its models',
+    args: '[add|disconnect]',
+    summary: 'Connect, disconnect, or choose a provider and model',
     run: async (argv, context) => {
       const stored = (await loadGlobalConfig().catch(() => ({}))) as StoredConfig;
       const action = argv[0]?.trim().toLowerCase();
-      if (action && action !== 'add') {
-        throw new PlifError('INVALID_ARGUMENT', 'usage: /providers [add]');
+      if (action && action !== 'add' && action !== 'disconnect') {
+        throw new PlifError('INVALID_ARGUMENT', 'usage: /providers [add|disconnect]');
+      }
+      if (action === 'disconnect') {
+        const selected = argv[1]?.trim();
+        if (!selected) throw new PlifError('INVALID_ARGUMENT', 'usage: /providers disconnect <provider>');
+        if (selected === 'openai') {
+          await new OpenAIOAuthClient().disconnect();
+        }
+        if (context.credentials) {
+          await context.credentials.forget(credentialVariableForProvider(selected, stored));
+        }
+        context.notify?.(entry('notice', `${selected} disconnected`, {
+          tone: 'accent',
+          subtitle: 'Its saved credential was removed. Reconnect with /provider.',
+        }));
+        return ok();
       }
       if (action === 'add') {
         if (await addCustomProvider(context, stored)) {

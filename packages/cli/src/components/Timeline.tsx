@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Box, ScrollView, Text, useSlateEvent } from '../ui.js';
 
 import { diffHeight } from './Diff.js';
@@ -832,6 +832,90 @@ function tailLine(line: string, maxColumns: number): string {
   return first >= 0xdc00 && first <= 0xdfff ? suffix.slice(1) : suffix;
 }
 
+/**
+ * How fast the revealed text closes the gap on what has arrived.
+ *
+ * A fraction of the remaining distance per frame rather than a fixed rate, so
+ * the reveal is quick when a large chunk lands and slows as it catches up —
+ * and never falls behind a fast model, because the gap itself is what drives
+ * it. The floor keeps single characters moving when the fraction rounds to
+ * nothing.
+ */
+const REVEAL_CATCHUP = 0.14;
+const REVEAL_MIN_CHARS = 2;
+
+/**
+ * The most text the reveal is allowed to be holding back.
+ *
+ * The window sizes every row from the entry's full text, so anything withheld
+ * is height the timeline reserved and the row did not draw — which shows up as
+ * a gap or a clipped tail while an answer streams, and churns as it catches up.
+ * Roughly two wrapped lines of disagreement is invisible; a whole paragraph is
+ * not. Ordinary chunks are smaller than this, so the smoothing survives.
+ */
+const REVEAL_MAX_LAG = 240;
+
+/**
+ * The shortest gap between two steps of the reveal.
+ *
+ * The fast clock ticks every 8 ms for gradient sweeps. Advancing text on every
+ * one of those means about 125 re-renders a second of the row being written,
+ * and a terminal cannot show more than a fraction of them — so half the work
+ * was never visible. This is that clock sampled down to roughly 60 Hz.
+ */
+const REVEAL_FRAME_MS = 16;
+
+/**
+ * How far the reveal moves in one frame.
+ *
+ * Pulled out of the hook so the pacing can be tested without a renderer: the
+ * feel of the animation is arithmetic, and arithmetic is the part worth pinning.
+ */
+export function nextRevealed(revealed: number, length: number): number {
+  if (revealed >= length) return length;
+  const remaining = length - revealed;
+  return Math.min(length, revealed + Math.max(REVEAL_MIN_CHARS, Math.ceil(remaining * REVEAL_CATCHUP)));
+}
+
+/**
+ * Show streamed text as writing rather than as arrivals.
+ *
+ * A model does not deliver prose evenly: it lands in provider-sized chunks, so
+ * a whole sentence appears at once and then nothing happens for a beat. Drawing
+ * exactly what arrived reads as stuttering, which is a property of the wire and
+ * not of the answer. This keeps a revealed length that walks toward whatever has
+ * arrived, sampled on the same 60 Hz clock the rest of the interface animates on.
+ *
+ * It only ever withholds text that is still being written. The moment the entry
+ * settles the whole body is shown, because an answer the model has finished is
+ * not something to make someone wait for.
+ */
+function useSmoothReveal(text: string, streaming: boolean): string {
+  const revealed = useRef(0);
+  const source = useRef(text);
+  const steppedAt = useRef(0);
+
+  // A different entry, or a body that was rewritten rather than appended, has
+  // nothing to do with the progress made on the last one.
+  if (!text.startsWith(source.current)) revealed.current = 0;
+  source.current = text;
+  if (!streaming) revealed.current = text.length;
+
+  useAnimationFrame(streaming && revealed.current < text.length, 'fast');
+
+  if (revealed.current >= text.length) return text;
+
+  const now = Date.now();
+  if (now - steppedAt.current >= REVEAL_FRAME_MS) {
+    steppedAt.current = now;
+    revealed.current = nextRevealed(revealed.current, text.length);
+  }
+  // Never hold back more than the timeline can absorb without the row and its
+  // reserved height disagreeing.
+  if (text.length - revealed.current > REVEAL_MAX_LAG) revealed.current = text.length - REVEAL_MAX_LAG;
+  return text.slice(0, revealed.current);
+}
+
 export const LIVE_THOUGHT_LINES = 3;
 export const ANSWER_GUTTER = 3;
 
@@ -1250,7 +1334,7 @@ function AnswerRow({
   // very long paragraphs, so counting `\n` would find four lines where the
   // terminal draws forty and clip nothing at all.
   const streaming = entry.status === 'active';
-  const source = body;
+  const source = useSmoothReveal(body, streaming);
 
   return (
     <Box marginBottom={1} width="100%">

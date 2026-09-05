@@ -236,6 +236,18 @@ describe('finding a credential', () => {
     assert.deepEqual(asked, []);
   });
 
+  it('returns a remembered key even when the durable store cannot read it back', async () => {
+    const store = {
+      async get() { throw new Error('dpapi-unprotect-failed'); },
+      async set() { /* persist attempted */ },
+      async delete() { /* unused */ },
+      async names() { return []; },
+    };
+    const broker = new CredentialBroker({ store, environment: {} });
+    await broker.remember('OPENCODE_API_KEY', 'sk-go-session');
+    assert.equal(await broker.lookup('OPENCODE_API_KEY'), 'sk-go-session');
+  });
+
   it('asks once, then saves so the next run does not ask again', async () => {
     const store = new MemorySecretStore();
     let asks = 0;

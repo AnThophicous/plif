@@ -81,12 +81,6 @@ describe('config precedence', () => {
     assert.equal(resolveConfig({ effort: 'high', maxTokens: 32_000 }, { env: { PLIF_MAX_TOKENS: '12' } }).maxTokens, 12);
   });
 
-  it('keeps Codex FAST opt-in and provider-scoped', () => {
-    assert.equal(resolveConfig({ preset: 'codex', model: 'codex/codex-default', codexFast: true }, { env: {} }).codexFast, true);
-    assert.equal(resolveConfig({ preset: 'codex', model: 'codex/codex-default', codexFast: false }, { env: {} }).codexFast, false);
-    assert.equal(resolveConfig({ preset: 'openai', model: 'gpt-4.1', codexFast: true }, { env: {} }).codexFast, undefined);
-  });
-
   it('defaults continuation to auto and accepts only the supported policies', () => {
     assert.equal(resolveConfig({}, { env: {} }).conversationState, 'auto');
     assert.equal(resolveConfig({ conversationState: 'replay' }, { env: {} }).conversationState, 'replay');
@@ -428,6 +422,35 @@ describe('config precedence', () => {
     assert.equal(config.model, 'from-env');
   });
 
+  it('treats built-in OpenAI without an API key as ChatGPT OAuth, not a missing key', () => {
+    const config = resolveConfig({}, { preset: 'openai', model: 'gpt-5.6-luna', env: {} });
+    assert.equal(config.authMode, 'openai-oauth');
+    assert.equal(config.needKey, false);
+    assert.equal(config.apiKey, '');
+    assert.match(config.baseURL, /chatgpt\.com/);
+    assert.equal(validate(config).ok, true);
+  });
+
+  it('does not demand OPENAI_API_KEY for ChatGPT OAuth models like gpt-5.3-codex-spark', () => {
+    const config = resolveConfig({}, { preset: 'openai', model: 'gpt-5.3-codex-spark', env: {} });
+    assert.equal(config.needKey, false);
+    assert.equal(validate(config).ok, true);
+    assert.equal(validate({ ...config, authMode: undefined, needKey: true, apiKey: '' }).ok, true);
+  });
+
+  it('keeps OpenAI on the public API when an API key is present', () => {
+    const config = resolveConfig({}, {
+      preset: 'openai',
+      model: 'gpt-4o',
+      apiKey: 'sk-test',
+      env: {},
+    });
+    assert.equal(config.authMode, undefined);
+    assert.equal(config.apiKey, 'sk-test');
+    assert.equal(config.baseURL, PRESETS.openai.baseURL);
+    assert.equal(validate(config).ok, true);
+  });
+
   it('falls back to the stored file, and to nothing at all after that', () => {
     assert.equal(resolveConfig({ model: 'from-file' }, { env: {} }).model, 'from-file');
     // Plif ships unconfigured on purpose. Resolving nothing must produce no
@@ -518,24 +541,6 @@ describe('config precedence', () => {
       { preset: 'openai', model: 'gpt-4o-mini' },
     );
     assert.equal(next.baseURL, 'https://gateway.internal/v1');
-  });
-
-  it('persists the Codex FAST choice and clears it outside Codex', () => {
-    const fast = adoptProvider(
-      { preset: 'openai', model: 'gpt-4.1' },
-      { preset: 'codex', model: 'codex-default', codexFast: true },
-    );
-    assert.equal(fast.codexFast, true);
-
-    const standard = adoptProvider(fast, {
-      preset: 'codex',
-      model: 'codex-default',
-      codexFast: false,
-    });
-    assert.equal(standard.codexFast, false);
-
-    const nonCodex = adoptProvider(standard, { preset: 'openai', model: 'gpt-4.1' });
-    assert.equal(nonCodex.codexFast, undefined);
   });
 
   it('rejects an unknown preset with the list of real ones', () => {

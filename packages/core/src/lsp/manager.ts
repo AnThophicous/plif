@@ -19,6 +19,9 @@ import type { ResolvedServer, ServerSpec } from './servers.js';
  * answer, on the one call per server that opens its first document. A query that
  * does match returns the moment the index has it.
  */
+/** How long a server that failed to start is left alone before trying again. */
+const START_RETRY_COOLDOWN_MS = 5 * 60_000;
+
 const INDEX_SETTLE_MS = 250;
 const INDEX_SETTLE_ATTEMPTS = 40;
 
@@ -48,6 +51,16 @@ export class LspManager {
   #clients = new Map<string, LspClient>();
   #starting = new Map<string, Promise<LspClient | null>>();
   #missing = new Map<string, ServerSpec>();
+  /**
+   * When each server last failed to start.
+   *
+   * Without this every call that wants a language server retried a broken one:
+   * a fresh spawn, a wait as long as the initialize timeout, and the same
+   * warning again, on every tool call for the rest of the session. A cooldown
+   * rather than a permanent mark, because the usual reason is a toolchain that
+   * is being installed while the session runs.
+   */
+  #failedAt = new Map<string, number>();
   #resolveServer: (spec: ServerSpec, root: string, tempRoot?: string) => Promise<ResolvedServer | null>;
   #createClient: (resolved: ResolvedServer, root: string) => LspClient;
   #stopping = false;
@@ -113,6 +126,9 @@ export class LspManager {
     const existing = this.#clients.get(spec.id);
     if (existing?.ready) return existing;
 
+    const failed = this.#failedAt.get(spec.id);
+    if (failed !== undefined && Date.now() - failed < START_RETRY_COOLDOWN_MS) return null;
+
     const attempt = this.#restart(spec, existing);
     this.#starting.set(spec.id, attempt);
     try {
@@ -151,6 +167,7 @@ export class LspManager {
       }
       this.#clients.set(spec.id, client);
       this.#missing.delete(spec.id);
+      this.#failedAt.delete(spec.id);
       this.#bus?.emit('lsp.ready', {
         server: spec.id,
         label: spec.label,
@@ -163,6 +180,7 @@ export class LspManager {
         message: `${spec.label} language server did not start`,
         detail: { reason: error instanceof Error ? error.message : String(error) },
       });
+      this.#failedAt.set(spec.id, Date.now());
       return null;
     }
   }
