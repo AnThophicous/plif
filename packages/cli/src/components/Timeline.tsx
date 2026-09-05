@@ -112,7 +112,16 @@ export const Timeline = React.memo(function Timeline({
 
   return (
     <Box flexDirection="column">
-      <ScrollView flexDirection="column" paddingX={layout.gutter} {...viewport}>
+      <ScrollView
+        // Recreate only the pinned viewport as new streamed rows arrive. The
+        // terminal renderer keeps native scroll state on a node; updating its
+        // prop alone does not move that state on every ConPTY build. A stable
+        // key while the reader is away preserves manual scrolling.
+        key={follow.pinned ? `timeline-tail-${slice.contentHeight}` : 'timeline-manual'}
+        flexDirection="column"
+        paddingX={layout.gutter}
+        {...viewport}
+      >
         {!process.env.NOSP && slice.above > 0 && <Box height={slice.above} flexShrink={0} />}
         {visible.map((item) => (
           <TimelineRow
