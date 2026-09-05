@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, ScrollView, Text } from '../ui.js';
+import { Box, ScrollView, Text, useSlateEvent } from '../ui.js';
 
 import { diffHeight } from './Diff.js';
 import { Markdown } from './Markdown.js';
@@ -72,6 +72,15 @@ export const Timeline = React.memo(function Timeline({
   // tail all behave as if the full transcript were mounted.
   const slice = useTimelineWindow(byCount, inner, maxLines);
   const visible = slice.rows;
+  // Some Windows Terminal/ConPTY builds do not dispatch the scroll callback
+  // from a controlled ScrollView. Keep a small application-level fallback so
+  // the same wheel event still releases follow mode and produces the notice.
+  const logicalScroll = React.useRef(0);
+  useSlateEvent(React.useCallback((event) => {
+    if (event.kind !== 'mouse' || event.action !== 'scroll' || !event.deltaY) return;
+    logicalScroll.current = Math.max(0, logicalScroll.current + event.deltaY);
+    slice.onScroll(logicalScroll.current);
+  }, [slice.onScroll]));
   // The tail is pinned while the reader is at it, and released while they are
   // not.
   //
