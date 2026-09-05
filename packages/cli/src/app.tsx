@@ -53,6 +53,7 @@ import {
   debugTools,
   BrowserSession,
   browserTools,
+  WorktreeManager,
   lspTools,
   EditCoordinator,
   agentsOf,
@@ -4178,9 +4179,6 @@ export function App({
       agentAutoLaunch: storedConfig.agentAutoLaunch !== false,
       extraTools: [
         ...(skillRegistry ? [skillTool(skillRegistry)] : []),
-        ...lspForAgent,
-      ...debugForAgent,
-      ...browserTools(browserSession.current),
         ...debugForAgent,
         ...WEB_TOOLS,
       ],
@@ -4194,6 +4192,34 @@ export function App({
       parentContext: () => activeConversation.current ?? carried,
       continuable: plifModeOf(storedConfig).continuableSubagents !== false,
       skillBootstrap: codexSkillBootstrap,
+      // A child gets a detached checkout, a distinct container and a distinct
+      // LSP root. This factory is runtime control-plane code, never exposed as
+      // a model tool, so a model cannot point a mount at an arbitrary path.
+      worktrees: new WorktreeManager(path.join(tempDir, 'worktrees')),
+      createChildRuntime: async (worktreePath: string, childTitle: string) => {
+        const childTemp = await fs.mkdtemp(path.join(tempDir, 'subagent-'));
+        const image = await engine.ensureBaseImage();
+        const child = await engine.run({
+          image: image.reference,
+          mounts: [containerMount(worktreePath), containerTempMount(childTemp)],
+          workdir: containerWorkdir(worktreePath),
+          capabilities: { hostWrite: true, network: true },
+        });
+        if (Object.keys(sessionEnvironment.current).length > 0) child.applyEnvironment(sessionEnvironment.current);
+        const childLsp = new LspManager({
+          root: await child.hostPathFor(child.workdir), tempRoot: childTemp, bus: engine.bus,
+        });
+        void childLsp.warmup().catch(() => undefined);
+        return {
+          container: child,
+          tools: lspTools(childLsp),
+          cleanup: async () => {
+            await childLsp.stop().catch(() => undefined);
+            await child.remove().catch(() => undefined);
+            await fs.rm(childTemp, { recursive: true, force: true }).catch(() => undefined);
+          },
+        };
+      },
     };
     const allAgentTools = [
       ...tools,
