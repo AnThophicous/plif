@@ -81,12 +81,19 @@ export const Timeline = React.memo(function Timeline({
   // the high-water mark resets whenever the transcript shrinks or empties, so a
   // cleared or freshly resumed session re-anchors on its own, and the reader
   // keeps the position they chose in every other case.
-  const follow = useTailFollow(visible.length, slice.onScroll);
+  // Follow the real transcript, not the windowed subset. The subset remains
+  // roughly one viewport long while activity streams, which used to make the
+  // controlled scroll value identical on every update. Slate correctly treats
+  // an identical prop as no instruction, so the viewport stopped above new
+  // work even though `pinned` was true.
+  const follow = useTailFollow(byCount.length, slice.onScroll);
   // Shown only when this view has genuinely been scrolled away from its newest
   // row and there is something to be away from. An empty session has nothing
   // below it, and a marker pointing at nothing is a control that lies.
   const showJump = !follow.pinned && visible.length > 0;
-  const viewport = maxLines === undefined ? {} : timelineViewport(maxLines, follow.pinned, showJump, follow.onScroll);
+  const viewport = maxLines === undefined ? {} : timelineViewport(
+    maxLines, follow.pinned, showJump, follow.onScroll, follow.tailRevision,
+  );
 
   return (
     <Box flexDirection="column">
@@ -157,6 +164,8 @@ export function timelineViewport(
   pinned: boolean,
   showJump: boolean,
   onScroll: (x: number, y: number) => void,
+  /** Changes whenever tail content changes, forcing Slate to re-pin. */
+  tailRevision = 0,
 ): {
   readonly height: number;
   readonly overflow: 'scroll';
@@ -166,7 +175,10 @@ export function timelineViewport(
   return {
     height: Math.max(1, maxLines - (showJump ? 1 : 0)),
     overflow: 'scroll' as const,
-    ...(pinned ? { scrollTop: Number.MAX_SAFE_INTEGER } : {}),
+    // Keep this a huge valid offset so Slate clamps to the physical end, but
+    // vary it with each appended row. A stable MAX_SAFE_INTEGER is ignored by
+    // controlled ScrollView reconciliation after the first render.
+    ...(pinned ? { scrollTop: Number.MAX_SAFE_INTEGER - tailRevision } : {}),
     onScroll,
   };
 }
@@ -261,6 +273,7 @@ export function useTailFollow(
 ): {
   readonly pinned: boolean;
   readonly addedWhileAway: number;
+  readonly tailRevision: number;
   readonly onScroll: (x: number, y: number) => void;
 } {
   const [pinned, setPinned] = React.useState(true);
@@ -317,6 +330,7 @@ export function useTailFollow(
   return {
     pinned,
     addedWhileAway: Math.max(0, rowCount - rowsWhenLeft.current),
+    tailRevision: rowCount,
     onScroll,
   };
 }
