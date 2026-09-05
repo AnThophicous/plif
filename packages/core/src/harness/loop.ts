@@ -26,6 +26,8 @@
 
 import { randomUUID } from 'node:crypto';
 
+import { describeHookOutcome, type HookRunner } from './hooks.js';
+import type { SpillSink } from './spill.js';
 import { PlifError, toPlifError } from '../errors.js';
 import type { EventBus } from '../events/bus.js';
 import { safeToolCallArguments } from '../model/provider.js';
@@ -165,6 +167,20 @@ export interface LoopOptions {
   };
   /** Resolved once for the session and shared by tool registration and calls. */
   readonly shellDialect?: ShellDialect;
+  /**
+   * Configured hooks for this session.
+   *
+   * Absent means none, which is the common case and costs nothing: the loop
+   * asks the runner whether an event has any hook before it builds a payload.
+   */
+  readonly hooks?: HookRunner;
+  /**
+   * Where oversized tool output is written instead of into the context.
+   *
+   * Absent keeps the old behaviour, so an embedder that has no temp mount is
+   * not obliged to provide one.
+   */
+  readonly spill?: SpillSink;
   readonly activateProfile?: (name: string) => Promise<void>;
   readonly setGoal?: (condition: string) => Promise<void>;
   readonly goal?: GoalController;
@@ -231,7 +247,10 @@ export function terminalToolOutput(
  * threshold describe the model actually serving the turn.
  */
 export const DEFAULT_CONTEXT_TOKENS = 1_000_000;
-export const AUTO_COMPACTION_TRIGGER_RATIO = 0.9;
+// Compact while there is still enough context left for the compaction request
+// itself. Waiting until 90% makes tool-heavy turns resend a large transcript
+// several times before the first reduction happens.
+export const AUTO_COMPACTION_TRIGGER_RATIO = 0.75;
 export const AUTO_COMPACTION_TARGET_RATIO = 0.5;
 
 /** Public so prompt builders can advertise the runtime tool before the loop starts. */
@@ -380,16 +399,19 @@ function callSignature(call: ToolCall): string {
   return `${call.name}(${call.arguments})`;
 }
 
-function totalUsageTokens(
+/**
+ * Tokens charged to the per-run watchdog. Cache reads are deliberately not
+ * counted: they are repeated context, not new model work, and treating them as
+ * fresh work can stop a healthy cached run after only a few tool calls.
+ */
+export function runBudgetTokens(
   usage: CanonicalTokenUsage,
   legacy: { promptTokens: number; completionTokens: number },
 ): number {
-  if (usage.totalTokens !== undefined && Number.isFinite(usage.totalTokens)) {
-    return Math.max(0, Math.floor(usage.totalTokens));
-  }
-  const input = usage.totalPromptTokens ?? legacy.promptTokens;
+  const input = usage.inputNewTokens ?? usage.totalPromptTokens ?? legacy.promptTokens;
+  const cacheWrite = usage.cacheWriteTokens ?? 0;
   const output = usage.outputTokens ?? legacy.completionTokens;
-  return Math.max(0, Math.floor(input + output));
+  return Math.max(0, Math.floor(input + cacheWrite + output));
 }
 
 function stagnationError(snapshot: ProgressSnapshot): PlifError {
@@ -696,7 +718,7 @@ async function runLoopInternal(
       messages,
       iterations,
       options.enableHarnessCycle
-        ? `Plano atual: .plif/plans/current.md · Checkpoint: ${cycle.phase}`
+        ? `Plano atual: /temp/plif/plans/current.md · Checkpoint: ${cycle.phase}`
         : undefined,
     ).catch(() => undefined);
   };
@@ -984,7 +1006,7 @@ async function runLoopInternal(
             ? canonicalFromLegacyUsage(event.usage.promptTokens, event.usage.completionTokens)
             : estimatedTokenUsage(estimateTokens(messages), event.usage.completionTokens));
           tokenUsage = mergeTokenUsage(tokenUsage, currentUsage);
-          progress.recordTokens(totalUsageTokens(currentUsage, event.usage));
+          progress.recordTokens(runBudgetTokens(currentUsage, event.usage));
           turnPromptTokensForTelemetry = turnPromptTokens;
           turnCompletionTokensForTelemetry = turnCompletionTokens;
           if (currentUsage.source !== 'estimated' && currentUsage.source !== 'unknown') {
@@ -1276,7 +1298,7 @@ async function runLoopInternal(
 
         const executed = item.replay === null && item.refusal === null && item.parseError === null;
         if (executed) {
-          progress.markProgress();
+          if (item.ok) progress.markProgress();
           safetyEvent('processing_result', true, item.ok ? 'new_tool_result' : 'new_tool_failure', item.fingerprint);
         }
 
@@ -1371,15 +1393,13 @@ async function runLoopInternal(
       await persistTokenSplitNotes();
 
       if (consecutiveFailures >= maxFailures) {
-        messages.push({
-          role: 'user',
-          content:
-            `Recovery checkpoint: ${consecutiveFailures} tool calls failed in a row. ` +
-            'Do not stop the task. Diagnose the latest error, change the command or ' +
-            'strategy materially, and continue. If Bash syntax is uncertain, use a ' +
-            'minimal command or repository search instead of repeating the same call.',
-        });
-        consecutiveFailures = 0;
+        return done(
+          'too_many_failures',
+          new PlifError(
+            'INTERNAL',
+            `${consecutiveFailures} tool calls failed consecutively; the run was stopped before it could loop indefinitely.`,
+          ),
+        );
       }
 
       // The next model pass is a distinct visual cycle. Emit this only after
@@ -1815,6 +1835,30 @@ async function executeCall(input: {
     };
   }
 
+  /**
+   * `tool.before`, the one hook point that can still stop something.
+   *
+   * It runs after the tool is known to exist and its arguments parsed, so a
+   * hook sees the call the tool would actually have received rather than a
+   * guess at it. A block returns a normal tool failure rather than throwing:
+   * the model has to read why it was refused and do something else, and an
+   * exception here would end the run instead.
+   */
+  const hooks = options.hooks;
+  if (hooks?.has('tool.before')) {
+    const outcome = await hooks.run({
+      event: 'tool.before',
+      subject: call.name,
+      data: parsed,
+    });
+    if (outcome.blocked) {
+      return {
+        output: redactToolText(options.container, describeHookOutcome(outcome)),
+        ok: false,
+      };
+    }
+  }
+
   try {
     const result = await tool.run(parsed, {
       container: options.container,
@@ -1822,6 +1866,7 @@ async function executeCall(input: {
       signal: options.signal,
       bus: options.bus,
       callId: call.id,
+      ...(options.spill ? { spill: options.spill } : {}),
       ...(options.memory ? { memory: options.memory } : {}),
       ...(options.readOnlyMemory ? { readOnlyMemory: true } : {}),
       ...(options.workspace ? { workspace: options.workspace } : {}),
@@ -1837,13 +1882,33 @@ async function executeCall(input: {
       ...(options.sessions ? { sessions: options.sessions } : {}),
       ...(options.attachments?.length ? { attachments: options.attachments } : {}),
     });
+    /**
+     * `tool.after`, which cannot block — the tool already ran.
+     *
+     * Its stdout is appended to the tool's own output rather than replacing
+     * it, so a formatter that reports what it changed reaches the model
+     * without a hook being able to hide what the tool actually did.
+     */
+    const afterOutput = hooks?.has('tool.after')
+      ? describeHookOutcome(
+          await hooks.run({
+            event: 'tool.after',
+            subject: call.name,
+            data: { input: parsed, ok: result.ok, output: result.output },
+          }),
+        )
+      : '';
+
     // A tool may be supplied by an extension or MCP server rather than the
     // built-in exec path. Apply the same session-secret boundary to every
     // result before it can enter the transcript, event bus, spill files, or
     // model context.
     return {
       ...result,
-      output: redactToolText(options.container, result.output),
+      output: redactToolText(
+        options.container,
+        afterOutput ? `${result.output}\n\n${afterOutput}` : result.output,
+      ),
       ...(result.display !== undefined
         ? { display: redactToolText(options.container, result.display) }
         : {}),

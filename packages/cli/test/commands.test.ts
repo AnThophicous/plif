@@ -46,6 +46,22 @@ const persona = COMMANDS.find((command) => command.name === 'persona');
 const usage = COMMANDS.find((command) => command.name === 'usage');
 const temp = COMMANDS.find((command) => command.name === 'temp');
 
+describe('/permissions', () => {
+  it('opens three explicit approval modes without changing the setting until one is picked', async () => {
+    const opened: Array<{ title: string; items: readonly { value: string; label: string }[] }> = [];
+    const result = await findCommand('permissions')!.run([], {
+      openPicker: (request) => {
+        if ('items' in request) opened.push(request as typeof opened[number]);
+      },
+    } as unknown as CommandContext);
+
+    assert.equal(result.entries.length, 0);
+    assert.equal(opened[0]?.title, 'Permissões');
+    assert.deepEqual(opened[0]?.items.map((item) => item.value), ['ask', 'auto-approve', 'full']);
+    assert.deepEqual(opened[0]?.items.map((item) => item.label), ['Perguntar', 'Aprovar para mim', 'Permissão Total']);
+  });
+});
+
 describe('/temp session scratch space', () => {
   it('explains the isolated virtual path without exposing the host path', async () => {
     const hostPath = path.join(os.tmpdir(), 'plif-session-private');
@@ -465,7 +481,11 @@ describe('/plan', () => {
 
 describe('/goal', () => {
   it('sets, reports, and clears a session goal', async () => {
+    // Bare `/goal` used to print the status and stop, which told you a goal
+    // existed but not how to change it. It opens the actions menu now, and the
+    // status it used to print is the menu's title.
     let current: { condition: string; turns: number; status: string } | null = null;
+    const opened: Array<{ title: string; items: readonly { value: string }[] }> = [];
     const context = {
       startGoal: async (condition: string) => {
         current = { condition, status: 'active' };
@@ -474,13 +494,20 @@ describe('/goal', () => {
       clearGoal: () => {
         current = null;
       },
+      openPicker: (request: unknown) => {
+        if (request && typeof request === 'object' && 'items' in request) {
+          opened.push(request as typeof opened[number]);
+        }
+      },
     } as unknown as CommandContext;
 
     await goal!.run(['tests', 'pass'], context);
     const status = await goal!.run([], context);
     await goal!.run(['clear'], context);
 
-    assert.match(status.entries[0]?.title ?? '', /goal active: tests pass/);
+    assert.equal(status.entries.length, 0, 'the menu is the output');
+    assert.match(opened[0]?.title ?? '', /active/);
+    assert.deepEqual(opened[0]?.items.map((item) => item.value), ['set', 'clear']);
     assert.equal(current, null);
   });
 });

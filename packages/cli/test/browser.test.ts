@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { mcpActionHint, mcpStatusKind, sessionAge, sortMcpStatuses } from '../src/components/Browser.js';
+import { browserTabLabel, mcpActionHint, mcpStatusKind, sessionAge, sortMcpStatuses } from '../src/components/Browser.js';
 import type { McpServerStatus } from '@plif/core';
 
 const status = (name: string, connected: boolean, detail: string): McpServerStatus => ({
@@ -40,5 +40,10 @@ describe('MCP browser status', () => {
     assert.equal(sessionAge('2026-08-17T11:59:40.000Z', now), 'now');
     assert.equal(sessionAge('2026-08-17T11:42:00.000Z', now), '18m');
     assert.equal(sessionAge('2026-08-17T09:00:00.000Z', now), '3h');
+  });
+
+  it('uses compact tab labels before the tab bar can overflow', () => {
+    assert.equal(browserTabLabel('marketplace', 40), 'Market');
+    assert.equal(browserTabLabel('marketplace', 100), 'Marketplace');
   });
 });

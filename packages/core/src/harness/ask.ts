@@ -55,10 +55,12 @@ export class QuestionBroker {
   #bus: EventBus;
   #pending = new Map<string, Pending>();
   #timeoutMs: number;
+  #scopeId: string | undefined;
 
-  constructor(bus: EventBus, timeoutMs = 600_000) {
+  constructor(bus: EventBus, timeoutMs = 600_000, scopeId?: string) {
     this.#bus = bus;
     this.#timeoutMs = timeoutMs;
+    this.#scopeId = scopeId;
   }
 
   /** Ask, and wait. Resolves to `null` if nobody answers in time. */
@@ -71,7 +73,11 @@ export class QuestionBroker {
     return new Promise<string | null>((resolve) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
-        this.#bus.emit('question.answered', { id, answer: null });
+        this.#bus.emit('question.answered', {
+          id,
+          answer: null,
+          ...(this.#scopeId ? { scopeId: this.#scopeId } : {}),
+        });
         resolve(null);
       }, this.#timeoutMs);
       // Never hold the process open waiting for an answer nobody will give.
@@ -80,6 +86,7 @@ export class QuestionBroker {
       this.#pending.set(id, { question, resolve, timer });
       this.#bus.emit('question.asked', {
         id,
+        ...(this.#scopeId ? { scopeId: this.#scopeId } : {}),
         text: question.text,
         options,
         context: question.context,
@@ -98,7 +105,9 @@ export class QuestionBroker {
     // separates that from the timeout, which also carries no answer.
     this.#bus.emit(
       'question.answered',
-      pending.question.secret ? { id, answer: null, redacted: true } : { id, answer: text },
+      pending.question.secret
+        ? { id, answer: null, redacted: true, ...(this.#scopeId ? { scopeId: this.#scopeId } : {}) }
+        : { id, answer: text, ...(this.#scopeId ? { scopeId: this.#scopeId } : {}) },
     );
     pending.resolve(text);
   }
@@ -107,7 +116,11 @@ export class QuestionBroker {
   abandonAll(): void {
     for (const [id, pending] of this.#pending) {
       clearTimeout(pending.timer);
-      this.#bus.emit('question.answered', { id, answer: null });
+      this.#bus.emit('question.answered', {
+        id,
+        answer: null,
+        ...(this.#scopeId ? { scopeId: this.#scopeId } : {}),
+      });
       pending.resolve(null);
     }
     this.#pending.clear();

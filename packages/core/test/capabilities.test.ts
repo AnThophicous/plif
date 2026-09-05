@@ -99,4 +99,121 @@ describe('capability resolution', () => {
     assert.equal(first.digest, second.digest, 'rebuilding changed the digest');
     assert.equal(second.config.capabilities.hostWrite, true);
   });
+
+  it('refuses an rw host mount when the backend cannot enforce host-write confinement', async () => {
+    const workspace = await fs.mkdtemp(path.join(root, 'host-mount-'));
+    const image = await engine.ensureBaseImage();
+    const container = await engine.create({
+      image: image.reference,
+      mounts: [{ source: workspace, target: '/project', mode: 'rw' }],
+      name: 'unconfined-rw-test',
+    });
+    await assert.rejects(
+      () => container.start(),
+      (error: unknown) => error instanceof Error && /host-write confinement/.test(error.message),
+    );
+    await engine.remove('unconfined-rw-test');
+  });
+
+  it('refuses a read-only host mount when the backend cannot enforce process writes', async () => {
+    const workspace = await fs.mkdtemp(path.join(root, 'ro-host-mount-'));
+    const image = await engine.ensureBaseImage();
+    const container = await engine.create({
+      image: image.reference,
+      mounts: [{ source: workspace, target: '/project', mode: 'ro' }],
+      name: 'unconfined-ro-test',
+    });
+    await assert.rejects(
+      () => container.start(),
+      (error: unknown) => error instanceof Error && /host-write confinement/.test(error.message),
+    );
+    await engine.remove('unconfined-ro-test');
+  });
+
+  it('asks before exec on a host mount when OS write isolation is absent', async () => {
+    const workspace = await fs.mkdtemp(path.join(root, 'host-mount-exec-'));
+    const image = await engine.ensureBaseImage();
+    const container = await engine.run({
+      image: image.reference,
+      mounts: [{ source: workspace, target: '/project', mode: 'rw' }],
+      capabilities: { hostWrite: true },
+      name: 'host-mount-exec-approval',
+    });
+    let asked = 0;
+    const unsubscribe = engine.bus.on('approval.request', (request) => {
+      if (request.containerId !== container.id) return;
+      asked += 1;
+      engine.approvals.respond(request.id, { decision: 'allow', remember: false });
+    });
+    try {
+      const result = await container.exec({
+        argv: ['node', '--version'],
+        cwd: '/project',
+        reason: 'verify host-backed execution approval',
+      });
+      assert.equal(result.exitCode, 0);
+      assert.equal(asked, 1);
+    } finally {
+      unsubscribe();
+      await container.stop('test complete');
+    }
+  });
+
+  it('redacts secrets from approval prompts as well as audit records', async () => {
+    const image = await engine.ensureBaseImage();
+    const container = await engine.run({ image: image.reference, mounts: [], name: 'approval-redaction-test' });
+    const secret = 'approval-secret-value-9f4c';
+    let requestSeen: { argv: readonly string[] | undefined; reason: string } | undefined;
+    const unsubscribe = engine.bus.on('approval.request', (request) => {
+      if (request.containerId !== container.id) return;
+      requestSeen = request;
+      engine.approvals.respond(request.id, { decision: 'allow', remember: false });
+    });
+    try {
+      const result = await container.exec({
+        argv: ['command-that-does-not-exist', secret],
+        env: { PLIF_APPROVAL_SECRET: secret },
+        reason: `diagnose ${secret}`,
+      });
+      assert.equal(result.exitCode, 127);
+      assert.ok(requestSeen);
+      assert.deepEqual(requestSeen.argv, ['command-that-does-not-exist', '[secret omitted]']);
+      assert.ok(!requestSeen.reason.includes(secret));
+    } finally {
+      unsubscribe();
+      await container.stop('test complete');
+    }
+  });
+
+  it('does not leave a failed atomic run registered in the engine', async () => {
+    const workspace = await fs.mkdtemp(path.join(root, 'atomic-run-'));
+    const image = await engine.ensureBaseImage();
+    await assert.rejects(
+      () => engine.run({
+        image: image.reference,
+        mounts: [{ source: workspace, target: '/project', mode: 'rw' }],
+        name: 'atomic-run-fails-cleanly',
+      }),
+      /host-write confinement/,
+    );
+    assert.equal(engine.get('atomic-run-fails-cleanly'), null);
+  });
+
+  it('enforces the network allowlist before opening a connection', async () => {
+    const image = await engine.ensureBaseImage();
+    const container = await engine.run({
+      image: image.reference,
+      mounts: [],
+      capabilities: { network: true },
+      name: 'network-allowlist-test',
+    });
+    try {
+      await assert.rejects(
+        () => container.reachNetwork('evil.example', 'test'),
+        (error: unknown) => error instanceof Error && /not in the policy allowlist/.test(error.message),
+      );
+    } finally {
+      await container.stop('test complete');
+    }
+  });
 });

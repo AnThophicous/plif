@@ -26,9 +26,9 @@
     "node": ">=20.11"
   },
   "bin": {
-    "plif": "dist/main.js"
+    "plif": "dist/plif.mjs"
   },
-  "main": "./dist/main.js",
+  "main": "./dist/plif.mjs",
   "files": [
     "dist",
     "assets",

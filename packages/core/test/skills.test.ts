@@ -24,18 +24,12 @@ import type { Message } from '../src/model/provider.js';
 const context = {} as ToolContext;
 
 describe('mandatory skill policy', () => {
-  it('requires anti-AI-slop and Pli\'ef Galileu for every effort, with Argus added to Plif', () => {
+  it('requires anti-AI-slop and Galileu for every effort, including Plif', () => {
     assert.deepEqual(mandatorySkillsForEffort('low'), ['anti-ai-slop', 'plief-galileu']);
-    // PLIF is the everything-on mode: the whole pli'ef family loads up front, so
-    // quality, security, frontend and component choice are all governed rather
-    // than remembered.
-    assert.deepEqual(mandatorySkillsForEffort('plif'), [
-      'anti-ai-slop',
-      'plief-galileu',
-      'plief-argus',
-      'plief-sifr',
-      'plief-orun',
-    ]);
+    // The rest of the family is domain-routed, not preloaded: keeping Argus,
+    // Sifr and Orun out of this gate is what stops a plif session from carrying
+    // 7,108 tokens of skill body it may never read.
+    assert.deepEqual(mandatorySkillsForEffort('plif'), ['anti-ai-slop', 'plief-galileu']);
   });
 });
 
@@ -65,6 +59,30 @@ describe('parseSkill', () => {
 
   it('rejects a file with no frontmatter at all', () => {
     assert.equal(parseSkill('just some markdown', '/x/y/SKILL.md', 'user'), null);
+  });
+
+  it('folds a block-scalar description, which several shipped skills use', () => {
+    const skill = parseSkill(
+      [
+        '---',
+        'name: deep-review',
+        'description: >',
+        '  Review a diff for correctness, or run an adversarial audit',
+        '  where mistakes are expensive.',
+        'license: MIT',
+        '---',
+        '',
+        'body',
+      ].join('\n'),
+      '/x/deep-review/SKILL.md',
+      'builtin',
+    );
+
+    assert.equal(
+      skill?.description,
+      'Review a diff for correctness, or run an adversarial audit where mistakes are expensive.',
+    );
+    assert.equal(skill?.instructions, 'body');
   });
 
   it('survives a UTF-8 BOM, which Windows editors add invisibly', () => {
@@ -686,6 +704,24 @@ describe('system prompt', () => {
 
     assert.match(prompt, /Available skills/);
     assert.match(prompt, /skill tool/);
+  });
+
+  it('spends fewer words on skills when the compact layer is compiled', () => {
+    const skills = '- deploy: how this project ships';
+    const full = buildSystemPrompt({ ...base, skills, promptProfile: 'full' });
+    const compact = buildSystemPrompt({ ...base, skills, promptProfile: 'compact' });
+
+    assert.ok(compact.length < full.length);
+    // Shorter, but not weaker: the routing table, the non-optional domain rules
+    // and the mandatory gate all have to survive the compact layer.
+    for (const prompt of [full, compact]) {
+      assert.match(prompt, /Available skills/);
+      assert.match(prompt, /Domain routing \(not optional\)/);
+      assert.match(prompt, /plief-sifr/);
+      assert.match(prompt, /skill gate is non-optional/);
+      assert.match(prompt, /anti-ai-slop/);
+      assert.match(prompt, /Galileu persistence/);
+    }
   });
 
   it('ships the builtin skills from the EDS contribution', () => {

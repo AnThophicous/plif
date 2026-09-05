@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="no-js">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Obesidade — guia leve em cinco minutos</title>
+<meta name="description" content="O que é obesidade, por que acontece e o que ajuda: um guia leve, sem julgamento e sem promessa de milagre, com calculadora de IMC.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #faf8f4;
+    --ink: #2b2926;
+    --ink-soft: #6b675f;
+    --sage: #dde8dc;
+    --blue: #d9e4f2;
+    --pink: #f4dede;
+    --lilac: #e7e1f1;
+    --butter: #f5e9d4;
+    --line: #e9e4dc;
+    --accent: #557453;
+    --radius: 24px;
+    --font-display: "Space Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --font-body: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .js .reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
+  }
+
+  body {
+    font-family: var(--font-body);
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.7;
+    font-size: 1.0625rem;
+  }
+
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+
+  section { padding: 6.5rem 0; scroll-margin-top: 90px; }
+
+  h1, h2 { font-family: var(--font-display); letter-spacing: -0.02em; line-height: 1.15; }
+
+  h1 { font-size: clamp(2.3rem, 6vw, 3.7rem); font-weight: 700; }
+
+  h2 { font-size: clamp(1.7rem, 4vw, 2.4rem); font-weight: 700; margin-bottom: 1.25rem; }
+
+  .lead { font-size: 1.15rem; color: var(--ink-soft); max-width: 34em; }
+
+  .eyebrow {
+    font-size: 0.8rem; font-weight: 600; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 1.25rem;
+  }
+
+  .js .reveal { opacity: 0; transform: translateY(12px); transition: opacity 0.5s ease-out, transform 0.5s ease-out; }
+  .js .reveal.on { opacity: 1; transform: none; }
+
+  a { color: var(--accent); }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+  /* ---------- Header ---------- */
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(250, 248, 244, 0.92);
+    border-bottom: 1px solid var(--line);
+  }
+  .header-inner {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding: 16px 0;
+  }
+  .brand {
+    font-family: var(--font-display); font-weight: 700; font-size: 1.1rem;
+    color: var(--ink); text-decoration: none; letter-spacing: -0.01em;
+  }
+  nav { display: flex; gap: 22px; }
+  nav a { text-decoration: none; font-size: 0.95rem; color: var(--ink-soft); }
+  nav a:hover { color: var(--ink); }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    display: inline-block; font-family: var(--font-body); font-weight: 600;
+    font-size: 1rem; text-decoration: none; border-radius: 999px;
+    padding: 13px 26px; cursor: pointer; border: 1px solid transparent;
+    transition: background-color 0.2s ease-out, color 0.2s ease-out, border-color 0.2s ease-out;
+  }
+  .btn-primary { background: var(--ink); color: var(--bg); }
+  .btn-primary:hover { background: #443f38; }
+  .btn-ghost { background: transparent; color: var(--ink); border-color: var(--ink); }
+  .btn-ghost:hover { background: var(--sage); border-color: var(--ink); }
+  .btn-small { padding: 9px 18px; font-size: 0.92rem; }
+
+  /* ---------- Hero ---------- */
+  .hero { padding: 7.5rem 0 6.5rem; }
+  .hero .lead { margin: 1.5rem 0 2.25rem; }
+  .hero-ctas { display: flex; flex-wrap: wrap; gap: 14px; }
+
+  /* ---------- Estatistica gentil ---------- */
+  .stat {
+    background: var(--sage); border-radius: var(--radius);
+    padding: 3rem clamp(1.5rem, 5vw, 3.5rem);
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 1rem 2.5rem;
+  }
+  .stat .big {
+    font-family: var(--font-display); font-weight: 700;
+    font-size: clamp(3rem, 9vw, 5rem); line-height: 1; letter-spacing: -0.03em;
+  }
+  .stat .label { flex: 1 1 18em; font-size: 1.1rem; max-width: 30em; }
+
+  /* ---------- Chips ---------- */
+  .chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; margin-top: 2.5rem; }
+  .chip { border-radius: var(--radius); padding: 1.75rem 1.5rem; }
+  .chip h3 { font-family: var(--font-display); font-size: 1.2rem; margin-bottom: 0.6rem; }
+  .chip p { font-size: 0.98rem; line-height: 1.6; }
+  .chip-sage { background: var(--sage); }
+  .chip-blue { background: var(--blue); }
+  .chip-pink { background: var(--pink); }
+  .chip-lilac { background: var(--lilac); }
+  .chip-butter { background: var(--butter); }
+
+  .section-intro { max-width: 36em; color: var(--ink-soft); margin-bottom: 0.5rem; }
+
+  /* ---------- IMC ---------- */
+  .imc-grid { display: grid; grid-template-columns: 1fr; gap: 2.5rem; margin-top: 2.5rem; }
+  .calculator {
+    background: var(--butter); border-radius: var(--radius); padding: 2rem;
+  }
+  .calculator h3 { font-family: var(--font-display); font-size: 1.25rem; margin-bottom: 1.25rem; }
+  .field { margin-bottom: 1.1rem; }
+  .field label { display: block; font-weight: 600; font-size: 0.92rem; margin-bottom: 0.4rem; }
+  .field input {
+    font-family: var(--font-body); font-size: 1.05rem; color: var(--ink);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 14px;
+    padding: 12px 16px; width: 100%; max-width: 220px;
+  }
+  .field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .field .hint { display: block; font-size: 0.85rem; color: var(--ink-soft); margin-top: 0.35rem; }
+  .result {
+    margin-top: 1.5rem; padding: 1.25rem 1.5rem; border-radius: 14px;
+    background: var(--bg); font-size: 1.05rem; display: none;
+  }
+  .result.show { display: block; }
+  .result strong { font-family: var(--font-display); font-size: 1.35rem; }
+  .result .note { display: block; margin-top: 0.4rem; font-size: 0.92rem; color: var(--ink-soft); }
+  .result-error { color: #8a4a2e; }
+
+  .ranges { list-style: none; }
+  .ranges li {
+    display: flex; justify-content: space-between; gap: 1.5rem;
+    padding: 0.8rem 0; border-bottom: 1px solid var(--line); font-size: 1rem;
+  }
+  .ranges li:last-child { border-bottom: none; }
+  .ranges .faixa { color: var(--ink-soft); }
+  .ranges .nome { font-weight: 600; text-align: right; }
+  .ranges li.ativa { background: var(--sage); border-radius: 10px; padding-left: 0.8rem; padding-right: 0.8rem; }
+  .ranges li.ativa .faixa, .ranges li.ativa .nome { color: var(--ink); }
+  .ranges-caption { font-size: 0.9rem; color: var(--ink-soft); margin-top: 1rem; }
+
+  /* ---------- Causas ---------- */
+  .causas { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 18px; margin-top: 2.5rem; }
+  .causa { border-radius: var(--radius); padding: 1.6rem 1.4rem; }
+  .causa h3 { font-family: var(--font-display); font-size: 1.1rem; margin-bottom: 0.5rem; }
+  .causa p { font-size: 0.95rem; line-height: 1.6; }
+  .closing-line {
+    margin-top: 2.5rem; font-family: var(--font-display);
+    font-size: 1.25rem; max-width: 26em;
+  }
+
+  /* ---------- Passos ---------- */
+  .passos { list-style: none; counter-reset: passo; margin-top: 2.5rem; }
+  .passos li {
+    counter-increment: passo; display: flex; gap: 1.5rem; align-items: baseline;
+    padding: 1.4rem 0; border-bottom: 1px solid var(--line);
+  }
+  .passos li:last-child { border-bottom: none; }
+  .passos li::before {
+    content: counter(passo, decimal-leading-zero);
+    font-family: var(--font-display); font-weight: 700; font-size: 1.4rem;
+    color: var(--accent); flex-shrink: 0;
+  }
+  .passos .titulo { display: block; font-weight: 600; }
+  .passos .detalhe { color: var(--ink-soft); font-size: 0.98rem; }
+
+  /* ---------- Ajuda ---------- */
+  .ajuda { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin-top: 2.5rem; }
+  .ajuda-card { border-radius: var(--radius); padding: 1.9rem 1.6rem; }
+  .ajuda-card h3 { font-family: var(--font-display); font-size: 1.2rem; margin-bottom: 0.6rem; }
+  .ajuda-card p { font-size: 0.98rem; }
+  .alerta {
+    margin-top: 2rem; padding: 1.25rem 1.5rem; border-radius: 14px;
+    background: var(--pink); font-size: 1rem;
+  }
+
+  /* ---------- Footer ---------- */
+  footer { border-top: 1px solid var(--line); padding: 3rem 0 4rem; }
+  footer p { font-size: 0.9rem; color: var(--ink-soft); max-width: 44em; }
+  footer .fontes { margin-bottom: 0.75rem; }
+  footer .marca {
+    font-family: var(--font-display); font-weight: 700; color: var(--ink);
+    margin-bottom: 1rem;
+  }
+
+  @media (max-width: 760px) {
+    nav { display: none; }
+    section { padding: 4.5rem 0; }
+    .hero { padding: 5rem 0 4.5rem; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap header-inner">
+    <a class="brand" href="#top">obesidade.</a>
+    <nav aria-label="Seções do guia">
+      <a href="#o-que-e">O que é</a>
+      <a href="#imc">IMC</a>
+      <a href="#causas">Causas</a>
+      <a href="#habitos">Hábitos</a>
+      <a href="#ajuda">Ajuda</a>
+    </nav>
+    <a class="btn btn-primary btn-small" href="#imc">Calcular IMC</a>
+  </div>
+</header>
+
+<main id="top">
+
+  <section class="hero" aria-labelledby="titulo-principal">
+    <div class="wrap">
+      <p class="eyebrow">Guia leve, sem julgamento</p>
+      <h1 id="titulo-principal">Obesidade se entende em cinco minutos.</h1>
+      <p class="lead">O que é, por que acontece e o que dá pra fazer — explicado sem terrorismo nutricional e sem promessa de milagre.</p>
+      <div class="hero-ctas">
+        <a class="btn btn-primary" href="#imc">Calcular meu IMC</a>
+        <a class="btn btn-ghost" href="#o-que-e">Entender de uma vez</a>
+      </div>
+    </div>
+  </section>
+
+  <section aria-label="Dado de contexto">
+    <div class="wrap">
+      <div class="stat reveal">
+        <span class="big">1 em 8</span>
+        <p class="label">pessoas no mundo vive com obesidade, segundo a Organização Mundial da Saúde. É comum, é tratável e não é culpa de ninguém.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="o-que-e" aria-labelledby="h-o-que-e">
+    <div class="wrap">
+      <p class="eyebrow">Primeiro o básico</p>
+      <h2 id="h-o-que-e">O que é, afinal?</h2>
+      <p class="section-intro">Obesidade é uma doença crônica, reconhecida pela Organização Mundial da Saúde. Ela acontece quando o corpo acumula gordura em quantidade suficiente para afetar a saúde — e isso envolve biologia, ambiente e comportamento juntos, não força de vontade.</p>
+      <div class="chips">
+        <div class="chip chip-sage reveal">
+          <h3>É doença</h3>
+          <p>Não é falta de caráter nem preguiça: é uma condição médica, com critérios de diagnóstico e tratamento.</p>
+        </div>
+        <div class="chip chip-blue reveal">
+          <h3>É crônica</h3>
+          <p>Como o diabetes e a hipertensão, convive-se com ela ao longo da vida, com fases melhores e piores.</p>
+        </div>
+        <div class="chip chip-pink reveal">
+          <h3>É tratável</h3>
+          <p>Hábitos, acompanhamento, medicação e, em alguns casos, cirurgia. Existe caminho — e ele não é o mesmo para todo mundo.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="imc" aria-labelledby="h-imc">
+    <div class="wrap">
+      <p class="eyebrow">Uma conta, um ponto de partida</p>
+      <h2 id="h-imc">Comece pelo IMC</h2>
+      <p class="section-intro">O Índice de Massa Corporal divide o peso pela altura ao quadrado. É a primeira referência que profissionais de saúde usam — não conta a história inteira, mas diz por onde começar.</p>
+
+      <div class="imc-grid">
+        <form class="calculator reveal" id="form-imc" novalidate>
+          <h3>Calcule o seu</h3>
+          <div class="field">
+            <label for="peso">Peso</label>
+            <input id="peso" name="peso" type="text" inputmode="decimal" autocomplete="off" placeholder="70">
+            <span class="hint">quilogramas, ex.: 70 ou 70,5</span>
+          </div>
+          <div class="field">
+            <label for="altura">Altura</label>
+            <input id="altura" name="altura" type="text" inputmode="decimal" autocomplete="off" placeholder="170">
+            <span class="hint">centímetros, ex.: 170</span>
+          </div>
+          <button class="btn btn-primary" type="submit">Calcular</button>
+          <div class="result" id="resultado" role="status" aria-live="polite"></div>
+        </form>
+
+        <div class="reveal">
+          <ul class="ranges" id="faixas">
+            <li data-min="0" data-max="18.5"><span class="faixa">Abaixo de 18,5</span><span class="nome">Abaixo do peso</span></li>
+            <li data-min="18.5" data-max="25"><span class="faixa">18,5 a 24,9</span><span class="nome">Peso adequado</span></li>
+            <li data-min="25" data-max="30"><span class="faixa">25 a 29,9</span><span class="nome">Sobrepeso</span></li>
+            <li data-min="30" data-max="35"><span class="faixa">30 a 34,9</span><span class="nome">Obesidade grau I</span></li>
+            <li data-min="35" data-max="40"><span class="faixa">35 a 39,9</span><span class="nome">Obesidade grau II</span></li>
+            <li data-min="40" data-max="Infinity"><span class="faixa">40 ou mais</span><span class="nome">Obesidade grau III</span></li>
+          </ul>
+          <p class="ranges-caption">Classificação da Organização Mundial da Saúde.</p>
+        </div>
+      </div>
+
+      <p class="section-intro" style="margin-top:2.5rem">O IMC é um ponto de partida, não um veredito. Músculo, idade e composição corporal também contam — a avaliação completa é trabalho para profissional.</p>
+    </div>
+  </section>
+
+  <section id="causas" aria-labelledby="h-causas">
+    <div class="wrap">
+      <p class="eyebrow">Sem culpa, com contexto</p>
+      <h2 id="h-causas">Por que acontece?</h2>
+      <p class="section-intro">Não existe uma causa única. A obesidade aparece quando vários fatores se combinam — e a maioria deles não estão sob controle direto:</p>
+      <div class="causas">
+        <div class="causa chip-blue reveal">
+          <h3>Biologia</h3>
+          <p>Genética e hormônios influenciam como o corpo usa e guarda energia.</p>
+        </div>
+        <div class="causa chip-butter reveal">
+          <h3>Alimentação</h3>
+          <p>O que chega ao prato depende do que chega ao bairro: preço, tempo e acesso contam.</p>
+        </div>
+        <div class="causa chip-sage reveal">
+          <h3>Movimento</h3>
+          <p>Rotinas cada vez mais paradas dificultam o gasto de energia no dia a dia.</p>
+        </div>
+        <div class="causa chip-lilac reveal">
+          <h3>Sono e estresse</h3>
+          <p>Dormir mal e viver no limite alteram fome, saciedade e metabolismo.</p>
+        </div>
+      </div>
+      <p class="closing-line reveal">Por isso "é só força de vontade" não é resposta — é simplificação.</p>
+    </div>
+  </section>
+
+  <section id="habitos" aria-labelledby="h-habitos">
+    <div class="wrap">
+      <p class="eyebrow">Direção, não perfeição</p>
+      <h2 id="h-habitos">Pequenos passos que ajudam</h2>
+      <ol class="passos">
+        <li class="reveal">
+          <span><span class="titulo">Comer com atenção</span><span class="detalhe">Devagar, sem tela, parando quando estiver satisfeito — não quando o prato acabar.</span></span>
+        </li>
+        <li class="reveal">
+          <span><span class="titulo">Dormir bem</span><span class="detalhe">Sono curto e de má qualidade desregula fome e saciedade no dia seguinte.</span></span>
+        </li>
+        <li class="reveal">
+          <span><span class="titulo">Beber água</span><span class="detalhe">Antes do refrigerante, do suco e da bebida açucarada.</span></span>
+        </li>
+        <li class="reveal">
+          <span><span class="titulo">Mexer o corpo no seu ritmo</span><span class="detalhe">Caminhada conta. Subir escada conta. O que conta é fazer com frequência.</span></span>
+        </li>
+        <li class="reveal">
+          <span><span class="titulo">Conversar com profissional</span><span class="detalhe">Antes de qualquer dieta restritiva — a restrição sem acompanhamento costuma sair cara.</span></span>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="ajuda" aria-labelledby="h-ajuda">
+    <div class="wrap">
+      <p class="eyebrow">O próximo passo concreto</p>
+      <h2 id="h-ajuda">Quando buscar ajuda</h2>
+      <p class="section-intro">Se o peso virou preocupação — sua ou de alguém próximo — o caminho é conversa, não aplicativo milagroso.</p>
+      <div class="ajuda">
+        <div class="ajuda-card chip-sage reveal">
+          <h3>Pelo SUS</h3>
+          <p>Comece pela UBS mais próxima da sua casa. Avaliação, acompanhamento e tratamento são gratuitos.</p>
+        </div>
+        <div class="ajuda-card chip-blue reveal">
+          <h3>Com profissional</h3>
+          <p>Endocrinologista, nutricionista e psicólogo costumam trabalhar juntos no tratamento — cada um cuida de uma parte.</p>
+        </div>
+      </div>
+      <p class="alerta reveal">Desconfie de promessa de resultado rápido sem acompanhamento. Se soa bom demais pra ser verdade, geralmente é.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="marca">obesidade.</p>
+    <p class="fontes">Fontes: Organização Mundial da Saúde / OPAS, dados de 2022 publicados em 2024 · Pesquisa Nacional de Saúde, IBGE (2019).</p>
+    <p>Este conteúdo é informativo e não substitui consulta médica ou nutricional.</p>
+  </div>
+</footer>
+
+<script>
+  document.documentElement.classList.replace('no-js', 'js');
+
+  (function () {
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    var items = document.querySelectorAll('.reveal');
+    if (!('IntersectionObserver' in window) || reduce.matches) {
+      items.forEach(function (el) { el.classList.add('on'); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('on');
+          io.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.15 });
+    items.forEach(function (el) { io.observe(el); });
+  })();
+
+  (function () {
+    var form = document.getElementById('form-imc');
+    var peso = document.getElementById('peso');
+    var altura = document.getElementById('altura');
+    var resultado = document.getElementById('resultado');
+    var faixas = document.querySelectorAll('#faixas li');
+
+    function numero(valor) {
+      var limpo = String(valor || '').trim().replace(',', '.');
+      var n = Number(limpo);
+      return (limpo !== '' && Number.isFinite(n)) ? n : null;
+    }
+
+    function classificar(imc) {
+      if (imc < 18.5) return 'abaixo do peso';
+      if (imc < 25) return 'peso adequado';
+      if (imc < 30) return 'sobrepeso';
+      if (imc < 35) return 'obesidade grau I';
+      if (imc < 40) return 'obesidade grau II';
+      return 'obesidade grau III';
+    }
+
+    form.addEventListener('submit', function (evento) {
+      evento.preventDefault();
+      faixas.forEach(function (li) { li.classList.remove('ativa'); });
+
+      var p = numero(peso.value);
+      var a = numero(altura.value);
+
+      if (p === null || p < 10 || p > 700) {
+        resultado.className = 'result show';
+        resultado.innerHTML = '<span class="result-error">Digite um peso em quilogramas entre 10 e 700.</span>';
+        return;
+      }
+      if (a === null || a < 50 || a > 300) {
+        resultado.className = 'result show';
+        resultado.innerHTML = '<span class="result-error">Digite uma altura em centímetros entre 50 e 300.</span>';
+        return;
+      }
+
+      var metros = a / 100;
+      var imc = p / (metros * metros);
+      var texto = imc.toFixed(1).replace('.', ',');
+      var classe = classificar(imc);
+
+      resultado.className = 'result show';
+      resultado.innerHTML = 'Seu IMC é <strong>' + texto + '</strong> — ' + classe +
+        '<span class="note">Um número de partida. A avaliação completa é com profissional de saúde.</span>';
+
+      faixas.forEach(function (li) {
+        var min = Number(li.getAttribute('data-min'));
+        var max = li.getAttribute('data-max') === 'Infinity' ? Infinity : Number(li.getAttribute('data-max'));
+        if (imc >= min && imc < max) li.classList.add('ativa');
+      });
+    });
+  })();
+</script>
+
+</body>
+</html>

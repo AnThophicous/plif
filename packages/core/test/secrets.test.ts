@@ -115,6 +115,27 @@ describe('the credential store', () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
+  it('binds Windows credentials to their logical names', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-secrets-'));
+    const runner = async (_mode: 'protect' | 'unprotect', input: string) =>
+      [...input].reverse().join('');
+    const store = new WindowsDpapiSecretStore(root, runner);
+    await store.set('A', 'one');
+    await store.set('B', 'two');
+    const files = await fs.readdir(root);
+    const first = path.join(root, files[0] as string);
+    const second = path.join(root, files[1] as string);
+    const [firstValue, secondValue] = await Promise.all([fs.readFile(first, 'utf8'), fs.readFile(second, 'utf8')]);
+    await Promise.all([fs.writeFile(first, secondValue), fs.writeFile(second, firstValue)]);
+    await assert.rejects(
+      () => store.get('A'),
+      (error: unknown) => error instanceof Error &&
+        error.message === 'could not read the credential store' &&
+        error.cause instanceof Error && /binding does not match/.test(error.cause.message),
+    );
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
   linuxIt('round-trips Linux credentials without cleartext or service names', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plif-linux-secrets-'));
     const runner = async (_mode: 'protect' | 'unprotect', input: string, _name: string) =>
@@ -318,6 +339,26 @@ describe('a secret question', () => {
 
     assert.equal(await pending, 'sqlite');
     assert.equal(seen[0]?.answer, 'sqlite');
+  });
+
+  it('namespaces concurrent brokers on the same event bus', async () => {
+    const bus = new EventBus();
+    const asked: Array<{ id: string; scopeId?: string }> = [];
+    const answered: Array<{ id: string; scopeId?: string }> = [];
+    bus.on('question.asked', (event) => asked.push(event));
+    bus.on('question.answered', (event) => answered.push(event));
+    const first = new QuestionBroker(bus, 50, 'acp-session-one');
+    const second = new QuestionBroker(bus, 50, 'acp-session-two');
+
+    const firstPending = first.ask({ text: 'first?' });
+    const secondPending = second.ask({ text: 'second?' });
+    assert.deepEqual(asked.map((event) => event.scopeId), ['acp-session-one', 'acp-session-two']);
+
+    first.answer(asked[0]!.id, 'one');
+    second.answer(asked[1]!.id, 'two');
+    assert.equal(await firstPending, 'one');
+    assert.equal(await secondPending, 'two');
+    assert.deepEqual(answered.map((event) => event.scopeId), ['acp-session-one', 'acp-session-two']);
   });
 
   it('separates a redacted answer from a question nobody answered', async () => {

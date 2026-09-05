@@ -299,13 +299,12 @@ describe('retry schedule', () => {
     const provider = new ScriptedProvider([
       apiError(500, 'Internal server error'),
       apiError(500, 'Internal server error'),
-      apiError(500, 'Internal server error'),
       [chunk('finally'), FINISH],
     ]);
 
     const result = await collect(provider.stream(ask));
     assert.equal(result.text, 'finally');
-    assert.deepEqual(provider.waits, [1_000, 2_000, 4_000]);
+    assert.deepEqual(provider.waits, [1_000, 2_000]);
   });
 
   it('announces the attempt before the wait, so the silence is explained', async () => {
@@ -316,7 +315,7 @@ describe('retry schedule', () => {
     const retry = all.find((event) => event.kind === 'retry');
     assert.ok(retry?.kind === 'retry');
     assert.equal(retry.attempt, 1);
-    assert.equal(retry.of, 6);
+    assert.equal(retry.of, 3);
     assert.equal(retry.waitMs, 1_000);
   });
 
@@ -337,10 +336,10 @@ describe('retry schedule', () => {
 
     await assert.rejects(collect(provider.stream(ask)), (error: unknown) => {
       assert.ok(PlifError.is(error));
-      assert.match(error.message, /gave up after 6 attempts/);
+      assert.match(error.message, /gave up after 3 attempts/);
       return true;
     });
-    assert.equal(provider.attempts, 6);
+    assert.equal(provider.attempts, 3);
   });
 
   it('discards a half-delivered turn before redoing it', async () => {
@@ -413,9 +412,9 @@ describe('retry schedule', () => {
     assert.equal(provider.attempts, 2);
   });
 
-  it('uses the configured timeout for first and inter-chunk waits', () => {
+  it('bounds a silent first response but honors the configured inter-chunk wait', () => {
     const provider = new ExposedTimeoutProvider({ ...CONFIG, timeoutMs: 120_000 });
-    assert.equal(provider.first(), 120_000);
+    assert.equal(provider.first(), 45_000);
     assert.equal(provider.between(), 120_000);
   });
 

@@ -497,7 +497,39 @@ function entryFromTranscriptCell(
   }
 }
 
+/**
+ * Cell heights, remembered per cell object.
+ *
+ * The transcript overlay asks how tall every cell is on every render, so this
+ * is O(transcript) work at the paint cadence — 27.76ms of a 33ms frame at a
+ * thousand cells, and 91.91ms at three thousand, which is roughly eleven
+ * frames a second. That is the whole of "the scroll is slow": the cost of
+ * drawing a long session grows with the session, and the work is the same
+ * answer recomputed for text that has not changed since it settled.
+ *
+ * A WeakMap keyed by the cell object is the right shape because cells are
+ * immutable — a changed cell is a new object, so it simply misses the cache,
+ * and a cell that falls out of the transcript is collected with it. The inner
+ * key carries width and expansion because both change the answer.
+ *
+ * The one thing this relies on is that cells are never mutated in place. They
+ * are built fresh by the reducer; a future cell that is edited rather than
+ * replaced would read a stale height from here.
+ */
+const cellHeights = new WeakMap<TranscriptCell, Map<string, number>>();
+
 export function measureTranscriptCell(cell: TranscriptCell, width: number, expanded = false): number {
+  const key = `${width}:${expanded ? 1 : 0}`;
+  const cached = cellHeights.get(cell);
+  const hit = cached?.get(key);
+  if (hit !== undefined) return hit;
+  const height = computeTranscriptCellHeight(cell, width, expanded);
+  if (cached) cached.set(key, height);
+  else cellHeights.set(cell, new Map([[key, height]]));
+  return height;
+}
+
+function computeTranscriptCellHeight(cell: TranscriptCell, width: number, expanded: boolean): number {
   const inner = Math.max(8, width - layout.gutter * 2);
   const wrap = (text: string, columns = inner): number =>
     text.split('\n').reduce((total, line) => total + wrappedHeight(line, columns), 0);

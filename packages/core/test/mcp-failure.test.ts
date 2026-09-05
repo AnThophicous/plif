@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { condenseMcpFailure, isDroppedConnection } from '../src/harness/mcp.js';
+import { authorizedMcpFetch, condenseMcpFailure, isDroppedConnection } from '../src/harness/mcp.js';
 
 const PAGE = [
   '<!DOCTYPE html>',
@@ -119,6 +119,41 @@ describe('isDroppedConnection', () => {
       'rate limited, try again in 30s',
     ]) {
       assert.equal(isDroppedConnection(new Error(message)), false, message);
+    }
+  });
+});
+
+describe('authorized MCP fetch', () => {
+  it('checks every request and fails closed on redirects', async () => {
+    const original = globalThis.fetch;
+    const reached: string[] = [];
+    globalThis.fetch = (async (_url, init) => {
+      assert.equal(init?.redirect, 'error');
+      return new Response('ok', { status: 200 });
+    }) as typeof fetch;
+    try {
+      const fetchMcp = authorizedMcpFetch(async (host) => { reached.push(host); }, 'fixture');
+      const response = await fetchMcp('https://allowed.example.test/mcp');
+      assert.equal(response.status, 200);
+      assert.deepEqual(reached, ['allowed.example.test']);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('does not call the underlying fetch when authorization rejects', async () => {
+    const original = globalThis.fetch;
+    let called = false;
+    globalThis.fetch = (async () => {
+      called = true;
+      return new Response('unexpected');
+    }) as typeof fetch;
+    try {
+      const fetchMcp = authorizedMcpFetch(async () => { throw new Error('blocked'); }, 'fixture');
+      await assert.rejects(() => fetchMcp('http://127.0.0.1/mcp'), /blocked/);
+      assert.equal(called, false);
+    } finally {
+      globalThis.fetch = original;
     }
   });
 });

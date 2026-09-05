@@ -5,9 +5,9 @@
  * the original PR (bypass mode, arbitrary MCP servers, persisted model
  * switches, skill mirroring into the workspace) now requires a local opt-in.
  *
- * Policy source, in order of precedence:
- *   1. ~/.plif/acp-security.json  (recommended — survives restarts)
- *   2. PLIF_ACP_* environment variables (per-launch overrides)
+ * Privilege-granting fields come only from ~/.plif/acp-security.json. The
+ * environment may tighten the session-count ceiling, but cannot silently turn
+ * on edit/bypass modes, host MCP execution, or persistent model changes.
  *
  * Every field defaults to the SAFEST value. Nothing is ever granted because
  * a field is missing.
@@ -16,8 +16,40 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DEVELOPER_POLICY } from '@plif/core';
+import type { PolicyDocument } from '@plif/core';
+
+/**
+ * ACP mounts the selected workspace read-write, so the core developer policy
+ * cannot be reused verbatim: its ordinary write rule assumes writes land in
+ * an isolated container layer. Keep the normal rules, then add a stricter
+ * approval rule for the host-backed workspace. Policy evaluation chooses the
+ * most restrictive matching decision, so VCS protection still wins with deny.
+ */
+export const ACP_POLICY: PolicyDocument = Object.freeze({
+  ...DEVELOPER_POLICY,
+  rules: Object.freeze([
+    ...DEVELOPER_POLICY.rules,
+    {
+      name: 'acp-host-workspace-writes',
+      actions: ['fs.write', 'fs.delete'] as const,
+      match: '/**',
+      decision: 'ask' as const,
+      rationale: 'This ACP session mounts the selected workspace on the host; approve each change explicitly.',
+    },
+    {
+      name: 'acp-host-workspace-execution',
+      actions: ['exec'] as const,
+      argvPattern: '.*',
+      decision: 'ask' as const,
+      rationale: 'A command can write through the host-backed workspace mount; approve it explicitly.',
+    },
+  ]),
+});
 
 export interface AcpSecurityPolicy {
+  /** Allow the host to auto-approve workspace writes/deletes. Off by default. */
+  readonly allowAcceptEdits: boolean;
   /**
    * Allow the host to switch the session to `bypassPermissions`, which
    * auto-approves EVERY action (commands, writes, network). Off by default.
@@ -42,15 +74,19 @@ export interface AcpSecurityPolicy {
   readonly persistModelSwitch: boolean;
   /** Hard cap on simultaneous sessions. */
   readonly maxSessions: number;
+  /** Additional directories the local ACP launcher explicitly permits. */
+  readonly workspaceRoots: readonly string[];
 }
 
 export const DEFAULT_POLICY: AcpSecurityPolicy = Object.freeze({
+  allowAcceptEdits: false,
   allowBypassPermissions: false,
   allowHostMcpServers: false,
   hostMcpCommandPrefixes: Object.freeze(['npx', 'node', 'bunx', 'uvx', 'python']),
   allowModelSwitch: false,
   persistModelSwitch: false,
   maxSessions: 8,
+  workspaceRoots: Object.freeze([]),
 });
 
 export function securityPolicyPath(): string {
@@ -85,9 +121,14 @@ function prefixesFrom(value: unknown, fallback: readonly string[]): readonly str
   return fallback;
 }
 
+function rootsFrom(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return DEFAULT_POLICY.workspaceRoots;
+  const roots = value.filter((entry): entry is string => typeof entry === 'string' && path.isAbsolute(entry));
+  return Object.freeze([...new Set(roots.map((root) => path.resolve(root)))]);
+}
+
 /**
- * Load the policy: JSON file (if present) merged over the defaults, then env
- * overrides. The file is never required — absent file means the safe
+ * Load the policy from JSON (if present). The file is never required — absent file means the safe
  * defaults. A malformed file fails LOUD (the adapter must not silently run
  * with an empty policy when the user believed they configured one).
  */
@@ -113,12 +154,16 @@ export async function loadSecurityPolicy(): Promise<AcpSecurityPolicy> {
   const env = process.env;
 
   return {
+    allowAcceptEdits: booleanFrom(
+      file['allowAcceptEdits'],
+      DEFAULT_POLICY.allowAcceptEdits,
+    ),
     allowBypassPermissions: booleanFrom(
-      env['PLIF_ACP_ALLOW_BYPASS'] ?? file['allowBypassPermissions'],
+      file['allowBypassPermissions'],
       DEFAULT_POLICY.allowBypassPermissions,
     ),
     allowHostMcpServers: booleanFrom(
-      env['PLIF_ACP_ALLOW_HOST_MCP'] ?? file['allowHostMcpServers'],
+      file['allowHostMcpServers'],
       DEFAULT_POLICY.allowHostMcpServers,
     ),
     hostMcpCommandPrefixes: prefixesFrom(
@@ -126,18 +171,32 @@ export async function loadSecurityPolicy(): Promise<AcpSecurityPolicy> {
       DEFAULT_POLICY.hostMcpCommandPrefixes,
     ),
     allowModelSwitch: booleanFrom(
-      env['PLIF_ACP_ALLOW_MODEL_SWITCH'] ?? file['allowModelSwitch'],
+      file['allowModelSwitch'],
       DEFAULT_POLICY.allowModelSwitch,
     ),
     persistModelSwitch: booleanFrom(
-      env['PLIF_ACP_PERSIST_MODEL_SWITCH'] ?? file['persistModelSwitch'],
+      file['persistModelSwitch'],
       DEFAULT_POLICY.persistModelSwitch,
     ),
     maxSessions: numberFrom(
       env['PLIF_ACP_MAX_SESSIONS'] ?? file['maxSessions'],
       DEFAULT_POLICY.maxSessions,
     ),
+    workspaceRoots: rootsFrom(file['workspaceRoots']),
   };
+}
+
+/** Component-aware workspace check used before an ACP host path becomes a mount. */
+export function isWorkspaceAllowed(workspace: string, roots: readonly string[]): boolean {
+  const normalize = (value: string): string => {
+    const resolved = path.resolve(value);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  };
+  const candidate = normalize(workspace);
+  return roots.some((root) => {
+    const relative = path.relative(normalize(root), candidate);
+    return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+  });
 }
 
 /** Helper for callers that want to display the policy decisions. */

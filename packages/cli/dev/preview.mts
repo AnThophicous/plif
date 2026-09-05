@@ -835,9 +835,9 @@ const SCENARIOS: Record<string, Step[]> = {
    */
   browser: [
     { wait: 200 },
-    { type: '/mcp\r' },
+    { type: '/marketplace\r' },
     { wait: 600 },
-    { capture: 'MCP tab — what this machine has' },
+    { capture: 'Marketplace tab — what this machine has' },
     { type: '\t\t' },
     { wait: 3000 },
     { capture: 'Marketplace tab, freshly fetched' },

@@ -1,14 +1,18 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 
+import { moduleDirectory, resolveAsset } from '../assets.js';
+import { isPromptProfile, type PromptProfile } from '../agenting/types.js';
 import { PlifError } from '../errors.js';
 import { BUILTIN_AGENT_PRESETS } from './agent-presets.js';
 import type { ConversationStateMode } from '../model/conversation-state.js';
+import { withFileLock } from '../store/file-lock.js';
 
-export type PermissionMode = 'ask' | 'auto-approve' | 'deny';
+export type PermissionMode = 'ask' | 'auto-approve' | 'full' | 'deny';
 
 export type ActivityHudMode = 'closed' | 'compact' | 'expanded';
 
@@ -87,6 +91,22 @@ export interface GlobalConfig {
   readonly agent?: Readonly<Record<string, AgentConfig>>;
   /** Whether the primary agent may choose named agents without explicit user direction. */
   readonly agentAutoLaunch?: boolean;
+  /**
+   * Commands run at fixed points in the loop; see `harness/hooks.ts`.
+   *
+   * Kept as `unknown` here rather than typed: this interface is the shape of a
+   * file a human edits, and `parseHooks` is where a malformed entry gets a
+   * readable complaint instead of being silently coerced.
+   */
+  readonly hooks?: unknown;
+  /**
+   * Which instruction layer the system prompt is compiled from.
+   *
+   * "auto" picks by context window, which is what plif has always done.
+   * "compact" uses the short layer at any context size and roughly halves the
+   * fixed per-request cost; "full" forces the long one.
+   */
+  readonly promptProfile?: PromptProfile;
   readonly plif?: PlifModeConfig;
   /** Presentation preference for the runtime activity HUD. */
   readonly activityHud?: ActivityHudConfig;
@@ -167,7 +187,24 @@ export function activityHudModeOf(config: GlobalConfig): ActivityHudMode {
 export const CONFIG_SCHEMA_URL =
   'https://raw.githubusercontent.com/AnThophicous/plif/main/packages/core/schema/config.schema.toml';
 
-const CONFIG_SCHEMA_FILE = new URL('../../schema/config.schema.toml', import.meta.url);
+/**
+ * The schema shipped beside the compiled config module.
+ *
+ * Resolved rather than constructed as a URL so a bundled build, whose module
+ * URL is the bundle's own path, still finds the copy placed next to it.
+ */
+function configSchemaFile(): string {
+  const here = moduleDirectory(import.meta.url);
+  const found = resolveAsset(import.meta.url, 'schema/config.schema.toml', [
+    path.resolve(here, '../../schema/config.schema.toml'),
+  ]);
+  if (found === null) {
+    throw new PlifError('INTERNAL', 'the plif config schema is missing from this install', {
+      hint: 'Reinstall @plif/core.',
+    });
+  }
+  return found;
+}
 
 /**
  * MCP servers, from whichever key the file uses.
@@ -270,33 +307,42 @@ export async function saveGlobalConfig(
   options: { readonly preserveProviderKeys?: boolean } = {},
 ): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });
-  // Canonical writes never put model credentials back into config.toml. The
-  // only exception is the one-time JSON/JSONC import below: it must preserve
-  // the source long enough for startup to move every value into the encrypted
-  // credential store. Ordinary callers cannot accidentally re-emit a secret
-  // merely because they loaded a stale snapshot before changing another field.
-  let nextConfig = withoutPlaintextModelCredentials(config);
-  if (options.preserveProviderKeys === true) {
-    let current: GlobalConfig = {};
-    try {
-      await fs.access(file);
-      current = await loadGlobalConfig(file);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  await withFileLock(file, async () => {
+    // Canonical writes never put model credentials back into config.toml. The
+    // only exception is the one-time JSON/JSONC import below: it must preserve
+    // the source long enough for startup to move every value into the encrypted
+    // credential store. Ordinary callers cannot accidentally re-emit a secret
+    // merely because they loaded a stale snapshot before changing another field.
+    let nextConfig = withoutPlaintextModelCredentials(config);
+    if (options.preserveProviderKeys === true) {
+      let current: GlobalConfig = {};
+      try {
+        await fs.access(file);
+        current = await loadGlobalConfig(file);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      nextConfig = mergeLegacyModelCredentials(current, config);
     }
-    nextConfig = mergeLegacyModelCredentials(current, config);
-  }
-  const temporary = `${file}.${process.pid}.tmp`;
-  const withSchema = { ...nextConfig, $schema: CONFIG_SCHEMA_URL };
-  // The canonical personal file is TOML. Keep an explicitly supplied legacy
-  // .jsonc path round-trippable for marketplace imports and older callers;
-  // production calls use ~/.plif/config.toml and never write JSON again.
-  const serialized = path.extname(file).toLowerCase() === '.jsonc'
-    ? JSON.stringify(withSchema, null, 2)
-    : formatConfigToml(withSchema);
-  await fs.writeFile(temporary, serialized, 'utf8');
-  await fs.rename(temporary, file);
-  await fs.chmod(file, 0o600).catch(() => undefined);
+    const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+    const withSchema = { ...nextConfig, $schema: CONFIG_SCHEMA_URL };
+    // The canonical personal file is TOML. Keep an explicitly supplied legacy
+    // .jsonc path round-trippable for marketplace imports and older callers;
+    // production calls use ~/.plif/config.toml and never write JSON again.
+    const serialized = path.extname(file).toLowerCase() === '.jsonc'
+      ? JSON.stringify(withSchema, null, 2)
+      : formatConfigToml(withSchema);
+    try {
+      await fs.writeFile(temporary, serialized, { encoding: 'utf8', mode: 0o600 });
+      await fs.rename(temporary, file);
+      await fs.chmod(file, 0o600).catch(() => undefined);
+    } finally {
+      // The import-only preserveProviderKeys path may briefly contain a
+      // plaintext legacy credential. Never leave that temp copy behind when
+      // a disk-full or rename failure interrupts the atomic replacement.
+      await fs.rm(temporary, { force: true }).catch(() => undefined);
+    }
+  });
 }
 
 /** Remove every legacy location that can carry a model API key. */
@@ -384,7 +430,7 @@ export function formatConfigToml(config: GlobalConfig): string {
 }
 
 export async function configSchemaText(): Promise<string> {
-  return await fs.readFile(CONFIG_SCHEMA_FILE, 'utf8');
+  return await fs.readFile(configSchemaFile(), 'utf8');
 }
 
 export async function migrateLegacyGlobalConfig(
@@ -445,7 +491,8 @@ export async function setAutoApprove(
 }
 
 export function isAutoApproveEnabled(config: GlobalConfig): boolean {
-  return permissionMode(config) === 'auto-approve';
+  const mode = permissionMode(config);
+  return mode === 'auto-approve' || mode === 'full';
 }
 
 /**
@@ -457,6 +504,18 @@ export function isAutoApproveEnabled(config: GlobalConfig): boolean {
  * falls back to `native` rather than failing: the wrong presentation is a cost,
  * a refusal to start is an outage.
  */
+/**
+ * The prompt layer for this session.
+ *
+ * The environment wins over the file for the same reason it does for tool
+ * mode: trying a cheaper prompt for one run should not mean editing config and
+ * remembering to change it back.
+ */
+export function promptProfileOf(config: GlobalConfig): PromptProfile {
+  const raw = (process.env['PLIF_PROMPT_PROFILE'] ?? config.promptProfile ?? '').trim().toLowerCase();
+  return isPromptProfile(raw) ? raw : 'auto';
+}
+
 export function toolModeOf(config: GlobalConfig): 'native' | 'code' | 'both' {
   const raw = (process.env['PLIF_TOOLS_MODE'] ?? config.toolMode ?? '').trim().toLowerCase();
   return raw === 'code' || raw === 'both' || raw === 'native' ? raw : 'native';
@@ -472,7 +531,7 @@ export async function setPermissionMode(
   file = globalConfigPath(),
 ): Promise<GlobalConfig> {
   const config = await loadGlobalConfig(file);
-  const next = { ...config, permissionMode: mode, autoApprove: mode === 'auto-approve' };
+  const next = { ...config, permissionMode: mode, autoApprove: mode === 'auto-approve' || mode === 'full' };
   await saveGlobalConfig(next, file);
   return next;
 }

@@ -6,7 +6,7 @@
  * components over plain data, so they can be rendered directly against
  * fixtures — which is the only practical way to iterate on their layout.
  *
- *   node --import tsx packages/cli/dev/screens-check.mts [columns] [screen]
+ *   node --import tsx packages/cli/dev/screens-check.mts [columns] [screen] [rows]
  */
 
 import './force-color.mjs';
@@ -25,7 +25,7 @@ import { effortPickerItems } from '../src/components/Picker.js';
 import { activateTheme, loadThemes } from '../src/themes.js';
 
 const columns = Number(process.argv[2] ?? 110);
-const rows = 30;
+const rows = Number(process.argv[4] ?? 30);
 const which = process.argv[3] ?? 'usage';
 
 class Out extends EventEmitter {

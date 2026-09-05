@@ -130,6 +130,11 @@ class Win32Jail implements SandboxJail {
       assigned = this.#assign(child.pid);
     }
 
+    if (!assigned) {
+      terminateUnassignedProcess(child);
+      throw new Error(`sandbox ${this.id} could not attach process to its job object`);
+    }
+
     return await this.#collect(child, options, started, assigned);
   }
 
@@ -145,6 +150,10 @@ class Win32Jail implements SandboxJail {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const assigned = typeof child.pid === 'number' ? this.#assign(child.pid) : false;
+    if (!assigned) {
+      terminateUnassignedProcess(child);
+      throw new Error(`sandbox ${this.id} could not attach terminal to its job object`);
+    }
     return new PipeTerminal(child, options, this.#decode, undefined, (signal) => {
       if (assigned) {
         if (signal === 'SIGKILL') {
@@ -310,6 +319,32 @@ class Win32Jail implements SandboxJail {
 
   async [Symbol.asyncDispose](): Promise<void> {
     await this.dispose();
+  }
+}
+
+/**
+ * A process outside the job has no resource or tree-kill guarantees. Do not
+ * return it to core as if it were confined. Kill its tree best-effort before
+ * surfacing the failure, and attach an error listener because the child may
+ * report an asynchronous spawn failure while it is being torn down.
+ */
+function terminateUnassignedProcess(child: ReturnType<typeof spawnProcess>): void {
+  child.once('error', () => undefined);
+  if (typeof child.pid === 'number') {
+    try {
+      const killer = spawnProcess('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+      killer.once('error', () => undefined);
+    } catch {
+      // The direct kill below is still useful when taskkill cannot start.
+    }
+  }
+  try {
+    child.kill('SIGKILL');
+  } catch {
+    // already gone
   }
 }
 

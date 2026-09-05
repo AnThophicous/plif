@@ -1,6 +1,6 @@
 ---
 name: plief-argus
-description: Engenharia de segurança sobre um modelo percorrível do sistema (SecurityIR) - threat modeling, travessia de caminhos de ataque com cálculo de alavancagem, revisão de segurança de mudanças (SecDiff), ciclo de achados com prova de correção, hardening, cadeia de suprimentos, segurança de IA e agentes, portão de release e postura consciente de evidência. Use quando o usuário pedir auditoria ou revisão de segurança, análise de vulnerabilidade, threat model, correção de CVE ou alerta de scanner (Dependabot, Snyk, Semgrep, CodeQL, Trivy), rotação de segredo vazado, hardening de headers/cookies/CORS/TLS/Docker/CI, revisão de auth/JWT/sessão/OAuth, checklist OWASP/ASVS, segurança de agente de IA ou injeção de prompt, portão de release, compliance (LGPD, SOC 2, PCI) em código, ou mencionar pentest autorizado e bug bounty próprio.
+description: Segurança sobre um grafo de risco percorrível: threat model, revisão de segurança de diff, CVE e alerta de scanner (Dependabot, Snyk, Semgrep, CodeQL, Trivy), segredo vazado, hardening de auth/JWT/OAuth/headers/CORS/TLS/Docker/CI, OWASP/ASVS, injeção de prompt e segurança de agentes, portão de release, LGPD/SOC 2/PCI em código, pentest autorizado.
 license: MIT
 metadata:
   plief-short-description: Segurança ofensiva-defensiva sobre grafo de risco

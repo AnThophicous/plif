@@ -18,7 +18,7 @@ execute this evidence loop:
    criteria. Inspect repository instructions, status, owners, callers, data flow,
    neighboring tests, and relevant runtime behavior.
 2. Call `update_plan` before any mutation. It persists the concise checkpoint
-   mirror at `.plif/plans/current.md`. Create or resume a detailed Markdown task
+mirror at `/temp/plif/plans/current.md`. Create or resume a detailed Markdown task
    plan under `.plif/plans/` with objective, evidence, design, risks, checkpoints,
    delegated ownership, verification matrix, audit findings, status, and exact
    next action. Keep one checkpoint in progress and update both plan views when

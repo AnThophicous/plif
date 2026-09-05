@@ -24,12 +24,48 @@ export type {
   Strategy,
 } from './harness/learning.js';
 
+export { BUNDLED_ASSET_DIRECTORY, moduleDirectory, resolveAsset } from './assets.js';
+export { PROMPT_PROFILES, isPromptProfile } from './agenting/types.js';
+export {
+  CURATED_MCP_SERVERS,
+  curatedServerConfig,
+  findCuratedServer,
+  installCuratedServer,
+} from './marketplace/servers.js';
+export type { CuratedInstallResult, CuratedMcpServer } from './marketplace/servers.js';
+export type { PromptProfile } from './agenting/types.js';
+export {
+  SPILL_DIRECTORY,
+  SPILL_THRESHOLD,
+  SpillStore,
+  describeSpill,
+  spillLargeOutput,
+} from './harness/spill.js';
+export type { SpillRecord, SpillSink } from './harness/spill.js';
+export {
+  HOOK_EVENTS,
+  HookRunner,
+  describeHookOutcome,
+  hookMatches,
+  isHookEvent,
+  parseHooks,
+} from './harness/hooks.js';
+export type {
+  HookDefinition,
+  HookEvent,
+  HookEventPayload,
+  HookOutcome,
+  HookRunnerOptions,
+} from './harness/hooks.js';
+export { credentialGaps, expandEnvironment, expandHeaders } from './config/expand.js';
+export { describeProxy, dispatcherFor, proxyForUrl } from './model/proxy.js';
 export { QuestionBroker } from './harness/ask.js';
 export {
   BUILTIN_SKILLS,
   MANDATORY_GLOBAL_SKILLS,
-  MANDATORY_PLIF_SKILLS,
+  PLIF_FAMILY_SKILLS,
   SkillRegistry,
+  TRACKED_SKILLS,
   createSkillTool,
   loadedSkillNames,
   mandatorySkillsForEffort,
@@ -256,6 +292,7 @@ export {
   updatePlan,
   applyPatch,
   editFile,
+  hashlineEdit,
   globFiles,
   grepFiles,
   listDir,
@@ -301,6 +338,8 @@ export type {
 export {
   BashDialect,
   PowerShellDialect,
+  detectShellDialect,
+  discoverInterpreters,
   resolveShellDialect,
 } from './execution/shell-dialects.js';
 export type {
@@ -330,7 +369,18 @@ export type {
 export { classifyDangerousCommand } from './tasks/dangerous.js';
 
 export { LspClient } from './lsp/client.js';
-export type { Diagnostic, Location, Severity, SymbolInfo } from './lsp/client.js';
+export type {
+  CallSite,
+  CodeAction,
+  Diagnostic,
+  DocumentEdit,
+  Location,
+  Severity,
+  SymbolInfo,
+  TextEdit,
+  WorkspaceChange,
+  WorkspaceSymbolInfo,
+} from './lsp/client.js';
 export { LspManager, countBySeverity, formatDiagnostics } from './lsp/manager.js';
 export type { LspManagerOptions, LspStatus } from './lsp/manager.js';
 export { diagnosticsAfterWrite, lspTools } from './lsp/tools.js';
@@ -623,6 +673,7 @@ export {
   setAutoApprove,
   profilesOf,
   plifModeOf,
+  promptProfileOf,
   toolModeOf,
 } from './config/global.js';
 export { stripJsonComments } from './config/global.js';
@@ -678,7 +729,7 @@ export type {
 } from './marketplace/catalog.js';
 
 export { SubagentCoordinator, sendMessageTool, subagentTool, subagentTools } from './harness/subagent.js';
-export type { SubagentOptions, SubagentRecord } from './harness/subagent.js';
+export type { SubagentOptions, SubagentRecord, SubagentResult } from './harness/subagent.js';
 export { readAgentInstructions } from './harness/prompt.js';
 export { routeVision, visionModelRef, visionTools } from './harness/vision.js';
 export type { VisionRoute } from './harness/vision.js';
@@ -693,6 +744,8 @@ export {
 export type { DiffHunk, DiffLine, DiffOp, DiffStats } from './harness/diff.js';
 export { EditCoordinator } from './harness/edits.js';
 export type { EditConflict } from './harness/edits.js';
+export { applyHashline, hashlineTag, parseHashline } from './harness/hashline.js';
+export type { HashlineEdit, HashlineOperation } from './harness/hashline.js';
 export {
   AUTO_COMPACTION_TARGET_RATIO,
   AUTO_COMPACTION_TRIGGER_RATIO,
@@ -704,3 +757,13 @@ export {
 export { SEARCH_HOSTS, parseResults, resolveRedirect, search, stripTags } from './web/duckduckgo.js';
 export type { InstantAnswer, SearchOptions, SearchResponse, SearchResult } from './web/duckduckgo.js';
 export { WEB_TOOLS, curl, research, webFetch, webSearch } from './web/tools.js';
+
+export { DebugSession } from './debug/session.js';
+export type {
+  DebugFrame,
+  DebugLauncher,
+  DebugProcess,
+  DebugStop,
+  DebugValue,
+} from './debug/session.js';
+export { DebugSessions, debugTool, debugTools } from './debug/tools.js';

@@ -1,5 +1,9 @@
-import { definePromptModule } from './types.js';
+import { definePromptModule, usesCompactLayer } from './types.js';
 import { DOMAIN_SKILL_ROUTES, mandatorySkillsForEffort } from '../harness/skills.js';
+
+/** Skill names as inline code, the way a routing rule prints them. */
+const badge = (names: readonly string[]): string =>
+  names.map((name) => '`' + name + '`').join(' and ');
 
 export const mcpModule = definePromptModule({
   id: '80-mcp',
@@ -45,35 +49,51 @@ export const skillsModule = definePromptModule({
     const skillListed = (name: string): boolean => catalogue
       .split(/\r?\n/)
       .some((line) => new RegExp(`^\\s*-\\s+${name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*:`, 'i').test(line));
-    const lines = [
-      '# Available skills',
-      '',
-      catalogue,
-      '',
-      'Treat this catalogue as an active routing table. For every request, silently scan',
-      'names, package labels, and descriptions for a clear match. The user does not need',
-      'to mention a skill or know that it exists. Load the smallest sufficient matching',
-      'set through the skill tool before covered work begins. A package groups related',
-      'skills but does not require loading every child.',
-      '',
-      'This catalogue is routing metadata, not the skill body. If no entry clearly',
-      'matches, proceed normally without announcing the scan. If a selected non-mandatory',
-      'skill cannot',
-      'load or does not fit after inspection, discard it and continue with the default',
-      'workflow. The default skill policy governs precedence, resources, and user',
-      'updates. The mandatory skill gate below overrides this optional degradation policy.',
-      '',
-      '## Domain routing (not optional)',
-      'These are not suggestions to weigh. When the condition holds, load the skill',
-      'before the covered work begins, whether or not the user named it and whether or',
-      'not you think you already know the answer:',
-      ...DOMAIN_SKILL_ROUTES.map(
-        (route) => `- Load ${route.skills.map((name) => `\`${name}\``).join(' and ')} when ${route.when}.`,
-      ),
-      'Judge by what the work is, not by the words the user used. "Make me a landing',
-      'page", "fix this button", "the spacing looks off" and "build the dashboard" are',
-      'all frontend work.',
-    ];
+    const compact = usesCompactLayer(context);
+    const lines = ['# Available skills', '', catalogue, ''];
+
+    if (compact) {
+      lines.push(
+        'This catalogue is a routing table, not the skill bodies. For every request,',
+        'silently match names, package labels and descriptions, then load the smallest',
+        'sufficient set with the skill tool before the covered work begins. The user does',
+        'not have to mention a skill or know that it exists, and a package groups related',
+        'skills without requiring all of them. If a selected non-mandatory skill does not',
+        'fit after inspection, discard it and continue with the default workflow.',
+        '',
+        '## Domain routing (not optional)',
+        ...DOMAIN_SKILL_ROUTES.map(
+          (route) => '- Load ' + badge(route.skills) + ' when ' + route.compactWhen + '.',
+        ),
+        'Judge by what the work is, not by the words the user used.',
+      );
+    } else {
+      lines.push(
+        'Treat this catalogue as an active routing table. For every request, silently scan',
+        'names, package labels, and descriptions for a clear match. The user does not need',
+        'to mention a skill or know that it exists. Load the smallest sufficient matching',
+        'set through the skill tool before covered work begins. A package groups related',
+        'skills but does not require loading every child.',
+        '',
+        'This catalogue is routing metadata, not the skill body. If no entry clearly',
+        'matches, proceed normally without announcing the scan. If a selected non-mandatory',
+        'skill cannot',
+        'load or does not fit after inspection, discard it and continue with the default',
+        'workflow. The default skill policy governs precedence, resources, and user',
+        'updates. The mandatory skill gate below overrides this optional degradation policy.',
+        '',
+        '## Domain routing (not optional)',
+        'These are not suggestions to weigh. When the condition holds, load the skill',
+        'before the covered work begins, whether or not the user named it and whether or',
+        'not you think you already know the answer:',
+        ...DOMAIN_SKILL_ROUTES.map(
+          (route) => `- Load ${route.skills.map((name) => `\`${name}\``).join(' and ')} when ${route.when}.`,
+        ),
+        'Judge by what the work is, not by the words the user used. "Make me a landing',
+        'page", "fix this button", "the spacing looks off" and "build the dashboard" are',
+        'all frontend work.',
+      );
+    }
 
     const loaded = new Set(context.loadedSkills ?? []);
     const codexNative = context.providerId === 'codex';
@@ -85,58 +105,100 @@ export const skillsModule = definePromptModule({
         ? '## Mandatory PLIF skills and review checkpoint'
         : '## Mandatory anti-AI-slop and Galileu review',
       missing.length > 0 && !codexNative
-        ? `The ${context.effort === 'plif' ? 'PLIF' : 'global'} skill gate is non-optional. Before answering, asking a question, planning, editing, running a command, or using another tool, call the skill tool for ${missing.map((name) => `{ "name": "${name}" }`).join(' and then ')}; ${missing.length === 1 ? 'wait for the requested result to succeed' : 'wait for all requested results to succeed'}.`
+        ? compact
+          ? `The skill gate is non-optional: before answering, planning, editing, running a command or using another tool, call the skill tool for ${missing.map((name) => `{ "name": "${name}" }`).join(' and then ')} and wait for each to succeed.`
+          : `The ${context.effort === 'plif' ? 'PLIF' : 'global'} skill gate is non-optional. Before answering, asking a question, planning, editing, running a command, or using another tool, call the skill tool for ${missing.map((name) => `{ "name": "${name}" }`).join(' and then ')}; ${missing.length === 1 ? 'wait for the requested result to succeed' : 'wait for all requested results to succeed'}.`
         : missing.length > 0
           ? `The ${context.effort === 'plif' ? 'PLIF' : 'global'} skill gate is non-optional. The native Codex adapter must preload ${missing.join(' and ')} before this turn; do not try to call the host-only skill tool. If a preloaded body is absent, report a runtime configuration error rather than claiming the skill is unavailable.`
         : `The non-optional ${mandatory.join(' and ')} skill${mandatory.length === 1 ? '' : 's'} were already loaded successfully in this session. Apply their instructions from the preceding skill result${mandatory.length === 1 ? '' : 's'}; do not call the skill tool again unless one of those results is missing.`,
       missing.length > 0 && !codexNative
-        ? 'Do not proceed when a requested load fails. If the skill tool is unavailable or a required skill is missing from the catalogue, stop and report a runtime configuration error instead of silently falling back.'
+        ? compact
+          ? 'If a load fails or the skill tool is unavailable, stop and report a runtime configuration error; do not fall back silently.'
+          : 'Do not proceed when a requested load fails. If the skill tool is unavailable or a required skill is missing from the catalogue, stop and report a runtime configuration error instead of silently falling back.'
         : missing.length > 0
           ? 'Do not proceed until PLIF has supplied the preloaded skill bodies. Do not emit a prose refusal merely because the native tool list does not contain the host-only skill tool.'
         : 'Do not discard or reload successful skill results: keeping one copy in the carried conversation prevents context growth and preserves the same mandatory policy. Do not call the `skill` tool again unless a successful result is missing.',
     );
 
     for (const name of mandatory) {
-      lines.push(
-        codexNative && loaded.has(name)
-          ? `The \`${name}\` skill body was preloaded by the native Codex adapter. Apply it directly; do not call the host-only \`skill\` tool.`
-          : skillListed(name)
-            ? `The \`${name}\` skill is available in the catalogue and must be loaded now.`
-            : `${name} is not present in the catalogue; this session is misconfigured.`,
-      );
+      if (codexNative && loaded.has(name)) {
+        lines.push(
+          `The \`${name}\` skill body was preloaded by the native Codex adapter. Apply it directly; do not call the host-only \`skill\` tool.`,
+        );
+        continue;
+      }
+      if (!skillListed(name)) {
+        lines.push(`${name} is not present in the catalogue; this session is misconfigured.`);
+        continue;
+      }
+      // The compact gate sentence above already names every skill it requires,
+      // so confirming each one again is prose the compact layer cannot afford.
+      if (!compact) {
+        lines.push(`The \`${name}\` skill is available in the catalogue and must be loaded now.`);
+      }
     }
 
     // Galileu is a standing discipline, not a one-off ceremony at the start of
     // a session. Loading it once and then drifting is the failure this block
     // exists to prevent: the decision record has to outlive the turn that
     // created it, and later turns have to be measured against it.
-    lines.push(
-      '',
-      '## Galileu persistence',
-      'The decision record is durable state, not a formality. Keep it alive:',
-      '- Before acting on a request that sets or changes direction, write the objective,',
-      '  the assumptions it rests on, and what would falsify each one.',
-      '- On every later turn, re-read that record before deciding. If new evidence',
-      '  contradicts a recorded assumption, reopen the affected decision explicitly and',
-      '  say what changed — do not quietly proceed on the old one.',
-      '- Never invent a final objective when the user has not set one. Ask, then record',
-      '  the answer.',
-      '- Check the environment before asking: a question whose answer is in the',
-      '  repository is a question that should not be asked.',
-      '- When a decision is reversed, keep the original entry and add the reversal with',
-      '  its cause. The history is the point; overwriting it destroys the audit.',
-    );
+    if (compact) {
+      lines.push(
+        '',
+        '## Galileu persistence',
+        'The decision record is durable state. Before acting on a request that sets or',
+        'changes direction, write the objective, the assumptions it rests on and what',
+        'would falsify each one. Re-read that record on every later turn, and when new',
+        'evidence contradicts a recorded assumption reopen the affected decision',
+        'explicitly instead of quietly proceeding. Never invent a final objective the',
+        'user has not set, and never ask what the repository already answers. A reversal',
+        'is appended with its cause; the original entry stays.',
+      );
+    } else {
+      lines.push(
+        '',
+        '## Galileu persistence',
+        'The decision record is durable state, not a formality. Keep it alive:',
+        '- Before acting on a request that sets or changes direction, write the objective,',
+        '  the assumptions it rests on, and what would falsify each one.',
+        '- On every later turn, re-read that record before deciding. If new evidence',
+        '  contradicts a recorded assumption, reopen the affected decision explicitly and',
+        '  say what changed — do not quietly proceed on the old one.',
+        '- Never invent a final objective when the user has not set one. Ask, then record',
+        '  the answer.',
+        '- Check the environment before asking: a question whose answer is in the',
+        '  repository is a question that should not be asked.',
+        '- When a decision is reversed, keep the original entry and add the reversal with',
+        '  its cause. The history is the point; overwriting it destroys the audit.',
+      );
+    }
 
     if (context.effort === 'plif') {
       lines.push(
-        'Once loaded, follow the mandatory procedures for this turn. The review checkpoint is internal orchestration: perform checks with tools, do not print gate narration or repeated audit receipts, and finish with a concise result.',
         '',
-        '### Quality gate (PLIF)',
-        'Nothing is reported as done until each of these is true, and each is checked',
-        'with a tool rather than asserted: the change builds and typechecks; the tests',
-        'that cover it run and pass; the diff introduces no secret, no broad lint',
-        'suppression and no destructive default; every claim of verification names the',
-        'command that produced it. A step that could not run is reported as not run.',
+        ...(compact
+          ? [
+              'Once loaded, follow the mandatory procedures for this turn. The review',
+              'checkpoint is internal orchestration: check with tools, do not narrate the',
+              'gate, and finish with a concise result.',
+              '',
+              '### Quality gate (PLIF)',
+              'Nothing is reported as done until each of these is true and checked with a',
+              'tool rather than asserted: the change builds and typechecks; the tests that',
+              'cover it pass; the diff introduces no secret, no broad lint suppression and',
+              'no destructive default; every claim of verification names the command that',
+              'produced it. A step that could not run is reported as not run.',
+            ]
+          : [
+              'Once loaded, follow the mandatory procedures for this turn. The review checkpoint is internal orchestration: perform checks with tools, do not print gate narration or repeated audit receipts, and finish with a concise result.',
+              '',
+              '### Quality gate (PLIF)',
+              'Nothing is reported as done until each of these is true, and each is checked',
+              'with a tool rather than asserted: the change builds and typechecks; the tests',
+              'that cover it run and pass; the diff introduces no secret, no broad lint',
+              'suppression and no destructive default; every claim of verification names the',
+              'command that produced it. A step that could not run is reported as not run.',
+            ]),
       );
     }
 

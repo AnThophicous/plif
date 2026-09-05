@@ -382,11 +382,14 @@ describe('installing into the config', () => {
     assert.deepEqual(result.replaced, ['added']);
   });
 
-  it('refuses a plugin whose manifest declares no server', async () => {
+  it('refuses a plugin that offers nothing plif can install', async () => {
+    // The message widened when skills became installable: a plugin of commands
+    // and agents now fails because neither a server nor a skill arrived, not
+    // because it lacked a server specifically.
     const plugin = await served({ name: 'commands-only', description: 'agents and commands' });
     const file = await configFile({});
 
-    await assert.rejects(installMarketplacePlugin(plugin, file), /declares no MCP server/);
+    await assert.rejects(installMarketplacePlugin(plugin, file), /installed nothing plif can use/);
     assert.deepEqual(await loadGlobalConfig(file), {}, 'nothing was written');
   });
 

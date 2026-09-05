@@ -65,7 +65,8 @@ export class WindowsDpapiSecretStore implements SecretStore {
   async get(name: string): Promise<string | undefined> {
     try {
       const encrypted = await readFile(this.file(name), 'utf8');
-      const record = JSON.parse(await this.dpapi('unprotect', encrypted)) as { value?: string };
+      const record = JSON.parse(await this.dpapi('unprotect', encrypted)) as { name?: string; value?: string };
+      if (record.name !== name) throw new PlifError('INTERNAL', 'Windows credential binding does not match');
       return typeof record.value === 'string' ? record.value : undefined;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 
-import { containerMount, containerWorkdir } from '../src/container-paths.js';
+import { containerMount, containerWorkdir, WORKSPACE_SECRET_MASKS } from '../src/container-paths.js';
 
 describe('container paths', () => {
   it('mounts only the selected workspace at a stable virtual path', () => {
@@ -12,7 +12,9 @@ describe('container paths', () => {
       source: workspace,
       target: '/project',
       mode: 'rw',
-      mask: ['/.git/config', '/.env', '/.env.local'],
+      mask: WORKSPACE_SECRET_MASKS,
     });
+    assert.ok(containerMount(workspace).mask.includes('/**/*.pem'));
+    assert.ok(containerMount(workspace).mask.includes('/.env.*'));
   });
 });

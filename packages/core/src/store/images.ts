@@ -8,6 +8,7 @@
  * two images with the same digest behave identically, always.
  */
 
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -16,6 +17,7 @@ import type { Digest, Image, ImageConfig, Layer, LayerEntry } from '../types.js'
 import { DEFAULT_CAPABILITIES, DEFAULT_LIMITS } from '../types.js';
 import { digestOf } from './content.js';
 import type { StorePaths } from './paths.js';
+import { withFileLock } from './file-lock.js';
 
 /**
  * Deterministic JSON: keys sorted at every level.
@@ -40,8 +42,8 @@ function sortDeep(value: unknown): unknown {
 
 async function writeJsonAtomic(target: string, value: unknown): Promise<void> {
   await fs.mkdir(path.dirname(target), { recursive: true });
-  const temp = `${target}.tmp`;
-  await fs.writeFile(temp, JSON.stringify(value, null, 2), 'utf8');
+  const temp = `${target}.${randomUUID()}.tmp`;
+  await fs.writeFile(temp, JSON.stringify(value, null, 2), { encoding: 'utf8', mode: 0o600 });
   await fs.rename(temp, target);
 }
 
@@ -130,21 +132,17 @@ export interface BuildImageInput {
 
 export class ImageStore {
   #paths: StorePaths;
-  #tags: Map<string, Digest> | null = null;
 
   constructor(paths: StorePaths) {
     this.#paths = paths;
   }
 
   async #loadTags(): Promise<Map<string, Digest>> {
-    if (this.#tags) return this.#tags;
     const raw = (await readJson<Record<string, Digest>>(this.#paths.tags)) ?? {};
-    this.#tags = new Map(Object.entries(raw));
-    return this.#tags;
+    return new Map(Object.entries(raw));
   }
 
-  async #saveTags(): Promise<void> {
-    const tags = await this.#loadTags();
+  async #saveTags(tags: Map<string, Digest>): Promise<void> {
     await writeJsonAtomic(this.#paths.tags, Object.fromEntries(tags));
   }
 
@@ -179,9 +177,12 @@ export class ImageStore {
   }
 
   async tag(reference: string, digest: Digest): Promise<void> {
-    const tags = await this.#loadTags();
-    tags.set(normalizeReference(reference), digest);
-    await this.#saveTags();
+    await fs.mkdir(path.dirname(this.#paths.tags), { recursive: true, mode: 0o700 });
+    await withFileLock(this.#paths.tags, async () => {
+      const tags = await this.#loadTags();
+      tags.set(normalizeReference(reference), digest);
+      await this.#saveTags(tags);
+    });
   }
 
   /** Resolve "name:tag", a full digest, or a digest prefix of 8+ characters. */

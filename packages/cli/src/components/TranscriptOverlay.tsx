@@ -57,8 +57,17 @@ export function TranscriptOverlay({
       <Box width="100%" justifyContent="space-between">
         <Text color={color('ghost')}>↑↓ scroll  PgUp/PgDn page  Ctrl+A home</Text>
         {!viewport.follow ? (
-          <Text color={color('accent')} inverse>
-            {' '}Jump to bottom (Ctrl+End) ↓{' '}
+          /**
+           * A quiet chip, not an inverted block.
+           *
+           * `inverse` swapped the accent into a solid pink slab the width of
+           * the label, which is the loudest thing on a screen whose whole job
+           * is to be read. The affordance only has to be findable: a filled
+           * surface a shade above the panel, with the accent kept for the text
+           * and the arrow.
+           */
+          <Text color={color('accent')} backgroundColor={color('surface')}>
+            {' Jump to bottom (Ctrl+End) ↓ '}
           </Text>
         ) : (
           <Text color={color('ghost')}>Ctrl+T or Esc close</Text>

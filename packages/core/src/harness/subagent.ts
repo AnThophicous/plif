@@ -30,6 +30,7 @@ import type { Session, SessionStore } from '../session/store.js';
 import {
   applyPatch,
   editFile,
+  hashlineEdit,
   globFiles,
   grepFiles,
   listDir,
@@ -95,6 +96,15 @@ export interface SubagentRecord {
   readonly effort?: Effort;
   readonly compatibilityId?: string;
   readonly forkedFrom?: string;
+}
+
+/** Durable, model-safe summary of a child run; never a transcript dump. */
+export interface SubagentResult {
+  readonly status: 'done' | 'failed' | 'cancelled';
+  readonly stop: string;
+  readonly summary: string;
+  readonly toolCalls: number;
+  readonly completedAt: number;
 }
 
 export class SubagentCoordinator {
@@ -182,6 +192,7 @@ export function subagentTools(
     updatePlan,
     writeFile,
     editFile,
+    hashlineEdit,
     applyPatch,
     listDir,
     globFiles,
@@ -262,6 +273,7 @@ interface SubagentManifest {
   readonly effort?: Effort;
   readonly compatibilityId?: string;
   readonly forkedFrom?: string;
+  readonly result?: SubagentResult;
 }
 
 function manifestPath(sessions: SessionStore, sessionId: string): string {
@@ -829,12 +841,26 @@ export function subagentTool(options: SubagentOptions): Tool {
 
       const answer = result.text.trim();
       const ok = result.stop === 'complete' && answer.length > 0;
+      const outcome: SubagentResult = {
+        status: result.stop === 'cancelled' ? 'cancelled' : ok ? 'done' : 'failed',
+        stop: result.stop,
+        summary: answer.split('\n').find((line) => line.trim())?.trim() ?? `stopped: ${result.stop}`,
+        toolCalls: result.toolCalls,
+        completedAt: Date.now(),
+      };
+      if (childSession) await saveManifest(options.sessions!, {
+        subagentId: continuationId(childSession), sessionId: childSession.id,
+        workspace: context.workspace!, modelRef: resolved.ref, title,
+        maxIterations: resolved.maxIterations ?? options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+        ...(resolved.effort ? { effort: resolved.effort } : {}), compatibilityId: childSession.id,
+        forkedFrom, result: outcome,
+      }).catch(() => undefined);
       parent?.emit('subagent.finished', {
         taskId,
-        status: result.stop === 'cancelled' ? 'cancelled' : ok ? 'done' : 'failed',
+        status: outcome.status,
         at: Date.now(),
         durationMs: Date.now() - startedAt,
-        summary: answer.split('\n').find((line) => line.trim())?.trim() ?? `stopped: ${result.stop}`,
+        summary: outcome.summary,
       });
 
       if (!answer) {

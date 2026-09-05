@@ -559,6 +559,19 @@ describe('navigable web fetch', () => {
 });
 
 describe('native curl tool', () => {
+  it('rejects local targets and credential-like query parameters before authorization', async () => {
+    let authorizations = 0;
+    const context = {
+      container: { reachNetwork: async () => { authorizations += 1; } },
+      signal: undefined,
+    } as unknown as ToolContext;
+    const local = await curl.run({ url: 'http://127.0.0.1/admin' }, context);
+    const credential = await curl.run({ url: 'https://example.test', query: { api_key: 'secret' } }, context);
+    assert.equal(local.ok, false);
+    assert.equal(credential.ok, false);
+    assert.equal(authorizations, 0);
+  });
+
   it('sends structured JSON and formats a JSON response', async () => {
     const original = globalThis.fetch;
     let request: RequestInit | undefined;
@@ -615,6 +628,25 @@ describe('native curl tool', () => {
       assert.equal(result.ok, true);
       assert.deepEqual(reached, ['first.example.test', 'second.example.test']);
       assert.deepEqual(authorization, ['Bearer private', null]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('rejects a redirect into a private address before contacting it', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => new Response('', {
+      status: 302,
+      headers: { location: 'http://169.254.169.254/latest/meta-data' },
+    })) as typeof fetch;
+    const reached: string[] = [];
+    try {
+      const result = await curl.run({ url: 'https://first.example.test/start' }, {
+        container: { reachNetwork: async (host: string) => { reached.push(host); } },
+        signal: undefined,
+      } as unknown as ToolContext);
+      assert.equal(result.ok, false);
+      assert.deepEqual(reached, ['first.example.test']);
     } finally {
       globalThis.fetch = original;
     }

@@ -25,6 +25,8 @@ describe('Slate frame hierarchy', () => {
     assert.match(source, /const liveSurfaceHeight = pastedTextPopup \? surface\.canvasHeight : surface\.panelHeight/);
     assert.match(source, /height=\{pastedTextPopup \? liveSurfaceHeight : headerHeight\(headerAvailableWidth\) \+ liveSurfaceHeight\}/);
     assert.match(source, /paddingX=\{surface\.panelPaddingX\}/);
+    assert.equal(source.match(/rows=\{surface\.panelHeight\}/g)?.length, 8);
+    assert.doesNotMatch(source, /rows=\{rows\}/);
     assert.doesNotMatch(source, /<TerminalSurface\b/);
     assert.match(source, /<Box flexGrow=\{1\} \/>/);
 

@@ -6,6 +6,7 @@ import type { SessionMeta } from '@plif/core';
 import {
   filterSessions,
   sessionBucket,
+  sessionRowPositions,
   sessionRows,
   metaColumns,
   turnsLabel,
@@ -74,6 +75,21 @@ describe('sessions screen grouping', () => {
     assert.equal(filterSessions(all, 'sonnet').length, 1);
     assert.equal(filterSessions(all, 'elsewhere').length, 1);
     assert.equal(filterSessions(all, '').length, 3);
+  });
+
+  it('reuses a filtered list while selection moves, avoiding a full filter per key press', () => {
+    const all = Array.from({ length: 10_000 }, (_, index) => at(local(2026, 8, 10, 11), {
+      id: `session-${index}`,
+      title: `landing ${index}`,
+    }));
+    assert.strictEqual(filterSessions(all, 'landing'), filterSessions(all, 'landing'));
+  });
+
+  it('indexes interleaved rows once so selection lookup is constant time', () => {
+    const rows = sessionRows([at(local(2026, 8, 10, 11)), at(local(2026, 8, 9, 11))], NOW);
+    const positions = sessionRowPositions(rows);
+    assert.equal(positions.get(0), 1);
+    assert.equal(positions.get(1), 3);
   });
 });
 

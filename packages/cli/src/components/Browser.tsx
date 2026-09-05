@@ -15,6 +15,18 @@ export const BROWSER_TABS: readonly { id: BrowserTab; label: string }[] = [
   { id: 'sessions', label: 'Sessions' },
 ];
 
+const COMPACT_BROWSER_TAB_LABELS: Readonly<Record<BrowserTab, string>> = {
+  mcp: 'MCP',
+  skills: 'Skills',
+  marketplace: 'Market',
+  sessions: 'Sessions',
+};
+
+export function browserTabLabel(tab: BrowserTab, width: number): string {
+  const full = BROWSER_TABS.find((item) => item.id === tab)?.label ?? tab;
+  return width < 72 ? COMPACT_BROWSER_TAB_LABELS[tab] : full;
+}
+
 interface BrowserProps {
   readonly state: BrowserViewState;
   readonly servers: readonly McpServerStatus[];
@@ -195,25 +207,26 @@ function Tabs({
   counts: Record<BrowserTab, number>;
   width: number;
 }): React.ReactElement {
+  const compact = width < 72;
   return (
     <Box width={width} justifyContent="space-between">
       <Box>
         {BROWSER_TABS.map((tab) => {
           const on = tab.id === active;
           return (
-            <Box key={tab.id} marginRight={3}>
+            <Box key={tab.id} marginRight={compact ? 1 : 3}>
               {/* An underline alone would vanish on a console that does not
                   render it, so the marker carries in plain text too. */}
               <Text color={color(on ? 'accent' : 'ghost')}>{on ? glyph.caret : ' '} </Text>
               <Text color={color(on ? 'text' : 'faint')} bold={on} underline={on}>
-                {tab.label}
+                {browserTabLabel(tab.id, width)}
               </Text>
-              <Text color={color('ghost')}> {formatCount(counts[tab.id])}</Text>
+              {!compact && <Text color={color('ghost')}> {formatCount(counts[tab.id])}</Text>}
             </Box>
           );
         })}
       </Box>
-      <Text color={color('ghost')}>{glyph.divider} Tab {glyph.caret}</Text>
+      {!compact && <Text color={color('ghost')}>{glyph.divider} Tab {glyph.caret}</Text>}
     </Box>
   );
 }

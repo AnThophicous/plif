@@ -7,7 +7,8 @@
  *
  * - The ACP host is treated as UNTRUSTED by default. Everything it could
  *   previously grant itself now requires a local opt-in file
- *   (~/.plif/acp-security.json) or a PLIF_ACP_* environment variable.
+ *   (~/.plif/acp-security.json). The only ACP environment override is the
+ *   session-count ceiling, which can reduce or cap concurrency.
  * - No user skill is ever copied into the host's workspace. Skills stay in
  *   ~/.plif/skills and are loaded through the in-loop `skill` tool.
  * - MCP servers proposed by the host are rejected unless allowHostMcpServers
@@ -37,16 +38,20 @@ import {
   buildSystemPrompt,
   DEFAULT_TOOLS,
   DEFAULT_CONTEXT_TOKENS,
-  DEVELOPER_POLICY,
   SkillRegistry,
   skillTool,
   createSkillTool,
   loadStoredConfig,
   loadTokenSplitConfig,
   McpRegistry,
+  QuestionBroker,
   type McpServerConfig,
   type Message,
+  type Attachment,
   type LoopStop,
+  type StoredConfig,
+  type Session,
+  eventBase,
 } from '@plif/core';
 import { buildProviderFromStoredConfig } from './provider.js';
 import {
@@ -59,6 +64,9 @@ import {
 } from './options.js';
 import {
   loadSecurityPolicy,
+  ACP_POLICY,
+  isWorkspaceAllowed,
+  securityPolicyPath,
   type AcpSecurityPolicy,
   type SecurityDecision,
 } from './security.js';
@@ -71,6 +79,7 @@ const TEMP_WORKDIR = '/temp';
 const MOUNT_MASKS: readonly string[] = [
   '/.git',
   '/.env',
+  '/.env.*',
   '/.env.local',
   '/.env.production',
   '/.env.development',
@@ -119,7 +128,7 @@ interface AcpMcpServer {
 }
 
 /** env entries whose names smell like credentials are dropped before spawn. */
-const SENSITIVE_ENV = /(^|_)(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|API_KEY)(_|$)/i;
+const SENSITIVE_ENV = /(^|_)(KEY|SECRET|TOKEN|PASSWORD|CREDENTIALS?|API_KEY)(_|$)/i;
 
 function sanitizeMcpEnv(
   env: Array<{ name: string; value: string }> | undefined,
@@ -192,25 +201,47 @@ interface PlifSession {
   mcp: McpRegistry | null;
   modelPicker: ModelPickerState;
   configOptions: SessionConfigOption[];
+  storedConfig: StoredConfig;
+  busy: boolean;
+  questions: QuestionBroker;
+  durableSession: Session;
 }
 
 const sessions = new Map<string, PlifSession>();
+/** Session/new can run concurrently; reserve slots before expensive setup. */
+const creatingSessions = new Set<string>();
 let engine: Engine | null = null;
 let engineStarted = false;
+let engineStart: Promise<Engine> | null = null;
 
 async function getEngine(): Promise<Engine> {
-  if (!engine) {
-    engine = new Engine({ policy: DEVELOPER_POLICY });
+  if (engine && engineStarted) return engine;
+  if (!engineStart) {
+    engineStart = (async () => {
+      const active = engine ?? new Engine({ policy: ACP_POLICY });
+      engine = active;
+      await active.start();
+      engineStarted = true;
+      return active;
+    })().finally(() => {
+      engineStart = null;
+    });
   }
-  if (!engineStarted) {
-    await engine.start();
-    engineStarted = true;
-  }
-  return engine;
+  return await engineStart;
 }
 
 // ── Config options / modes builders ────────────────────────────────────
-function buildSessionConfigOptions(session: PlifSession): SessionConfigOption[] {
+function permittedModes(policy: AcpSecurityPolicy): typeof MODES[number][] {
+  return MODES.filter((mode) =>
+    (mode.id !== 'acceptEdits' || policy.allowAcceptEdits) &&
+    (mode.id !== 'bypassPermissions' || policy.allowBypassPermissions),
+  );
+}
+
+function buildSessionConfigOptions(
+  session: PlifSession,
+  policy: AcpSecurityPolicy,
+): SessionConfigOption[] {
   return [
     {
       id: 'mode',
@@ -219,7 +250,7 @@ function buildSessionConfigOptions(session: PlifSession): SessionConfigOption[] 
       category: 'mode',
       type: 'select',
       currentValue: session.mode,
-      options: MODES.map((m) => ({ value: m.id, name: m.name, description: m.description })),
+      options: permittedModes(policy).map((m) => ({ value: m.id, name: m.name, description: m.description })),
     },
     {
       id: 'model',
@@ -233,10 +264,10 @@ function buildSessionConfigOptions(session: PlifSession): SessionConfigOption[] 
   ];
 }
 
-function buildModeState(session: PlifSession): SessionModeState {
+function buildModeState(session: PlifSession, policy: AcpSecurityPolicy): SessionModeState {
   return {
     currentModeId: session.mode,
-    availableModes: MODES.map((m) => ({ id: m.id, name: m.name, description: m.description })),
+    availableModes: permittedModes(policy).map((m) => ({ id: m.id, name: m.name, description: m.description })),
   };
 }
 
@@ -269,7 +300,8 @@ function inferToolKind(name: string): 'read' | 'edit' | 'execute' | 'search' | '
 // ── Main ───────────────────────────────────────────────────────────────
 async function main() {
   const policy = await loadSecurityPolicy();
-  log(`security policy: bypass=${policy.allowBypassPermissions ? 'allowed' : 'DENIED'} ` +
+  log(`security policy: acceptEdits=${policy.allowAcceptEdits ? 'allowed' : 'DENIED'} ` +
+    `bypass=${policy.allowBypassPermissions ? 'allowed' : 'DENIED'} ` +
     `hostMcp=${policy.allowHostMcpServers ? 'allowed' : 'DENIED'} ` +
     `modelSwitch=${policy.allowModelSwitch ? 'allowed' : 'DENIED'} ` +
     `maxSessions=${policy.maxSessions}`);
@@ -298,104 +330,146 @@ async function main() {
       mcpServers?: AcpMcpServer[];
       _meta?: Record<string, unknown>;
     };
-    const workspace = params.cwd || process.cwd();
+    const requestedWorkspace = path.resolve(params.cwd || process.cwd());
+    const workspaceRoots = [process.cwd(), ...policy.workspaceRoots];
+    let workspace = requestedWorkspace;
+    try {
+      workspace = fs.realpathSync.native(requestedWorkspace);
+    } catch {
+      throw new Error(`Workspace does not exist: ${requestedWorkspace}`);
+    }
+    if (!isWorkspaceAllowed(workspace, workspaceRoots)) {
+      throw new Error(
+        `ACP workspace is outside the permitted roots. Add an absolute path to workspaceRoots in ${securityPolicyPath()}.`,
+      );
+    }
     const sessionId = randomUUID();
 
-    if (sessions.size >= policy.maxSessions) {
+    if (sessions.size + creatingSessions.size >= policy.maxSessions) {
       throw new Error(
         `Session limit reached (${policy.maxSessions}). Close a session before opening another.`,
       );
     }
+    creatingSessions.add(sessionId);
 
-    const eng = await getEngine();
-    const bundle = await buildProviderFromStoredConfig(eng);
-    const stored = await loadStoredConfig(eng.paths);
-    const modelPicker = await buildModelPicker(stored, bundle.credentials).catch(() => ({
-      options: [],
-      currentValue: '',
-    }));
-
-    const skills = await SkillRegistry.load({ workspace, root: eng.paths.root }).catch(
-      () => null,
-    );
-
-    // MCP servers handed over by the host — gated by the local policy.
     let mcp: McpRegistry | null = null;
-    const mcpConfigs = policy.allowHostMcpServers
-      ? toPlifMcpConfigs(params.mcpServers, policy)
-      : {};
-    if (params.mcpServers?.length && !policy.allowHostMcpServers) {
-      log(
-        `host proposed ${params.mcpServers.length} MCP server(s); rejected — ` +
-          `set allowHostMcpServers in ~/.plif/acp-security.json to accept them.`,
-      );
-    }
-    if (Object.keys(mcpConfigs).length > 0) {
-      try {
-        mcp = await McpRegistry.connect(mcpConfigs, eng.bus);
-        for (const status of mcp.statuses()) {
-          log(
-            `MCP "${status.name}" ${status.connected ? 'connected' : 'FAILED'} ` +
-              `(${status.toolCount} tools)${status.detail ? ` — ${status.detail}` : ''}`,
-          );
-        }
-      } catch (err) {
-        mcp = null;
-        log(`MCP registry failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-
-    const image = await eng.ensureBaseImage();
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'plif-acp-'));
-    const container = await eng.run({
-      image: image.reference,
-      mounts: [
-        { ...containerMount(workspace), mode: 'rw' as const },
-        containerTempMount(tempDir),
-      ],
-      workdir: CONTAINER_WORKDIR,
-      capabilities: { network: true, hostWrite: true },
-    });
-
-    await eng.sessions.create(workspace);
-
-    const session: PlifSession = {
-      sessionId,
-      workspace,
-      history: [],
-      abortController: new AbortController(),
-      container,
-      tempWorkspace: tempDir,
-      mode: 'default',
-      skills,
-      mcp,
-      modelPicker,
-      configOptions: [],
-    };
-    session.configOptions = buildSessionConfigOptions(session);
-    sessions.set(sessionId, session);
-
-    if (skills && skills.size > 0) {
-      const commands = skills.list().map((s) => ({
-        name: s.name,
-        description: s.description,
-        input: { hint: '[instruction]' },
+    let tempDir: string | undefined;
+    let container: Awaited<ReturnType<Engine['run']>> | undefined;
+    let durableSession: Session | undefined;
+    try {
+      const eng = await getEngine();
+      const bundle = await buildProviderFromStoredConfig(eng);
+      const stored = bundle.stored;
+      const modelPicker = await buildModelPicker(stored, bundle.credentials).catch(() => ({
+        options: [],
+        currentValue: '',
       }));
-      setTimeout(() => {
-        void ctx.client
-          .notify(methods.client.session.update, {
-            sessionId,
-            update: { sessionUpdate: 'available_commands_update', availableCommands: commands },
-          })
-          .catch(() => undefined);
-      }, 150);
-    }
 
-    return {
-      sessionId,
-      modes: buildModeState(session),
-      configOptions: session.configOptions,
-    };
+      const skills = await SkillRegistry.load({ workspace, root: eng.paths.root }).catch(
+        () => null,
+      );
+
+      // MCP servers handed over by the host — gated by the local policy.
+      const mcpConfigs = policy.allowHostMcpServers
+        ? toPlifMcpConfigs(params.mcpServers, policy)
+        : {};
+      if (params.mcpServers?.length && !policy.allowHostMcpServers) {
+        log(
+          `host proposed ${params.mcpServers.length} MCP server(s); rejected — ` +
+            `set allowHostMcpServers in ~/.plif/acp-security.json to accept them.`,
+        );
+      }
+      if (Object.keys(mcpConfigs).length > 0) {
+        try {
+          mcp = await McpRegistry.connect(mcpConfigs, eng.bus, {
+            authorizeNetwork: async (host, reason) => {
+              if (!eng.policy.allowsHost(host)) {
+                throw new Error(`MCP network target ${host} is not in the local policy allowlist (${reason})`);
+              }
+            },
+          });
+          for (const status of mcp.statuses()) {
+            log(
+              `MCP "${status.name}" ${status.connected ? 'connected' : 'FAILED'} ` +
+                `(${status.toolCount} tools)${status.detail ? ` — ${status.detail}` : ''}`,
+            );
+          }
+        } catch (err) {
+          mcp = null;
+          log(`MCP registry failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      const image = await eng.ensureBaseImage();
+      const tempWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'plif-acp-'));
+      tempDir = tempWorkspace;
+      container = await eng.run({
+        image: image.reference,
+        mounts: [
+          { ...containerMount(workspace), mode: 'rw' as const },
+          containerTempMount(tempWorkspace),
+        ],
+        workdir: CONTAINER_WORKDIR,
+        capabilities: { network: true, hostWrite: true },
+      });
+
+      durableSession = await eng.sessions.create(workspace, {
+        container: container.name,
+        ...(bundle.provider.info.providerId ? { providerId: bundle.provider.info.providerId } : {}),
+        modelId: bundle.provider.info.id,
+        lifecycle: 'acp',
+      });
+
+      const session: PlifSession = {
+        sessionId,
+        workspace,
+        history: [],
+        abortController: new AbortController(),
+        container,
+        tempWorkspace,
+        mode: 'default',
+        skills,
+        mcp,
+        modelPicker,
+        configOptions: [],
+        storedConfig: stored,
+        busy: false,
+        questions: new QuestionBroker(eng.bus, 600_000, sessionId),
+        durableSession,
+      };
+      session.configOptions = buildSessionConfigOptions(session, policy);
+      sessions.set(sessionId, session);
+
+      if (skills && skills.size > 0) {
+        const commands = skills.list().map((s) => ({
+          name: s.name,
+          description: s.description,
+          input: { hint: '[instruction]' },
+        }));
+        setTimeout(() => {
+          void ctx.client
+            .notify(methods.client.session.update, {
+              sessionId,
+              update: { sessionUpdate: 'available_commands_update', availableCommands: commands },
+            })
+            .catch(() => undefined);
+        }, 150);
+      }
+
+      return {
+        sessionId,
+        modes: buildModeState(session, policy),
+        configOptions: session.configOptions,
+      };
+    } catch (error) {
+      await durableSession?.close().catch(() => undefined);
+      await container?.remove().catch(() => undefined);
+      await mcp?.close().catch(() => undefined);
+      if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+      throw error;
+    } finally {
+      creatingSessions.delete(sessionId);
+    }
   });
 
   // ── session/set_mode ───────────────────────────────────────────────
@@ -404,6 +478,12 @@ async function main() {
     const session = sessions.get(params.sessionId);
     if (!session) throw new Error(`Session ${params.sessionId} not found`);
     if (!isKnownMode(params.modeId)) throw new Error(`Unknown mode: ${params.modeId}`);
+    if (params.modeId === 'acceptEdits' && !policy.allowAcceptEdits) {
+      throw new Error(
+        'acceptEdits is disabled. To enable it, set allowAcceptEdits: true in ' +
+          '~/.plif/acp-security.json — this lets the host auto-approve workspace writes and deletes.',
+      );
+    }
     if (params.modeId === 'bypassPermissions' && !policy.allowBypassPermissions) {
       throw new Error(
         'bypassPermissions is disabled. To enable it, set allowBypassPermissions: true in ' +
@@ -411,7 +491,7 @@ async function main() {
       );
     }
     session.mode = params.modeId;
-    session.configOptions = buildSessionConfigOptions(session);
+    session.configOptions = buildSessionConfigOptions(session, policy);
     void ctx.client.notify(methods.client.session.update, {
       sessionId: params.sessionId,
       update: { sessionUpdate: 'current_mode_update', currentModeId: session.mode },
@@ -434,6 +514,12 @@ async function main() {
 
     if (params.configId === 'mode') {
       if (!isKnownMode(params.value)) throw new Error(`Unknown mode: ${params.value}`);
+      if (params.value === 'acceptEdits' && !policy.allowAcceptEdits) {
+        throw new Error(
+          'acceptEdits is disabled. Enable it with allowAcceptEdits in ' +
+            '~/.plif/acp-security.json — this lets the host auto-approve workspace writes and deletes.',
+        );
+      }
       if (params.value === 'bypassPermissions' && !policy.allowBypassPermissions) {
         throw new Error(
           'bypassPermissions is disabled. Enable it with allowBypassPermissions in ' +
@@ -449,8 +535,8 @@ async function main() {
         );
       }
       const eng = await getEngine();
-      const bundle = await buildProviderFromStoredConfig(eng);
-      const stored = await loadStoredConfig(eng.paths);
+      const bundle = await buildProviderFromStoredConfig(eng, session.storedConfig);
+      const stored = session.storedConfig;
       const next = await applyModelChoice(
         eng,
         stored,
@@ -458,6 +544,7 @@ async function main() {
         params.value,
         /* persist */ policy.persistModelSwitch,
       );
+      session.storedConfig = next;
       session.modelPicker = await buildModelPicker(next, bundle.credentials).catch(() => ({
         options: [],
         currentValue: params.value as string,
@@ -485,7 +572,7 @@ async function main() {
       throw new Error(`Unknown config option: ${params.configId}`);
     }
 
-    session.configOptions = buildSessionConfigOptions(session);
+    session.configOptions = buildSessionConfigOptions(session, policy);
     void ctx.client.notify(methods.client.session.update, {
       sessionId: params.sessionId,
       update: { sessionUpdate: 'config_option_update', configOptions: session.configOptions },
@@ -508,15 +595,53 @@ async function main() {
     const session = sessions.get(params.sessionId);
     if (!session) throw new Error(`Session ${params.sessionId} not found`);
     if (!session.container) throw new Error(`Session ${params.sessionId} has no container`);
+    if (session.busy) throw new Error(`Session ${params.sessionId} is already processing a prompt`);
+    session.busy = true;
 
-    const eng = await getEngine();
-    const bundle = await buildProviderFromStoredConfig(eng);
+    let eng: Engine;
+    let bundle: Awaited<ReturnType<typeof buildProviderFromStoredConfig>>;
+    try {
+      eng = await getEngine();
+      bundle = await buildProviderFromStoredConfig(eng, session.storedConfig);
+    } catch (error) {
+      session.busy = false;
+      throw error;
+    }
     const { provider } = bundle;
 
-    const rawText = params.prompt
-      .filter((b) => b.type === 'text' && typeof b.text === 'string')
-      .map((b) => b.text as string)
-      .join('\n');
+    const attachments: Attachment[] = [];
+    const promptParts: string[] = [];
+    let imageNumber = 0;
+    try {
+      for (const block of params.prompt) {
+        if (block.type === 'text' && typeof block.text === 'string') {
+          promptParts.push(block.text);
+        } else if (block.type === 'image') {
+          const data = typeof block.data === 'string' ? block.data : '';
+          const mediaType = typeof block.mimeType === 'string' ? block.mimeType : '';
+          if (!data || !/^image\/[A-Za-z0-9.+-]+$/i.test(mediaType)) {
+            throw new Error('ACP image blocks require a non-empty base64 data field and image MIME type.');
+          }
+          if (data.length > 25_000_000) throw new Error('ACP image blocks are limited to 25 MB of base64 data.');
+          imageNumber += 1;
+          attachments.push({ kind: 'image', data, mediaType, name: `ACP image ${imageNumber}` });
+        } else if (block.type === 'resource_link') {
+          const uri = typeof block.uri === 'string' ? block.uri : '';
+          if (uri) promptParts.push(`[Resource link: ${uri}]`);
+        } else if (block.type === 'resource') {
+          const resource = block.resource as { text?: unknown; uri?: unknown; blob?: unknown };
+          if (typeof resource.text === 'string') promptParts.push(`[Resource]\n${resource.text}`);
+          else if (typeof resource.uri === 'string') promptParts.push(`[Resource: ${resource.uri}]`);
+          else if (typeof resource.blob === 'string') promptParts.push('[Binary resource attached; use the client-provided URI if available.]');
+        } else if (block.type === 'audio') {
+          throw new Error('ACP audio prompt blocks are not supported by the configured model adapter.');
+        }
+      }
+    } catch (error) {
+      session.busy = false;
+      throw error;
+    }
+    const rawText = promptParts.join('\n');
 
     let userText = rawText;
     const slash = /^\/([A-Za-z0-9_-]+)(?:\s+([\s\S]*))?$/.exec(rawText.trim());
@@ -561,10 +686,19 @@ async function main() {
     const history: Message[] = [
       { role: 'system', content: systemPrompt },
       ...session.history,
-      { role: 'user', content: userText },
+      { role: 'user', content: userText, ...(attachments.length ? { attachments } : {}) },
     ];
 
     const unsubscribes: Array<() => void> = [];
+    let failurePersisted = false;
+    const persist = (event: Parameters<Session['append']>[0]): void => {
+      void session.durableSession.append(event).catch((error) => {
+        log(`could not persist ACP session event: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    };
+    const userEvent = { ...eventBase('user.message', turnId), text: userText };
+    persist({ ...eventBase('turn.started', turnId), userEventId: userEvent.eventId });
+    persist(userEvent);
 
     unsubscribes.push(
       eng.bus.on('agent.text', (e) => {
@@ -626,8 +760,8 @@ async function main() {
 
     unsubscribes.push(
       eng.bus.on('approval.request', async (e) => {
-        const targetSession =
-          [...sessions.values()].find((s) => s.container?.id === e.containerId) ?? session;
+        if (e.containerId !== session.container?.id) return;
+        const targetSession = session;
 
         // bypassPermissions is only reachable when the local policy allowed it
         // (enforced at setMode/setConfigOption). Never auto-allow otherwise.
@@ -694,16 +828,37 @@ async function main() {
     );
 
     unsubscribes.push(
-      eng.bus.on('question.asked', (e) => {
-        const first = e.options?.[0];
-        const answer =
-          typeof first === 'string'
-            ? first
-            : first && typeof first === 'object' && 'value' in first
-              ? String((first as { value?: unknown }).value ?? '')
-              : '';
-        log(`auto-answered question with first option: ${answer}`);
-        eng.questions.answer(e.id, answer);
+      eng.bus.on('question.asked', async (e) => {
+        if (e.scopeId !== session.sessionId) return;
+        const choices = (e.options ?? []).map((option, index) => {
+          const value = typeof option === 'string'
+            ? option
+            : String((option as { value?: unknown }).value ?? '');
+          return { value, optionId: `answer-${index}`, name: value || `Option ${index + 1}`, kind: 'allow_once' as const };
+        });
+        if (choices.length === 0) {
+          session.questions.answer(e.id, '');
+          return;
+        }
+        try {
+          const response = await ctx.client.request(methods.client.session.requestPermission, {
+            sessionId: params.sessionId,
+            toolCall: {
+              toolCallId: `question-${e.id}`,
+              title: e.text,
+              kind: 'other',
+              status: 'pending',
+            },
+            options: choices.map(({ optionId, name, kind }) => ({ optionId, name, kind })),
+          }) as { outcome: { outcome: 'selected'; optionId: string } | { outcome: 'cancelled' } };
+          const outcome = response.outcome;
+          const answer = outcome.outcome === 'selected'
+            ? choices.find((choice) => choice.optionId === outcome.optionId)?.value ?? ''
+            : '';
+          session.questions.answer(e.id, answer);
+        } catch {
+          session.questions.answer(e.id, '');
+        }
       }),
     );
 
@@ -711,7 +866,7 @@ async function main() {
       const result = await runLoop(history, {
         provider,
         container: session.container,
-        questions: eng.questions,
+        questions: session.questions,
         bus: eng.bus,
         turnId,
         signal: session.abortController.signal,
@@ -731,9 +886,35 @@ async function main() {
 
       session.history = result.messages.filter((m) => m.role !== 'system');
 
+      if (result.error) {
+        failurePersisted = true;
+        persist({ ...eventBase('turn.failed', turnId), reason: result.error.message });
+        throw result.error;
+      }
+
+      const finalAssistant = [...result.messages].reverse().find(
+        (message) => message.role === 'assistant' && message.content.trim(),
+      );
+      if (finalAssistant) {
+        persist({
+          ...eventBase('assistant.message', turnId),
+          phase: 'final',
+          text: finalAssistant.content,
+          ...(finalAssistant.reasoning ? { reasoning: finalAssistant.reasoning } : {}),
+          ...(finalAssistant.toolCalls ? { toolCalls: finalAssistant.toolCalls } : {}),
+        });
+      }
+      persist({ ...eventBase('turn.completed', turnId), durationMs: Date.now() - Date.parse(userEvent.at) });
+
       return { stopReason: mapStopReason(result.stop) };
+    } catch (error) {
+      if (!failurePersisted) {
+        persist({ ...eventBase('turn.failed', turnId), reason: error instanceof Error ? error.message : String(error) });
+      }
+      throw error;
     } finally {
       for (const unsub of unsubscribes) unsub();
+      session.busy = false;
     }
   });
 
@@ -743,9 +924,7 @@ async function main() {
     const session = sessions.get(params.sessionId);
     if (session) {
       session.abortController.abort();
-      getEngine()
-        .then((eng) => eng.questions.abandonAll())
-        .catch(() => undefined);
+      session.questions.abandonAll();
     }
   });
 
@@ -757,6 +936,8 @@ async function main() {
     void (async () => {
       for (const session of sessions.values()) {
         session.abortController.abort();
+        session.questions.abandonAll();
+        await session.durableSession.close().catch(() => undefined);
         if (session.tempWorkspace) {
           fs.rmSync(session.tempWorkspace, { recursive: true, force: true });
         }

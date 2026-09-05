@@ -48,7 +48,7 @@ import type { PickerGroup } from '../src/components/Picker.js';
 import type { Engine } from '@plif/core';
 import { initialSession, sessionReducer } from '../src/session.js';
 import { editorDeleteAction, isControlShortcut } from '../src/editor-keys.js';
-import { keyForEvent } from '../src/ui.js';
+import { keepCtrlCInApp, keyForEvent } from '../src/ui.js';
 
 describe('editor delete key normalization', () => {
   it('treats Windows DEL as Backspace even though Ink calls it delete', () => {
@@ -82,6 +82,21 @@ describe('Slate modifier normalization', () => {
     assert.equal(altGr.ctrl, true);
     assert.equal(altGr.alt, true);
     assert.equal(altGr.meta, true);
+  });
+
+  it('keeps Ctrl+C in Plif so it cancels a turn instead of killing the process', () => {
+    const preserved = keepCtrlCInApp({
+      kind: 'key', code: 'c', text: 'c', phase: 'press', modifiers: 2,
+    });
+    assert.equal(preserved.code, 'plif-control-c');
+    assert.equal(preserved.text, 'c');
+    assert.equal(keyForEvent(preserved).ctrl, true);
+
+    assert.equal(
+      keepCtrlCInApp({ kind: 'key', code: 'c', text: 'c', phase: 'release', modifiers: 2 }).code,
+      'c',
+    );
+    assert.equal(keepCtrlCInApp({ kind: 'key', code: 't', text: 't', modifiers: 2 }).code, 't');
   });
 });
 

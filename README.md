@@ -30,7 +30,7 @@ on every request, which moves the catalogue into the cacheable prompt prefix and
 keeps intermediate tool output out of the context. See
 [`CHANGELOG.md`](CHANGELOG.md) for the complete release notes.
 
-## What's new in 0.3.9
+## What's new in 0.4.0
 
 ### Isolated session scratch space
 

@@ -15,6 +15,7 @@
  */
 
 import { PlifError } from '../errors.js';
+import { spillLargeOutput, type SpillSink } from './spill.js';
 import type { Container } from '../container/container.js';
 import type { ExecResult } from '../types.js';
 import {
@@ -30,6 +31,7 @@ import type { EventBus } from '../events/bus.js';
 import type { LspManager } from '../lsp/manager.js';
 import { diagnosticsAfterWrite } from '../lsp/tools.js';
 import { describeStats, diffLines, diffStats, formatDiff } from './diff.js';
+import { applyHashline, hashlineTag, parseHashline } from './hashline.js';
 import type { EditCoordinator } from './edits.js';
 import {
   configSchemaText,
@@ -68,6 +70,12 @@ export interface ToolContext {
    * than opening a second one beside it.
    */
   readonly callId?: string;
+  /**
+   * Where oversized output goes instead of into the context window.
+   *
+   * Absent means the old behaviour: truncate inline and lose the middle.
+   */
+  readonly spill?: SpillSink;
   readonly memory?: MemoryStore;
   readonly readOnlyMemory?: boolean;
   readonly workspace?: string;
@@ -155,6 +163,23 @@ export interface Tool {
 /** Truncate tool output so one `cat` of a big file cannot eat the context. */
 const MAX_OUTPUT = 24_000;
 
+/**
+ * Spill first, then clip whatever is left.
+ *
+ * The order is the point. Clipping first would delete the middle before the
+ * file was written, so the file would be as lossy as the context. Spilling
+ * first keeps the complete text on disk; the clip that follows only ever
+ * applies to a preview that is already small, or to output from a container
+ * that could not spill.
+ */
+async function clipOrSpill(
+  text: string,
+  label: string,
+  context: Pick<ToolContext, 'spill'>,
+): Promise<string> {
+  return clip(await spillLargeOutput(text, label, context.spill));
+}
+
 function clip(text: string): string {
   if (text.length <= MAX_OUTPUT) return text;
   const half = Math.floor(MAX_OUTPUT / 2);
@@ -203,10 +228,13 @@ export const readFile: Tool = {
     // more than it has, and invited a reference to a line that is not there.
     // Only one is dropped, so a file with no final newline keeps everything.
     if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
-    const numbered = lines
+    const numbered = `[${path}#${hashlineTag(content)}]\n` + lines
       .map((line, index) => `${String(index + 1).padStart(5)}\t${line}`)
       .join('\n');
-    return { output: clip(numbered), ok: true };
+    return {
+      output: await clipOrSpill(numbered, `read-${path.split('/').pop() ?? 'file'}`, context),
+      ok: true,
+    };
   },
 };
 
@@ -254,7 +282,11 @@ export const writeFile: Tool = {
 
     return {
       output: `${what}${lspNote ?? ''}`,
-      ok: !lspNote || !/\berror\(s\)/.test(lspNote),
+      // The write itself succeeded. Diagnostics are post-write evidence for
+      // the model, not a transport failure: marking this false would make the
+      // loop treat a successful mutation as a failed action and suppress its
+      // progress accounting.
+      ok: true,
       ...(stats.added + stats.removed > 0 ? { diff: formatDiff(path, changes) } : {}),
     };
   },
@@ -368,9 +400,34 @@ export const editFile: Tool = {
       output:
         `edited ${path}${occurrences > 1 ? ` (${occurrences} occurrences)` : ''} — ` +
         `${describeStats(stats)?.toLowerCase() ?? 'no line changes'}${lspNote ?? ''}`,
-      ok: !lspNote || !/\berror\(s\)/.test(lspNote),
+      // See write_file: a compiler error after a successful edit is useful
+      // feedback, but it does not mean the file mutation failed.
+      ok: true,
       ...(stats.added + stats.removed > 0 ? { diff: formatDiff(path, changes) } : {}),
     };
+  },
+};
+
+/** Apply compact line-addressed edits only to the exact snapshot previously read. */
+export const hashlineEdit: Tool = {
+  spec: {
+    name: 'hashline_edit',
+    description: 'Edit an existing file with a compact [PATH#TAG] line patch returned by read_file. The tag rejects stale content before writing. Use SWAP, CUT, or INS.PRE/POST/HEAD/TAIL with + body rows.',
+    parameters: { type: 'object', properties: { input: { type: 'string', description: 'One [PATH#TAG] hashline patch.' } }, required: ['input'], additionalProperties: false },
+  },
+  async run(input, context) {
+    const patch = parseHashline(requireString(input, 'input'));
+    const before = await context.container.readFile(patch.path);
+    let after: string;
+    try { after = applyHashline(before, patch); } catch (error) { return { output: `Error: ${String(error)}`, ok: false }; }
+    if (after === before) return { output: `No change in ${patch.path}; re-read before retrying.`, ok: false };
+    if (context.edits && context.agentId) {
+      await context.edits.observe(context.agentId, patch.path, before);
+      await context.edits.commit(context.agentId, patch.path, after, context.container);
+    } else await context.container.writeFile(patch.path, after);
+    const changes = diffLines(before, after);
+    const lspNote = context.lsp ? await diagnosticsAfterWrite(context.lsp, await context.container.hostPathFor(patch.path)).catch(() => null) : null;
+    return { output: `Updated [${patch.path}#${hashlineTag(after)}] — ${describeStats(diffStats(changes))?.toLowerCase() ?? 'changed'}${lspNote ?? ''}`, ok: true, diff: formatDiff(patch.path, changes) };
   },
 };
 
@@ -409,7 +466,7 @@ export const listDir: Tool = {
       .map((entry) => (entry.kind === 'directory' ? `${entry.name}/` : entry.name))
       .sort()
       .join('\n');
-    return { output: clip(listing), ok: true };
+    return { output: await clipOrSpill(listing, 'list-dir', context), ok: true };
   },
 };
 
@@ -627,7 +684,11 @@ export const globFiles: Tool = {
     matches.sort();
     matches.splice(limit);
     return {
-      output: clip(matches.length > 0 ? matches.join('\n') : `No files matched ${pattern} under ${root}.`),
+      output: await clipOrSpill(
+        matches.length > 0 ? matches.join('\n') : `No files matched ${pattern} under ${root}.`,
+        'glob',
+        context,
+      ),
       ok: true,
     };
   },
@@ -678,7 +739,11 @@ export const grepFiles: Tool = {
     }
 
     return {
-      output: clip(matches.length > 0 ? matches.join('\n') : `No matches for ${pattern} under ${root}.`),
+      output: await clipOrSpill(
+        matches.length > 0 ? matches.join('\n') : `No matches for ${pattern} under ${root}.`,
+        'grep',
+        context,
+      ),
       ok: true,
     };
   },
@@ -695,8 +760,8 @@ export const applyPatch: Tool = {
   spec: {
     name: 'apply_patch',
     description:
-      'Apply one or more exact replacements as one transaction. Every edit is validated before ' +
-      'the first write; if a later write fails, earlier writes are restored.',
+      'Apply one or more exact replacements as one validated batch. Every edit is validated before ' +
+      'the first write; if a later write fails, earlier writes are restored when possible.',
     parameters: {
       type: 'object',
       properties: {
@@ -773,8 +838,27 @@ export const applyPatch: Tool = {
         written.push(item);
       }
     } catch (error) {
+      const rollbackFailures: string[] = [];
       for (const item of written.reverse()) {
-        await context.container.writeFile(item.edit.path, item.before).catch(() => undefined);
+        try {
+          await context.container.writeFile(item.edit.path, item.before);
+        } catch {
+          rollbackFailures.push(item.edit.path);
+        }
+      }
+      if (rollbackFailures.length > 0) {
+        throw new PlifError(
+          'INTERNAL',
+          `apply_patch failed and could not restore: ${rollbackFailures.join(', ')}`,
+          {
+            cause: error,
+            detail: {
+              written: written.map((item) => item.edit.path),
+              rollbackFailures,
+            },
+            hint: 'Inspect the listed files before retrying; the workspace may be partially modified.',
+          },
+        );
       }
       throw error;
     }
@@ -796,7 +880,8 @@ export const applyPatch: Tool = {
     return {
       output: `${summary}${lspNotes.length > 0 ? `\n\n${lspNotes.join('\n\n')}` : ''}`,
       diff: diffs.join('\n'),
-      ok: !lspNotes.some((note) => /\berror\(s\)/.test(note)),
+      // Diagnostics describe the resulting files; all writes completed.
+      ok: true,
     };
   },
 };
@@ -839,7 +924,7 @@ export const runCommand: Tool = {
       ...(context.signal ? { signal: context.signal } : {}),
     });
 
-    return formatExecToolResult(result);
+    return await formatExecToolResult(result, context, 'command');
   },
 };
 
@@ -985,7 +1070,7 @@ export const terminalClose: Tool = {
   },
   async run(input, context) {
     const result = await context.container.closeTerminal(requireString(input, 'terminal_id'), terminalOwner(context));
-    return formatExecToolResult(result);
+    return await formatExecToolResult(result, context, 'command');
   },
 };
 
@@ -1060,19 +1145,48 @@ export const shellCommand: Tool = {
       reason: typeof input['reason'] === 'string' ? input['reason'] : 'no reason given',
       ...(context.signal ? { signal: context.signal } : {}),
     });
-    return formatExecToolResult(result);
+    return await formatExecToolResult(result, context, 'command');
   },
 };
 
 /** Keep process-result semantics identical across direct and interpreter exec. */
-export function formatExecToolResult(result: ExecResult): ToolResult {
+export async function formatExecToolResult(
+  result: ExecResult,
+  context?: Pick<ToolContext, 'spill'>,
+  label = 'command',
+): Promise<ToolResult> {
   // Both streams are labelled and the exit code is always stated. A model
   // shown only stdout cannot tell a warning-and-succeeded from a failure.
   const parts: string[] = [`exit ${result.exitCode}${result.killedBy ? ` (${result.killedBy})` : ''}`];
+
+  /**
+   * The complete transcript, spilled when there is one worth keeping.
+   *
+   * `compactTerminal` below shows the model five lines of a build log and
+   * discards the rest — the terminal keeps the whole thing in `display`, the
+   * model never sees it. So a failing test suite reached the model as "2 lines
+   * … 400 lines hidden … 2 lines", with the assertion that failed inside the
+   * hidden part. Spilling puts those 400 lines on disk where `grep` can reach
+   * them, which is strictly more than the model had before, for the cost of
+   * one path.
+   */
+  const full = [
+    result.stdout.trim() ? `stdout:\n${result.stdout.trimEnd()}` : '',
+    result.stderr.trim() ? `stderr:\n${result.stderr.trimEnd()}` : '',
+  ].filter(Boolean).join('\n');
+  const spilled = context?.spill && full
+    ? await spillLargeOutput(full, label, context.spill)
+    : null;
+
   if (result.stdout.trim()) parts.push(`stdout:\n${compactTerminal(result.stdout)}`);
   if (result.stderr.trim()) parts.push(`stderr:\n${compactTerminal(result.stderr)}`);
   if (result.truncated) parts.push('(output truncated at the container limit)');
   if (parts.length === 1) parts.push('(no output)');
+  // Only mention the file when one was actually written: an unspilled result
+  // must not promise a path that is not there.
+  if (spilled && spilled !== full) {
+    parts.push(spilled.slice(spilled.indexOf('[Full output:')));
+  }
 
   const ok = result.exitCode === 0 && !result.killedBy;
   return {
@@ -1768,7 +1882,7 @@ export const updatePlan: Tool = {
     description:
       'Set a short execution plan before authorized file changes. Use 1-6 concise checkpoints, ' +
       'update it only at meaningful checkpoint boundaries, and keep at most one checkpoint in progress. ' +
-      'In workspace runs the runtime also writes a durable Markdown checkpoint mirror under .plif/plans/.',
+      'In workspace runs the runtime also writes a session-private Markdown checkpoint mirror under /temp/plif/plans/.',
     parameters: {
       type: 'object',
       properties: {
@@ -1829,11 +1943,14 @@ export const updatePlan: Tool = {
     const active = checkpoints.find((checkpoint) => checkpoint.status === 'in_progress');
     let durable = '';
     if (context.workspace) {
-      const root = context.container.workdir.replace(/[\\/]+$/, '');
       const child = context.agentId?.startsWith('subagent:')
         ? `/subagents/${context.agentId.replace(/[^a-z0-9_.-]+/gi, '-').slice(0, 96)}.md`
         : '/current.md';
-      const planPath = `${root}/.plif/plans${child}`;
+      // `.plif` inside the workspace is intentionally masked from the agent
+      // mount. Keeping runtime state there made `update_plan` fail, then the
+      // plan gate blocked every later file mutation. The session temp volume is
+      // writable, isolated from the repository and available to this tool.
+      const planPath = `/temp/plif/plans${child}`;
       const objective = typeof input['objective'] === 'string' && input['objective'].trim()
         ? input['objective'].trim()
         : checkpoints[0]!.step;
@@ -1876,8 +1993,15 @@ export const updatePlan: Tool = {
         active?.step ?? (completed === checkpoints.length ? 'All visible checkpoints are complete.' : 'Select the next pending checkpoint.'),
         '',
       ].join('\n');
-      await context.container.writeFile(planPath, markdown);
-      durable = ` Durable checkpoint: ${planPath}.`;
+      try {
+        await context.container.writeFile(planPath, markdown);
+        durable = ` Durable checkpoint: ${planPath}.`;
+      } catch {
+        // The plan gate protects the workflow, not a runtime-owned Markdown
+        // mirror. A masked or unavailable temp mount must never turn a valid
+        // plan into a permanent ban on every user-file mutation.
+        durable = ' Checkpoint mirror unavailable; the accepted plan remains active for this run.';
+      }
     }
     return {
       output:
@@ -2028,6 +2152,7 @@ export const DEFAULT_TOOLS: readonly Tool[] = [
   readFile,
   writeFile,
   editFile,
+  hashlineEdit,
   listDir,
   globFiles,
   grepFiles,

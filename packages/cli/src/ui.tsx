@@ -16,7 +16,11 @@ import { clusterLength, displayWidth } from './text.js';
 /** React host backed by Slate's flex and ANSI renderer. */
 
 /** Repaints per second. See the note beside `createSlateApp` below. */
-const SLATE_FRAME_RATE = 60;
+// The terminal controller must not own a perpetual render clock. Rendering is
+// demand-driven below; a short timer coalesces bursts without burning CPU at
+// idle or letting a stream schedule one full layout per microtask.
+const SLATE_FRAME_RATE = 240;
+const SLATE_REPAINT_DELAY_MS = 0;
 
 type UiProps = Record<string, unknown>;
 type HostText = { kind: 'text'; id: string; value: string; revision: number; parent?: HostNode };
@@ -801,6 +805,22 @@ function dispatchSlateEvent(
 }
 
 /**
+ * Slate reserves Ctrl+C as an unconditional process exit before application
+ * input subscribers run. Plif owns Ctrl+C: while a turn is running it must
+ * abort that turn, and only a second press from an idle prompt may quit. Keep
+ * the event's printable text and modifier, but give Slate a neutral code so
+ * its emergency-exit guard cannot bypass App's cancellation state machine.
+ */
+export function keepCtrlCInApp(event: SlateEvent): SlateEvent {
+  if (event.kind !== 'key' || event.phase === 'release' || ((event.modifiers ?? 0) & 2) === 0) {
+    return event;
+  }
+  const code = String(event.code ?? event.text ?? '').toLowerCase();
+  if (code !== 'c' && code !== 'keyc' && code !== 'ctrl+c') return event;
+  return { ...event, code: 'plif-control-c', text: 'c' };
+}
+
+/**
  * Preserve distinct repeated keypresses across Slate's semantic deduplicator.
  *
  * The normalizer intentionally drops the same event returned twice by a noisy
@@ -815,12 +835,13 @@ function createLosslessInputSource(): ReturnType<typeof createInputSource> {
   let duplicatePhase: 'press' | 'repeat' = 'press';
   return {
     poll(timeoutMs?: number): SlateEvent | null {
-      const event = source.poll(timeoutMs);
-      if (!event) {
+      const received = source.poll(timeoutMs);
+      if (!received) {
         previousSignature = null;
         duplicatePhase = 'press';
         return null;
       }
+      const event = keepCtrlCInApp(received);
       if (event.kind !== 'key' || event.phase === 'release') {
         previousSignature = null;
         duplicatePhase = 'press';
@@ -897,6 +918,69 @@ function createCoalescingWriter(stdout: NodeJS.WriteStream): {
       if (waitingDrain) stdout.off('drain', onDrain);
       waitingDrain = false;
     },
+  };
+}
+
+interface SlateFrameRows {
+  readonly prefix: string;
+  readonly rows: readonly string[];
+  readonly suffix: string;
+}
+
+/** Split Slate's fixed-width ANSI frame without interpreting terminal text. */
+function slateFrameRows(frame: string): SlateFrameRows | null {
+  const lines = frame.split('\n');
+  const first = lines.shift() ?? '';
+  const marker = '\u001b[?25l';
+  const markerAt = first.indexOf(marker);
+  if (markerAt < 0) return null;
+  const rows: string[] = [first.slice(markerAt + marker.length)];
+  const suffix: string[] = [];
+  for (const line of lines) {
+    const positioned = /^\u001b\[(\d+);1H([\s\S]*)$/.exec(line);
+    if (!positioned) {
+      suffix.push(line);
+      continue;
+    }
+    const row = Number(positioned[1]);
+    if (!Number.isSafeInteger(row) || row < 1) return null;
+    rows[row - 1] = positioned[2] ?? '';
+  }
+  return {
+    prefix: first.slice(0, markerAt + marker.length),
+    rows,
+    suffix: suffix.length > 0 ? `\n${suffix.join('\n')}` : '',
+  };
+}
+
+/** Write only changed rows; a parse failure falls back to the complete frame. */
+function createDamageWriter(stdout: NodeJS.WriteStream): {
+  readonly write: (frame: string) => void;
+  readonly invalidate: () => void;
+  readonly dispose: () => void;
+} {
+  const output = createCoalescingWriter(stdout);
+  let previous: SlateFrameRows | null = null;
+  return {
+    write(frame) {
+      const current = slateFrameRows(frame);
+      if (!current || frame.includes('\u001b[2J') || previous === null || current.rows.length !== previous.rows.length) {
+        previous = current;
+        output.write(frame);
+        return;
+      }
+      const damage: string[] = [];
+      for (let index = 0; index < current.rows.length; index += 1) {
+        if (current.rows[index] !== previous.rows[index]) {
+          damage.push(`\u001b[${index + 1};1H${current.rows[index] ?? ''}`);
+        }
+      }
+      if (current.suffix) damage.push(current.suffix);
+      previous = current;
+      if (damage.length > 0) output.write(damage.join(''));
+    },
+    invalidate() { previous = null; },
+    dispose() { previous = null; output.dispose(); },
   };
 }
 
@@ -1043,6 +1127,7 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
   };
   let resolveExit!: () => void;
   let paintScheduled = false;
+  let paintTimer: ReturnType<typeof setTimeout> | undefined;
   let skipNextRepaint = false;
   let terminalController: ReturnType<typeof createTerminalController> | null = null;
   let renderFailure: unknown;
@@ -1064,7 +1149,8 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
   const root: UiRoot = { children: [], repaint: () => {
     if (paintScheduled) return;
     paintScheduled = true;
-    queueMicrotask(() => {
+    paintTimer = setTimeout(() => {
+      paintTimer = undefined;
       paintScheduled = false;
       if (skipNextRepaint) {
         skipNextRepaint = false;
@@ -1075,7 +1161,7 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
       // events delivered by custom streams as well as the native poller.
       syncViewport();
       slate.render();
-    });
+    }, SLATE_REPAINT_DELAY_MS);
   } };
   // Coalesce repaints onto a frame budget instead of painting on every
   // microtask.
@@ -1136,6 +1222,7 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
       width: event.width ?? stdout.columns ?? 80,
       height: event.height ?? stdout.rows ?? 24,
     });
+    if (event.kind === 'resize') output.invalidate();
     for (const listener of [...slateEventListeners]) listener(event);
     dispatchSlateEvent(event, input, stdout, inputListeners);
     // App-level listeners observe the normalized event, while Slate's own
@@ -1154,13 +1241,15 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
   // normalizer. Wrapping the native source here caused a second deduplication
   // window and made fast repeated/pasted characters disappear.
   const source = nativeTerminal ? createLosslessInputSource() : { poll: () => null };
-  const output = createCoalescingWriter(stdout);
+  const output = createDamageWriter(stdout);
   terminalController = createTerminalController(
     slate,
     source,
     { write: (frame) => output.write(normalizeSlateFrame(frame)) },
     {
-      intervalMs: 16,
+      // Poll faster than the old 16 ms cadence so a key or stream event does
+      // not wait a whole frame before entering the app.
+      intervalMs: 4,
       animationFps: 0,
       render: { hideCursor: true },
       // Slate stops the controller on a render error, which leaves a frozen
@@ -1172,6 +1261,9 @@ export function render(element: React.ReactElement, options: RenderOptions = {})
   terminalController.start();
   return {
     unmount: () => {
+      if (paintTimer !== undefined) clearTimeout(paintTimer);
+      paintTimer = undefined;
+      paintScheduled = false;
       if (renderFailure !== undefined) {
         process.stderr.write(`plif: the terminal renderer stopped: ${
           renderFailure instanceof Error ? renderFailure.stack ?? renderFailure.message : String(renderFailure)

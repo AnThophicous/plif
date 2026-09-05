@@ -3,7 +3,7 @@
 Adaptador **Agent Client Protocol** para a plif, versão **host não-confiável**. Mesmas funcionalidades do PR original (sessões, modos de permissão, seletor de modelo, skills como slash commands, MCP stdio/http/sse) com um modelo de confiança endurecido.
 
 `@plif/acp` é um pacote público do workspace e acompanha a versão estável do
-CLI, core e sandbox. A versão atual do workspace é `0.3.9`; o binário instalado
+CLI, core e sandbox. A versão atual do workspace é `0.4.0`; o binário instalado
 é `plif-acp`.
 
 ## Modelo de ameaça
@@ -14,7 +14,7 @@ O processo host (ex.: AionUi) é tratado como **NÃO confiável por padrão**. T
 
 ```powershell
 # usando o pacote publicado
-npm install @plif/acp@0.3.9
+npm install @plif/acp@0.4.0
 
 # a partir de um clone do repositório
 npm ci
@@ -33,32 +33,38 @@ Ausente = **tudo negado** (padrões seguros). Exemplo de política completa:
 
 ```json
 {
+  "allowAcceptEdits": false,
   "allowBypassPermissions": false,
   "allowHostMcpServers": true,
   "hostMcpCommandPrefixes": ["npx", "node", "bunx", "uvx"],
   "allowModelSwitch": true,
   "persistModelSwitch": false,
-  "maxSessions": 8
+  "maxSessions": 8,
+  "workspaceRoots": ["C:/Users/me/projects"]
 }
 ```
 
-Alternativa por env (por execução): `PLIF_ACP_ALLOW_BYPASS`, `PLIF_ACP_ALLOW_HOST_MCP`, `PLIF_ACP_ALLOW_MODEL_SWITCH`, `PLIF_ACP_PERSIST_MODEL_SWITCH`, `PLIF_ACP_MAX_SESSIONS`.
+As permissões ficam somente no arquivo local. `PLIF_ACP_MAX_SESSIONS` é a única
+sobrescrita por ambiente e serve apenas para reduzir/capar a concorrência desta
+execução; não concede bypass, MCP do host ou troca de modelo.
 
 ### O que cada chave controla
 
 | Chave | Default | O que libera |
 |---|---|---|
+| `allowAcceptEdits` | `false` | `acceptEdits` (auto-aprova escritas/deleções do workspace montado). Sem isso, o host precisa de aprovação por ação. |
 | `allowBypassPermissions` | `false` | `bypassPermissions` (auto-approve de TODA ação). Sem isso, `set_mode`/`set_config_option` com esse valor **falha** com erro explicativo. |
 | `allowHostMcpServers` | `false` | MCP servers propostos pelo host. Off = todos rejeitados com log. |
 | `hostMcpCommandPrefixes` | `npx, node, bunx, uvx, python` | Primeiro token permitido no `command` de um MCP stdio do host. Qualquer outro é rejeitado com log. |
 | `allowModelSwitch` | `false` | Troca de modelo pelo host. Off = `set_config_option model` falha. |
 | `persistModelSwitch` | `false` | Persiste a troca de modelo em `~/.plif/config.toml`. Off = troca vale só para a sessão. |
 | `maxSessions` | `8` | Teto de sessões simultâneas. |
+| `workspaceRoots` | `[]` | Diretórios absolutos adicionais que o host ACP pode abrir. O diretório de execução já é permitido. |
 
 ## Funcionalidades (iguais ao PR)
 
-- Sessões ACP com workspace, container (mount rw + network + hostWrite) e histórico
-- Modos de permissão: `default` (pergunta), `acceptEdits` (escreve, pergunta o resto), `bypassPermissions` (opt-in local)
+- Sessões ACP com workspace, container (mount rw + network + hostWrite) e histórico; no modo `default`, escritas/deleções **e comandos** pedem aprovação porque comandos também podem escrever no workspace
+- Modos de permissão: `default` (pergunta), `acceptEdits` (opt-in local; escreve, pergunta o resto), `bypassPermissions` (opt-in local)
 - Seletor de modelo (ranked, só providers alcançáveis com a credencial local)
 - Skills como slash commands — o modelo carrega a skill via tool `skill` dentro do loop
 - MCP stdio/http/sse do host (com opt-in + whitelist de comando)
@@ -70,9 +76,11 @@ Alternativa por env (por execução): `PLIF_ACP_ALLOW_BYPASS`, `PLIF_ACP_ALLOW_H
 
 | Capacidade | PR original | Versão segura |
 |---|---|---|
-| `bypassPermissions` | host ativa quando quiser | **negado** até opt-in local |
+| `acceptEdits` | host podia auto-aprovar escritas | **negado** até opt-in local |
+| Execução no workspace | comandos podiam escrever no mount `rw` sem passar por `fs.write` | **pergunta por comando**; `acceptEdits` não libera execução |
+| `bypassPermissions` | host ativa quando quiser | **negado** até opt-in no arquivo local |
 | MCP servers do host (`command` arbitrário) | spawna qualquer comando | **negado** até opt-in + whitelist de prefixo |
-| env de MCP do host | repassado inteiro | chaves `KEY/SECRET/TOKEN/PASSWORD/CREDENTIAL` **removidas** |
+| env de MCP do host | repassado inteiro | chaves `KEY/SECRET/TOKEN/PASSWORD/CREDENTIAL(S)` **removidas** |
 | Troca de modelo | persistida no config da plif | **negada** até opt-in; por default **sessão-local** |
 | Skills do usuário | **copiadas para o workspace do host** | **nunca copiadas** — ficam em `~/.plif/skills`, carregadas via tool `skill` |
 | Mask do mount | `.git/config`, `.env`, `.env.local` | + `.npmrc`, `.pypirc`, `.netrc`, `.plif`, `*.pem`, `*.key`, `secrets*`, `credentials*` |

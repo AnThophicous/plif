@@ -1,12 +1,21 @@
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
+import { moduleDirectory, resolveAsset } from '@plif/core';
 
 interface PackageMetadata {
   readonly version?: unknown;
 }
 
-const metadata = JSON.parse(
-  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
-) as PackageMetadata;
+const metadataFile = resolveAsset(import.meta.url, 'cli/package.json', [
+  path.resolve(moduleDirectory(import.meta.url), '../package.json'),
+]);
+
+if (metadataFile === null) {
+  throw new Error('CLI package metadata is missing from this install');
+}
+
+const metadata = JSON.parse(readFileSync(metadataFile, 'utf8')) as PackageMetadata;
 
 if (typeof metadata.version !== 'string' || metadata.version.length === 0) {
   throw new Error('CLI package metadata does not contain a version');

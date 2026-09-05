@@ -16,7 +16,6 @@ import {
   platformSecretStore,
   providerIdForConfig,
   resolveConfig,
-  saveStoredConfig,
   validateModelConfig,
   type Engine,
   type ModelConfig,
@@ -32,12 +31,12 @@ export interface ProviderBundle {
   promptConfig: ModelConfig;
 }
 
-export async function buildProviderFromStoredConfig(engine: Engine): Promise<ProviderBundle> {
+export async function buildProviderFromStoredConfig(engine: Engine, storedOverride?: StoredConfig): Promise<ProviderBundle> {
   const capabilityCache = new ProviderCapabilityCache({
     file: path.join(engine.paths.root, 'model-capabilities.json'),
   });
   const credentials = new CredentialBroker({ store: platformSecretStore() });
-  let stored = await loadStoredConfig(engine.paths);
+  let stored = storedOverride ?? await loadStoredConfig(engine.paths);
 
   // A clean install should be usable immediately: fall back to the built-in
   // anonymous OpenCode route when nothing is configured at all. Explicit
@@ -57,7 +56,6 @@ export async function buildProviderFromStoredConfig(engine: Engine): Promise<Pro
     const fallbackConfig = resolveConfig(stored, fallback);
     if (validateModelConfig(fallbackConfig).ok) {
       const next = { ...stored, ...fallback };
-      await saveStoredConfig(engine.paths, next, { preserveProviderKeys: false });
       stored = next;
     }
   }

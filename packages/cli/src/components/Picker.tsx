@@ -675,16 +675,67 @@ const ModelPickerRow = React.memo(function ModelPickerRow({
     );
   }
 
+  /**
+   * The facts that decide the choice, on the row that offers it.
+   *
+   * Price, context and whether the model thinks were already carried on every
+   * item and already rendered — in a details pane behind Ctrl+E, one model at
+   * a time. Choosing between forty models then meant opening forty panes, so
+   * in practice nobody compared anything and picked by name. These are the
+   * three the decision actually turns on, so they belong beside the name.
+   *
+   * Everything else stays in the pane. A row that listed tier, provider tier,
+   * transport, max input and max output would be a table, and a table of forty
+   * rows is not more scannable than one fact per line — it is less.
+   */
+  const facts = [
+    priceLabel(item),
+    item.context,
+    item.reasoning === true ? 'thinks' : undefined,
+  ].filter((fact): fact is string => Boolean(fact)).join('  ');
+
+  // The name gets whatever the facts do not need, and the facts are dropped
+  // entirely before the name becomes unreadable on a narrow terminal.
+  const factsWidth = facts.length + 2;
+  const showFacts = width - factsWidth > 24;
+  const labelWidth = Math.max(12, width - 12 - (showFacts ? factsWidth : 0));
+
   return (
     <Box key={item.value} width="100%">
-      <Text color={active ? color('accentBright') : color('ghost')} bold={active}>{prefix} </Text>
-      <Text color={active ? color('text') : color(item.tone ?? 'muted')} bold={active}>
-        {truncate(item.label, Math.max(12, width - 12))}
-      </Text>
-      {item.current && <Text color={color('success')}> {glyph.done}</Text>}
+      <Box flexGrow={1}>
+        <Text color={active ? color('accentBright') : color('ghost')} bold={active}>{prefix} </Text>
+        <Text color={active ? color('text') : color(item.tone ?? 'muted')} bold={active}>
+          {truncate(item.label, labelWidth)}
+        </Text>
+        {item.current && <Text color={color('success')}> {glyph.done}</Text>}
+      </Box>
+      {showFacts && facts && (
+        <Text color={color(active ? 'faint' : 'ghost')}>{facts}</Text>
+      )}
     </Box>
   );
 });
+
+/**
+ * What this model costs, in the shortest honest form.
+ *
+ * A real input price beats the coarse free/paid flag, because "paid" is the
+ * answer to a different question than the one someone comparing two models is
+ * asking. When the provider reported no price, the flag is all there is, and
+ * saying nothing at all would read as free.
+ */
+function priceLabel(item: PickerItem): string | undefined {
+  const perMillion = item.pricing?.inputPerMillion;
+  if (perMillion !== undefined) {
+    if (perMillion === 0) return 'free';
+    // Sub-cent prices are common and rounding them to two places prints $0.00,
+    // which reads as free for a model that is not.
+    return `$${perMillion < 0.1 ? perMillion.toFixed(3) : perMillion.toFixed(2)}/M`;
+  }
+  if (item.cost === 'free') return 'free';
+  if (item.cost === 'paid') return 'paid';
+  return undefined;
+}
 
 ModelPickerRow.displayName = 'ModelPickerRow';
 

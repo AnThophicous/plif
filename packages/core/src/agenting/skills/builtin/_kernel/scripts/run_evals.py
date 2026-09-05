@@ -117,16 +117,17 @@ def main():
     else:
         n_total, n_crit = count_behavioral_cases(root)
         report["layers"]["E2_E6_behavioral"] = {
-            "status": "RUNTIME_EVAL_NOT_EXECUTED",
-            "reason": "no host adapter provided (env PLIEF_EVAL_ADAPTER unset)",
+            "status": "PASS" if n_total == 0 else "RUNTIME_EVAL_NOT_EXECUTED",
+            "reason": "no behavioral cases declared" if n_total == 0 else
+                      "no host adapter provided (env PLIEF_EVAL_ADAPTER unset)",
             "behavioral_cases_declared": n_total,
             "critical_cases_declared": n_crit,
             "note": "declared critical evals are release-blocking once executed; "
-                    "non-execution is recorded, never assumed-passed"}
+                    "non-execution is recorded and fails the runner, never assumed-passed"}
 
     layers_flat = [report["layers"]["E0_packaging"]["status"]] \
         + [r["status"] for r in st_results] \
-        + ([report["layers"]["E2_E6_behavioral"]["status"]] if adapter else [])
+        + [report["layers"]["E2_E6_behavioral"]["status"]]
     failing = sum(1 for s in layers_flat if s not in ("PASS", "CONFORMANT"))
     report["aggregate"] = {"hard_failures": failing,
                            "behavioral_execution": "host" if adapter else "not-executed"}
@@ -142,7 +143,8 @@ def main():
         print(f"FAIL {f['script']}: {f.get('summary')} / {f.get('stderr_last')}")
     for e in report["layers"]["E0_packaging"].get("errors", []):
         print(f"CONF-ERR {e}")
-    sys.exit(0 if (not fails and e0 == "CONFORMANT") else 1)
+    sys.exit(0 if (not fails and e0 == "CONFORMANT" and
+                    report["layers"]["E2_E6_behavioral"]["status"] in ("PASS",)) else 1)
 
 
 if __name__ == "__main__":

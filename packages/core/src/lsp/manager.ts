@@ -2,9 +2,25 @@ import path from 'node:path';
 
 import type { EventBus } from '../events/bus.js';
 import { LspClient } from './client.js';
-import type { Diagnostic } from './client.js';
-import { detectLanguages, resolveServer, serverFor } from './servers.js';
+import type { Diagnostic, WorkspaceSymbolInfo } from './client.js';
+import { SERVERS, detectLanguages, findFileWithExtension, resolveServer, serverFor } from './servers.js';
 import type { ResolvedServer, ServerSpec } from './servers.js';
+
+/**
+ * How long to let a freshly primed server finish loading its project.
+ *
+ * Measured on this repository against the bundled TypeScript server, with the
+ * servers already warm: the first document opens, and the same query answers
+ * nothing for 3.4 seconds and then four hits. Retrying inside that window is the
+ * difference between "the index was not ready yet" and the answer "this symbol
+ * does not exist" — and the second one is a lie the caller cannot detect.
+ *
+ * The ceiling is generous because it is only ever reached by a query with no
+ * answer, on the one call per server that opens its first document. A query that
+ * does match returns the moment the index has it.
+ */
+const INDEX_SETTLE_MS = 250;
+const INDEX_SETTLE_ATTEMPTS = 40;
 
 export interface LspStatus {
   readonly id: string;
@@ -36,6 +52,7 @@ export class LspManager {
   #createClient: (resolved: ResolvedServer, root: string) => LspClient;
   #stopping = false;
   #tempRoot: string | undefined;
+  #primed = new Map<string, string>();
 
   constructor(options: LspManagerOptions) {
     this.root = path.resolve(options.root);
@@ -162,6 +179,114 @@ export class LspManager {
     const client = await this.clientFor(file);
     if (!client) return null;
     return await client.diagnose(file);
+  }
+
+  /**
+   * Find a declaration anywhere in the workspace, by name.
+   *
+   * The search is not tied to a file, so it asks every running server and
+   * merges the answers: a polyglot repository can hold the same name in two
+   * languages, and both are real hits. Servers normally started during warmup;
+   * when none have, this pays that cost once rather than reporting nothing.
+   *
+   * Returns null when the workspace has no server at all, which is a different
+   * answer from an empty array — the same distinction diagnose() makes, and for
+   * the same reason: "nothing looked" must not read as "nothing exists".
+   */
+  async searchSymbols(query: string, limit = 100): Promise<WorkspaceSymbolInfo[] | null> {
+    if (!this.#enabled) return null;
+    if (this.#clients.size === 0) await this.warmup();
+    if (this.#clients.size === 0) return null;
+
+    const answers = await Promise.all(
+      [...this.#clients].map(async ([id, client]) => {
+        const primed = await this.#primeIndex(id, client);
+        let hits = await client.workspaceSymbols(query, limit).catch(() => []);
+
+        // Retry the question actually asked, not a cheaper stand-in. A server
+        // will answer a generic probe out of the one file it has open while the
+        // project is still loading, so a probe reports ready too early; only the
+        // real query distinguishes "not indexed yet" from "not there".
+        for (
+          let attempt = 0;
+          primed && hits.length === 0 && attempt < INDEX_SETTLE_ATTEMPTS;
+          attempt += 1
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, INDEX_SETTLE_MS));
+          hits = await client.workspaceSymbols(query, limit).catch(() => []);
+        }
+        return hits;
+      }),
+    );
+
+    // Two servers can index the same file, and one server can report a symbol
+    // once per declaration site. Collapse on the identity the caller sees.
+    const seen = new Set<string>();
+    const merged: WorkspaceSymbolInfo[] = [];
+    for (const hit of answers.flat()) {
+      const key = `${hit.file}:${hit.line}:${hit.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(hit);
+      if (merged.length >= limit) break;
+    }
+    return merged;
+  }
+
+  /**
+   * Give a server one open document before asking it about the workspace.
+   *
+   * tsserver answers workspace/symbol out of the project it has loaded, and it
+   * loads no project until a document is opened. Cold, the search returns an
+   * empty list that reads exactly like "no such symbol" — the one failure this
+   * tool must not have. Measured on this repository: 0 hits with nothing open,
+   * 2 with a single file open. One file is the whole difference, so pay for it
+   * here instead of expecting the caller to know. Returns whether this call was
+   * the one that opened it, which is what tells the caller to wait for the index.
+   */
+  async #primeIndex(id: string, client: LspClient): Promise<boolean> {
+    if (client.openDocumentCount > 0) return false;
+
+    const cached = this.#primed.get(id);
+    if (cached) {
+      await client.openFile(cached);
+      return true;
+    }
+
+    const spec = SERVERS.find((candidate) => candidate.id === id);
+    if (!spec) return false;
+    const sample = await findFileWithExtension(this.root, spec.extensions, 4);
+    if (!sample) return false;
+
+    this.#primed.set(id, sample);
+    await client.openFile(sample);
+    return true;
+  }
+
+  /**
+   * Start the server for a file and wait until it has analysed that file.
+   *
+   * A server that has not read a file answers questions about it with silence,
+   * and silence is indistinguishable from "there is nothing there". Measured
+   * against the bundled TypeScript server on this repository: a rename requested
+   * the moment the file opened rewrote the declaration and none of its importers,
+   * and reported success.
+   *
+   * This is necessary and not sufficient. Diagnostics arrive once the program
+   * containing the file is built, which is before the server has indexed the
+   * files that import it — measured here, three seconds before. A caller that
+   * needs the call sites has to wait for the call sites; see rename_symbol.
+   *
+   * The wait is per file, not per server, and that is what a monorepo needs:
+   * opening some other package's file loads that package's project, which says
+   * nothing about the one being edited.
+   */
+  async ensureIndexed(file: string): Promise<LspClient | null> {
+    const client = await this.clientFor(file);
+    if (!client) return null;
+
+    await client.awaitAnalysis(file);
+    return client;
   }
 
   async statuses(): Promise<LspStatus[]> {

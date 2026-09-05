@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
+import { moduleDirectory, resolveAsset } from '../assets.js';
 import type { PromptMode } from './types.js';
 
 export interface MarkdownInstruction {
@@ -46,15 +46,13 @@ export function resetInstructionCache(): void {
 }
 
 function instructionDirectory(): string {
-  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    path.join(moduleDirectory, 'instructions'),
-    path.resolve(moduleDirectory, '../../src/agenting/instructions'),
-  ];
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  throw new Error('Plif agent instruction assets are missing.');
+  const here = moduleDirectory(import.meta.url);
+  const found = resolveAsset(import.meta.url, 'instructions', [
+    path.join(here, 'instructions'),
+    path.resolve(here, '../../src/agenting/instructions'),
+  ]);
+  if (found === null) throw new Error('Plif agent instruction assets are missing.');
+  return found;
 }
 
 function readInstructionFiles(root: string): readonly MarkdownInstruction[] {

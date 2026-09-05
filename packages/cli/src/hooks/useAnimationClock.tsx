@@ -11,7 +11,7 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useSyncEx
 export const ANIMATION_INTERVAL_MS = 120;
 // 60 Hz. This was 33 ms — an exactly 30 FPS pulse, which is what a smooth
 // gradient sweep reads as when the terminal beside it is drawing at 60.
-export const FAST_ANIMATION_INTERVAL_MS = 16;
+export const FAST_ANIMATION_INTERVAL_MS = 8;
 
 export type AnimationRate = 'slow' | 'fast';
 

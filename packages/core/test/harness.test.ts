@@ -140,9 +140,9 @@ describe('compaction', () => {
     assert.equal(result.after, result.before);
   });
 
-  it('automatically compacts a 1M window at 900K toward 500K', () => {
-    assert.equal(shouldAutoCompact(899_999, 1_000_000), false);
-    assert.equal(shouldAutoCompact(900_000, 1_000_000), true);
+  it('automatically compacts a 1M window at 750K toward 500K', () => {
+    assert.equal(shouldAutoCompact(749_999, 1_000_000), false);
+    assert.equal(shouldAutoCompact(750_000, 1_000_000), true);
     assert.equal(autoCompactionTarget(1_000_000), 500_000);
   });
 

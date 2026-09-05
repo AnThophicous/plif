@@ -1,6 +1,6 @@
 ---
 name: plief-orun
-description: Intelligence system for frontend capabilities — components, registries, libraries, motion, media, 2D/3D, WebGL/WebGPU, shaders, source verification and evidence-first integration. Use quando o usuário pedir para descobrir, comparar, selecionar ou integrar shadcn, Aceternity, Magic UI, GSAP, Three.js, Rive, Motion, registries, 3D, animação, ou capabilities frontend verificáveis.
+description: Escolha e integração verificada de capabilities frontend: componentes e registries (shadcn, Aceternity, Magic UI), animação (GSAP, Motion, Rive), 2D/3D e shaders (Three.js, WebGL/WebGPU). Use quando a escolha precisa de evidência em vez de palpite.
 license: MIT
 metadata:
   plief-short-description: Capabilities frontend com evidência

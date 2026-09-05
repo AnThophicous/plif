@@ -25,6 +25,7 @@ import { createReadStream } from 'node:fs';
 
 import type { Decision, PolicyAction } from '../policy/policy.js';
 import type { StorePaths } from '../store/paths.js';
+import { withFileLock } from '../store/file-lock.js';
 
 export type AuditEventType =
   | 'container.create'
@@ -82,8 +83,8 @@ export class AuditLog {
   /** Read the tail of today's log to resume the sequence and hash chain. */
   async open(): Promise<void> {
     if (this.#ready) return;
-    await fs.mkdir(this.#paths.audit, { recursive: true });
-    const last = await this.#lastRecord();
+    await fs.mkdir(this.#paths.audit, { recursive: true, mode: 0o700 });
+    const last = await this.#lastRecord(new Date());
     if (last) {
       this.#seq = last.seq;
       this.#prev = last.hash;
@@ -91,8 +92,8 @@ export class AuditLog {
     this.#ready = true;
   }
 
-  async #lastRecord(): Promise<AuditRecord | null> {
-    const file = this.#paths.auditFile(new Date());
+  async #lastRecord(date = new Date()): Promise<AuditRecord | null> {
+    const file = this.#paths.auditFile(date);
     let content: string;
     try {
       content = await fs.readFile(file, 'utf8');
@@ -128,16 +129,21 @@ export class AuditLog {
   ): Promise<void> {
     if (!this.#ready) await this.open();
 
-    const seq = ++this.#seq;
-    const at = new Date().toISOString();
-    const body = { seq, at, type, containerId, data, prev: this.#prev };
-    const hash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
-    const record: AuditRecord = { ...body, hash };
-
-    const file = this.#paths.auditFile(new Date());
-    await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.appendFile(file, JSON.stringify(record) + '\n', 'utf8');
-    this.#prev = hash;
+    const now = new Date();
+    const file = this.#paths.auditFile(now);
+    await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+    await withFileLock(file, async () => {
+      const last = await this.#lastRecord(now);
+      const seq = (last?.seq ?? 0) + 1;
+      const prev = last?.hash ?? GENESIS;
+      const at = now.toISOString();
+      const body = { seq, at, type, containerId, data, prev };
+      const hash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
+      const record: AuditRecord = { ...body, hash };
+      await fs.appendFile(file, JSON.stringify(record) + '\n', { encoding: 'utf8', mode: 0o600 });
+      this.#seq = seq;
+      this.#prev = hash;
+    });
   }
 
   /** Flush pending appends. Call before exit so the last actions are durable. */

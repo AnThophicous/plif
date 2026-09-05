@@ -380,21 +380,39 @@ async function hasExtension(
   extensions: readonly string[],
   depth: number,
 ): Promise<boolean> {
-  if (depth < 0) return false;
+  return (await findFileWithExtension(dir, extensions, depth)) !== null;
+}
+
+/**
+ * One file of a given language, for callers that need a sample rather than a count.
+ *
+ * Shares the walk with detection: same skip list, same bounded depth, same
+ * breadth-before-descent order, so the file it returns is the shallowest one
+ * and the cost is the cost of the detection that already runs at startup.
+ */
+export async function findFileWithExtension(
+  dir: string,
+  extensions: readonly string[],
+  depth: number,
+): Promise<string | null> {
+  if (depth < 0) return null;
 
   let entries;
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
   } catch {
-    return false;
+    return null;
   }
 
   for (const entry of entries) {
-    if (entry.isFile() && extensions.includes(path.extname(entry.name).toLowerCase())) return true;
+    if (entry.isFile() && extensions.includes(path.extname(entry.name).toLowerCase())) {
+      return path.join(dir, entry.name);
+    }
   }
   for (const entry of entries) {
     if (!entry.isDirectory() || SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
-    if (await hasExtension(path.join(dir, entry.name), extensions, depth - 1)) return true;
+    const found = await findFileWithExtension(path.join(dir, entry.name), extensions, depth - 1);
+    if (found) return found;
   }
-  return false;
+  return null;
 }

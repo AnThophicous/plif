@@ -186,6 +186,45 @@ describe('transactional apply_patch tool', () => {
     assert.equal(container.files.get('/project/b.ts'), 'old b');
   });
 
+  it('surfaces a partial workspace when rollback itself fails', async () => {
+    const container = new MemoryContainer({
+      '/project/a.ts': 'old a',
+      '/project/b.ts': 'old b',
+      '/project/c.ts': 'old c',
+    });
+    let bWrites = 0;
+    const originalWrite = container.writeFile.bind(container);
+    container.writeFile = async (file, content) => {
+      if (file === '/project/c.ts') {
+        throw new Error(`failed ${file}`);
+      }
+      if (file === '/project/b.ts' && bWrites++ === 1) {
+        throw new Error(`failed ${file}`);
+      }
+      await originalWrite(file, content);
+    };
+
+    await assert.rejects(
+      applyPatch.run(
+        {
+          edits: [
+            { path: '/project/a.ts', old_string: 'old a', new_string: 'new a' },
+            { path: '/project/b.ts', old_string: 'old b', new_string: 'new b' },
+            { path: '/project/c.ts', old_string: 'old c', new_string: 'new c' },
+          ],
+        },
+        context(container),
+      ),
+      (error: unknown) => {
+        assert.match(String(error), /could not restore/);
+        assert.match(String(error), /\/project\/b\.ts/);
+        return true;
+      },
+    );
+
+    assert.equal(container.files.get('/project/a.ts'), 'old a');
+  });
+
   it('runs diagnostics once per changed file after the transaction', async () => {
     const container = new MemoryContainer({
       '/project/a.ts': 'old a',
@@ -222,7 +261,7 @@ describe('transactional apply_patch tool', () => {
 
     assert.deepEqual(calls, ['/project/a.ts', '/project/b.ts']);
     assert.deepEqual(snapshots, [['new a', 'new b'], ['new a', 'new b']]);
-    assert.equal(result.ok, false);
+    assert.equal(result.ok, true);
     assert.match(result.output, /Language server: 1 error\(s\)/);
     assert.match(result.output, /\/project\/a\.ts/);
   });

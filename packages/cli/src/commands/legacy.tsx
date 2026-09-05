@@ -68,6 +68,8 @@ import {
   permissionMode,
   TaskManager,
   LspManager,
+  DebugSessions,
+  debugTools,
   lspTools,
   EditCoordinator,
   agentsOf,
@@ -616,6 +618,7 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
       credentials,
     ),
     engine.bus,
+    { authorizeNetwork: (host, reason) => container.reachNetwork(host, reason) },
   );
 
   const tools = [...DEFAULT_TOOLS, skillTool(skills), createSkillTool(skills), ...mcp.tools()];
@@ -635,6 +638,7 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
   // — that is what stops recursion, and it is enforced here rather than trusted
   // to the prompt.
   const lspForAgent = lspTools(lsp);
+  const debugForAgent = debugTools(new DebugSessions(), lsp.root);
   const edits = new EditCoordinator();
   // Native Codex runs cannot execute PLIF's host-only `skill` tool. Preload
   // the same mandatory skills used by the interactive app into the native
@@ -654,7 +658,8 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
       await lookupProviderCredential(credentials, providerId, childStored),
     agents: agentsOf(stored),
     agentAutoLaunch: stored.agentAutoLaunch !== false,
-    extraTools: [skillTool(skills), ...lspForAgent, ...WEB_TOOLS],
+    extraTools: [skillTool(skills), ...lspForAgent,
+    ...debugForAgent, ...WEB_TOOLS],
     skillCatalogue: skills.catalogue(),
     skillBootstrap: codexSkillBootstrap,
     edits,
@@ -663,6 +668,7 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
   const agentTools = [
     ...tools,
     ...lspForAgent,
+    ...debugForAgent,
     ...WEB_TOOLS,
     ...visionTools(childOptions),
     subagentTool(childOptions),

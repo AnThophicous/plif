@@ -5,6 +5,7 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
+import { credentialGaps, expandEnvironment } from '../config/expand.js';
 import { isSdkError } from '../model/sdk-errors.js';
 
 /** Loads the MCP client SDK once, on the first connection attempt. */
@@ -37,6 +38,7 @@ import {
 } from '../auth/mcp-oauth.js';
 import type { CredentialRequest } from '../auth/secrets.js';
 import { PlifError } from '../errors.js';
+import { safeRuntimeEnvironment } from '../security/runtime-environment.js';
 import type { EventBus } from '../events/bus.js';
 import { formatToolEnvelope } from './tools.js';
 import type { Tool, ToolContext, ToolResult } from './tools.js';
@@ -69,6 +71,8 @@ export interface McpLoginResult {
 export interface McpRegistryOptions {
   readonly oauth?: McpOAuthCoordinator;
   readonly interactive?: boolean;
+  /** Gate every HTTP request, including redirects, reconnects and OAuth retries. */
+  readonly authorizeNetwork?: (host: string, reason: string) => Promise<void>;
 }
 
 export type McpServerConfig = StdioServerConfig | HttpServerConfig;
@@ -133,6 +137,26 @@ const NAMED_ENTITIES: Readonly<Record<string, string>> = {
 
 function isHttp(config: McpServerConfig): config is HttpServerConfig {
   return 'url' in config;
+}
+
+type McpFetch = (url: string | URL, init?: RequestInit) => Promise<Response>;
+
+/**
+ * The SDK otherwise follows redirects inside its own fetch call. That makes
+ * checking only the configured endpoint insufficient: an allowed MCP host can
+ * redirect the process to localhost or a cloud metadata address. The wrapper
+ * checks every URL and deliberately rejects redirects so the policy remains
+ * the final authority for each network destination.
+ */
+export function authorizedMcpFetch(
+  authorizeNetwork: (host: string, reason: string) => Promise<void>,
+  serverName: string,
+): McpFetch {
+  return async (url, init) => {
+    const target = new URL(url);
+    await authorizeNetwork(target.hostname, `request MCP server ${serverName}`);
+    return await globalThis.fetch(target, { ...(init ?? {}), redirect: 'error' });
+  };
 }
 
 /**
@@ -235,15 +259,23 @@ class McpServer {
   #provider: McpOAuthProvider | undefined;
   #httpTransport: StreamableHTTPClientTransport | undefined;
   #bus: EventBus | undefined;
+  #authorizeNetwork: ((host: string, reason: string) => Promise<void>) | undefined;
   #startedAt: string | undefined;
   #lastActivityAt: string | undefined;
   #recentCalls: McpToolCall[] = [];
 
-  constructor(name: string, config: McpServerConfig, bus?: EventBus, oauth?: McpOAuthCoordinator) {
+  constructor(
+    name: string,
+    config: McpServerConfig,
+    bus?: EventBus,
+    oauth?: McpOAuthCoordinator,
+    authorizeNetwork?: (host: string, reason: string) => Promise<void>,
+  ) {
     this.name = name;
     this.#config = config;
     this.transport = isHttp(config) ? 'http' : 'stdio';
     this.#bus = bus;
+    this.#authorizeNetwork = authorizeNetwork;
     if (isHttp(config) && oauth) {
       this.#provider = oauth.providerFor(name, new URL(config.url), config.oauth);
     }
@@ -317,6 +349,9 @@ class McpServer {
     if (this.#client) return;
     this.#detail = 'connecting';
     this.#emitStatus();
+    if (isHttp(this.#config) && this.#authorizeNetwork) {
+      await this.#authorizeNetwork(new URL(this.#config.url).hostname, `connect MCP server ${this.name}`);
+    }
     const { Client, StdioClientTransport, StreamableHTTPClientTransport } = await loadMcpSdk();
     const client = new Client(
       { name: 'plif', version: '0.1.0' },
@@ -327,6 +362,9 @@ class McpServer {
       ? new StreamableHTTPClientTransport(new URL(this.#config.url), {
           requestInit: this.#config.headers ? { headers: { ...this.#config.headers } } : {},
           ...(this.#provider ? { authProvider: this.#provider } : {}),
+          ...(this.#authorizeNetwork
+            ? { fetch: authorizedMcpFetch(this.#authorizeNetwork, this.name) }
+            : {}),
         })
       : new StdioClientTransport({
           command: (this.#config as StdioServerConfig).command,
@@ -334,10 +372,7 @@ class McpServer {
           ...((this.#config as StdioServerConfig).cwd
             ? { cwd: (this.#config as StdioServerConfig).cwd as string }
             : {}),
-          env: {
-            ...(process.env as Record<string, string>),
-            ...((this.#config as StdioServerConfig).env ?? {}),
-          },
+          env: safeRuntimeEnvironment((this.#config as StdioServerConfig).env ?? {}),
         });
     this.#httpTransport = transport instanceof StreamableHTTPClientTransport ? transport : undefined;
 
@@ -517,9 +552,11 @@ export class McpRegistry {
   #servers: McpServer[] = [];
   #bus: EventBus | undefined;
   #oauth: McpOAuthCoordinator;
+  #authorizeNetwork: ((host: string, reason: string) => Promise<void>) | undefined;
 
   constructor(bus?: EventBus, options: McpRegistryOptions = {}) {
     this.#bus = bus;
+    this.#authorizeNetwork = options.authorizeNetwork;
     this.#oauth = options.oauth ?? new McpOAuthCoordinator(bus, { interactive: options.interactive ?? false });
   }
 
@@ -540,7 +577,13 @@ export class McpRegistry {
 
     const enabled = Object.entries(configs).filter(([, config]) => config.enabled !== false);
     if (enabled.some(([, config]) => isHttp(config))) await this.#oauth.start();
-    this.#servers = enabled.map(([name, config]) => new McpServer(name, config, this.#bus, this.#oauth));
+    this.#servers = enabled.map(([name, config]) => new McpServer(
+      name,
+      config,
+      this.#bus,
+      this.#oauth,
+      this.#authorizeNetwork,
+    ));
 
     await Promise.all(
       this.#servers.map(async (server) => {
@@ -692,7 +735,7 @@ export function parseServerConfigs(
 ): Record<string, McpServerConfig> {
   if (!value || typeof value !== 'object') return {};
 
-  const expand = (input: string): string => expandMcpEnvironment(input, environment);
+  const expand = (input: string): string => expandEnvironment(input, environment);
 
   const expandRecord = (input: unknown): Record<string, string> | undefined => {
     if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
@@ -832,40 +875,9 @@ export async function resolveServerConfigs(
 }
 
 /**
- * Variables this template needs and cannot get.
- *
- * A reference with a non-empty default is not a gap — `${MODE:-fast}` is fully
- * satisfied by its own default and nobody should be asked for it.
+ * The `${VAR}` rules moved to `config/expand.ts` so model provider headers can
+ * use the same ones. These names stay here because callers import them from
+ * this module.
  */
-export function credentialGaps(
-  value: string,
-  environment: Readonly<Record<string, string | undefined>> = process.env,
-): string[] {
-  const gaps: string[] = [];
-  for (const match of value.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::?-([^}]*))?\}/g)) {
-    const name = match[1] as string;
-    if (environment[name]?.trim()) continue;
-    if (match[2]?.trim()) continue;
-    gaps.push(name);
-  }
-  return gaps;
-}
-
-export function expandMcpEnvironment(
-  value: string,
-  environment: Readonly<Record<string, string | undefined>> = process.env,
-): string {
-  return value.replace(
-    /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::?-([^}]*))?\}/g,
-    (_match, name: string, fallback: string | undefined) => {
-      const resolved = environment[name];
-      if (resolved) return resolved;
-      if (fallback !== undefined) return fallback;
-      if (resolved !== undefined) return resolved;
-      throw new PlifError(
-        'INVALID_ARGUMENT',
-        `MCP configuration references missing environment variable ${name}`,
-      );
-    },
-  );
-}
+export { credentialGaps } from '../config/expand.js';
+export { expandEnvironment as expandMcpEnvironment } from '../config/expand.js';

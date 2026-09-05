@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+
 /** A deterministic interpreter adapter. It builds argv; it never executes it. */
 export interface ShellDialect {
   readonly id: 'powershell' | 'bash';
@@ -111,4 +114,49 @@ function findInterpreter(
 ): string | null {
   const expected = new Set(names.map((name) => name.toLowerCase()));
   return interpreters.find((name) => expected.has(name.toLowerCase())) ?? null;
+}
+
+/**
+ * The interpreters this machine actually has, by basename.
+ *
+ * `resolveShellDialect` takes the list rather than finding it, so the decision
+ * stays testable — but nothing was calling it with a real list, which is why
+ * `shell_command` had never appeared in a session and hooks would have had no
+ * shell to run in. PATH is read directly rather than by spawning `which`,
+ * because this runs at session start and a subprocess there is startup cost
+ * for an answer four `existsSync` calls already have.
+ */
+export function discoverInterpreters(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+  platform: NodeJS.Platform = process.platform,
+): readonly string[] {
+  const names = platform === 'win32'
+    ? ['pwsh.exe', 'powershell.exe']
+    : ['bash'];
+  const separator = platform === 'win32' ? ';' : ':';
+  const directories = (environment['PATH'] ?? environment['Path'] ?? '')
+    .split(separator)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const found: string[] = [];
+  for (const name of names) {
+    for (const directory of directories) {
+      if (existsSync(path.join(directory, name))) {
+        found.push(name);
+        break;
+      }
+    }
+  }
+  return Object.freeze(found);
+}
+
+/** The dialect for this machine, discovered and resolved in one step. */
+export function detectShellDialect(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+  platform: NodeJS.Platform = process.platform,
+): ShellDialectResolution {
+  return resolveShellDialect({
+    platform,
+    interpreters: discoverInterpreters(environment, platform),
+  });
 }

@@ -42,7 +42,7 @@ describe('update_plan', () => {
     );
   });
 
-  it('persists a durable Markdown checkpoint mirror in workspace runs', async () => {
+  it('persists a session-private checkpoint without writing into masked workspace metadata', async () => {
     let writtenPath = '';
     let written = '';
     const result = await updatePlan.run({
@@ -63,11 +63,25 @@ describe('update_plan', () => {
       },
     } as unknown as ToolContext);
 
-    assert.equal(writtenPath, '/workspace/.plif/plans/current.md');
+    assert.equal(writtenPath, '/temp/plif/plans/current.md');
     assert.match(written, /# Plif execution checkpoint/);
     assert.match(written, /Ship stable rendering/);
     assert.match(written, /Fix the frame budget/);
     assert.match(result.output, /Durable checkpoint/);
+  });
+
+  it('keeps the accepted plan usable when the runtime checkpoint mirror is unavailable', async () => {
+    const result = await updatePlan.run({
+      plan: [{ step: 'Create the user file', status: 'in_progress' }],
+    }, {
+      workspace: 'C:/workspace',
+      container: {
+        writeFile: async () => { throw new Error('runtime mount is masked'); },
+      },
+    } as unknown as ToolContext);
+
+    assert.equal(result.ok, true);
+    assert.match(result.output, /Checkpoint mirror unavailable/);
   });
 });
 
