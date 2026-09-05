@@ -51,6 +51,8 @@ import {
   LspManager,
   DebugSessions,
   debugTools,
+  BrowserSession,
+  browserTools,
   lspTools,
   EditCoordinator,
   agentsOf,
@@ -983,6 +985,7 @@ export function App({
   // One debugger for the whole session: `continue` means nothing without the
   // `launch` before it, so the state has to outlive the turn that started it.
   const debugSessions = useRef(new DebugSessions());
+  const browserSession = useRef(new BrowserSession());
   const subagents = useRef(new SubagentCoordinator());
   const interruptTimer = useRef<NodeJS.Timeout | null>(null);
   const sessionStartedAt = useRef(Date.now());
@@ -4177,6 +4180,7 @@ export function App({
         ...(skillRegistry ? [skillTool(skillRegistry)] : []),
         ...lspForAgent,
       ...debugForAgent,
+      ...browserTools(browserSession.current),
         ...debugForAgent,
         ...WEB_TOOLS,
       ],
@@ -4196,6 +4200,7 @@ export function App({
       ...(planOnly ? [] : mcpRegistry?.tools() ?? []),
       ...lspForAgent,
       ...debugForAgent,
+      ...browserTools(browserSession.current),
       ...WEB_TOOLS,
       ...(planOnly ? [] : visionTools(childOptions)),
       ...(planOnly ? [] : [subagentTool(childOptions)]),

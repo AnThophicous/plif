@@ -34,10 +34,12 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@playwright/browser-chromium": "^1.63.0",
     "@plif/sandbox": "0.4.0",
     "@types/sql.js": "^1.4.11",
     "koffi": "^2.10.0",
     "openai": "^4.104.0",
+    "playwright-core": "^1.63.0",
     "smol-toml": "^1.8.0",
     "sql.js": "^1.14.2",
     "typescript": "^5.9.3",

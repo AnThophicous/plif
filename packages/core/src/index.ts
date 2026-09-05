@@ -744,6 +744,8 @@ export {
 export type { DiffHunk, DiffLine, DiffOp, DiffStats } from './harness/diff.js';
 export { EditCoordinator } from './harness/edits.js';
 export type { EditConflict } from './harness/edits.js';
+export { WorktreeManager } from './harness/worktrees.js';
+export type { WorktreeLease } from './harness/worktrees.js';
 export { applyHashline, hashlineTag, parseHashline } from './harness/hashline.js';
 export type { HashlineEdit, HashlineOperation } from './harness/hashline.js';
 export {
@@ -767,3 +769,5 @@ export type {
   DebugValue,
 } from './debug/session.js';
 export { DebugSessions, debugTool, debugTools } from './debug/tools.js';
+export { BrowserSession } from './browser/session.js';
+export { browserTool, browserTools } from './browser/tools.js';

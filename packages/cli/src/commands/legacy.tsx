@@ -70,6 +70,7 @@ import {
   LspManager,
   DebugSessions,
   debugTools,
+  browserTools,
   lspTools,
   EditCoordinator,
   agentsOf,
@@ -668,7 +669,8 @@ export async function runPrompt(invocation: Extract<Invocation, { kind: 'prompt'
   const agentTools = [
     ...tools,
     ...lspForAgent,
-    ...debugForAgent,
+      ...debugForAgent,
+      ...browserTools(),
     ...WEB_TOOLS,
     ...visionTools(childOptions),
     subagentTool(childOptions),
