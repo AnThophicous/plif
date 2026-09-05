@@ -28,7 +28,7 @@ const noop = (): void => undefined;
 
 test('pinning is only asserted while the view is at the tail', () => {
   const pinned = timelineViewport(20, true, false, noop);
-  assert.equal(pinned.scrollTop, Number.MAX_SAFE_INTEGER);
+  assert.equal(pinned.scrollTop, 0);
 
   const away = timelineViewport(20, false, true, noop);
   assert.equal(
@@ -39,10 +39,10 @@ test('pinning is only asserted while the view is at the tail', () => {
 });
 
 test('a pinned viewport receives a fresh tail instruction when activity appends rows', () => {
-  const before = timelineViewport(20, true, false, noop, 12);
-  const after = timelineViewport(20, true, false, noop, 13);
+  const before = timelineViewport(20, true, false, noop, 120);
+  const after = timelineViewport(20, true, false, noop, 121);
   assert.notEqual(before.scrollTop, after.scrollTop);
-  assert.ok(after.scrollTop! > 1_000_000, 'both revisions still clamp to the physical tail');
+  assert.equal(after.scrollTop, 121);
 });
 
 test('the jump pill comes out of the timeline budget, not out of the prompt', () => {

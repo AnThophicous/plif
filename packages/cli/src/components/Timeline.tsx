@@ -92,7 +92,13 @@ export const Timeline = React.memo(function Timeline({
   // below it, and a marker pointing at nothing is a control that lies.
   const showJump = !follow.pinned && visible.length > 0;
   const viewport = maxLines === undefined ? {} : timelineViewport(
-    maxLines, follow.pinned, showJump, follow.onScroll, follow.tailRevision,
+    maxLines,
+    follow.pinned,
+    showJump,
+    follow.onScroll,
+    // Use the measured end, not an unsafe sentinel. ConPTY/Slate clamps this
+    // exact offset consistently and applies it again as the content grows.
+    Math.max(0, slice.contentHeight - Math.max(1, maxLines - (showJump ? 1 : 0))),
   );
 
   return (
@@ -164,8 +170,8 @@ export function timelineViewport(
   pinned: boolean,
   showJump: boolean,
   onScroll: (x: number, y: number) => void,
-  /** Changes whenever tail content changes, forcing Slate to re-pin. */
-  tailRevision = 0,
+  /** Exact content offset to use while following the tail. */
+  tailOffset = 0,
 ): {
   readonly height: number;
   readonly overflow: 'scroll';
@@ -175,10 +181,7 @@ export function timelineViewport(
   return {
     height: Math.max(1, maxLines - (showJump ? 1 : 0)),
     overflow: 'scroll' as const,
-    // Keep this a huge valid offset so Slate clamps to the physical end, but
-    // vary it with each appended row. A stable MAX_SAFE_INTEGER is ignored by
-    // controlled ScrollView reconciliation after the first render.
-    ...(pinned ? { scrollTop: Number.MAX_SAFE_INTEGER - tailRevision } : {}),
+    ...(pinned ? { scrollTop: tailOffset } : {}),
     onScroll,
   };
 }
@@ -188,6 +191,7 @@ interface TimelineWindow {
   readonly rows: readonly TimelineEntry[];
   readonly above: number;
   readonly below: number;
+  readonly contentHeight: number;
   readonly onScroll: (y: number) => void;
 }
 
@@ -213,10 +217,10 @@ function useTimelineWindow(
 
   return React.useMemo((): TimelineWindow => {
     if (maxLines === undefined) {
-      return { rows: entries, above: 0, below: 0, onScroll };
+      return { rows: entries, above: 0, below: 0, contentHeight: 0, onScroll };
     }
     if (maxLines <= 0 || entries.length === 0) {
-      return { rows: [], above: 0, below: 0, onScroll };
+      return { rows: [], above: 0, below: 0, contentHeight: 0, onScroll };
     }
 
     const heights = entries.map((entry) => cachedHeight(entry, width));
@@ -252,6 +256,7 @@ function useTimelineWindow(
       rows: entries.slice(start, end),
       above: Math.max(0, above),
       below: Math.max(0, below),
+      contentHeight,
       onScroll,
     };
   }, [entries, maxLines, onScroll, scrollTop, width]);
@@ -273,7 +278,6 @@ export function useTailFollow(
 ): {
   readonly pinned: boolean;
   readonly addedWhileAway: number;
-  readonly tailRevision: number;
   readonly onScroll: (x: number, y: number) => void;
 } {
   const [pinned, setPinned] = React.useState(true);
@@ -330,7 +334,6 @@ export function useTailFollow(
   return {
     pinned,
     addedWhileAway: Math.max(0, rowCount - rowsWhenLeft.current),
-    tailRevision: rowCount,
     onScroll,
   };
 }
